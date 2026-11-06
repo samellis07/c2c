@@ -11,6 +11,12 @@
  * admin scope and reads its CSV from a Stratus bucket, so the object upload is
  * injected by the caller (`putObject`); this module never handles a bucket
  * credential. Every URL goes through the data-centre host check.
+ *
+ * `stratusCsvPutObject` below is the real upload: `PUT
+ * https://<bucket>.zohostratus.<tld>/<key>` with the same bearer token as the
+ * Data Store calls, sent as `Zoho-oauthtoken`. `overwrite` is always on
+ * because a failed write job clears its checkpoint entry so the next run
+ * re-sends the same chunk onto the same object key.
  */
 import {
   assertAllowedHost,
@@ -20,9 +26,32 @@ import {
   type CatalystScope,
   type FetchLike,
 } from '../../data/src/migrate.js';
+import { stratusObjectUrl } from '../../data/src/files.js';
 import type { BulkJobStatus, BulkStore, BulkWriteJobRequest } from '../../data/src/bulk-load.js';
 import { exactId, parseJsonExact } from './json-exact.js';
 import { loadRowIds } from './remap.js';
+
+export interface StratusCsvUploadOptions {
+  dc: string;
+  environment: 'development' | 'production';
+  /** The same bearer token `catalystAuthHeaders` sends, resent as `Zoho-oauthtoken` (Stratus.fileop.CREATE). */
+  token: string;
+  fetch: FetchLike;
+}
+
+/** A bulk chunk's CSV upload, through the Stratus object REST API. */
+export function stratusCsvPutObject(opts: StratusCsvUploadOptions): BulkStore['putObject'] {
+  return async (bucket, key, csv) => {
+    const url = stratusObjectUrl(bucket, opts.dc, opts.environment, key);
+    const response = await opts.fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Zoho-oauthtoken ${opts.token}`, 'Content-Type': 'text/csv', overwrite: 'true' },
+      body: csv,
+    });
+    if (response.status >= 200 && response.status < 300) return;
+    throw new Error(`stratus CSV upload failed: ${response.status}${catalystErrorDetail(await response.text())}`);
+  };
+}
 
 export function bulkWriteUrl(base: string, scope: CatalystScope, jobId?: string): string {
   const root = `${base.replace(/\/$/, '')}/baas/v1/project/${encodeURIComponent(scope.projectId)}/bulk/write`;
@@ -54,8 +83,11 @@ export function restBulkStore(opts: {
   base: string;
   dc: string;
   scope: CatalystScope;
-  putObject: BulkStore['putObject'];
+  /** Defaults to the real Stratus upload (`stratusCsvPutObject`) over the same dc, token and fetch; a test overrides it. */
+  putObject?: BulkStore['putObject'];
+  environment?: 'development' | 'production';
 }): BulkStore {
+  const putObject = opts.putObject ?? stratusCsvPutObject({ dc: opts.dc, environment: opts.environment ?? 'production', token: opts.scope.token, fetch: opts.fetch });
   const headers = { 'Content-Type': 'application/json', Accept: 'application/json', ...catalystAuthHeaders(opts.scope) };
   const call = async (url: string, method: string, body?: unknown): Promise<unknown> => {
     assertAllowedHost(url, opts.dc);
@@ -65,7 +97,7 @@ export function restBulkStore(opts: {
     return parseJsonExact(text);
   };
   return {
-    putObject: opts.putObject,
+    putObject,
     async createWriteJob(request: BulkWriteJobRequest) {
       const job = jobOf(await call(bulkWriteUrl(opts.base, opts.scope), 'POST', request));
       return { jobId: exactId(job.job_id as string | number, 'job_id') };
