@@ -37,6 +37,7 @@ import { readSourceBackup } from './backup.js';
 import { GuardError } from './guards.js';
 import { parseStoreRows, STORE_SYSTEM_COLUMNS, type StoreRows } from './rollback.js';
 import { DELTA_SOURCES } from './delta-cli.js';
+import { e2eParity, formatE2eParity, formatQ6, q6Verdict, readPlaywrightReport } from './q6.js';
 
 function rawJsonRecordCounts(dir: string): Map<string, number> {
   const counts = new Map<string, number>();
@@ -348,10 +349,14 @@ export function formatParity(report: DataParityReport): string {
 }
 
 const VERIFY_USAGE =
-  'usage: c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--allow-empty] [--json] [--out <file>]\n' +
+  'usage: c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--e2e-report <playwright.json>] [--allow-empty] [--json] [--out <file>]\n' +
+  '       c2c verify --e2e-report <playwright.json> [--json] [--out <file>]\n' +
   '       compares the export the loader reads with the stored rows dumped as <rows>/<Table>.json\n' +
   '       (a row array or a ZCQL {data:[...]} body, one file per loaded table). Ids only, never values.\n' +
-  '       Exit 0 parity, 1 mismatch, 2 usage.\n';
+  '       --e2e-report reads a Playwright JSON report of the generated regression suite and checks\n' +
+  '       the same cases ran and passed on both the creator and catalyst projects. With\n' +
+  '       --data-parity the two halves fold into the Q6 verified verdict.\n' +
+  '       Exit 0 verified/pass, 1 mismatch, 2 usage.\n';
 
 /**
  * `c2c verify --data-parity` — the offline checker. The live read (ZCQL pages
@@ -360,11 +365,28 @@ const VERIFY_USAGE =
  */
 export function verifyCli(args: readonly string[], io: Io): number {
   try {
-    if (!args.includes('--data-parity')) {
+    if (!args.includes('--data-parity') && !args.includes('--e2e-report')) {
       io.stderr(VERIFY_USAGE);
       return 2;
     }
     // Literal flag reads: the argv census reconciles these against ARGV_SPEC.
+    const e2ePath = flag(args, '--e2e-report');
+    if (args.includes('--e2e-report') && e2ePath === undefined) {
+      io.stderr(VERIFY_USAGE);
+      return 2;
+    }
+    const e2e = e2ePath === undefined ? undefined : e2eParity(readPlaywrightReport(e2ePath));
+    if (!args.includes('--data-parity')) {
+      if (e2e === undefined) {
+        io.stderr(VERIFY_USAGE);
+        return 2;
+      }
+      const out = flag(args, '--out');
+      const text = args.includes('--json') ? `${JSON.stringify(e2e, null, 2)}\n` : formatE2eParity(e2e);
+      if (out) writeFileSync(out, text);
+      else io.stdout(text);
+      return e2e.ok ? 0 : 1;
+    }
     const source = (['json', 'csv', 'backup'] as const).filter((kind) =>
       kind === 'json' ? args.includes('--source-json') : kind === 'csv' ? args.includes('--source-csv') : args.includes('--source-backup'),
     );
@@ -387,13 +409,17 @@ export function verifyCli(args: readonly string[], io: Io): number {
     const rawSourceCounts = kind === 'json' ? rawJsonRecordCounts(sourcePath) : undefined;
     const report = dataParity({ app, loaded, stored, rawSourceCounts });
     const out = flag(args, '--out');
-    const text = args.includes('--json') ? `${JSON.stringify(report, null, 2)}\n` : formatParity(report);
+    const text = args.includes('--json')
+      ? `${JSON.stringify(e2e === undefined ? report : q6Verdict({ e2e, parity: report }), null, 2)}\n`
+      : e2e === undefined
+        ? formatParity(report)
+        : formatQ6(q6Verdict({ e2e, parity: report }));
     if (out) {
       writeFileSync(out, text);
     } else {
       io.stdout(text);
     }
-    return report.ok ? 0 : 1;
+    return report.ok && (e2e === undefined || e2e.ok) ? 0 : 1;
   } catch (err) {
     if (err instanceof GuardError) {
       io.stderr(`c2c verify: ${err.message}\n`);

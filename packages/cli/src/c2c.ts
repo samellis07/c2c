@@ -224,7 +224,8 @@ const USAGE =
       '       c2c rollback-export --ds <file|dir> --out <dir> --rows <dir> [--changed-since <state-file|dir>]\n' +
       '       c2c rollback-export --ds <file|dir> --out <dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--changed-since <state-file|dir>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
       '              (without --rows: plans the tables to read; --confirm reads the rows from the project)\n' +
-      '       c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--json]\n' +
+      '       c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--e2e-report <playwright.json>] [--json]\n' +
+      '       c2c verify --e2e-report <playwright.json> [--json]\n' +
       '       c2c verify-behavior <file|dir> --goldens <dir> [--report <file.json>] [--report-md <file.md>]\n' +
       '       c2c verify-behavior <file|dir> --goldens <dir> --live --confirm --url <fn-base> [--project <id>] [--org <id>] [--auth-token <token> | --session-cookie <name=value>]\n' +
       '       c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>] [--previous <deployed.ds> [--rename Form.Old=New]...]\n' +

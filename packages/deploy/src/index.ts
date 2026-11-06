@@ -142,6 +142,8 @@ export { applyDelta, computeDelta, deletionRefusals, deltaCheckpointId, deltaTot
 export type { DeltaApplyResult, DeltaCheckpoint, DeltaPlan, DeltaTable, DeletionRefusal } from './row-delta.js';
 export { dataParity, formatParity, storeRowsFromDir, verifyCli } from './parity.js';
 export type { DataParityReport, ParityTableReport } from './parity.js';
+export { e2eParity, formatE2eParity, formatQ6, playwrightSpecOutcomes, q6Verdict, readPlaywrightReport } from './q6.js';
+export type { E2eCaseReport, E2eCaseStatus, E2eParityReport, Q6Verdict } from './q6.js';
 export { DELTA_SOURCES, deltaSource, readDeltaCheckpoint, readStateFile, rollbackExportCli, stateFilePath, syncDeltaCli } from './delta-cli.js';
 export { parseStoreRows, readStoreRows, rollbackExport, ROLLBACK_DELETED_FILE, ROLLBACK_MANIFEST_FILE, ROLLBACK_MANIFEST_VERSION, verifyRollbackManifest } from './rollback.js';
 export type { RollbackDelta, RollbackDeltaCounts, RollbackExport, RollbackFile, RollbackMode } from './rollback.js';
