@@ -41,7 +41,11 @@ export function catalystScopeArgs(org: string, projectId: string): string[] {
 export function scrubCatalystEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const next: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) {
-    if (key === 'X_ZC_CREDENTIAL_PATH') {
+    // Each CI run receives a host-refreshed access token.  The Catalyst CLI
+    // consumes it as a one-time token and must not refresh or persist it;
+    // the active DC is likewise pinned by the host.  Keep the credential
+    // path requirement below intact for the CLI's normal store.
+    if (key === 'X_ZC_CREDENTIAL_PATH' || key === 'CATALYST_TOKEN' || key === 'CATALYST_ACTIVE_DC') {
       next[key] = value;
       continue;
     }

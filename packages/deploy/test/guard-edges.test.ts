@@ -21,6 +21,14 @@ test('scrubCatalystEnv removes conflicting Node color variables from child envir
   assert.equal(env.NO_COLOR, undefined);
   assert.equal(env.KEEP_ME, 'yes');
 });
+
+test('scrubCatalystEnv preserves the host-refreshed one-time token and pinned DC', () => {
+  const env = scrubCatalystEnv({ CATALYST_TOKEN: 'access-token', CATALYST_ACTIVE_DC: 'in', CATALYST_OTHER: 'drop', X_ZC_CREDENTIAL_PATH: '/credential' });
+  assert.equal(env.CATALYST_TOKEN, 'access-token');
+  assert.equal(env.CATALYST_ACTIVE_DC, 'in');
+  assert.equal(env.CATALYST_OTHER, undefined);
+  assert.equal(env.X_ZC_CREDENTIAL_PATH, '/credential');
+});
 import {
   catalystCreatedMs,
   importingAgeState,
