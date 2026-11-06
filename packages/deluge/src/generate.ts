@@ -2508,6 +2508,16 @@ function emitFunction(
           name: fn.name || name,
           note: 'The function body produced no server, client, or prefetch code.',
         });
+        // A warning alone is never a counted manual item (no-silent-drop.ts
+        // auditFunction only looks for a todo inside the function's span), so
+        // without this the function is a silent drop: no module and nothing
+        // telling the operator it needs attention.
+        todos.push({
+          construct: 'function-untranslated',
+          start: fn.span.start,
+          end: fn.span.end,
+          manualStep: `Function ${fn.name} translated to no server, client, or prefetch code. Migrate it by hand or confirm it is intentionally a no-op.`,
+        });
       }
       return;
     }
