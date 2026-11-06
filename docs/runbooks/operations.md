@@ -68,12 +68,30 @@ Data Store schema, optional Slate web client — and that `<dc>`, `<org-id>`,
   environment (rules: `plugin/references/facts/projects.md`).
 - [ ] The Creator source export (.ds) is the durable input — keep it; every
   generated tree is regenerable from it (see §7).
-- [ ] **[gap]** No Data Store row export/backup is generated or scheduled.
-  Loaded data lives in Catalyst tables; a table-level export or scheduled
-  backup is a console step or missing tooling — do not claim one exists.
-- [ ] **[gap]** No restore drill is defined. Re-running `c2c` reconciles a
-  fresh project from source (seed/migrate dedupe by `c2c_source_id`), but a
-  "restore rows to the same project" path is not a c2c feature.
+- [ ] Export Data Store rows on demand with `c2c rollback-export --ds <app>
+  --out <dir>`: it plans the tables to read, and `--confirm` reads them from
+  the project. It writes CSV files Creator's report "Import Data" accepts,
+  one per form, plus a manifest (`c2c-rollback-export/1`). `--changed-since
+  <state-file|dir>` writes only rows that changed since a sync-delta
+  checkpoint. Subform rows and multi lookups land under `manual/`; file
+  fields are listed in `files/<Form>.files.csv` for re-attaching by hand
+  (source: `packages/deploy/src/rollback.ts`,
+  `packages/deploy/src/delta-cli.ts`).
+- [ ] Take that export before any destructive schema change: `c2c plan
+  --previous <deployed.ds>` refuses a rename, drop or alter unless
+  `--allow-destructive` names a verified `--backup <rollback-export dir>`;
+  `c2c cutover-checklist --rollback-export <dir>` checks the manifest
+  matches the app (source: `packages/deploy/src/offline-plan.ts`,
+  `packages/deploy/src/rollback.ts`).
+- [ ] **[gap]** No scheduled or automatic row backup exists. Run
+  `c2c rollback-export` yourself, and keep its output outside the repo,
+  since it holds record values.
+- [ ] **[gap]** No restore drill is defined. The export's `import/` folder
+  reads back with `--source-csv`, and re-planning against the last
+  checkpoint shows no changes when store and checkpoint agree. Re-running
+  `c2c` reconciles a fresh project from source (seed/migrate dedupe by
+  `c2c_source_id`), but a "restore rows to the same project" path is not a
+  c2c feature.
 
 ## 4. Development vs Production
 
