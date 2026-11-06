@@ -457,6 +457,113 @@ export function usersInvitesCsv(plan: UsersPlan): string {
   return `id,role,via,state\n${rows.join('\n')}\n`;
 }
 
+export interface UsersPlanConflict {
+  id: string;
+  /** Apps (plan.app) the id appeared in, sorted. */
+  apps: string[];
+  /** Every distinct role the id was planned with, sorted. */
+  roles: string[];
+  /** The role carried into the merged plan. */
+  resolved: string;
+}
+
+export interface MergedUsersPlan {
+  version: 1;
+  apps: string[];
+  users: PlanUser[];
+  counts: {
+    total: number;
+    pending: number;
+    invited: number;
+    manual: number;
+    perRole: Record<string, number>;
+  };
+  conflicts: UsersPlanConflict[];
+}
+
+/** App Administrator outranks every named role; App User (Catalyst's own floor) outranks nothing. */
+function roleRank(role: string): number {
+  if (role === 'App Administrator') return 2;
+  if (role === 'App User') return 0;
+  return 1;
+}
+
+/**
+ * A multi-app Creator workspace migrates to one Catalyst project: each app
+ * gets its own usersPlan() run against the same salt, and this merges those
+ * plans into the one set of invites the shared project needs. A shared salt
+ * hashes the same identity to the same id in every app's plan, so a user who
+ * appears in more than one app's backup is counted and invited once here,
+ * never twice.
+ *
+ * A role conflict — the same person held a different Creator profile in two
+ * apps — is never guessed silently: the higher-privilege role is kept (a
+ * project-level Catalyst role can only be one value) and the conflict is
+ * listed in `conflicts`, never dropped. Plans are read in app-name order so
+ * the winner of an unranked tie (two distinct named roles) is deterministic
+ * regardless of the order the apps were passed in.
+ */
+export function mergeUsersPlans(plans: readonly UsersPlan[]): MergedUsersPlan {
+  const ordered = [...plans].sort((a, b) => (a.app < b.app ? -1 : a.app > b.app ? 1 : 0));
+  const byId = new Map<string, { user: PlanUser; apps: string[]; roles: Set<string> }>();
+  for (const plan of ordered) {
+    for (const user of plan.users) {
+      const existing = byId.get(user.id);
+      const aliasRules = [...new Set([...(existing?.user.aliasRules ?? []), ...(user.aliasRules ?? [])])];
+      const state: PlanUser['state'] =
+        existing?.user.state === 'manual' || user.state === 'manual'
+          ? 'manual'
+          : existing?.user.state === 'invited' || user.state === 'invited'
+            ? 'invited'
+            : 'pending';
+      const merged: PlanUser = { ...user, state, ...(aliasRules.length ? { aliasRules } : {}) };
+      if (!existing) {
+        byId.set(user.id, { user: merged, apps: [plan.app], roles: new Set([user.role]) });
+        continue;
+      }
+      existing.user = merged;
+      existing.apps.push(plan.app);
+      existing.roles.add(user.role);
+    }
+  }
+
+  const conflicts: UsersPlanConflict[] = [];
+  const users: PlanUser[] = [];
+  for (const entry of byId.values()) {
+    let role = entry.user.role;
+    if (entry.roles.size > 1) {
+      role = [...entry.roles].sort((a, b) => roleRank(b) - roleRank(a))[0]!;
+      conflicts.push({ id: entry.user.id, apps: [...new Set(entry.apps)].sort(), roles: [...entry.roles].sort(), resolved: role });
+    }
+    users.push({ ...entry.user, role });
+  }
+  users.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  conflicts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  const perRole: Record<string, number> = {};
+  for (const user of users) perRole[user.role] = (perRole[user.role] ?? 0) + 1;
+  const sortedPerRole: Record<string, number> = {};
+  for (const role of Object.keys(perRole).sort()) sortedPerRole[role] = perRole[role]!;
+
+  return {
+    version: 1,
+    apps: [...new Set(ordered.map((plan) => plan.app))],
+    users,
+    counts: {
+      total: users.length,
+      pending: users.filter((user) => user.state === 'pending').length,
+      invited: users.filter((user) => user.state === 'invited').length,
+      manual: users.filter((user) => user.state === 'manual').length,
+      perRole: sortedPerRole,
+    },
+    conflicts,
+  };
+}
+
+export function mergedUsersPlanJson(plan: MergedUsersPlan): string {
+  return `${JSON.stringify(plan, null, 2)}\n`;
+}
+
 /**
  * Invite state: which user ids already landed on this project, plus the
  * random salt the ids were hashed with and the project they were sent to —
