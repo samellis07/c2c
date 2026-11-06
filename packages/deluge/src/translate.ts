@@ -191,6 +191,12 @@ export interface TranslateOptions {
    */
   decimalFields?: string[];
   /**
+   * Link names of date and date-time fields. A read of one of these names is a
+   * date, so `+`, `-` and comparisons go through `shim.date`, not JS string ops
+   * on the stored dd-MMM-yyyy text.
+   */
+  dateFields?: string[];
+  /**
    * Link names of lookup fields. A bare read is the stored reference object,
    * so `Field == literal` compares the id/label through `shim.compare`, not
    * object identity.
@@ -551,6 +557,8 @@ interface Scope {
   decimal: Set<string>;
   /** Form link names stored as exact decimals. */
   decimalFields: Set<string>;
+  /** Form link names stored as dates or date-times. */
+  dateFields: Set<string>;
   row: Set<string>;
   serverOnly: Set<string>;
   /** Loop elements whose snapshot is in scope on the client. */
@@ -2670,6 +2678,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     date: new Set(),
     decimal: new Set(options.decimalVars ?? []),
     decimalFields: new Set(options.decimalFields ?? []),
+    dateFields: new Set(options.dateFields ?? []),
     row: new Set(options.rowNames ?? []),
     serverOnly: new Set(),
     clientData: new Set(),
@@ -4962,6 +4971,7 @@ function exprBody(e: Expr, scope: Scope): Fx {
           code: `${api}(ctx, ${JSON.stringify(e.index.value)})`,
           shim: true,
           decimal: decimalLeaf([e.index.value], scope),
+          date: dateLeaf([e.index.value], scope),
           lookup: e.object.name === 'input' && scope.lookupFields.has(e.index.value),
           stateReads: [`${e.object.name}.${e.index.value}`],
         });
@@ -5111,6 +5121,7 @@ function readName(name: string, scope: Scope): Fx {
       code: `shim.input.get(ctx, ${JSON.stringify(name)})`,
       shim: true,
       decimal: scope.decimalFields.has(name),
+      date: scope.dateFields.has(name),
       lookup: scope.lookupFields.has(name),
       stateReads: [`input.${name}`],
     });
@@ -5325,6 +5336,11 @@ function localReads(name: string, scope: Scope): string[] {
 function decimalLeaf(path: readonly string[], scope: Scope): boolean {
   const leaf = path[path.length - 1];
   return !!leaf && scope.decimalFields.has(leaf);
+}
+
+function dateLeaf(path: readonly string[], scope: Scope): boolean {
+  const leaf = path[path.length - 1];
+  return !!leaf && scope.dateFields.has(leaf);
 }
 
 function memberPath(e: Expr): { root: string; path: string[] } | null {
@@ -5592,6 +5608,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
       code: `${api}, ${path.path.map((p) => JSON.stringify(p)).join(', ')})`,
       shim: true,
       decimal: decimalLeaf(path.path, scope),
+      date: dateLeaf(path.path, scope),
       lookup: path.root === 'input' && path.path.length === 1 && scope.lookupFields.has(path.path[0]!),
       stateReads: [`${path.root}.${path.path[0]}`],
     });
@@ -5607,6 +5624,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
         code: `shim.record.get(${jsIdent(rowFields.row)}, ${[path.root, ...path.path].map((p) => JSON.stringify(p)).join(', ')})`,
         shim: true,
         decimal: decimalLeaf(path.path, scope),
+        date: dateLeaf(path.path, scope),
         serverOnly,
         reads: [rowFields.row],
         clientReady: scope.clientData.has(rowFields.row) || !serverOnly,
@@ -5621,6 +5639,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
       code: `shim.input.get(ctx, ${[path.root, ...path.path].map((p) => JSON.stringify(p)).join(', ')})`,
       shim: true,
       decimal: decimalLeaf(path.path, scope),
+      date: dateLeaf(path.path, scope),
       stateReads: [`input.${path.root}`],
     });
   }
@@ -5631,6 +5650,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
       code: `shim.record.get(${jsIdent(path.root)}, ${path.path.map((p) => JSON.stringify(p)).join(', ')})`,
       shim: true,
       decimal: decimalLeaf(path.path, scope),
+      date: dateLeaf(path.path, scope),
       serverOnly,
       reads: [path.root],
       clientReady: onClient || !serverOnly,
@@ -5641,6 +5661,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
       code: `await shim.datastore.field(ctx, ${jsIdent(path.root)}, ${JSON.stringify(path.path.join('.'))})`,
       shim: true,
       decimal: decimalLeaf(path.path, scope),
+      date: dateLeaf(path.path, scope),
       serverOnly: true,
       reads: [path.root],
       clientReady: false,
@@ -5686,6 +5707,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
   return mergeFx(`shim.get(${obj.code}, ${JSON.stringify(e.property)})`, [obj], {
     shim: true,
     decimal: path ? decimalLeaf(path.path, scope) : false,
+    date: path ? dateLeaf(path.path, scope) : false,
   });
 }
 
