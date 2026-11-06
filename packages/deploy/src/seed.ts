@@ -44,6 +44,7 @@ import {
   omitColumns,
   orderTables,
   resolveForeignKeys,
+  sourceIds,
   formatDeferredUpdate,
   updateDeferredForeignKeys,
   type DeferredUpdateReport,
@@ -529,6 +530,32 @@ export async function migrateSeed(opts: {
   // ROWIDs are read back only where they are used: a lookup parent, or a table
   // whose deferred lookups are set by row update after the load.
   const needsRowIds = new Set(keys.flatMap((key) => (deferred.has(foreignKeyId(key)) ? [key.parent, key.table] : [key.parent])));
+  // A lookup whose parent table is not part of this seed has no rows to read
+  // ROWIDs back from: the parent may already be live from an earlier run, so
+  // its ROWIDs are fetched directly instead of being left unresolved.
+  if (!opts.dryRun && opts.scope) {
+    const seedTableNames = new Set(opts.tables.map((table) => table.table));
+    const externalSourceIds = new Map<string, Set<string>>();
+    for (const key of acyclic) {
+      if (seedTableNames.has(key.parent)) continue;
+      const table = opts.tables.find((item) => item.table === key.table);
+      if (!table) continue;
+      const ids = externalSourceIds.get(key.parent) ?? new Set<string>();
+      externalSourceIds.set(key.parent, ids);
+      for (const row of table.rows) {
+        const value = row.columns[key.column];
+        if (!value) continue;
+        for (const source of sourceIds(value)) ids.add(source);
+      }
+    }
+    for (const [parent, ids] of externalSourceIds) {
+      try {
+        rowIds.set(parent, await loadRowIds(opts.fetch, opts.catalystBase, opts.dc, parent, [...ids], opts.scope));
+      } catch {
+        // Left unresolved: the per-table resolve below reports the rows that still miss a ROWID.
+      }
+    }
+  }
   for (const table of staged) {
     const missingParent = opts.dryRun
       ? undefined
