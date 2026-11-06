@@ -308,6 +308,19 @@ test('a header sort survives the query reload', { skip: SKIP }, async (t) => {
   assert.deepEqual(view.textOf('Title'), ['Alpha', 'Bravo', 'Charlie', 'Delta']);
 });
 
+test('options { record count = enable } shows how many rows the list is displaying', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'record-count');
+  const spec = reactAppSpec(appOf());
+  const counted = { ...spec.reports.Orders!, showRecordCount: true };
+  const view = await mount(out, counted, ROWS, new Set(['Total']));
+  const note = view.container.querySelector('[data-record-count]');
+  assert.ok(note, 'the record count is shown above the list');
+  assert.equal(note?.textContent?.trim(), '4 records');
+  // A report that does not opt in draws no count.
+  const plain = await mount(out, spec.reports.Orders!, ROWS, new Set(['Total']));
+  assert.equal(plain.container.querySelector('[data-record-count]'), null);
+});
+
 test('a numeric column keeps the exact decimal order of the server', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'num');
   const spec = reactAppSpec(appOf());

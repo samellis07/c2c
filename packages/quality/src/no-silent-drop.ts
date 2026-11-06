@@ -1120,6 +1120,7 @@ function optionProved(built: UiReport, property: Property): boolean {
   if (key === 'display rows') return built.pageSize === reportPageSizeOption(value);
   if (key === 'display records per row') return built.recordsPerRow === recordsPerRowOption(value);
   if (key === 'label width') return built.labelWidth !== undefined && built.labelWidth === labelWidthOption(value);
+  if (key === 'record count') return (value.toLowerCase() === 'enable') === (built.showRecordCount === true);
   return false;
 }
 
