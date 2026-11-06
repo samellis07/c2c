@@ -483,6 +483,12 @@ function bidirectionalReverseEligible(field: Field, formName: string, app: App, 
   return bidirectionalLinkedGrid(partner, formName) && unquote(partnerBack?.value ?? '').trim() === field.name;
 }
 
+/** `alloweddays = 0,1,2,3,4,5,6` (every weekday) is the Creator default and needs no manual step. */
+function isEveryWeekday(text: string): boolean {
+  const days = new Set(text.split(',').map((day) => day.trim()));
+  return days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day));
+}
+
 const REPORT_VIEW: Record<string, UiReport['view']> = {
   list: 'list',
   report: 'list',
@@ -969,6 +975,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} is flagged \`bidirectional = ${back || biProp.value}\`; Catalyst only creates the reverse column from a linked grid side, and neither ${field.name} nor ${target ? `${target}.${back || biProp.value}` : 'its target'} is one.`,
           manualStep: `In the Catalyst console, if the two records should look each other up, add a grid field on one side pointing back at the other, or wire the lookup by hand — this reverse reference is not generated.`,
+        });
+      }
+    }
+  }
+  if (widget === 'date' || widget === 'datetime') {
+    const allowedDays = prop(field, 'alloweddays');
+    if (allowedDays !== undefined && !isEveryWeekday(allowedDays)) {
+      const name = `${formName}.${field.name} property alloweddays`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} restricts selectable weekdays to \`${allowedDays}\`; the generated ${widget} input is a plain native control with no weekday restriction.`,
+          manualStep: `Add validation (client-side and server-side) so ${field.name} only accepts the Creator-allowed days (\`${allowedDays}\`) — the generated input currently accepts every day of the week.`,
         });
       }
     }
