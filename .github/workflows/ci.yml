@@ -1,11 +1,16 @@
 # Offline CI: no network beyond `npm ci` and no secrets. Fixture-dependent
 # tests skip because C2C_FIXTURES_DIR / C2C_GALLERY_DIR are unset here.
+#
+# Required check-run names: test (20.20.1), test (22), gates.
+# GitHub derives those from the job id plus the matrix value when the job
+# sets no `name:`. `npm run check` is the suite plus the determinism gate.
 name: ci
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read

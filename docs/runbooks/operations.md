@@ -103,12 +103,14 @@ Data Store schema, optional Slate web client — and that `<dc>`, `<org-id>`,
 
 ## 5. CI/CD (this repo)
 
-- [ ] CI workflow (`.github/workflows/ci.yml`) runs on PRs and pushes to `main`,
-  on Node 20.20.1 and 22: `npm ci`, React template `npm ci --prefix
-  packages/ui-react/template`, then `npm run check` (defined in `package.json`:
-  build, tests, hygiene, determinism gate). It is offline — no secrets, no
-  network beyond `npm ci`; fixture-dependent tests skip when `C2C_FIXTURES_DIR`
-  / `C2C_GALLERY_DIR` are unset.
+- [ ] CI workflow (`.github/workflows/ci.yml`) runs on pull requests, on
+  pushes to `main`, and on manual dispatch, on Node 20.20.1 and 22: `npm ci`,
+  React template `npm ci --prefix packages/ui-react/template`, then
+  `npm run check` (defined in `package.json`: build, tests, hygiene,
+  determinism gate). The check names are `test (20.20.1)`, `test (22)`, and
+  `gates`. It is offline — no secrets, no network beyond `npm ci`;
+  fixture-dependent tests skip when `C2C_FIXTURES_DIR` / `C2C_GALLERY_DIR`
+  are unset.
 - [ ] CI vendors the plugin twice and compares `MANIFEST.sha256` to check
   repeatability. It also checks plugin versions and hygiene, runs the shipped
   licence gate, and validates plugin and marketplace manifests
