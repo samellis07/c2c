@@ -1195,6 +1195,33 @@ test('a page element whose payload was not generated is a drop even though the n
   for (const drop of drops) assert.match(drop.note ?? '', /Add one:/);
 });
 
+test('a named dspZml snippet that fails to compile is counted by its own nested manual-translation TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Invoice',
+        properties: [],
+        zml: [
+          {
+            tag: 'dspZml',
+            attributes: { elementName: 'ZML Snippet' },
+            children: [],
+            text: '<% while (x < 1) { z = 1; } %>',
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const rows = coverageLedger(source);
+  const row = rows.find((r) => r.name === 'Invoice.ZML Snippet');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+});
+
 test('a page element emitted as an empty stub is a drop', () => {
   const source = app({
     pages: [
