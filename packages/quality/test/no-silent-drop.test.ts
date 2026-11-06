@@ -2000,7 +2000,41 @@ test('flag description and a help_text annotation are emitted only as the genera
   assert.equal(rowStatus(bare, collectOutputs(bare), 'Visit.Notes flag description'), 'dropped');
 });
 
-test('a non-help_text annotation is still a silent drop', () => {
+test('flag description and a tooltip annotation are emitted only as the generated help', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = tooltip
+				message = "Hover me"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.equal(ui.help, 'Hover me');
+  const annotationRow = coverageLedger(source, out).find((row) => row.name.startsWith('Visit.Notes annotation'));
+  assert.equal(annotationRow?.status, 'emitted');
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+
+  // The generated field carries different help text: neither item was carried.
+  const wrong = cloneOutputs(out);
+  wrong.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help = 'Other text';
+  assert.equal(rowStatus(source, wrong, 'Visit.Notes flag description'), 'dropped');
+  assert.equal(coverageLedger(source, wrong).find((row) => row.name.startsWith('Visit.Notes annotation'))?.status, 'dropped');
+
+  // No generated help at all.
+  const gone = cloneOutputs(out);
+  delete gone.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help;
+  assert.equal(rowStatus(source, gone, 'Visit.Notes flag description'), 'dropped');
+});
+
+test('an unhandled annotation type is still a silent drop', () => {
   const source = dsApp(`
 	form Visit
 	{
@@ -2008,7 +2042,7 @@ test('a non-help_text annotation is still a silent drop', () => {
 		(
 			type = text
 			[
-				type = tooltip
+				type = reminder
 				message = "Hover me"
 			]
 		)
