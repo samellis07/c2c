@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { MigrateResponse } from '../../data/src/migrate.js';
-import { bulkJobStatus, bulkWriteUrl, restBulkStore } from '../src/bulk-store.js';
+import { bulkJobStatus, bulkWriteUrl, restBulkStore, stratusCsvPutObject } from '../src/bulk-store.js';
 
 const scope = { org: '<org-id>', projectId: '<project-id>', token: 'test-token' };
 const BASE = 'https://api.catalyst.zoho.in';
@@ -73,4 +73,45 @@ test('a refused create names the store code; a host outside the data centre is r
   );
   const wrong = restBulkStore({ base: 'https://api.catalyst.zoho.com', dc: 'in', scope, putObject: async () => {}, fetch: async () => reply({}) });
   await assert.rejects(wrong.writeJobStatus('1'), /not on the allow-list/);
+});
+
+test('the Stratus CSV upload PUTs to the bucket object URL with overwrite on, and without a fetch override restBulkStore uses it', async () => {
+  const seen: { url: string; method?: string; headers?: Record<string, string>; body?: string }[] = [];
+  const put = stratusCsvPutObject({
+    dc: 'in',
+    environment: 'development',
+    token: 'test-token',
+    fetch: async (url, init) => {
+      seen.push({ url, method: init?.method, headers: init?.headers, body: init?.body });
+      return reply('', 201);
+    },
+  });
+  await put('c2c-load', 'run/Orders/chunk-00000.csv', 'c2c_source_id\r\nO1\r\n');
+  assert.equal(seen[0]!.url, 'https://c2c-load-development.zohostratus.in/run/Orders/chunk-00000.csv');
+  assert.equal(seen[0]!.method, 'PUT');
+  assert.equal(seen[0]!.headers!.Authorization, 'Zoho-oauthtoken test-token');
+  assert.equal(seen[0]!.headers!.overwrite, 'true');
+  assert.equal(seen[0]!.body, 'c2c_source_id\r\nO1\r\n');
+
+  await assert.rejects(
+    stratusCsvPutObject({ dc: 'in', environment: 'production', token: 't', fetch: async () => reply({ data: { error_code: 'FAIL' } }, 500) })(
+      'c2c-load',
+      'k',
+      'x',
+    ),
+    /stratus CSV upload failed: 500 FAIL/,
+  );
+
+  const seenDefault: string[] = [];
+  const store = restBulkStore({
+    base: BASE,
+    dc: 'in',
+    scope,
+    fetch: async (url) => {
+      seenDefault.push(url);
+      return reply('', 201);
+    },
+  });
+  await store.putObject('c2c-load', 'run/Orders/chunk-00000.csv', 'c2c_source_id\r\nO1\r\n');
+  assert.equal(seenDefault[0], 'https://c2c-load.zohostratus.in/run/Orders/chunk-00000.csv');
 });
