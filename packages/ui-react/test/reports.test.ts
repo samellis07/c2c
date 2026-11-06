@@ -31,6 +31,10 @@ function source(): string {
 \tlist Orders
 \t{
 \t\tdisplayname = "Orders"
+\t\toptions
+\t\t(
+\t\t\trecord count = enable
+\t\t)
 \t\tshow all rows from Order
 \t\t(
 \t\t\tTitle
@@ -146,6 +150,7 @@ test('the report spec carries the view options: sort, filters, grouping, detail,
   assert.equal(report.groupField, 'Status');
   assert.equal(report.detail, true);
   assert.equal(report.form, 'Order');
+  assert.equal(report.showRecordCount, true);
   assert.deepEqual(report.detailBlocks, [{
     title: 'Overview',
     fields: [

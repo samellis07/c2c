@@ -580,6 +580,11 @@ function ReportList({ report }: { report: ReportSpec }) {
       ) : null}
       {previewEndpoints.size ? <p className="todo" data-action-preview>{previewActionsNote(report.customActions.filter((a) => a.preview).map((a) => a.name.trim()))}</p> : null}
       {report.note ? <p className="todo" data-report-note>{report.note}</p> : null}
+      {report.showRecordCount && load.state === 'ready' ? (
+        <p className="c2c-record-count" data-record-count="" role="status">
+          {shown.length} {shown.length === 1 ? 'record' : 'records'}
+        </p>
+      ) : null}
       {load.state === 'loading' ? (
         <p className="c2c-loading" data-state="loading" role="status">
           Loading records…

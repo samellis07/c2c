@@ -219,6 +219,8 @@ export interface ReportSpec {
   recordsPerRow?: number;
   /** `options { label width = 20% }`: the record-card label column width. */
   labelWidth?: string;
+  /** `options { record count = enable }`: show how many rows the list is displaying. */
+  showRecordCount?: boolean;
   conditionalFormats: ConditionalFormatSpec[];
   /** Single-row read of the report's form, for the detail view. */
   recordEndpoint?: string;
