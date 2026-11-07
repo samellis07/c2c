@@ -1014,6 +1014,21 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
         });
       }
     }
+    // `show gallery` governs the scan dialog's photo-library option. The
+    // generated scan field is a plain text input with no capture UI of its
+    // own, so this never carries over regardless of its value.
+    const showGallery = prop(field, 'show gallery');
+    if (showGallery !== undefined) {
+      const name = `${formName}.${field.name} property show gallery`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`show gallery = ${showGallery}\`; the generated scan field has no camera or photo-library UI to carry that option onto.`,
+          manualStep: `Build a scan capture UI for ${field.name} that offers (or omits) the photo library per \`show gallery = ${showGallery}\` — the generated field is manual text entry only.`,
+        });
+      }
+    }
   }
   if (widget === 'video') {
     const duration = prop(field, VIDEO_DURATION_PROPERTY_KEY);
@@ -1160,6 +1175,21 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
             manualStep: `Add a link-name/title input alongside ${field.name}'s image upload and make the displayed image open that link — this is not generated.`,
           });
         }
+      }
+    }
+    // `show gallery = false` restricts capture to the camera only. The
+    // generated file input sets no attribute that blocks the device photo
+    // library, so the picker still offers it next to the camera.
+    const showGallery = prop(field, 'show gallery');
+    if (showGallery !== undefined && showGallery.trim().toLowerCase() !== 'true') {
+      const name = `${formName}.${field.name} property show gallery`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`show gallery = ${showGallery}\`; the generated file input has no attribute that blocks the device photo library, so the picker still offers it next to the camera.`,
+          manualStep: `Restrict ${field.name} to camera-only capture by hand (a native wrapper or a custom capture UI) — the generated web file input cannot prevent the photo library from being offered.`,
+        });
       }
     }
   }
