@@ -70,6 +70,13 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
     why: 'Files come from the local drive only. The generated field offers only a device file picker (a file input in the static UI, a drop zone in the React app) and has no cloud document picker.',
   },
   {
+    widget: 'file',
+    accept: undefined,
+    key: 'file count',
+    value: '1',
+    why: 'Only one file may be attached. The generated field has no `multiple` attribute and accepts exactly one file per upload, already matching a count of 1.',
+  },
+  {
     widget: 'address',
     accept: undefined,
     key: 'adjust_using_map',

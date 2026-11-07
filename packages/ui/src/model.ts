@@ -1167,6 +1167,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
         }
       }
     }
+    if (widget === 'file' && depth === 0) {
+      const count = intProp(field, ['file count']);
+      if (count !== undefined && count !== 1) {
+        const name = `${formName}.${field.name} property file count`;
+        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+          todos.push({
+            area: 'field',
+            name,
+            reason: `Field ${field.name} sets \`file count = ${count}\`; the generated input has no \`multiple\` attribute and accepts one file per upload.`,
+            manualStep: `Add repeat-upload controls so ${field.name} can hold up to ${count} files, or keep it to one file per upload — this is not generated.`,
+          });
+        }
+      }
+    }
     ui.accept = widget === 'image' || widget === 'signature' ? 'image/*' : widget === 'audio' ? 'audio/*' : widget === 'video' ? 'video/*' : undefined;
     ui.note =
       widget === 'signature'
