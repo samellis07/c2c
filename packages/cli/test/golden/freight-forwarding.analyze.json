@@ -1492,7 +1492,7 @@
     "statements": 553,
     "translated": 56,
     "shimmed": 486,
-    "todo": 47,
+    "todo": 52,
     "todoLocations": [
       {
         "location": "workflow Zoho_Book_Customer_Update:13",
@@ -1632,6 +1632,36 @@
         "construct": "Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "scope": "ui",
         "manualStep": "In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.Time property timedisplayoptions",
+        "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.FROM property timedisplayoptions",
+        "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.TO property timedisplayoptions",
+        "construct": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.FROM2 property timedisplayoptions",
+        "construct": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.TO2 property timedisplayoptions",
+        "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated."
       },
       {
         "location": "report Container_Movement_Tracking block report properties",
@@ -2039,6 +2069,41 @@
     },
     {
       "kind": "ui",
+      "label": "field New_SOF.FROM property timedisplayoptions",
+      "detail": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.FROM2 property timedisplayoptions",
+      "detail": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.Time property timedisplayoptions",
+      "detail": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.TO property timedisplayoptions",
+      "detail": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.TO2 property timedisplayoptions",
+      "detail": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
       "label": "field New_User.Email property personal data",
       "detail": "Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "scope": "ui",
@@ -2215,7 +2280,7 @@
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 47,
+    "todoCount": 52,
     "fillLockEntries": 0,
     "todoKinds": [
       {
@@ -2243,7 +2308,27 @@
         "count": 1
       },
       {
+        "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
         "construct": "Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "count": 1
+      },
+      {
+        "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
         "count": 1
       },
       {
@@ -2335,7 +2420,7 @@
         "count": 1
       }
     ],
-    "uiTodoCount": 36,
+    "uiTodoCount": 41,
     "silentDrops": 18,
     "silentDropKinds": [
       {

@@ -514,6 +514,7 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'layout') return fieldLayoutProved(text, ui);
   if (key === 'visibility') return visibilityProved(text, ui);
   if (key === 'alloweddays') return allowedDaysProved(text, ui);
+  if (key === 'timedisplayoptions') return timeDisplayProved(text, ui);
   if (key === 'source') return sourceProved(text, ui);
   if (key === 'start index') {
     const rawTrim = raw.trim();
@@ -633,6 +634,19 @@ function allowedDaysProved(text: string, ui: UiField | undefined): boolean {
   if (ui?.widget !== 'date' && ui?.widget !== 'datetime') return false;
   const days = new Set(text.split(',').map((day) => day.trim()));
   return days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day));
+}
+
+/**
+ * `timedisplayoptions` names the clock format Creator's time picker shows. The
+ * generated `time`/`datetime-local` input has no seconds step (packages/ui/src
+ * model.ts), so it always behaves as an `hh:mm` format regardless of what is
+ * declared: a format that does not ask for seconds is proved outright. A
+ * format that does (`hh:mm:ss`, with or without a 12-hour suffix) is a real
+ * behaviour gap, counted only as the manual-step UI todo model.ts emits for it.
+ */
+function timeDisplayProved(text: string, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'time' && ui?.widget !== 'datetime') return false;
+  return !/ss/i.test(text);
 }
 
 /**
