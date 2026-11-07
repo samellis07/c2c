@@ -1309,6 +1309,31 @@ test('a page element emitted as an empty stub is a drop', () => {
   assert.deepEqual(dropNames(source, stub).sort(), ['Dash.Hello', 'Dash.World']);
 });
 
+test('a server-side snippet with only conditional logic and no static markup compiles with empty output, not a drop', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          {
+            tag: 'dsp',
+            attributes: { elementName: 'HTML Snippet' },
+            children: [],
+            text: '<%{\n\tif(zoho.loginuserid == zoho.adminuserid)\n\t{\n\t\topenUrl("#Form:Setup","Same Window");\n\t}\n}%>',
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const rows = coverageLedger(source);
+  assert.equal(rows.find((r) => r.name === 'Dash.HTML Snippet')?.status, 'emitted');
+});
+
 test('a same-tag element under another name does not satisfy a named page element', () => {
   const source = app({
     pages: [
