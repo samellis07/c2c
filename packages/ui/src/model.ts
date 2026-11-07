@@ -962,6 +962,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       manualStep: `In the Catalyst console, apply the data-privacy protection ${field.name} needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.`,
     });
   }
+  if (widget === 'address') {
+    const captureCoordinates = prop(field, 'capture_coordinates');
+    if (captureCoordinates?.trim().toLowerCase() === 'true') {
+      const name = `${formName}.${field.name} property capture_coordinates`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} is flagged \`capture_coordinates = true\`; the generated address field has no device-location pin or stored latitude/longitude.`,
+          manualStep: `In the Catalyst console, capture and store the device's GPS coordinates for ${field.name} by hand (geolocation lookup plus latitude/longitude columns) — this is not generated.`,
+        });
+      }
+    }
+  }
   const biProp = field.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
   if (biProp && app) {
     const target = field.lookup?.form;

@@ -2639,6 +2639,35 @@ test('private and personal data field flags emit a counted UI todo with a manual
   assert.equal(rowStatus(privateField, mutated, 'Patient.SSN property private'), 'dropped');
 });
 
+test('an address field capturing GPS coordinates emits a counted UI todo with a manual step, not a generated map pin', () => {
+  const addressField = (value: string): string => `
+	form Site
+	{
+		Location
+		(
+			type = address
+			capture_coordinates = ${value}
+		)
+	}
+`;
+  const capturing = dsApp(addressField('true'));
+  const capturingOut = collectOutputs(capturing);
+  assert.equal(rowStatus(capturing, capturingOut, 'Site.Location property capture_coordinates'), 'counted');
+  const todo = capturingOut.model.todos.find((t) => t.name === 'Site.Location property capture_coordinates');
+  assert.ok(todo, 'UI todo is emitted for a GPS-capturing address field');
+  assert.ok(todo.manualStep, 'GPS-capturing address field todo names a manual step');
+
+  // Not requesting coordinates is the generated field's own default behaviour.
+  const notCapturing = dsApp(addressField('false'));
+  assert.equal(rowStatus(notCapturing, collectOutputs(notCapturing), 'Site.Location property capture_coordinates'), 'emitted');
+
+  // Mutation test: removing the UI todo makes capture_coordinates=true a drop again —
+  // proving the setting is not silently carried by any generated widget.
+  const mutated = cloneOutputs(capturingOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Site.Location property capture_coordinates');
+  assert.equal(rowStatus(capturing, mutated, 'Site.Location property capture_coordinates'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
