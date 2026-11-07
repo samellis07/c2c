@@ -2291,7 +2291,8 @@ test('searchable is emitted only when the field generated a lookup widget', () =
   delete lookupUi(gone).lookup;
   assert.equal(rowStatus(source, gone, name), 'dropped');
 
-  // searchable = false is not honoured by the always-searchable endpoint.
+  // searchable = false is not honoured by the always-searchable endpoint, but
+  // the generated field notes it as a manual step.
   const off = dsApp(`
 	form Course
 	{
@@ -2310,7 +2311,11 @@ test('searchable is emitted only when the field generated a lookup widget', () =
 		)
 	}
 `);
-  assert.equal(rowStatus(off, collectOutputs(off), 'Enrolment.Course property searchable'), 'dropped');
+  const offOut = collectOutputs(off);
+  assert.equal(rowStatus(off, offOut, 'Enrolment.Course property searchable'), 'counted');
+  const todo = offOut.model.todos.find((t) => t.area === 'field' && t.name === 'Enrolment.Course property searchable');
+  assert.ok(todo, 'expected a manual todo for searchable = false');
+  assert.ok(todo.manualStep, 'searchable = false todo names a manual step');
 });
 
 test('a report column naming the group field is emitted by the group headers', () => {
