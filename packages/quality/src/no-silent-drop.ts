@@ -501,6 +501,11 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'values') return choicesProved(field, ui) || lookupProved(field.lookup, ui, columns, app);
   // `others option` lands as the generated select/radio "Others" free-text entry.
   if (key === 'others option') return text.toLowerCase() !== 'true' || ui?.othersOption === true;
+  // `show onload = true` asks Creator to open the camera/scanner before the form
+  // displays; the generated field opens it only on a user tap, so only the `true`
+  // case is a gap (listed through model.ts's dedicated UI todo). A false/omitted
+  // value matches the generated behavior already, on any field.
+  if (key === 'show onload') return text.toLowerCase() !== 'true';
   if (key === 'sortorder') return sortOrderProved(text, field, ui, app, out);
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');
