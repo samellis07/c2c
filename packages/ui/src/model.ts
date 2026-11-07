@@ -1146,6 +1146,23 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
         ? 'A signature pad uploads the drawn strokes as JSON. The dry-run function does not write to Stratus.'
         : 'The column stores a Stratus object key. The dry-run upload does not write bytes.';
   }
+  if (widget === 'image') {
+    const enableProp = prop(field, 'enable');
+    if (enableProp !== undefined) {
+      const tokens = enableProp.split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
+      if (tokens.includes('link') || tokens.includes('title')) {
+        const name = `${formName}.${field.name} property enable`;
+        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+          todos.push({
+            area: 'field',
+            name,
+            reason: `Field ${field.name} is flagged \`enable = ${enableProp}\`; the generated image field collects no link name or title alongside the upload, and the shown image is not a clickable link.`,
+            manualStep: `Add a link-name/title input alongside ${field.name}'s image upload and make the displayed image open that link — this is not generated.`,
+          });
+        }
+      }
+    }
+  }
   if (widget === 'zia') ui.note = 'Filled after submit. The form shows the stored text; it does not call Zia.';
   if (widget === 'formula' || widget === 'autonumber' || widget === 'barcode') ui.note = 'Computed. The form shows it and does not accept a typed value.';
   if (widget === 'name' || widget === 'address') {
