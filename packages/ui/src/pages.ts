@@ -60,6 +60,10 @@ export interface UiElement {
   /** A `type="form data"` cell: `thisapp.<Report>.<Field>.<fn>()` plus the row criteria. */
   kpi?: { report?: string; form?: string; field?: string; fn?: string; expression?: string };
   criteria?: string;
+  /** A button's `parameters` text the click action does not carry through; recorded as a manual step. */
+  droppedParameters?: string;
+  /** A search box's `criteriaString`/`criteria` text the generated element does not bind; recorded as a manual step. */
+  droppedCriteria?: string;
   /** Allowlisted HTML. The runtime sanitizes again before inserting it. */
   html?: string;
   /** Active or non-rendering snippet elements removed by the sanitizer. */
@@ -1306,9 +1310,15 @@ export function elementFromZml(
     const isForm = isFormAction(action, attributes);
     const formTarget = isForm ? formActionTarget(action, attributes) : undefined;
     const matchingForm = formTarget ? findMatchingForm(env?.app?.forms, formTarget) : undefined;
+    // The click action carries the form/function target, but `parameters` args
+    // the export attached for the receiving end are never wired through; flag
+    // them as a manual step unless the text already happens to show them.
+    const parameters = attr(attributes, ['parameters'])?.trim();
+    const droppedParameters = (haystack: (string | undefined)[]): { droppedParameters?: string } =>
+      parameters && !haystack.filter(Boolean).join('\n').includes(parameters) ? { droppedParameters: parameters } : {};
     if (isForm && matchingForm) {
       const href = `#/form/${matchingForm.name}`;
-      return { tag, kind: 'button', ...(name ? { name } : {}), text: label, href, ...(style ? { style } : {}), children };
+      return { tag, kind: 'button', ...(name ? { name } : {}), text: label, href, ...(style ? { style } : {}), ...droppedParameters([label, href]), children };
     }
     if (isForm && env?.app && !matchingForm) {
       const what = label ? `ZML <button> "${label}"` : `ZML <button>`;
@@ -1341,12 +1351,16 @@ export function elementFromZml(
       const reportHref = knownRouteHref(env?.app, reportTarget ? `#/report/${reportTarget}` : undefined);
       if (reportHref) href = reportHref;
     }
-    return { tag, kind: 'button', ...(name ? { name } : {}), text: label, ...(href ? { href } : {}), ...(style ? { style } : {}), children };
+    return { tag, kind: 'button', ...(name ? { name } : {}), text: label, ...(href ? { href } : {}), ...(style ? { style } : {}), ...droppedParameters([label, href]), children };
   }
   if (kind === 'text' || kind === 'gauge' || kind === 'search') {
     const label = attr(attributes, ['value', 'text', 'label', 'title', 'content']) ?? body?.trim() ?? name ?? tag;
     const href = kind === 'search' ? attr(attributes, ['url', 'href', 'linkName']) : undefined;
-    return { tag, kind, ...(name ? { name } : {}), text: label, ...(href ? { href } : {}), ...(style ? { style } : {}), children };
+    // A search box's `criteriaString`/`criteria` names the predicate it should
+    // filter by, but the generated element has nowhere to bind it; flag it as
+    // a manual step so the filtering gets wired by hand.
+    const criteria = kind === 'search' ? attr(attributes, ['criteriaString', 'criteria'])?.trim() : undefined;
+    return { tag, kind, ...(name ? { name } : {}), text: label, ...(href ? { href } : {}), ...(style ? { style } : {}), ...(criteria ? { droppedCriteria: criteria } : {}), children };
   }
   const href =
     kind === 'report'

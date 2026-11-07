@@ -1187,12 +1187,71 @@ test('a page element whose payload was not generated is a drop even though the n
   const rows = coverageLedger(source);
   assert.equal(rows.find((row) => row.name === 'Dash.Panel')?.status, 'emitted');
   assert.equal(rows.find((row) => row.name === 'Dash.Total')?.status, 'emitted');
+  // A button's click `parameters` and a search box's `criteria` are now recorded as
+  // manual steps instead of disappearing, so only the unsupported KPI stays a drop.
+  assert.equal(rows.find((row) => row.name === 'Dash.Go')?.status, 'counted');
+  assert.equal(rows.find((row) => row.name === 'Dash.Book_Report')?.status, 'counted');
   const drops = rows.filter((row) => row.status === 'dropped');
   assert.deepEqual(
     drops.map((drop) => drop.name).sort(),
-    ['Dash.Book_Report', 'Dash.Fine', 'Dash.Go'],
+    ['Dash.Fine'],
   );
   for (const drop of drops) assert.match(drop.note ?? '', /Add one:/);
+});
+
+test('a button whose click parameters are not carried through is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Invoice',
+        properties: [],
+        zml: [{ tag: 'button', attributes: { elementName: 'Go', parameters: 'View all Books' }, children: [], start: 10, end: 20 }],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Invoice.Go');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Invoice.Go' && /parameters/.test(todo.reason)));
+  // Without the generator's backing TODO the gap is a genuine drop, not a free pass.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Invoice.Go');
+  assert.ok(dropNames(source, mutated).includes('Invoice.Go'));
+});
+
+test('a search box whose criteria is not bound is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Invoice',
+        properties: [],
+        zml: [
+          {
+            tag: 'search',
+            attributes: { elementName: 'Find', criteriaString: 'Title.contains(input.searchString)' },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Invoice.Find');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Invoice.Find' && /criteria/.test(todo.reason)));
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Invoice.Find');
+  assert.ok(dropNames(source, mutated).includes('Invoice.Find'));
 });
 
 test('a named dspZml snippet that fails to compile is counted by its own nested manual-translation TODO, not dropped', () => {
