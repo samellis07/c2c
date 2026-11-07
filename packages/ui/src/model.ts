@@ -464,6 +464,11 @@ const BROWSE_REMOTE_SOURCES = new Set(['google_docs', 'zoho_docs']);
 // is recorded as a manual step rather than invented as UI.
 const PRIVACY_PROPERTY_KEYS = ['private', 'personal data'];
 
+// A scan-capable field's `manual input` setting toggles a free-text fallback next to
+// the camera control. The generated scan field has no such fallback, so the setting
+// is recorded as a manual step rather than invented as UI.
+const SCAN_MANUAL_INPUT_PROPERTY_KEY = 'manual input';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -961,6 +966,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       reason: `Field ${field.name} is flagged \`${key} = true\`; Catalyst generates no privacy or access control for this field.`,
       manualStep: `In the Catalyst console, apply the data-privacy protection ${field.name} needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.`,
     });
+  }
+  if (ui.scan) {
+    const manualInput = prop(field, SCAN_MANUAL_INPUT_PROPERTY_KEY);
+    if (manualInput !== undefined) {
+      const name = `${formName}.${field.name} property ${SCAN_MANUAL_INPUT_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`manual input = ${manualInput}\`; the generated scan field has no free-text fallback next to the camera.`,
+          manualStep: `Add a manual text entry alongside the generated scan control, or leave the field scan-only, per your policy — this is not generated.`,
+        });
+      }
+    }
   }
   const biProp = field.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
   if (biProp && app) {

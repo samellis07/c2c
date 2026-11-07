@@ -2675,6 +2675,42 @@ test('a defaultrow field property is listed through the generated field todo', (
   assert.ok(drops.some((d) => d.name === 'Orders.Lines property defaultrow'));
 });
 
+test('a manual input field property on a scan field is listed through a dedicated UI todo', () => {
+  const withManualInput = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'manual input', value: 'true', span: Z }],
+  });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withManualInput).filter((d) => d.name.includes('manual input')),
+    [],
+  );
+  const todo = collectOutputs(withManualInput).model.todos.find((t) => t.name === 'Orders.Code property manual input');
+  assert.ok(todo, 'a UI todo names the manual input setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withManualInput);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withManualInput, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Code property manual input'],
+  );
+});
+
+test('a manual input field property stays a silent drop on a non-scan field', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'manual input', value: 'true', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('manual input')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('manual input'))
+      .map((d) => d.name),
+    ['Orders.Notes property manual input'],
+  );
+});
+
 test('an enable linkname flag is listed only when the generated field carries no link name', () => {
   const withFlag = appWithField({ ...field('Website', 'url'), flags: ['enable linkname'] });
   assert.deepEqual(
