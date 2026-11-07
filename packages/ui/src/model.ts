@@ -475,6 +475,12 @@ const SCAN_MANUAL_INPUT_PROPERTY_KEY = 'manual input';
 // rather than invented as UI.
 const VIDEO_DURATION_PROPERTY_KEY = 'duration';
 
+// `annotation = true` on an image field turns on Creator's draw-on-the-photo
+// markup tool. The generated image upload has no drawing surface of its own
+// (same upload/download path as a plain file field), so this is recorded as a
+// manual step rather than invented as UI.
+const IMAGE_ANNOTATION_PROPERTY_KEY = 'annotation';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -997,6 +1003,18 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} sets \`target = ${target}\`; the generated image field has no clickable link, so there is no window to open it in.`,
           manualStep: `Make the image open ${target} when clicked, per your policy — this is not generated.`,
+        });
+      }
+    }
+    const value = prop(field, IMAGE_ANNOTATION_PROPERTY_KEY);
+    if (value?.trim().toLowerCase() === 'true') {
+      const name = `${formName}.${field.name} property ${IMAGE_ANNOTATION_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} is flagged \`annotation = true\`; the generated image upload has no drawing or markup tool.`,
+          manualStep: `Give users another way to mark up ${field.name} (an annotation widget or a separate review step) — the generated upload stores the file as-is, with no on-image drawing.`,
         });
       }
     }
