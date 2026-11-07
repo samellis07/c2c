@@ -1158,6 +1158,18 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       ui.subfields = columns;
       ui.note = 'Rows are edited in a grid and saved with the parent submit. There is no cross-table transaction.';
     }
+    const autoWidth = prop(field, 'auto width');
+    if (autoWidth !== undefined && autoWidth.trim().toLowerCase() === 'false') {
+      const name = `${formName}.${field.name} property auto width`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`auto width = false\`; the generated subform grid has no fixed-column-width control, so its columns always size themselves.`,
+          manualStep: `Give ${field.name}'s generated grid explicit column widths (CSS or a table layout) so columns stay fixed instead of auto-sizing — the generated grid currently has no width control for this.`,
+        });
+      }
+    }
   }
   if (widget === 'currency' || widget === 'decimal' || widget === 'percent') {
     const places = intProp(field, ['decimalplace', 'decimal places', 'decimal digits']);
