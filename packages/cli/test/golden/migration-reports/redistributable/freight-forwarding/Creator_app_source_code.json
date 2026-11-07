@@ -58,7 +58,7 @@
       "shimmed": 486
     }
   },
-  "todoCount": 47,
+  "todoCount": 79,
   "todoKinds": [
     {
       "construct": "client-condition-uses-server",
@@ -69,11 +69,55 @@
       "count": 5
     },
     {
+      "construct": "Field Amount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 4
+    },
+    {
       "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "count": 4
     },
     {
+      "construct": "Field Discount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 3
+    },
+    {
+      "construct": "Field Grand_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 3
+    },
+    {
+      "construct": "Field List_Price sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 3
+    },
+    {
+      "construct": "Field Sub_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 3
+    },
+    {
+      "construct": "Field Tax sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 3
+    },
+    {
+      "construct": "Field Tax_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 3
+    },
+    {
+      "construct": "Field Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 3
+    },
+    {
+      "construct": "Field Annual_Revenue sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 2
+    },
+    {
+      "construct": "Field Excise_Duty sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "count": 2
+    },
+    {
       "construct": "Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 2
+    },
+    {
+      "construct": "Field Sales_Commission sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
       "count": 2
     },
     {
@@ -82,6 +126,10 @@
     },
     {
       "construct": "Field Contact_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 1
+    },
+    {
+      "construct": "Field Expected_Revenue sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
       "count": 1
     },
     {
@@ -966,6 +1014,11 @@
   "hiddenParts": [],
   "todoSteps": [
     {
+      "location": "field New_Account.Annual_Revenue property format",
+      "construct": "Field Annual_Revenue sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Annual_Revenue needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
       "location": "field New_Account.Email property personal data",
       "construct": "Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "step": "In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
@@ -1016,6 +1069,16 @@
       "step": "In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     },
     {
+      "location": "field New_Deal.Amount property format",
+      "construct": "Field Amount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Amount needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Deal.Expected_Revenue property format",
+      "construct": "Field Expected_Revenue sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Expected_Revenue needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
       "location": "field New_Lead.Phone_Number property personal data",
       "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "step": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
@@ -1026,6 +1089,11 @@
       "step": "In the Catalyst console, apply the data-privacy protection Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     },
     {
+      "location": "field New_Lead.Annual_Revenue property format",
+      "construct": "Field Annual_Revenue sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Annual_Revenue needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
       "location": "field New_Lead.Email property personal data",
       "construct": "Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "step": "In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
@@ -1034,6 +1102,146 @@
       "location": "field New_Lead.Mobile property personal data",
       "construct": "Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "step": "In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "location": "field New_Quotation.List_Price property format",
+      "construct": "Field List_Price sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting List_Price needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Quotation.Amount property format",
+      "construct": "Field Amount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Amount needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Quotation.Discount property format",
+      "construct": "Field Discount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Discount needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Quotation.Tax property format",
+      "construct": "Field Tax sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Tax needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Quotation.Total property format",
+      "construct": "Field Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Quotation.Sub_Total property format",
+      "construct": "Field Sub_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Sub_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Quotation.Tax_Total property format",
+      "construct": "Field Tax_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Tax_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Quotation.Grand_Total property format",
+      "construct": "Field Grand_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Grand_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Sales_Commission property format",
+      "construct": "Field Sales_Commission sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Sales_Commission needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Excise_Duty property format",
+      "construct": "Field Excise_Duty sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Excise_Duty needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.List_Price property format",
+      "construct": "Field List_Price sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting List_Price needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Amount property format",
+      "construct": "Field Amount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Amount needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Discount property format",
+      "construct": "Field Discount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Discount needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Tax property format",
+      "construct": "Field Tax sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Tax needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Total property format",
+      "construct": "Field Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Sub_Total property format",
+      "construct": "Field Sub_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Sub_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Tax_Total property format",
+      "construct": "Field Tax_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Tax_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Delivery_Order.Grand_Total property format",
+      "construct": "Field Grand_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Grand_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Excise_Duty property format",
+      "construct": "Field Excise_Duty sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Excise_Duty needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Sales_Commission property format",
+      "construct": "Field Sales_Commission sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Sales_Commission needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.List_Price property format",
+      "construct": "Field List_Price sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting List_Price needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Amount property format",
+      "construct": "Field Amount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Amount needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Discount property format",
+      "construct": "Field Discount sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Discount needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Tax property format",
+      "construct": "Field Tax sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Tax needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Total property format",
+      "construct": "Field Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Sub_Total property format",
+      "construct": "Field Sub_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Sub_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Tax_Total property format",
+      "construct": "Field Tax_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Tax_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
+    },
+    {
+      "location": "field New_Invoice.Grand_Total property format",
+      "construct": "Field Grand_Total sets `format = commadotwestern`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.",
+      "step": "Add the display formatting Grand_Total needs (thousands grouping and decimal punctuation matching `commadotwestern`) to list, detail and form views by hand — the generated numeric field carries no grouping style."
     },
     {
       "location": "report Container_Movement_Tracking block report properties",
@@ -1155,195 +1363,8 @@
     "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
     "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
   ],
-  "silentDrops": 18,
+  "silentDrops": 1,
   "residuals": [
-    {
-      "id": "field-property:New_Account.Annual_Revenue property format",
-      "kind": "field-property",
-      "construct": "New_Account.Annual_Revenue property format",
-      "form": "New_Account",
-      "field": "Annual_Revenue",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Account.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Account.Annual_Revenue, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Deal.Amount property format",
-      "kind": "field-property",
-      "construct": "New_Deal.Amount property format",
-      "form": "New_Deal",
-      "field": "Amount",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Deal.Amount was not converted. In the Catalyst console, set the field's number or currency format for New_Deal.Amount, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Deal.Expected_Revenue property format",
-      "kind": "field-property",
-      "construct": "New_Deal.Expected_Revenue property format",
-      "form": "New_Deal",
-      "field": "Expected_Revenue",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Deal.Expected_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Deal.Expected_Revenue, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Annual_Revenue property format",
-      "kind": "field-property",
-      "construct": "New_Lead.Annual_Revenue property format",
-      "form": "New_Lead",
-      "field": "Annual_Revenue",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Lead.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Lead.Annual_Revenue, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Quotation.Sub_Total property format",
-      "kind": "field-property",
-      "construct": "New_Quotation.Sub_Total property format",
-      "form": "New_Quotation",
-      "field": "Sub_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Quotation.Sub_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Quotation.Sub_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Quotation.Tax_Total property format",
-      "kind": "field-property",
-      "construct": "New_Quotation.Tax_Total property format",
-      "form": "New_Quotation",
-      "field": "Tax_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Quotation.Tax_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Quotation.Tax_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Quotation.Grand_Total property format",
-      "kind": "field-property",
-      "construct": "New_Quotation.Grand_Total property format",
-      "form": "New_Quotation",
-      "field": "Grand_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Quotation.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Quotation.Grand_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Delivery_Order.Sales_Commission property format",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Sales_Commission property format",
-      "form": "New_Delivery_Order",
-      "field": "Sales_Commission",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Delivery_Order.Sales_Commission was not converted. In the Catalyst console, set the field's number or currency format for New_Delivery_Order.Sales_Commission, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Delivery_Order.Excise_Duty property format",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Excise_Duty property format",
-      "form": "New_Delivery_Order",
-      "field": "Excise_Duty",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Delivery_Order.Excise_Duty was not converted. In the Catalyst console, set the field's number or currency format for New_Delivery_Order.Excise_Duty, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Delivery_Order.Sub_Total property format",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Sub_Total property format",
-      "form": "New_Delivery_Order",
-      "field": "Sub_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Delivery_Order.Sub_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Delivery_Order.Sub_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Delivery_Order.Tax_Total property format",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Tax_Total property format",
-      "form": "New_Delivery_Order",
-      "field": "Tax_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Delivery_Order.Tax_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Delivery_Order.Tax_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Delivery_Order.Grand_Total property format",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Grand_Total property format",
-      "form": "New_Delivery_Order",
-      "field": "Grand_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Delivery_Order.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Delivery_Order.Grand_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Excise_Duty property format",
-      "kind": "field-property",
-      "construct": "New_Invoice.Excise_Duty property format",
-      "form": "New_Invoice",
-      "field": "Excise_Duty",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Invoice.Excise_Duty was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Excise_Duty, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Sales_Commission property format",
-      "kind": "field-property",
-      "construct": "New_Invoice.Sales_Commission property format",
-      "form": "New_Invoice",
-      "field": "Sales_Commission",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Invoice.Sales_Commission was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Sales_Commission, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Sub_Total property format",
-      "kind": "field-property",
-      "construct": "New_Invoice.Sub_Total property format",
-      "form": "New_Invoice",
-      "field": "Sub_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Invoice.Sub_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Sub_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Tax_Total property format",
-      "kind": "field-property",
-      "construct": "New_Invoice.Tax_Total property format",
-      "form": "New_Invoice",
-      "field": "Tax_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Invoice.Tax_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Tax_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Grand_Total property format",
-      "kind": "field-property",
-      "construct": "New_Invoice.Grand_Total property format",
-      "form": "New_Invoice",
-      "field": "Grand_Total",
-      "property": "property format",
-      "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
-      "step": "The display format for New_Invoice.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Grand_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
     {
       "id": "translation:translation Language_Settings",
       "kind": "translation",

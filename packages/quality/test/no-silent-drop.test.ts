@@ -2731,6 +2731,35 @@ test('an address field capturing GPS coordinates emits a counted UI todo with a 
   assert.equal(rowStatus(capturing, mutated, 'Site.Location property capture_coordinates'), 'dropped');
 });
 
+test('a currency/decimal field with an explicit format emits a counted UI todo, not a generated grouping style', () => {
+  const amountField = (type: string, format: string | undefined): string => `
+	form Invoice
+	{
+		Amount
+		(
+			type = ${type}
+			${format === undefined ? '' : `format = ${format}`}
+		)
+	}
+`;
+  const grouped = dsApp(amountField('decimal', 'commadotwestern'));
+  const groupedOut = collectOutputs(grouped);
+  assert.equal(rowStatus(grouped, groupedOut, 'Invoice.Amount property format'), 'counted');
+  const todo = groupedOut.model.todos.find((t) => t.name === 'Invoice.Amount property format');
+  assert.ok(todo, 'UI todo is emitted for a field carrying an explicit format');
+  assert.ok(todo.manualStep, 'format todo names a manual step');
+
+  // No format property set is not a construct at all: nothing to carry or drop.
+  const unset = dsApp(amountField('decimal', undefined));
+  assert.equal(rowStatus(unset, collectOutputs(unset), 'Invoice.Amount property format'), undefined);
+
+  // Mutation test: removing the UI todo makes an explicit format a drop again —
+  // proving the setting is not silently carried by the generated numeric input.
+  const mutated = cloneOutputs(groupedOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Invoice.Amount property format');
+  assert.equal(rowStatus(grouped, mutated, 'Invoice.Amount property format'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
