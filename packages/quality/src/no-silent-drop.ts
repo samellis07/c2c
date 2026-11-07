@@ -486,6 +486,12 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   // match). The generated input already carries that as `ui.scan`, which the
   // static runtime renders as `data-scan="true"` (client-runtime.js fieldControl).
   if (key === 'qrcode' || key === 'barcode') return ui?.scan === true;
+  // `preview duration = 0` on an image field is already proved by DEFAULT_EQUIVALENCE
+  // (above). A scan-capable field (qrcode/barcode text/number) has the same
+  // no-auto-dismiss default — the generated scan input relies on native device
+  // confirmation, same as the image capture control — but DEFAULT_EQUIVALENCE is
+  // keyed by widget, and a scan field's widget is never 'image'.
+  if (key === 'preview duration') return text === '0' && ui?.scan === true;
   if (key === 'displayformat') {
     // System Users fields are backed by the Catalyst Users endpoint. Their
     // display format is carried as the generated lookup's display field.
