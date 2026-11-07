@@ -586,7 +586,7 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 6,
+    "todo": 7,
     "todoLocations": [
       {
         "location": "field Staff_Members.Staff_Name property personal data",
@@ -614,6 +614,11 @@
       {
         "location": "page DashBoard.Book_Report",
         "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+        "scope": "ui"
+      },
+      {
+        "location": "page DashBoard.All_Book_Transactions",
+        "construct": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
         "scope": "ui"
       },
       {
@@ -702,6 +707,12 @@
     },
     {
       "kind": "ui",
+      "label": "page DashBoard.All_Book_Transactions",
+      "detail": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
       "label": "page DashBoard.Book_Report",
       "detail": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
       "scope": "ui"
@@ -715,7 +726,7 @@
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 6,
+    "todoCount": 7,
     "fillLockEntries": 0,
     "todoKinds": [
       {
@@ -741,9 +752,13 @@
       {
         "construct": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
         "count": 1
+      },
+      {
+        "construct": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
+        "count": 1
       }
     ],
-    "uiTodoCount": 6,
+    "uiTodoCount": 7,
     "silentDrops": 7,
     "silentDropKinds": [
       {
