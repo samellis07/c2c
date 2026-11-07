@@ -1165,6 +1165,60 @@ test('a detail view proves against the layout kept for its device', () => {
   assert.ok(dropNames(source, mutated).includes('All_Orders detailview phone'));
 });
 
+test('a detail view is not lost when an earlier report shares its name', () => {
+  const block = (name: string, fields: string[]) => ({
+    name,
+    fields: fields.map((f) => ({ field: f, properties: [], subcolumns: [], span: Z })),
+    properties: [],
+    span: Z,
+  });
+  const view = (kind: 'detailview', device: string, blocks: ReturnType<typeof block>[]) => ({
+    kind,
+    device,
+    layoutProperties: [],
+    blocks,
+    menus: {},
+    actions: {},
+    properties: [],
+    span: Z,
+  });
+  const report = (overrides: Partial<App['reports'][number]>): App['reports'][number] => ({
+    name: 'All_Orders',
+    type: 'list',
+    modifiers: [],
+    form: 'Orders',
+    flags: [],
+    properties: [],
+    columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+    customActions: [],
+    conditionalFormats: [],
+    filters: [],
+    groupBy: [],
+    sortBy: [],
+    blocks: [],
+    views: [],
+    span: Z,
+    ...overrides,
+  });
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    // Two reports declared under the same name (e.g. a device-scoped
+    // redeclaration): the first carries the detail view, the second none.
+    reports: [report({ views: [view('detailview', 'web', [block('datablock1', ['Title'])])] }), report({})],
+  });
+  const out = collectOutputs(source);
+  assert.equal(out.model.reports.length, 2);
+  assert.deepEqual(out.model.reports[0]!.detailBlocks, [{ title: 'datablock1', fields: [{ field: 'Title', label: 'Title' }] }]);
+  assert.equal(out.model.reports[1]!.detailBlocks, undefined);
+  const rows = coverageLedger(source, out);
+  assert.equal(rows.find((row) => row.name === 'All_Orders detailview web')?.status, 'emitted');
+  assert.equal(dropNames(source, out).includes('All_Orders detailview web'), false);
+  // Break the generated output: without the carried layout the drop returns.
+  const mutated = cloneOutputs(out);
+  delete mutated.model.reports[0]!.detailBlocks;
+  assert.ok(dropNames(source, mutated).includes('All_Orders detailview web'));
+});
+
 test('a page element whose payload was not generated is a drop even though the node exists', () => {
   const element = (tag: string, attributes: Record<string, string>) => ({ tag, attributes, children: [], start: 10, end: 20 });
   const source = app({
