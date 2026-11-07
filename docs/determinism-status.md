@@ -29,9 +29,9 @@ TODO item per untranslated construct occurrence.
 | corpus apps | 67 |
 | apps with no residual todos | 1/67 |
 | apps with no residual todos and no silent drops (deterministic) | 0/67 (0%) |
-| silent drops (total) | 261 |
-| residual TODO items | 841 |
-| distinct TODO kinds | 276 |
+| silent drops (total) | 260 |
+| residual TODO items | 842 |
+| distinct TODO kinds | 277 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -63,7 +63,7 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `field-property` | 139 |
+| `field-property` | 138 |
 | `page-element` | 49 |
 | `translation` | 41 |
 | `report-feature` | 32 |
@@ -649,6 +649,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Field Location is flagged `bidirectional = Employees`; Catalyst only creates the reverse column from a linked grid side, and neither Location nor Add_Location.Employees is one.",
+      "count": 1
+    },
+    {
+      "construct": "Field Location sets `manual input = true`; the generated scan field has no free-text fallback next to the camera.",
       "count": 1
     },
     {
@@ -1696,13 +1700,14 @@ clears the app. The count is apps, not items.
         "Field Branch_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "Field Buildings is flagged `bidirectional = Select_Floors`; Catalyst only creates the reverse column from a linked grid side, and neither Buildings nor Add_Building.Select_Floors is one.",
         "Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "Field Location sets `manual input = true`; the generated scan field has no free-text fallback next to the camera.",
         "Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "Field Select_Floors is flagged `bidirectional = Buildings`; Catalyst only creates the reverse column from a linked grid side, and neither Select_Floors nor Add_Floor.Buildings is one.",
         "Field Signature is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "openurl-unsupported-target"
       ],
-      "items": 17
+      "items": 18
     },
     {
       "constructs": [
@@ -2053,7 +2058,7 @@ clears the app. The count is apps, not items.
   "silentDropKinds": [
     {
       "construct": "field-property",
-      "count": 139
+      "count": 138
     },
     {
       "construct": "page-element",
@@ -2068,8 +2073,8 @@ clears the app. The count is apps, not items.
       "count": 32
     }
   ],
-  "silentDropTotal": 261,
-  "todoTotal": 841,
+  "silentDropTotal": 260,
+  "todoTotal": 842,
   "totalApps": 67
 }
 ```
