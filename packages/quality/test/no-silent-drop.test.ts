@@ -3100,6 +3100,62 @@ test('a duration field property stays a silent drop on a non-video field', () =>
   );
 });
 
+test('a show onload field property on a scan field is listed through a dedicated UI todo', () => {
+  const withShowOnload = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'show onload', value: 'true', span: Z }],
+  });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withShowOnload).filter((d) => d.name.includes('show onload')),
+    [],
+  );
+  const todo = collectOutputs(withShowOnload).model.todos.find((t) => t.name === 'Orders.Code property show onload');
+  assert.ok(todo, 'a UI todo names the show onload setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withShowOnload);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withShowOnload, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Code property show onload'],
+  );
+});
+
+test('a show onload field property on an image field is listed through a dedicated UI todo', () => {
+  const withShowOnload = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show onload', value: 'true', span: Z }] });
+  assert.deepEqual(
+    auditApp(withShowOnload).filter((d) => d.name.includes('show onload')),
+    [],
+  );
+  const todo = collectOutputs(withShowOnload).model.todos.find((t) => t.name === 'Orders.Photo property show onload');
+  assert.ok(todo, 'a UI todo names the show onload setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+});
+
+test('a show onload field property stays a silent drop on a field that is neither scan nor image', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'show onload', value: 'true', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('show onload')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('show onload'))
+      .map((d) => d.name),
+    ['Orders.Notes property show onload'],
+  );
+});
+
+test('a show onload field property set to false is not flagged', () => {
+  const falseValue = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show onload', value: 'false', span: Z }] });
+  assert.equal(collectOutputs(falseValue).model.todos.some((t) => t.name.includes('show onload')), false);
+  assert.deepEqual(
+    auditApp(falseValue).filter((d) => d.name.includes('show onload')),
+    [],
+  );
+});
+
 test('an enable linkname flag is listed only when the generated field carries no link name', () => {
   const withFlag = appWithField({ ...field('Website', 'url'), flags: ['enable linkname'] });
   assert.deepEqual(
