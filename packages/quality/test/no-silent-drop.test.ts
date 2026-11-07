@@ -2261,6 +2261,28 @@ test('flag description and a tooltip annotation are emitted only as the generate
   assert.equal(rowStatus(source, gone, 'Visit.Notes flag description'), 'dropped');
 });
 
+test('a description annotation with display type none is not a drop: Creator never shows it', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = none
+				message = "Internal note, never shown"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.equal(ui.help, undefined);
+  const row = coverageLedger(source, out).find((r) => r.name.startsWith('Visit.Notes annotation'));
+  assert.equal(row?.status, 'emitted');
+});
+
 test('an unhandled annotation type is still a silent drop', () => {
   const source = dsApp(`
 	form Visit
