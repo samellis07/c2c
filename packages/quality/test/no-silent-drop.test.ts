@@ -2966,6 +2966,38 @@ test('a manual input field property stays a silent drop on a non-scan field', ()
   );
 });
 
+test('a duration field property on a video field is listed through a dedicated UI todo', () => {
+  const withDuration = appWithField({ ...field('Demo_Video', 'video'), properties: [{ key: 'duration', value: '30', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withDuration).filter((d) => d.name.includes('property duration')),
+    [],
+  );
+  const todo = collectOutputs(withDuration).model.todos.find((t) => t.name === 'Orders.Demo_Video property duration');
+  assert.ok(todo, 'a UI todo names the duration setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withDuration);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withDuration, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Demo_Video property duration'],
+  );
+});
+
+test('a duration field property stays a silent drop on a non-video field', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'duration', value: '30', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property duration')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('property duration'))
+      .map((d) => d.name),
+    ['Orders.Notes property duration'],
+  );
+});
+
 test('an enable linkname flag is listed only when the generated field carries no link name', () => {
   const withFlag = appWithField({ ...field('Website', 'url'), flags: ['enable linkname'] });
   assert.deepEqual(
