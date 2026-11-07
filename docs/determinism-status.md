@@ -29,9 +29,9 @@ TODO item per untranslated construct occurrence.
 | corpus apps | 67 |
 | apps with no residual todos | 1/67 |
 | apps with no residual todos and no silent drops (deterministic) | 0/67 (0%) |
-| silent drops (total) | 297 |
-| residual TODO items | 805 |
-| distinct TODO kinds | 243 |
+| silent drops (total) | 261 |
+| residual TODO items | 841 |
+| distinct TODO kinds | 276 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -56,17 +56,17 @@ TODO item per untranslated construct occurrence.
 | `Field Shipping_Address1 is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.` | 4 |
 | `Field Status is flagged `private = true`; Catalyst generates no privacy or access control for this field.` | 4 |
 | `function-untranslated` | 4 |
+| `ZML <button> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 4 |
 | `client-loop-uses-server` | 3 |
-| `Field Access_Hubs is flagged `private = true`; Catalyst generates no privacy or access control for this field.` | 3 |
 
 ## Top 4 silent-drop kinds
 
 | construct | count |
 |---|---:|
 | `field-property` | 139 |
-| `report-feature` | 64 |
-| `page-element` | 53 |
+| `page-element` | 49 |
 | `translation` | 41 |
+| `report-feature` | 32 |
 
 ## Sole-kind unblocks
 
@@ -157,6 +157,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "function-untranslated",
+      "count": 4
+    },
+    {
+      "construct": "ZML <button> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
       "count": 4
     },
     {
@@ -1044,6 +1048,134 @@ clears the app. The count is apps, not items.
       "count": 1
     },
     {
+      "construct": "Report All_Accounts has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report All_Callbacks has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report All_Case_History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report All_Cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report All_Pending_cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report All_Problems has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report All_Questions has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report allhardwares has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report allmachines has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report allmobiledevices has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Case_Settings_Report has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Company_Setup1 has a `customlayouts` settings block ((no properties)) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Departments_View has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Hubs_Inventory has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Manager_s_Profile has a `permission` settings block (edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Callbacks has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_case_History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Company_Contacts has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Company_Projects has a `permission` settings block (edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Ongoing_Bookings has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Open_cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Pending_cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Profile_Customers has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Projects has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Team_Callbacks has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report My_Upcoming_Booking has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Ongoing_Bookings has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Profile has a `permission` settings block (edit = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Registered_Volunteers has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Sales_Rep_Details has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
       "construct": "report-criteria",
       "count": 1
     },
@@ -1241,11 +1373,20 @@ clears the app. The count is apps, not items.
         "Field Resolved_By is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
         "Field Seconds is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
         "openurl-unsupported-target",
+        "Report All_Accounts has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report All_Callbacks has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report All_Problems has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report All_Questions has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report Case_Settings_Report has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report Departments_View has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report My_Callbacks has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report My_Profile_Customers has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report My_Team_Callbacks has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)",
         "Toolbar setting is not carried; the generated editor has no toolbar control."
       ],
-      "items": 36
+      "items": 45
     },
     {
       "constructs": [
@@ -1298,10 +1439,11 @@ clears the app. The count is apps, not items.
         "Field Organisation_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "Field Registered_Volunteers is flagged `bidirectional = Event_Name`; Catalyst only creates the reverse column from a linked grid side, and neither Registered_Volunteers nor Event_Registration.Event_Name is one.",
         "Field Venue_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
+        "Report Registered_Volunteers has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
         "Server-side Deluge snippet requires manual translation",
         "translation-block"
       ],
-      "items": 9
+      "items": 10
     },
     {
       "constructs": [
@@ -1316,10 +1458,11 @@ clears the app. The count is apps, not items.
         "Field Service_Locations_Hub is flagged `bidirectional = Employees_Employee_Name`; Catalyst only creates the reverse column from a linked grid side, and neither Service_Locations_Hub nor Service_Locations_Hubs.Employees_Employee_Name is one.",
         "Field Third_Party_Carriers_Contracted_Carrier_Name is flagged `bidirectional = Vehicle_No`; Catalyst only creates the reverse column from a linked grid side, and neither Third_Party_Carriers_Contracted_Carrier_Name nor Third_Party_Carriers.Vehicle_No is one.",
         "Field Vehicle_No is flagged `bidirectional = Third_Party_Carriers_Contracted_Carrier_Name`; Catalyst only creates the reverse column from a linked grid side, and neither Vehicle_No nor Truck_Details.Third_Party_Carriers_Contracted_Carrier_Name is one.",
+        "Report Hubs_Inventory has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
-      "items": 24
+      "items": 25
     },
     {
       "constructs": [
@@ -1379,9 +1522,10 @@ clears the app. The count is apps, not items.
         "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "openurl-unsupported-target",
         "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
+        "Static <style> CSS not carried over:(app identifier)",
+        "ZML <button> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
       ],
-      "items": 24
+      "items": 28
     },
     {
       "constructs": [
@@ -1400,11 +1544,16 @@ clears the app. The count is apps, not items.
         "Field Reporting_Employees is flagged `bidirectional = Managers_Name`; Catalyst only creates the reverse column from a linked grid side, and neither Reporting_Employees nor Employee.Managers_Name is one.",
         "Field Status is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
         "openurl-unsupported-target",
+        "Report Manager_s_Profile has a `permission` settings block (edit = true) that Catalyst generates no equivalent for.",
+        "Report My_Company_Contacts has a `permission` settings block (add = true, edit = true) that Catalyst generates no equivalent for.",
+        "Report My_Company_Projects has a `permission` settings block (edit = true) that Catalyst generates no equivalent for.",
+        "Report My_Projects has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+        "Report Profile has a `permission` settings block (edit = true) that Catalyst generates no equivalent for.",
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)",
         "Toolbar setting is not carried; the generated editor has no toolbar control."
       ],
-      "items": 75
+      "items": 80
     },
     {
       "constructs": [
@@ -1505,9 +1654,15 @@ clears the app. The count is apps, not items.
         "Field Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "Field Court_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "openurl-unsupported-target",
+        "Report All_Case_History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report All_Cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report All_Pending_cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report My_case_History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report My_Open_cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report My_Pending_cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 9
+      "items": 15
     },
     {
       "constructs": [
@@ -1575,18 +1730,21 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
         "openurl-unsupported-target",
-        "Server-side Deluge snippet requires manual translation",
-        "Toolbar setting is not carried; the generated editor has no toolbar control."
+        "Report allhardwares has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+        "Report allmachines has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+        "Report allmobiledevices has a `permission` settings block (add = true) that Catalyst generates no equivalent for.",
+        "translation-block"
       ],
-      "items": 5
+      "items": 6
     },
     {
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
         "openurl-unsupported-target",
-        "translation-block"
+        "Server-side Deluge snippet requires manual translation",
+        "Toolbar setting is not carried; the generated editor has no toolbar control."
       ],
-      "items": 3
+      "items": 5
     },
     {
       "constructs": [
@@ -1642,9 +1800,10 @@ clears the app. The count is apps, not items.
         "Field Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "Field Billing_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "Field Lead is flagged `bidirectional = Account_Name`; Catalyst only creates the reverse column from a linked grid side, and neither Lead nor New_Lead.Account_Name is one.",
-        "Field Shipping_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude."
+        "Field Shipping_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
+        "Report Sales_Rep_Details has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for."
       ],
-      "items": 7
+      "items": 8
     },
     {
       "constructs": [
@@ -1751,9 +1910,14 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Field Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "Field Location is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
-        "Field Status is flagged `private = true`; Catalyst generates no privacy or access control for this field."
+        "Field Status is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
+        "Report History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report My_History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report My_Ongoing_Bookings has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report My_Upcoming_Booking has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
+        "Report Ongoing_Bookings has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for."
       ],
-      "items": 3
+      "items": 8
     },
     {
       "constructs": [
@@ -1835,9 +1999,10 @@ clears the app. The count is apps, not items.
         "Field Mail_ID is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "Field Phone is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
-        "Field Production_Batch is flagged `bidirectional = BOM`; Catalyst only creates the reverse column from a linked grid side, and neither Production_Batch nor Add_Production_Batch.BOM is one."
+        "Field Production_Batch is flagged `bidirectional = BOM`; Catalyst only creates the reverse column from a linked grid side, and neither Production_Batch nor Add_Production_Batch.BOM is one.",
+        "Report Company_Setup1 has a `customlayouts` settings block ((no properties)) that Catalyst generates no equivalent for."
       ],
-      "items": 8
+      "items": 9
     },
     {
       "constructs": [
@@ -1891,20 +2056,20 @@ clears the app. The count is apps, not items.
       "count": 139
     },
     {
-      "construct": "report-feature",
-      "count": 64
-    },
-    {
       "construct": "page-element",
-      "count": 53
+      "count": 49
     },
     {
       "construct": "translation",
       "count": 41
+    },
+    {
+      "construct": "report-feature",
+      "count": 32
     }
   ],
-  "silentDropTotal": 297,
-  "todoTotal": 805,
+  "silentDropTotal": 261,
+  "todoTotal": 841,
   "totalApps": 67
 }
 ```
