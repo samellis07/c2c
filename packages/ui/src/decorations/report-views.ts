@@ -67,11 +67,18 @@ function phoneFields(app: App, source: Report): { field: string; label: string }
   return phoneColumns(source, columns).filter((column) => !column.field.includes('.') || lookupPrefix.has(column.field.split('.')[0]!));
 }
 
+/**
+ * `model.reports` is built as `app.reports.map(buildReport)`: same length,
+ * same order. Two reports can share a name (a report redeclared in a
+ * device-scoped section, say), so matching by name alone can pair a model
+ * report with the wrong same-named source and silently lose its declared
+ * views; matching by position never does.
+ */
 function applyReportViews(model: UiModel, app: App): void {
-  const byName = new Map(app.reports.map((report) => [report.name, report]));
-  for (const report of model.reports) {
-    const source = byName.get(report.name);
-    if (!source) continue;
+  if (model.reports.length !== app.reports.length) return;
+  for (let i = 0; i < model.reports.length; i++) {
+    const report = model.reports[i]!;
+    const source = app.reports[i]!;
     // Only columns the generated view carries make the phone card: a column
     // the model dropped (a name the form does not store) stays dropped.
     const carried = new Set(report.columns.map((column) => column.field));
