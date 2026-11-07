@@ -987,6 +987,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
   }
+  if (widget === 'image') {
+    const target = prop(field, 'target');
+    if (target !== undefined) {
+      const name = `${formName}.${field.name} property target`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`target = ${target}\`; the generated image field has no clickable link, so there is no window to open it in.`,
+          manualStep: `Make the image open ${target} when clicked, per your policy — this is not generated.`,
+        });
+      }
+    }
+  }
   if (ui.scan) {
     const manualInput = prop(field, SCAN_MANUAL_INPUT_PROPERTY_KEY);
     if (manualInput !== undefined) {
