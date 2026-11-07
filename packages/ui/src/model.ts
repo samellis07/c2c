@@ -1646,6 +1646,24 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       ...(el.manualStep ? { manualStep: el.manualStep } : {}),
     });
   }
+  for (const el of pageLeaves) {
+    if (el.droppedParameters) {
+      todos.push({
+        area: 'zml',
+        name: `${page.name}.${el.name ?? el.tag}`,
+        reason: `ZML <${el.tag}> "${el.name ?? el.tag}" click parameters "${el.droppedParameters}" are not generated; wire them to the click handler by hand`,
+      });
+      delete el.droppedParameters;
+    }
+    if (el.droppedCriteria) {
+      todos.push({
+        area: 'zml',
+        name: `${page.name}.${el.name ?? el.tag}`,
+        reason: `ZML <${el.tag}> "${el.name ?? el.tag}" criteria "${el.droppedCriteria}" is not generated; wire the search filter by hand`,
+      });
+      delete el.droppedCriteria;
+    }
+  }
   const seenDroppedTags = new Set<string>();
   for (const el of pageLeaves) {
     if (el.kind === 'html') {

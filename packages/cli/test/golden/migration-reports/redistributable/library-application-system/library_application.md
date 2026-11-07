@@ -25,11 +25,14 @@ App: Library_System_Application
 
 ## TODO counts
 
-3
+6
 
 - 1 Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
+- 1 ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
+- 1 ZML <search> "Book_Report" criteria "Title.contains(input.searchString)" is not generated; wire the search filter by hand
 
 ## Field gaps
 
@@ -77,7 +80,7 @@ App: Library_System_Application
 
 ## Not converted
 
-Silent drops: 11 (still counted; each has a guided step below)
+Silent drops: 7 (still counted; each has a guided step below)
 
 - `field-property:Staff_Members.Phone_Number property defaultcountry` — not converted. property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
   - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.
@@ -91,13 +94,5 @@ Silent drops: 11 (still counted; each has a guided step below)
   - Step: The options for the All_Book_Transactions report were not converted. In the Catalyst console, open the All_Book_Transactions report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:All_Staff_Members block options` — not converted. Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.
   - Step: The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `page-element:DashBoard.Book_Report #1` — not converted. ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.
-  - Step: The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
-- `page-element:DashBoard.Book_Report #2` — not converted. ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
-  - Step: The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
-- `page-element:DashBoard.All_Book_Transactions #1` — not converted. ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
-  - Step: The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
-- `page-element:DashBoard.All_Book_Transactions #2` — not converted. ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
-  - Step: The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
 - `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
   - Step: The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.

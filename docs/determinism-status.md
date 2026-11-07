@@ -29,9 +29,9 @@ TODO item per untranslated construct occurrence.
 | corpus apps | 67 |
 | apps with no residual todos | 3/67 |
 | apps with no residual todos and no silent drops (deterministic) | 0/67 (0%) |
-| silent drops (total) | 411 |
-| residual TODO items | 692 |
-| distinct TODO kinds | 237 |
+| silent drops (total) | 407 |
+| residual TODO items | 696 |
+| distinct TODO kinds | 238 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -51,20 +51,20 @@ TODO item per untranslated construct occurrence.
 | `Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.` | 5 |
 | `Field Status is flagged `private = true`; Catalyst generates no privacy or access control for this field.` | 4 |
 | `function-untranslated` | 4 |
+| `ZML <button> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 4 |
 | `client-loop-uses-server` | 3 |
 | `Field Access_Hubs is flagged `private = true`; Catalyst generates no privacy or access control for this field.` | 3 |
 | `Field Mail_ID is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.` | 3 |
 | `Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.` | 2 |
 | `Field Academic_Year is flagged `private = true`; Catalyst generates no privacy or access control for this field.` | 2 |
 | `Field Access_Hub is flagged `private = true`; Catalyst generates no privacy or access control for this field.` | 2 |
-| `Field Approver is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.` | 2 |
 
 ## Top 4 silent-drop kinds
 
 | construct | count |
 |---|---:|
 | `field-property` | 285 |
-| `page-element` | 53 |
+| `page-element` | 49 |
 | `translation` | 41 |
 | `report-feature` | 32 |
 
@@ -139,6 +139,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "function-untranslated",
+      "count": 4
+    },
+    {
+      "construct": "ZML <button> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
       "count": 4
     },
     {
@@ -1342,9 +1346,10 @@ clears the app. The count is apps, not items.
         "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "openurl-unsupported-target",
         "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
+        "Static <style> CSS not carried over:(app identifier)",
+        "ZML <button> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
       ],
-      "items": 22
+      "items": 26
     },
     {
       "constructs": [
@@ -1803,7 +1808,7 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "page-element",
-      "count": 53
+      "count": 49
     },
     {
       "construct": "translation",
@@ -1814,8 +1819,8 @@ clears the app. The count is apps, not items.
       "count": 32
     }
   ],
-  "silentDropTotal": 411,
-  "todoTotal": 692,
+  "silentDropTotal": 407,
+  "todoTotal": 696,
   "totalApps": 67
 }
 ```

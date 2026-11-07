@@ -573,38 +573,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "page-element:DashBoard.Book_Report #1",
-      "kind": "page-element",
-      "construct": "DashBoard.Book_Report",
-      "reason": "ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "page-element:DashBoard.Book_Report #2",
-      "kind": "page-element",
-      "construct": "DashBoard.Book_Report",
-      "reason": "ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "page-element:DashBoard.All_Book_Transactions #1",
-      "kind": "page-element",
-      "construct": "DashBoard.All_Book_Transactions",
-      "reason": "ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "page-element:DashBoard.All_Book_Transactions #2",
-      "kind": "page-element",
-      "construct": "DashBoard.All_Book_Transactions",
-      "reason": "ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
       "id": "translation:translation Language_Settings",
       "kind": "translation",
       "construct": "translation Language_Settings",
@@ -618,7 +586,7 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 3,
+    "todo": 6,
     "todoLocations": [
       {
         "location": "field Staff_Members.Staff_Name property personal data",
@@ -637,6 +605,21 @@
         "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "scope": "ui",
         "manualStep": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "page DashBoard.Book_Report",
+        "construct": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+        "scope": "ui"
+      },
+      {
+        "location": "page DashBoard.Book_Report",
+        "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+        "scope": "ui"
+      },
+      {
+        "location": "page DashBoard.All_Book_Transactions",
+        "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+        "scope": "ui"
       }
     ]
   },
@@ -647,34 +630,6 @@
       "detail": "Field Staff_Members.Phone_Number property defaultcountry is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.All_Book_Transactions",
-      "detail": "ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.All_Book_Transactions",
-      "detail": "ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.Book_Report",
-      "detail": "ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.Book_Report",
-      "detail": "ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
     },
     {
       "kind": "deluge",
@@ -738,11 +693,29 @@
       "detail": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "scope": "ui",
       "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "page DashBoard.All_Book_Transactions",
+      "detail": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "page DashBoard.Book_Report",
+      "detail": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "page DashBoard.Book_Report",
+      "detail": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+      "scope": "ui"
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 3,
+    "todoCount": 6,
     "fillLockEntries": 0,
     "todoKinds": [
       {
@@ -756,18 +729,26 @@
       {
         "construct": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "count": 1
+      },
+      {
+        "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+        "count": 1
+      },
+      {
+        "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+        "count": 1
+      },
+      {
+        "construct": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+        "count": 1
       }
     ],
-    "uiTodoCount": 3,
-    "silentDrops": 11,
+    "uiTodoCount": 6,
+    "silentDrops": 7,
     "silentDropKinds": [
       {
         "construct": "report-feature",
         "count": 5
-      },
-      {
-        "construct": "page-element",
-        "count": 4
       },
       {
         "construct": "field-property",
