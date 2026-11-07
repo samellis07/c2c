@@ -2862,6 +2862,59 @@ test('a manual input field property stays a silent drop on a non-scan field', ()
   );
 });
 
+test('a show gallery field property on a scan field is listed through a dedicated UI todo', () => {
+  const withShowGallery = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'show gallery', value: 'true', span: Z }],
+  });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withShowGallery).filter((d) => d.name.includes('show gallery')),
+    [],
+  );
+  const todo = collectOutputs(withShowGallery).model.todos.find((t) => t.name === 'Orders.Code property show gallery');
+  assert.ok(todo, 'a UI todo names the show gallery setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop: a scan field has no
+  // camera or gallery UI of its own regardless of the property's value.
+  const unlisted = collectOutputs(withShowGallery);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withShowGallery, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Code property show gallery'],
+  );
+});
+
+test('a show gallery field property stays proven on an image field (Creator default: photo library offered)', () => {
+  const image = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show gallery', value: 'true', span: Z }] });
+  assert.deepEqual(
+    auditApp(image).filter((d) => d.name.includes('show gallery')),
+    [],
+  );
+  assert.equal(collectOutputs(image).model.todos.some((t) => t.name.includes('show gallery')), false, 'proved directly, no UI todo needed');
+});
+
+test('a show gallery = false field property on an image field is listed through a dedicated UI todo', () => {
+  const withShowGallery = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show gallery', value: 'false', span: Z }] });
+  assert.deepEqual(
+    auditApp(withShowGallery).filter((d) => d.name.includes('show gallery')),
+    [],
+  );
+  const todo = collectOutputs(withShowGallery).model.todos.find((t) => t.name === 'Orders.Photo property show gallery');
+  assert.ok(todo, 'a UI todo names the show gallery setting');
+
+  const unlisted = collectOutputs(withShowGallery);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withShowGallery, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Photo property show gallery'],
+  );
+});
+
 test('an enable linkname flag is listed only when the generated field carries no link name', () => {
   const withFlag = appWithField({ ...field('Website', 'url'), flags: ['enable linkname'] });
   assert.deepEqual(

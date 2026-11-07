@@ -994,6 +994,21 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
         });
       }
     }
+    // `show gallery` governs the scan dialog's photo-library option. The
+    // generated scan field is a plain text input with no capture UI of its
+    // own, so this never carries over regardless of its value.
+    const showGallery = prop(field, 'show gallery');
+    if (showGallery !== undefined) {
+      const name = `${formName}.${field.name} property show gallery`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`show gallery = ${showGallery}\`; the generated scan field has no camera or photo-library UI to carry that option onto.`,
+          manualStep: `Build a scan capture UI for ${field.name} that offers (or omits) the photo library per \`show gallery = ${showGallery}\` — the generated field is manual text entry only.`,
+        });
+      }
+    }
   }
   const biProp = field.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
   if (biProp && app) {
@@ -1111,6 +1126,23 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       widget === 'signature'
         ? 'A signature pad uploads the drawn strokes as JSON. The dry-run function does not write to Stratus.'
         : 'The column stores a Stratus object key. The dry-run upload does not write bytes.';
+  }
+  if (widget === 'image') {
+    // `show gallery = false` restricts capture to the camera only. The
+    // generated file input sets no attribute that blocks the device photo
+    // library, so the picker still offers it next to the camera.
+    const showGallery = prop(field, 'show gallery');
+    if (showGallery !== undefined && showGallery.trim().toLowerCase() !== 'true') {
+      const name = `${formName}.${field.name} property show gallery`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`show gallery = ${showGallery}\`; the generated file input has no attribute that blocks the device photo library, so the picker still offers it next to the camera.`,
+          manualStep: `Restrict ${field.name} to camera-only capture by hand (a native wrapper or a custom capture UI) — the generated web file input cannot prevent the photo library from being offered.`,
+        });
+      }
+    }
   }
   if (widget === 'zia') ui.note = 'Filled after submit. The form shows the stored text; it does not call Zia.';
   if (widget === 'formula' || widget === 'autonumber' || widget === 'barcode') ui.note = 'Computed. The form shows it and does not accept a typed value.';
