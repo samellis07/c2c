@@ -3160,7 +3160,7 @@ test('a duration field property on a video field is listed through a dedicated U
   );
 });
 
-test('a duration field property stays a silent drop on a non-video field', () => {
+test('a duration field property stays a silent drop on a non-video, non-audio field', () => {
   const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'duration', value: '30', span: Z }] });
   assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property duration')), false);
   assert.deepEqual(
@@ -3224,6 +3224,27 @@ test('a show onload field property set to false is not flagged', () => {
   assert.deepEqual(
     auditApp(falseValue).filter((d) => d.name.includes('show onload')),
     [],
+  );
+});
+
+test('a duration field property on an audio field is listed through a dedicated UI todo', () => {
+  const withDuration = appWithField({ ...field('Voice_Note', 'audio'), properties: [{ key: 'duration', value: '60', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withDuration).filter((d) => d.name.includes('property duration')),
+    [],
+  );
+  const todo = collectOutputs(withDuration).model.todos.find((t) => t.name === 'Orders.Voice_Note property duration');
+  assert.ok(todo, 'a UI todo names the duration setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop (RED).
+  const unlisted = collectOutputs(withDuration);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withDuration, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Voice_Note property duration'],
   );
 });
 
