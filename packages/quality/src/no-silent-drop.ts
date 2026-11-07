@@ -512,6 +512,10 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   // attribute. Only `primary` names that default; any other value asks for a camera
   // facing the generated field does not select, and stays a drop.
   if (key === 'camera') return ui?.scan === true && text.toLowerCase() === 'primary';
+  // A subform grid always renders its rows as an HTML table (client-runtime.js
+  // fieldControl, widget 'subform'); `list` names exactly that layout. Any other
+  // named view asks for a layout the generator has no path for and stays a drop.
+  if (key === 'viewtype') return ui?.widget === 'subform' && ui.status === 'generated' && text.toLowerCase() === 'list';
   if (key === 'sortorder') return sortOrderProved(text, field, ui, app, out);
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');

@@ -3308,6 +3308,60 @@ test('a scan field camera = primary is proved outright; another facing stays a d
   assert.equal(rowStatus(primary, mutated, 'Asset.Tag property camera'), 'dropped');
 });
 
+test('a subform viewtype = list is proved outright; another view type stays a drop', () => {
+  const linkedForm = `
+	form Site
+	{
+		Name
+		(
+			type = text
+		)
+	}
+	form Company
+	{
+		Branches
+		(
+			type = grid
+			values = Site.ID
+			viewtype = list
+		)
+	}
+`;
+  const listView = dsApp(linkedForm);
+  assert.equal(rowStatus(listView, collectOutputs(listView), 'Company.Branches property viewtype'), 'emitted');
+
+  const cardView = dsApp(`
+	form Site
+	{
+		Name
+		(
+			type = text
+		)
+	}
+	form Company
+	{
+		Branches
+		(
+			type = grid
+			values = Site.ID
+			viewtype = card
+		)
+	}
+`);
+  // The generated subform always renders an HTML table; a non-list view type asks for
+  // layout the generator does not have, so it stays a drop.
+  assert.equal(rowStatus(cardView, collectOutputs(cardView), 'Company.Branches property viewtype'), 'dropped');
+
+  // Mutation test: a field carrying the same `viewtype = list` value on a widget that
+  // is not a subform is not proved by this rule — proving the check reads the real
+  // generated widget, not just the property value.
+  const mutated = cloneOutputs(collectOutputs(listView));
+  const branches = mutated.model.forms.find((f) => f.name === 'Company')?.fields.find((f) => f.name === 'Branches');
+  assert.ok(branches);
+  branches!.widget = 'text';
+  assert.equal(rowStatus(listView, mutated, 'Company.Branches property viewtype'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
