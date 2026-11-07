@@ -1389,7 +1389,12 @@ export function elementFromZml(
       : kind === 'form'
         ? `#/form/${encodeURIComponent(name ?? '')}`
         : undefined;
-  return { tag, kind, ...(name ? { name } : {}), ...(href ? { href } : {}), children };
+  // An embedded `<report>` card's `criteriaString`/`criteria` names the rows
+  // it should be limited to (e.g. the parent record's related rows), but the
+  // generated card is a plain link to the full report with nowhere to bind
+  // it; flag it as a manual step so the filtering gets wired by hand.
+  const reportCriteria = kind === 'report' ? attr(attributes, ['criteriaString', 'criteria'])?.trim() : undefined;
+  return { tag, kind, ...(name ? { name } : {}), ...(href ? { href } : {}), ...(reportCriteria ? { droppedCriteria: reportCriteria } : {}), children };
 }
 
 export function elementsFromZml(roots: ZmlElement[], env?: ZmlEnv): UiElement[] {
