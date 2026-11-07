@@ -29,7 +29,7 @@ TODO item per untranslated construct occurrence.
 | corpus apps | 67 |
 | apps with no residual todos | 3/67 |
 | apps with no residual todos and no silent drops (deterministic) | 0/67 (0%) |
-| silent drops (total) | 411 |
+| silent drops (total) | 406 |
 | residual TODO items | 692 |
 | distinct TODO kinds | 237 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
@@ -63,7 +63,7 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `field-property` | 285 |
+| `field-property` | 280 |
 | `page-element` | 53 |
 | `translation` | 41 |
 | `report-feature` | 32 |
@@ -1799,7 +1799,7 @@ clears the app. The count is apps, not items.
   "silentDropKinds": [
     {
       "construct": "field-property",
-      "count": 285
+      "count": 280
     },
     {
       "construct": "page-element",
@@ -1814,7 +1814,7 @@ clears the app. The count is apps, not items.
       "count": 32
     }
   ],
-  "silentDropTotal": 411,
+  "silentDropTotal": 406,
   "todoTotal": 692,
   "totalApps": 67
 }
