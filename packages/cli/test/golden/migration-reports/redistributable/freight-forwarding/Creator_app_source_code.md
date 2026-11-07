@@ -24,7 +24,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-47
+52
 
 - 11 client-condition-uses-server
 - 5 Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -32,7 +32,12 @@ App: Freight Forwarding and Feeder Solution
 - 2 Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Assistant_Phone is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Contact_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+- 1 Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
 - 1 Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+- 1 Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+- 1 Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
 - 1 Report Accounts has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
 - 1 Report Airports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
 - 1 Report Contacts has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.
@@ -109,6 +114,16 @@ App: Freight Forwarding and Feeder Solution
   - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `field New_Lead.Mobile property personal data` — Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
   - Step: In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_SOF.Time property timedisplayoptions` — Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+  - Step: Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated.
+- `field New_SOF.FROM property timedisplayoptions` — Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+  - Step: Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated.
+- `field New_SOF.TO property timedisplayoptions` — Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+  - Step: Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated.
+- `field New_SOF.FROM2 property timedisplayoptions` — Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+  - Step: Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated.
+- `field New_SOF.TO2 property timedisplayoptions` — Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+  - Step: Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated.
 - `report Container_Movement_Tracking block report properties` — Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
   - Step: In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false.
 - `report SOFs block options` — Report SOFs has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
