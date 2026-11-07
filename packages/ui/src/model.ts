@@ -1087,6 +1087,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
   }
+  if (widget === 'time' || widget === 'datetime') {
+    const timeDisplay = prop(field, 'timedisplayoptions');
+    if (timeDisplay !== undefined && /ss/i.test(timeDisplay)) {
+      const name = `${formName}.${field.name} property timedisplayoptions`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`timedisplayoptions = ${timeDisplay}\`; the generated ${widget} input has no seconds step and never shows seconds.`,
+          manualStep: `Add a seconds-precision time control for ${field.name} by hand (the native ${widget} input shows only hours and minutes) — this is not generated.`,
+        });
+      }
+    }
+  }
   if (field.lookup && (widget === 'lookup' || widget === 'lookup-multi')) {
     ui.lookup = {
       form: field.lookup.form,

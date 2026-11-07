@@ -68,6 +68,9 @@ test('generated presentation that differs from the Creator value is not in the t
   const keys = DEFAULT_EQUIVALENCE.map((row) => row.key);
   assert.ok(!keys.includes('timedisplayoptions'));
   assert.ok(!keys.includes('toolbar'));
+  // A seconds-showing format is not byte-equivalent to the generated input's
+  // default (no seconds step), so it stays off this table — it is carried as
+  // a counted manual step instead (packages/ui/src/model.ts), not generated.
   const time = deriveIr(parse('application "Demo"\n{\n\tform Profile\n\t{\n\t\tWhen\n\t\t(\n\t\t\ttype = datetime\n\t\t\ttimedisplayoptions = "hh:mm:ss"\n\t\t)\n\t}\n}\n'));
-  assert.equal(coverageLedger(time, collectOutputs(time)).find((row) => row.name === 'Profile.When property timedisplayoptions')?.status, 'dropped');
+  assert.equal(coverageLedger(time, collectOutputs(time)).find((row) => row.name === 'Profile.When property timedisplayoptions')?.status, 'counted');
 });
