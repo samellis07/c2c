@@ -27,7 +27,7 @@
  */
 
 import { compareEnUs } from '../../core/src/order.js';
-import { unquote, type App, type Field, type Form, type RawDeluge, type Workflow } from '../../core/src/ir.js';
+import { isScheduleBranchWorkflow, unquote, type App, type Field, type Form, type RawDeluge, type Workflow } from '../../core/src/ir.js';
 import type { Expr, Script, Stmt } from '../../deluge/src/ast.js';
 import { parse, parseExpression } from '../../deluge/src/parser.js';
 import { connectionArgIndex, declaredConnections, resolveConnectionArgument, type DeclaredConnection } from '../../deluge/src/connections.js';
@@ -286,6 +286,8 @@ export function precheck(app: App, source: string): PrecheckReport {
   reportViewColumns(app, source, formByName, findings);
   scriptShapes(scripts, source, findings);
   successStoreCalls(app, scripts, source, findings);
+  statementExecutionRisk(parsedScripts, source, findings);
+  scheduleQuotaRisk(app, source, findings);
   nonBmpText(app, source, findings);
   pivotReports(app, source, findings);
 
@@ -2249,6 +2251,76 @@ function successStoreCalls(app: App, scripts: ScriptSrc[], source: string, findi
       fix: 'Keep running totals updated on write instead of re-reading other forms, or move the recalculation to a scheduled function.',
     });
   }
+}
+
+/**
+ * Deluge statement execution risk (Creator Enterprise: 50,000 statements/action; Free 5,000; Standard 10,000; Pro 20,000).
+ * Flags scripts approaching or exceeding plan statement caps where Catalyst's 30s Advanced I/O timeout is a risk.
+ */
+export const STATEMENT_HOTSPOT_THRESHOLD = 5000;
+
+function countDelugeStatements(stmts: Stmt[]): number {
+  let count = 0;
+  for (const s of stmts) {
+    count++;
+    switch (s.kind) {
+      case 'block':
+        count += countDelugeStatements(s.body);
+        break;
+      case 'if':
+        count += countDelugeStatements([s.then]);
+        for (const elif of s.elifs) count += countDelugeStatements([elif.body]);
+        if (s.else) count += countDelugeStatements([s.else]);
+        break;
+      case 'forEach':
+      case 'while':
+        count += countDelugeStatements([s.body]);
+        break;
+      case 'try':
+        count += countDelugeStatements([s.body]);
+        if (s.catchBody) count += countDelugeStatements([s.catchBody]);
+        break;
+      case 'fn':
+        count += countDelugeStatements([s.body]);
+        break;
+    }
+  }
+  return count;
+}
+
+function statementExecutionRisk(parsedScripts: { script: ScriptSrc; ast: Script }[], source: string, findings: PrecheckFinding[]): void {
+  for (const { script, ast } of parsedScripts) {
+    const count = countDelugeStatements(ast.body);
+    if (count < STATEMENT_HOTSPOT_THRESHOLD) continue;
+    push(findings, {
+      check: 'statement-limit-risk',
+      severity: 'warning',
+      location: loc(source, script.base, script.form, null),
+      message: `${script.where} has ${count} Deluge statements (Creator Enterprise cap is 50,000 statements/action; lower tiers cap at 5,000–20,000). While Catalyst does not enforce a statement counter, Advanced I/O functions have a hard 30-second execution cutoff (function.timeout_seconds); heavy execution paths risk timing out if executed inline.`,
+      fix: 'Offload long-running or high-statement work to a Catalyst Job function (15-minute timeout) via runOrDefer, or chunk iterative operations across multiple requests.',
+    });
+  }
+}
+
+/**
+ * Static definition-count proxy. Creator Enterprise allows 600 custom-schedule
+ * executions per user per month. This check counts schedule definitions in
+ * app.workflows. A count at or above the threshold is not evidence that the
+ * per-user monthly execution quota has been or will be hit.
+ */
+export const ENTERPRISE_SCHEDULE_QUOTA = 600;
+
+function scheduleQuotaRisk(app: App, source: string, findings: PrecheckFinding[]): void {
+  const schedules = app.workflows.filter(isScheduleBranchWorkflow);
+  if (schedules.length < ENTERPRISE_SCHEDULE_QUOTA) return;
+  const first = schedules[0];
+  push(findings, {
+    check: 'schedule-quota-risk',
+    severity: 'warning',
+    location: loc(source, first?.span.start, first?.form ? baseForm(first.form) : null, null),
+    message: `Application defines ${schedules.length} schedule definitions. This is a static definition-count proxy against a threshold of ${ENTERPRISE_SCHEDULE_QUOTA}, not evidence that Creator's per-user monthly execution quota of 600 custom schedules per user per month has been or will be hit. On Catalyst, all form schedules share a single 5-minute sweeper Job with a 4-minute execution budget.`,
+    fix: 'Consolidate frequent schedules or verify that the 5-minute sweeper Job with 4-minute time budget can process due records across all form schedules. The definition count alone does not show that the monthly execution quota is exhausted.',
+  });
 }
 
 function scriptShapes(scripts: ScriptSrc[], source: string, findings: PrecheckFinding[]): void {

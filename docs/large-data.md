@@ -108,8 +108,9 @@ matches by ROWID and uses `updateRows`/`deleteRows` in chunks of 200 (`runtime.t
 ## Work longer than the 30 s request cut
 
 An Advanced I/O function (and AppSail) is cut at about 30 s, and that limit cannot be raised. A Job
-function runs for up to 15 minutes. `runOrDefer` runs small work inline and answers 200. Larger
-work, more than one 300-row page by default, is handled like this:
+function runs for up to 15 minutes. See [docs/enterprise-caps.md](enterprise-caps.md) for how Creator's
+50,000 Deluge statement Enterprise cap maps onto this 30 s request cut vs. 15 min Job limit. `runOrDefer`
+runs small work inline and answers 200. Larger work, more than one 300-row page by default, is handled like this:
 
 1. The handler writes a work status row (`queued`) and submits a Job (`submitJob` on the app's job
    pool) with the work id.
