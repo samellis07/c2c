@@ -231,14 +231,17 @@ function auditForm(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
 }
 
 /** Every field of a form, subfields included (subforms, composite parts). */
-function eachField(app: App, visit: (form: string, field: App['forms'][number]['fields'][number]) => void): void {
-  const walk = (form: string, fields: App['forms'][number]['fields']): void => {
+function eachField(
+  app: App,
+  visit: (form: string, field: App['forms'][number]['fields'][number], path: string[]) => void,
+): void {
+  const walk = (form: string, fields: App['forms'][number]['fields'], path: string[]): void => {
     for (const field of fields) {
-      visit(form, field);
-      walk(form, field.subfields);
+      visit(form, field, path);
+      walk(form, field.subfields, [...path, field.name]);
     }
   };
-  for (const form of app.forms) walk(form.name, form.fields);
+  for (const form of app.forms) walk(form.name, form.fields, []);
 }
 
 function auditField(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
@@ -280,7 +283,7 @@ function auditField(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
  */
 function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
   const fieldRow = new Map(rows.filter((r) => r.kind === 'field').map((r) => [r.name, r.status]));
-  eachField(app, (formName, field) => {
+  eachField(app, (formName, field, path) => {
     const status = fieldRow.get(`${formName}.${field.name}`);
     if (status !== 'emitted' && status !== 'counted') return;
     const items = fieldSettingItems(field, app, formName, out);
@@ -290,8 +293,14 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
       }
       return;
     }
-    const ui = findUiField(out.model, formName, field.name);
-    const columns = findColumns(out.schema, formName, field.name);
+    // A subform field can share its name with the top-level field (or a field
+    // in a sibling subform) the coverage ledger names it after, since the
+    // ledger name carries no subform path. Resolve the UI field and schema
+    // columns along this field's own subform path first, so a nested field's
+    // settings are proved against its own generated widget rather than a
+    // same-named field elsewhere in the form.
+    const ui = findUiField(out.model, formName, field.name, path);
+    const columns = findColumns(out.schema, formName, field.name, path);
     for (const item of items) {
       const name = `${formName}.${field.name} ${item.label}`;
       const propertyTodo = out.model.todos.find((t) => t.area === 'field' && (t.name === name || t.name === `${formName}.${field.name}.${item.label}`));
@@ -396,15 +405,35 @@ function fieldListed(out: AuditOutputs, formName: string, field: Field): boolean
   );
 }
 
-function findUiField(model: UiModel, formName: string, fieldName: string): UiField | undefined {
+/**
+ * `path` is the chain of enclosing subform field names (root to parent,
+ * exclusive of `fieldName` itself) from the field's own place in `app.forms`.
+ * The coverage ledger names a field property `${form}.${field} ${setting}`
+ * with no subform path, so a subform field can share that name with the
+ * top-level field (or a field in a sibling subform) it is really auditing
+ * against — a generic by-name search would silently grab the wrong one, as a
+ * top-level field or an earlier subfield of the same name. Following the
+ * field's own path first resolves that ambiguity; a by-name search is the
+ * fallback only for a field the path does not lead to (e.g. the lookup ran
+ * before path-tracking existed, or the path itself does not resolve).
+ */
+function findUiField(model: UiModel, formName: string, fieldName: string, path: string[] = []): UiField | undefined {
   const form = model.forms.find((item) => item.name === formName);
   if (!form) return undefined;
+  let fields: UiField[] | undefined = form.fields;
+  for (const step of path) {
+    const parent: UiField | undefined = fields?.find((item) => item.name === step);
+    fields = parent?.subfields;
+    if (!fields) break;
+  }
+  const atPath = fields?.find((item) => item.name === fieldName);
+  if (atPath) return atPath;
   // The audit names items `${form}.${field}` — a top-level match wins over a
   // same-named subform column nested under an earlier field.
   const top = form.fields.find((item) => item.name === fieldName);
   if (top) return top;
-  const walk = (fields: UiField[]): UiField | undefined => {
-    for (const item of fields) {
+  const walk = (list: UiField[]): UiField | undefined => {
+    for (const item of list) {
       if (item.name === fieldName) return item;
       if (item.subfields?.length) {
         const hit = walk(item.subfields);
@@ -416,14 +445,23 @@ function findUiField(model: UiModel, formName: string, fieldName: string): UiFie
   return walk(form.fields);
 }
 
-function findColumns(schema: SchemaPlan, formName: string, fieldName: string): SchemaColumn[] {
+function findColumns(schema: SchemaPlan, formName: string, fieldName: string, path: string[] = []): SchemaColumn[] {
   const ident = schemaIdent(fieldName, 'col');
+  const matches = (table: SchemaPlan['tables'][number]): SchemaColumn[] =>
+    table.columns.filter((column) => column.field === fieldName || column.name === fieldName || column.name === ident);
+  if (path.length) {
+    // Mirrors linkedTableName's `${parentTable}__${field}` chaining (packages/schema/src/generator.ts):
+    // a collision-suffixed or length-truncated table name falls through to the unscoped search below.
+    const atPath = schema.tables.find((table) => table.name === [formName, ...path].join('__'));
+    if (atPath) {
+      const columns = matches(atPath);
+      if (columns.length) return columns;
+    }
+  }
   const columns: SchemaColumn[] = [];
   for (const table of schema.tables) {
     if (table.form !== formName) continue;
-    for (const column of table.columns) {
-      if (column.field === fieldName || column.name === fieldName || column.name === ident) columns.push(column);
-    }
+    columns.push(...matches(table));
   }
   return columns;
 }
