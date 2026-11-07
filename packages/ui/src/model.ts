@@ -1225,6 +1225,18 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   if (widget === 'currency' || widget === 'decimal' || widget === 'percent') {
     const places = intProp(field, ['decimalplace', 'decimal places', 'decimal digits']);
     if (places !== undefined) ui.decimalPlaces = places;
+    const format = prop(field, 'format');
+    if (format !== undefined) {
+      const name = `${formName}.${field.name} property format`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`format = ${format}\`; the generated number input and reports show the raw value with no thousands grouping or locale punctuation.`,
+          manualStep: `Add the display formatting ${field.name} needs (thousands grouping and decimal punctuation matching \`${format}\`) to list, detail and form views by hand — the generated numeric field carries no grouping style.`,
+        });
+      }
+    }
   }
   if (widget === 'currency') {
     const code = CURRENCY_CODES.has(token) ? token.toUpperCase() : appCurrency(app);
