@@ -1038,6 +1038,21 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       const label = addNewLabel(field);
       ui.lookup.addNew = label !== undefined ? { label } : {};
     }
+    // `searchable = false` asks the picker's option list to not be searchable.
+    // The generated `/lookups/:form/:field` endpoint always accepts `?q=`, so
+    // the picker stays searchable regardless; this is not generated.
+    const searchable = prop(field, 'searchable');
+    if (searchable?.trim().toLowerCase() === 'false') {
+      const name = `${formName}.${field.name} property searchable`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`searchable = false\`; the generated lookup's search endpoint accepts \`?q=\` regardless.`,
+          manualStep: `Hide or disable the search box in the lookup picker for ${field.name} by hand, or leave it searchable, per your policy — this is not generated.`,
+        });
+      }
+    }
   }
   // Creator's Users module is a project-user picker.  Catalyst exposes the
   // same records through the system Users lookup endpoint; keep the submitted
