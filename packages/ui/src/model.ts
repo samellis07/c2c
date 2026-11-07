@@ -488,6 +488,12 @@ const SHOW_ONLOAD_PROPERTY_KEY = 'show onload';
 // recorded as a manual step rather than invented as UI.
 const BARCODE_VALUE_PROPERTY_KEY = 'value';
 
+// `annotation = true` lets the user draw or mark up a captured photo before it is
+// stored. The generated image field uploads the chosen file unchanged with no
+// drawing tool, so the setting is recorded as a manual step rather than invented
+// as UI. `false` (or absent) needs no step: default-equivalence.ts proves it.
+const ANNOTATION_PROPERTY_KEY = 'annotation';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -1056,6 +1062,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
   }
+  if (widget === 'image') {
+    const annotation = prop(field, ANNOTATION_PROPERTY_KEY);
+    if (annotation?.trim().toLowerCase() === 'true') {
+      const name = `${formName}.${field.name} property ${ANNOTATION_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`annotation = true\`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.`,
+          manualStep: `Add a way to draw or mark up the photo for ${field.name} before it is stored, by hand — this is not generated.`,
+        });
+      }
+    }
+  }
   const biProp = field.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
   if (biProp && app) {
     const target = field.lookup?.form;
@@ -1410,6 +1430,23 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   let view = REPORT_VIEW[type] ?? 'todo';
   const form = report.form ? app.forms.find((item) => item.name === report.form) : undefined;
   const columns = report.columns.flatMap((column) => reportViewColumns(app, form, column));
+  // A declared column naming an unrecognized field head stays a silent drop
+  // (reportViewColumns fails closed) — correctly so for a typo or a field the
+  // export never declared. A handful of heads are real Creator built-ins the
+  // generated schema simply has no column for (e.g. the per-record approval
+  // status); those are recorded as a manual step instead of staying silent.
+  for (const column of report.columns) {
+    if (knownColumnHead(form, column.field) || !UNSUPPORTED_RECORD_COLUMNS.has(column.field)) continue;
+    const name = `${report.name} column ${column.field}`;
+    if (!todos.some((t) => t.area === 'report' && t.name === name)) {
+      todos.push({
+        area: 'report',
+        name,
+        reason: `Report ${report.name} lists column ${column.field}, a Creator built-in record column; the generated schema has no column for it.`,
+        manualStep: `Add a column — or a manual note — standing in for ${column.field} on report ${report.name}, by hand; Catalyst generates no equivalent.`,
+      });
+    }
+  }
   const groupBy = report.groupBy.map((item) => ({ field: item.field }));
   let status: 'generated' | 'todo' = view === 'todo' ? 'todo' : 'generated';
   let todo: string | undefined;
@@ -1700,6 +1737,15 @@ const RECORD_COLUMNS = new Set([
   'Added_User_IP_Address',
   'Modified_User_IP_Address',
 ]);
+
+/**
+ * Creator system columns a report may list that the generated schema stores
+ * no column for at all — distinct from `RECORD_COLUMNS`, which the schema
+ * does store. `Record_Status` is the per-record approval state (Not
+ * Applicable / Yet to get Approved / Approved / Rejected); Catalyst has no
+ * generated record-approval tracking to read it from.
+ */
+const UNSUPPORTED_RECORD_COLUMNS = new Set(['Record_Status']);
 
 /**
  * A report column resolves when its head names a field of the report's form

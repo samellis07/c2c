@@ -2784,6 +2784,66 @@ test('composite report subcolumns are carried as view columns, unknown columns s
   assert.equal(rowStatus(ghost, ghostOut, 'All_Appointments column Phone_Number column bogus_part'), 'dropped');
 });
 
+const RECORD_STATUS_REPORT = `
+	form Orders
+	{
+		Title
+		(
+			type = text
+		)
+	}
+	list Orders_List
+	{
+		show all rows from Orders
+		(
+			Title
+			Record_Status as "Record Status"
+		)
+	}
+`;
+
+test('a report column naming the record-status system field is listed through a dedicated UI todo', () => {
+  const source = dsApp(RECORD_STATUS_REPORT);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Orders_List column Title'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Orders_List column Record_Status'), 'counted');
+  const todo = out.model.todos.find((t) => t.name === 'Orders_List column Record_Status');
+  assert.ok(todo, 'a UI todo names the record-status column');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same column is a silent drop.
+  const unlisted = collectOutputs(source);
+  unlisted.model = { ...unlisted.model, todos: unlisted.model.todos.filter((t) => t.name !== 'Orders_List column Record_Status') };
+  const drops = auditApp(source, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders_List column Record_Status'],
+  );
+});
+
+test('a report column naming an unrecognized field stays a silent drop, not the record-status manual step', () => {
+  const source = dsApp(`
+	form Orders
+	{
+		Title
+		(
+			type = text
+		)
+	}
+	list Orders_List
+	{
+		show all rows from Orders
+		(
+			Title
+			Ghost_Field
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(out.model.todos.some((t) => t.name.includes('Ghost_Field')), false);
+  assert.equal(rowStatus(source, out, 'Orders_List column Ghost_Field'), 'dropped');
+});
+
 test('a quickview that omits declared columns does not drop them', () => {
   const source = dsApp(`${CARRY_REPORT}
 	web
@@ -3293,6 +3353,46 @@ test('a show onload field property set to false is not flagged', () => {
   assert.equal(collectOutputs(falseValue).model.todos.some((t) => t.name.includes('show onload')), false);
   assert.deepEqual(
     auditApp(falseValue).filter((d) => d.name.includes('show onload')),
+    [],
+  );
+});
+
+test('an annotation field property on an image field is listed through a dedicated UI todo', () => {
+  const withAnnotation = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
+  assert.deepEqual(
+    auditApp(withAnnotation).filter((d) => d.name.includes('property annotation')),
+    [],
+  );
+  const todo = collectOutputs(withAnnotation).model.todos.find((t) => t.name === 'Orders.Photo property annotation');
+  assert.ok(todo, 'a UI todo names the annotation setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withAnnotation);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withAnnotation, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Photo property annotation'],
+  );
+});
+
+test('an annotation field property stays a silent drop on a non-image field', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property annotation')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('property annotation'))
+      .map((d) => d.name),
+    ['Orders.Notes property annotation'],
+  );
+});
+
+test('an annotation field property set to false is not flagged', () => {
+  const falseValue = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'annotation', value: 'false', span: Z }] });
+  assert.equal(collectOutputs(falseValue).model.todos.some((t) => t.name.includes('property annotation')), false);
+  assert.deepEqual(
+    auditApp(falseValue).filter((d) => d.name.includes('property annotation')),
     [],
   );
 });

@@ -63,6 +63,13 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
     why: 'The user may pick an existing photo. The generated input has no capture attribute, so the device picker offers the photo library next to the camera.',
   },
   {
+    widget: 'image',
+    accept: 'image/*',
+    key: 'annotation',
+    value: 'false',
+    why: 'Drawing on the captured photo is off. The generated upload accepts the chosen file unchanged, which already matches: it has no markup tool either way.',
+  },
+  {
     widget: 'file',
     accept: undefined,
     key: 'browse',
