@@ -2914,6 +2914,39 @@ test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo
   assert.equal(rowStatus(cloudSources, mutated, 'Attachment.File_Attachment property browse'), 'dropped');
 });
 
+test('file count = 1 is emitted; a higher count emits a counted UI todo, not a silent drop', () => {
+  const fileField = (count: string): string => `
+	form Attachment
+	{
+		File_Attachment
+		(
+			type = upload file
+			file count = ${count}
+		)
+	}
+`;
+  const singleFile = dsApp(fileField('1'));
+  assert.equal(rowStatus(singleFile, collectOutputs(singleFile), 'Attachment.File_Attachment property file count'), 'emitted');
+
+  const multiFile = dsApp(fileField('10'));
+  const multiOut = collectOutputs(multiFile);
+  assert.equal(rowStatus(multiFile, multiOut, 'Attachment.File_Attachment property file count'), 'counted');
+  const todo = multiOut.model.todos.find((t) => t.name === 'Attachment.File_Attachment property file count');
+  assert.ok(todo, 'UI todo is emitted for a file count above 1');
+  assert.ok(todo.reason.includes('file count = 10'));
+  assert.ok(todo.manualStep?.includes('10 files'));
+
+  // Mutation test: removing the UI todo makes file count = 10 a drop again.
+  const mutated = cloneOutputs(multiOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Attachment.File_Attachment property file count');
+  assert.equal(rowStatus(multiFile, mutated, 'Attachment.File_Attachment property file count'), 'dropped');
+
+  // Mutation test: breaking default equivalence makes file count = 1 a drop again.
+  const brokenWidget = cloneOutputs(collectOutputs(singleFile));
+  brokenWidget.model.forms[0]!.fields.find((f) => f.name === 'File_Attachment')!.widget = 'text';
+  assert.equal(rowStatus(singleFile, brokenWidget, 'Attachment.File_Attachment property file count'), 'dropped');
+});
+
 test('private and personal data field flags emit a counted UI todo with a manual step, not a generated privacy control', () => {
   const flaggedField = (flag: string): string => `
 	form Patient
