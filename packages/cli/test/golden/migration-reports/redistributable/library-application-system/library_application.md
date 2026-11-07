@@ -25,7 +25,7 @@ App: Library_System_Application
 
 ## TODO counts
 
-11
+12
 
 - 1 Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -38,6 +38,7 @@ App: Library_System_Application
 - 1 ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
 - 1 ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
 - 1 ZML <search> "Book_Report" criteria "Title.contains(input.searchString)" is not generated; wire the search filter by hand
+- 1 ZML <text> "All_Book_Transactions" click parameters "Borrowed Book" are not generated; wire them to the click handler by hand
 
 ## Field gaps
 

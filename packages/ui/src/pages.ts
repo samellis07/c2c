@@ -1296,15 +1296,20 @@ export function elementFromZml(
       const value = attr(attributes, ['value']) ?? '';
       const criteria = attr(attributes, ['criteria']);
       const expr = /^thisapp\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*(?:\(|$)/.exec(value.trim());
+      const kpi = expr ? { form: expr[1], field: expr[2], fn: expr[3].toLowerCase() } : { expression: value };
+      // The export attaches a click-through target and drill-down `parameters`
+      // (e.g. `OpenReport` on a KPI tile), but the generated element has no
+      // click behaviour to carry them into; flag them as a manual step.
+      const parameters = attr(attributes, ['parameters'])?.trim();
+      const droppedParameters = parameters && !JSON.stringify(kpi).includes(parameters) ? { droppedParameters: parameters } : {};
       return {
         tag,
         kind: 'kpi',
         ...(name ? { name } : {}),
-        kpi: expr
-          ? { form: expr[1], field: expr[2], fn: expr[3].toLowerCase() }
-          : { expression: value },
+        kpi,
         ...(criteria ? { criteria } : {}),
         ...(style ? { style } : {}),
+        ...droppedParameters,
         children,
       };
     }

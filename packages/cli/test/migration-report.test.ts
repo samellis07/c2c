@@ -63,22 +63,21 @@ test('committed fixtures carry the deterministic flag', () => {
   );
   // Both apps now carry personal-data field flags as counted manual-step UI
   // todos instead of silent drops, so lib has todos too (it did not before).
-  // lib also carries manual steps for a button's click `parameters` and a
-  // search box's `criteria` the generated page element does not carry.
-  // Both apps' report `options` icons (never a model home on any view) are
-  // now counted manual steps too, instead of silent report-feature drops.
+  // lib also carries manual steps for a button's click `parameters`, a search
+  // box's `criteria`, and a KPI tile's drill-down `parameters` the generated
+  // page element does not carry.
   assert.equal(lib.deterministic, false);
-  assert.equal(lib.todoCount, 11);
-  assert.equal(lib.uiTodoCount, 11);
+  assert.equal(lib.todoCount, 12);
+  assert.equal(lib.uiTodoCount, 12);
   assert.equal(
     lib.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    11,
+    12,
   );
   assert.equal(lib.silentDrops, 2);
   assert.equal(ff.silentDrops, 18);
   assert.equal(report.aggregate.deterministicApps, 0);
   assert.equal(report.aggregate.silentDrops, 20);
-  assert.equal(report.aggregate.todoTotal, 58);
+  assert.equal(report.aggregate.todoTotal, 59);
   // Neither app has zero todos anymore.
   assert.equal(report.aggregate.noTodoApps, 0);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
