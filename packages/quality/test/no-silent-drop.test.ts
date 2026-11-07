@@ -2859,7 +2859,7 @@ test('a source list the generated controls draw is emitted; an undrawn source st
   assert.equal(rowStatus(source, missing, 'Profile.Photo property source'), 'dropped');
 });
 
-test('preview duration = 0 on an image field is emitted; non-zero stays a drop', () => {
+test('preview duration = 0 on an image field is emitted; non-zero is a counted UI todo', () => {
   const photo = (duration: string): string => `
 	form Profile
 	{
@@ -2874,12 +2874,21 @@ test('preview duration = 0 on an image field is emitted; non-zero stays a drop',
   assert.equal(rowStatus(defaultZero, collectOutputs(defaultZero), 'Profile.Photo property preview duration'), 'emitted');
 
   const nonZero = dsApp(photo('3'));
-  assert.equal(rowStatus(nonZero, collectOutputs(nonZero), 'Profile.Photo property preview duration'), 'dropped');
+  const nonZeroOut = collectOutputs(nonZero);
+  assert.equal(rowStatus(nonZero, nonZeroOut, 'Profile.Photo property preview duration'), 'counted');
+  const todo = nonZeroOut.model.todos.find((t) => t.name === 'Profile.Photo property preview duration');
+  assert.ok(todo, 'a UI todo names the non-zero preview duration setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
 
   // Mutation test: breaking default equivalence makes preview duration = 0 a drop again.
   const mutated = cloneOutputs(collectOutputs(defaultZero));
   mutated.model.forms[0]!.fields.find((f) => f.name === 'Photo')!.widget = 'text';
   assert.equal(rowStatus(defaultZero, mutated, 'Profile.Photo property preview duration'), 'dropped');
+
+  // Mutation test: removing the UI todo makes the non-zero value a drop again.
+  const withoutTodo = cloneOutputs(nonZeroOut);
+  withoutTodo.model.todos = withoutTodo.model.todos.filter((t) => t.name !== 'Profile.Photo property preview duration');
+  assert.equal(rowStatus(nonZero, withoutTodo, 'Profile.Photo property preview duration'), 'dropped');
 });
 
 test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo; unknown stays drop', () => {
@@ -3008,6 +3017,43 @@ test('an image field enabling a link name or title emits a counted UI todo with 
   assert.equal(rowStatus(linked, mutated, 'Company.Logo property enable'), 'dropped');
 });
 
+test('a non-zero preview duration on an image field emits a counted UI todo with a manual step', () => {
+  const timed = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'preview duration', value: '3', span: Z }] });
+  const timedOut = collectOutputs(timed);
+  assert.equal(rowStatus(timed, timedOut, 'Orders.Photo property preview duration'), 'counted');
+  const todo = timedOut.model.todos.find((t) => t.name === 'Orders.Photo property preview duration');
+  assert.ok(todo, 'a UI todo names the preview duration setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // 0 is the generated capture control's own default (no auto-dismiss timer).
+  const untimed = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'preview duration', value: '0', span: Z }] });
+  assert.equal(rowStatus(untimed, collectOutputs(untimed), 'Orders.Photo property preview duration'), 'emitted');
+
+  // Mutation test: removing the UI todo makes the non-zero value a drop again —
+  // proving the setting is not silently carried by any generated widget.
+  const mutated = cloneOutputs(timedOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Orders.Photo property preview duration');
+  assert.equal(rowStatus(timed, mutated, 'Orders.Photo property preview duration'), 'dropped');
+});
+
+test('preview duration = 0 on a scan field is proved the same no-auto-dismiss default as an image field', () => {
+  const scanDefault = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'preview duration', value: '0', span: Z }],
+  });
+  assert.equal(rowStatus(scanDefault, collectOutputs(scanDefault), 'Orders.Code property preview duration'), 'emitted');
+
+  // A non-scan, non-image field gets no default-equivalence: the setting stays a drop.
+  const plainText = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'preview duration', value: '0', span: Z }] });
+  assert.deepEqual(
+    auditApp(plainText)
+      .filter((d) => d.name.includes('preview duration'))
+      .map((d) => d.name),
+    ['Orders.Notes property preview duration'],
+  );
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
@@ -3019,6 +3065,22 @@ test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is co
   const todo = taskzOut.model.todos.find((t) => t.name === 'Add_Attachment.File_Attachment property browse');
   assert.ok(todo, 'TaskzDone Add_Attachment.File_Attachment property browse has a counted UI todo');
 });
+
+test(
+  'gallery apps: Point of Sale scan field preview duration = 0 is emitted, Recruitment Tracker image preview duration = 3 is counted',
+  { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false },
+  () => {
+    const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+    const pointOfSale = parseProject(join(gallery, 'point-of-sale')).ir;
+    assert.equal(rowStatus(pointOfSale, collectOutputs(pointOfSale), 'Add_stock.Barcode_Number property preview duration'), 'emitted');
+
+    const recruitment = parseProject(join(gallery, 'recruitment-tracker')).ir;
+    const recruitmentOut = collectOutputs(recruitment);
+    const name = recruitmentOut.model.todos.find((t) => t.name.endsWith('property preview duration'))?.name;
+    assert.ok(name, 'a counted UI todo names Recruitment Tracker\'s non-zero preview duration');
+    assert.equal(rowStatus(recruitment, recruitmentOut, name!), 'counted');
+  },
+);
 
 test('allow new entries and its displayname dialog title are emitted through the lookup picker', () => {
   const source = `application "Demo"
