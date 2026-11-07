@@ -8,6 +8,7 @@
     "Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.": 2,
     "Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.": 1,
     "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.": 4,
+    "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.": 1,
     "client-condition-uses-server": 11
   },
   "fixtures/redistributable/library-application-system": {

@@ -1479,14 +1479,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "report-feature:Container_Movement_Tracking block report properties",
-      "kind": "report-feature",
-      "construct": "Container_Movement_Tracking block report properties",
-      "reason": "Report Container_Movement_Tracking block report properties is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The report properties for Container_Movement_Tracking were not converted. In the Catalyst console, open the Container_Movement_Tracking report and configure its report properties, then preview it and verify the layout and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
       "id": "report-feature:SOFs block options",
       "kind": "report-feature",
       "construct": "SOFs block options",
@@ -1668,7 +1660,7 @@
     "statements": 553,
     "translated": 56,
     "shimmed": 486,
-    "todo": 25,
+    "todo": 26,
     "todoLocations": [
       {
         "location": "workflow Zoho_Book_Customer_Update:13",
@@ -1808,6 +1800,12 @@
         "construct": "Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "scope": "ui",
         "manualStep": "In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "report Container_Movement_Tracking block report properties",
+        "construct": "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false."
       }
     ]
   },
@@ -1951,13 +1949,6 @@
       "detail": "Report Contacts block options is not in the generated report. Add one: either emit it or record the manual step.",
       "scope": "app",
       "manualStep": "The options for the Contacts report were not converted. In the Catalyst console, open the Contacts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: Container_Movement_Tracking block report properties",
-      "detail": "Report Container_Movement_Tracking block report properties is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The report properties for Container_Movement_Tracking were not converted. In the Catalyst console, open the Container_Movement_Tracking report and configure its report properties, then preview it and verify the layout and visible data match the source app."
     },
     {
       "kind": "deluge",
@@ -2255,11 +2246,18 @@
       "detail": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "scope": "ui",
       "manualStep": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "report Container_Movement_Tracking block report properties",
+      "detail": "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false."
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 25,
+    "todoCount": 26,
     "fillLockEntries": 0,
     "todoKinds": [
       {
@@ -2289,14 +2287,18 @@
       {
         "construct": "Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "count": 1
+      },
+      {
+        "construct": "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+        "count": 1
       }
     ],
-    "uiTodoCount": 14,
-    "silentDrops": 40,
+    "uiTodoCount": 15,
+    "silentDrops": 39,
     "silentDropKinds": [
       {
         "construct": "report-feature",
-        "count": 22
+        "count": 21
       },
       {
         "construct": "field-property",

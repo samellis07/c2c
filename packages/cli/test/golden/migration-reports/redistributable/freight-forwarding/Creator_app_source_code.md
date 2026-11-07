@@ -24,7 +24,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-25
+26
 
 - 11 client-condition-uses-server
 - 5 Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -33,6 +33,7 @@ App: Freight Forwarding and Feeder Solution
 - 1 Field Assistant_Phone is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Contact_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
 
 ## Field gaps
 
@@ -87,6 +88,8 @@ App: Freight Forwarding and Feeder Solution
   - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `field New_Lead.Mobile property personal data` — Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
   - Step: In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `report Container_Movement_Tracking block report properties` — Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
+  - Step: In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false.
 
 ## Hidden from end users
 
@@ -106,7 +109,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## Not converted
 
-Silent drops: 40 (still counted; each has a guided step below)
+Silent drops: 39 (still counted; each has a guided step below)
 
 - `field-property:New_Account.Annual_Revenue property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Account.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Account.Annual_Revenue, then preview a record and confirm the value is displayed correctly.
@@ -142,8 +145,6 @@ Silent drops: 40 (still counted; each has a guided step below)
   - Step: The display format for New_Invoice.Tax_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Tax_Total, then preview a record and confirm the value is displayed correctly.
 - `field-property:New_Invoice.Grand_Total property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Invoice.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Grand_Total, then preview a record and confirm the value is displayed correctly.
-- `report-feature:Container_Movement_Tracking block report properties` — not converted. Report Container_Movement_Tracking block report properties is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The report properties for Container_Movement_Tracking were not converted. In the Catalyst console, open the Container_Movement_Tracking report and configure its report properties, then preview it and verify the layout and visible data match the source app.
 - `report-feature:SOFs block options` — not converted. Report SOFs block options is not in the generated report. Add one: either emit it or record the manual step.
   - Step: The options for the SOFs report were not converted. In the Catalyst console, open the SOFs report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Leads block options` — not converted. Report Leads block options is not in the generated report. Add one: either emit it or record the manual step.

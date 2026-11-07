@@ -870,6 +870,10 @@ function auditReportFeatures(app: App, out: AuditOutputs, rows: CoverageRow[]): 
         rows.push({ kind: 'report-feature', name, status: 'counted', via: 'todo' });
         continue;
       }
+      if (out.model.todos.some((t) => t.area === 'report' && t.name === name)) {
+        rows.push({ kind: 'report-feature', name, status: 'counted', via: 'UI report todo' });
+        continue;
+      }
       const verdict = built ? feature.prove(built, bag) : 'dropped';
       if (verdict === 'dropped') {
         rows.push({

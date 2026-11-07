@@ -1419,6 +1419,57 @@ test('options display rows, records per row and label width clear only when the 
   assert.deepEqual(dropNames(boardCounted, collectOutputs(boardCounted)), ['All_Orders block options']);
 });
 
+test('a named report settings block other than options is recorded as a manual step, not silently dropped', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [
+          {
+            name: 'toolbar',
+            properties: [
+              { key: 'show add button', value: 'false', span: Z },
+              { key: 'show export', value: 'true', span: Z },
+            ],
+            blocks: [],
+            items: [],
+            span: Z,
+          },
+        ],
+        views: [],
+        span: Z,
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'All_Orders block toolbar'), 'counted');
+  assert.deepEqual(dropNames(source, out), []);
+
+  const todo = out.model.todos.find((t) => t.name === 'All_Orders block toolbar');
+  assert.ok(todo, 'UI todo is emitted for the non-options settings block');
+  assert.ok(todo!.reason.includes('toolbar'), 'todo reason names the block');
+  assert.ok(todo!.reason.includes('show add button = false'), 'todo reason names the block properties and values');
+  assert.ok(todo!.manualStep, 'toolbar block todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the block a silent drop again —
+  // proving the block has no generated home of its own.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'All_Orders block toolbar');
+  assert.equal(rowStatus(source, mutated, 'All_Orders block toolbar'), 'dropped');
+});
+
 // A submit-kind body on /forms/<form>/submit runs only for the posts the
 // generated UI still sends there: add posts go to submitEndpoint, edit posts
 // to editSubmitEndpoint (falling back to submitEndpoint). Each case pins which
