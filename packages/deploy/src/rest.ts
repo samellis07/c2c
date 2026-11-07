@@ -17,6 +17,7 @@ import { invalidTokenAnswer, readWithNewerToken } from './retry.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import type { RestCall, RestResult } from './tables.js';
 import type { ListedProject } from './stuck-import.js';
+import { withCliLock } from './cli-lock.js';
 
 const HOOK = `const fs = require('fs');
 const path = require('path');
@@ -294,7 +295,7 @@ async function restOnce(
       C2C_ORG: org,
     };
     const scopeArgs = opts.exact ? ['--org', org] : catalystScopeArgs(org, projectId);
-    const result = await run(process.execPath, ['-r', hook, located.bin, ...scopeArgs, 'project:list'], childEnv);
+    const result = await withCliLock(env, () => run(process.execPath, ['-r', hook, located.bin, ...scopeArgs, 'project:list'], childEnv));
     const text = result.extra;
     const line = text.split('\n').find((item) => item.startsWith('C2C_RESULT ') || item === 'C2C_REFUSED');
     if (!line) throw new Error(`catalyst rest printed no result (${describeExit(result)})`);
@@ -419,7 +420,7 @@ async function cliToken(env: NodeJS.ProcessEnv, mode: TokenMode, org?: string, p
       mode === 'peek' || mode === 'tag'
         ? ['--version']
         : [...(org === undefined ? [] : projectId === undefined ? ['--org', org] : catalystScopeArgs(org, projectId)), 'project:list'];
-    const result = await run(process.execPath, ['-r', hook, located.bin, ...command], childEnv);
+    const result = await withCliLock(env, () => run(process.execPath, ['-r', hook, located.bin, ...command], childEnv));
     if (!result.extra && (result.code !== 0 || result.signal)) throw new Error(`catalyst token hook printed nothing (${describeExit(result)})`);
     return result.extra.trim();
   } finally {
