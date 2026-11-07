@@ -494,6 +494,11 @@ const BARCODE_VALUE_PROPERTY_KEY = 'value';
 // as UI. `false` (or absent) needs no step: default-equivalence.ts proves it.
 const ANNOTATION_PROPERTY_KEY = 'annotation';
 
+// An audio field's `duration` setting (seconds) caps the recording length. The
+// generated recorder enforces no maximum, so the limit is recorded as a manual
+// step rather than invented as UI.
+const AUDIO_DURATION_PROPERTY_KEY = 'duration';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -1220,6 +1225,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       widget === 'signature'
         ? 'A signature pad uploads the drawn strokes as JSON. The dry-run function does not write to Stratus.'
         : 'The column stores a Stratus object key. The dry-run upload does not write bytes.';
+    if (widget === 'audio') {
+      const duration = prop(field, AUDIO_DURATION_PROPERTY_KEY);
+      if (duration !== undefined) {
+        const name = `${formName}.${field.name} property ${AUDIO_DURATION_PROPERTY_KEY}`;
+        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+          todos.push({
+            area: 'field',
+            name,
+            reason: `Field ${field.name} sets \`duration = ${duration}\`; the generated audio recorder enforces no maximum recording length.`,
+            manualStep: `Enforce the ${duration}-second recording limit in the client (stop or trim the recorder) or accept longer recordings, per your policy — this is not generated.`,
+          });
+        }
+      }
+    }
   }
   if (widget === 'image') {
     const enableProp = prop(field, 'enable');
