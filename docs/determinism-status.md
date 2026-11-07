@@ -29,9 +29,9 @@ TODO item per untranslated construct occurrence.
 | corpus apps | 67 |
 | apps with no residual todos | 1/67 |
 | apps with no residual todos and no silent drops (deterministic) | 0/67 (0%) |
-| silent drops (total) | 261 |
-| residual TODO items | 841 |
-| distinct TODO kinds | 276 |
+| silent drops (total) | 256 |
+| residual TODO items | 846 |
+| distinct TODO kinds | 280 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -63,7 +63,7 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `field-property` | 139 |
+| `field-property` | 134 |
 | `page-element` | 49 |
 | `translation` | 41 |
 | `report-feature` | 32 |
@@ -201,6 +201,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Field Access_Hub is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 2
+    },
+    {
+      "construct": "Field Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
       "count": 2
     },
     {
@@ -476,6 +480,10 @@ clears the app. The count is apps, not items.
       "count": 1
     },
     {
+      "construct": "Field Court_Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
+      "count": 1
+    },
+    {
       "construct": "Field Court_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
       "count": 1
     },
@@ -513,6 +521,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Field Deals_with is flagged `bidirectional = Vendors`; Catalyst only creates the reverse column from a linked grid side, and neither Deals_with nor Add_Product.Vendors is one.",
+      "count": 1
+    },
+    {
+      "construct": "Field Delivery_Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
       "count": 1
     },
     {
@@ -737,6 +749,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Field Phone_Number1 is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 1
+    },
+    {
+      "construct": "Field Pickup_Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
       "count": 1
     },
     {
@@ -1509,6 +1525,7 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
         "Default row count is not carried; the generated subform starts with no pre-filled rows.",
+        "Field Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
         "Field Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "Field Address is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "Field Approver is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
@@ -1525,7 +1542,7 @@ clears the app. The count is apps, not items.
         "Static <style> CSS not carried over:(app identifier)",
         "ZML <button> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
       ],
-      "items": 28
+      "items": 29
     },
     {
       "constructs": [
@@ -1585,6 +1602,23 @@ clears the app. The count is apps, not items.
         "translation-block"
       ],
       "items": 26
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "Field Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
+        "Field Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
+        "Field Delivery_Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
+        "Field Delivery_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
+        "Field Pickup_Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
+        "Field Pickup_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
+        "Field Subscription_Id is flagged `bidirectional = Transactions`; Catalyst only creates the reverse column from a linked grid side, and neither Subscription_Id nor Add_New_Subscription.Transactions is one.",
+        "Field Transactions is flagged `bidirectional = Subscription_Id`; Catalyst only creates the reverse column from a linked grid side, and neither Transactions nor Add_Transaction.Subscription_Id is one.",
+        "openurl-unsupported-target",
+        "pushnotification",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 16
     },
     {
       "constructs": [
@@ -1652,6 +1686,7 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
         "Field Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
+        "Field Court_Address is flagged `adjust_using_map = true`; the generated address field is plain text inputs and shows no map to adjust the pin on.",
         "Field Court_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
         "openurl-unsupported-target",
         "Report All_Case_History has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
@@ -1662,21 +1697,7 @@ clears the app. The count is apps, not items.
         "Report My_Pending_cases has a `properties` settings block (display record count = true) that Catalyst generates no equivalent for.",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 15
-    },
-    {
-      "constructs": [
-        "Custom action (app identifier) is not migrated; its button is turned off.",
-        "Field Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
-        "Field Delivery_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
-        "Field Pickup_Address is flagged `capture_coordinates = true`; the generated address field has no device-location pin or stored latitude/longitude.",
-        "Field Subscription_Id is flagged `bidirectional = Transactions`; Catalyst only creates the reverse column from a linked grid side, and neither Subscription_Id nor Add_New_Subscription.Transactions is one.",
-        "Field Transactions is flagged `bidirectional = Subscription_Id`; Catalyst only creates the reverse column from a linked grid side, and neither Transactions nor Add_Transaction.Subscription_Id is one.",
-        "openurl-unsupported-target",
-        "pushnotification",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 13
+      "items": 16
     },
     {
       "constructs": [
@@ -2053,7 +2074,7 @@ clears the app. The count is apps, not items.
   "silentDropKinds": [
     {
       "construct": "field-property",
-      "count": 139
+      "count": 134
     },
     {
       "construct": "page-element",
@@ -2068,8 +2089,8 @@ clears the app. The count is apps, not items.
       "count": 32
     }
   ],
-  "silentDropTotal": 261,
-  "todoTotal": 841,
+  "silentDropTotal": 256,
+  "todoTotal": 846,
   "totalApps": 67
 }
 ```
