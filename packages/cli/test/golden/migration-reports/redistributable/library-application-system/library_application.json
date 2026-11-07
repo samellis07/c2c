@@ -58,10 +58,14 @@
       "shimmed": 60
     }
   },
-  "todoCount": 12,
+  "todoCount": 13,
   "todoKinds": [
     {
       "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 1
+    },
+    {
+      "construct": "Field Phone_Number sets `defaultcountry = in`; the generated phone field is a plain text input with no country code selector.",
       "count": 1
     },
     {
@@ -264,6 +268,11 @@
       "step": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     },
     {
+      "location": "field Staff_Members.Phone_Number property defaultcountry",
+      "construct": "Field Phone_Number sets `defaultcountry = in`; the generated phone field is a plain text input with no country code selector.",
+      "step": "Add a country code selector (or input mask) to Phone_Number honoring `defaultcountry = in` by hand — the generated input accepts any phone-shaped text."
+    },
+    {
       "location": "report Book_Report block options",
       "construct": "Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
       "step": "In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46."
@@ -296,19 +305,8 @@
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)",
     "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
   ],
-  "silentDrops": 2,
+  "silentDrops": 1,
   "residuals": [
-    {
-      "id": "field-property:Staff_Members.Phone_Number property defaultcountry",
-      "kind": "field-property",
-      "construct": "Staff_Members.Phone_Number property defaultcountry",
-      "form": "Staff_Members",
-      "field": "Phone_Number",
-      "property": "property defaultcountry",
-      "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
-      "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
     {
       "id": "translation:translation Language_Settings",
       "kind": "translation",

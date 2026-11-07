@@ -25,9 +25,10 @@ App: Library_System_Application
 
 ## TODO counts
 
-12
+13
 
 - 1 Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field Phone_Number sets `defaultcountry = in`; the generated phone field is a plain text input with no country code selector.
 - 1 Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
@@ -62,6 +63,8 @@ App: Library_System_Application
   - Step: In the Catalyst console, apply the data-privacy protection Staff_Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `field Staff_Members.Phone_Number property personal data` — Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
   - Step: In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field Staff_Members.Phone_Number property defaultcountry` — Field Phone_Number sets `defaultcountry = in`; the generated phone field is a plain text input with no country code selector.
+  - Step: Add a country code selector (or input mask) to Phone_Number honoring `defaultcountry = in` by hand — the generated input accepts any phone-shaped text.
 - `report Book_Report block options` — Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.
   - Step: In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46.
 - `report Book_by_Genre block options` — Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.
@@ -96,9 +99,7 @@ App: Library_System_Application
 
 ## Not converted
 
-Silent drops: 2 (still counted; each has a guided step below)
+Silent drops: 1 (still counted; each has a guided step below)
 
-- `field-property:Staff_Members.Phone_Number property defaultcountry` — not converted. property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.
 - `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
   - Step: The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.

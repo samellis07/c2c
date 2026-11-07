@@ -67,25 +67,25 @@ test('committed fixtures carry the deterministic flag', () => {
   // box's `criteria`, and a KPI tile's drill-down `parameters` the generated
   // page element does not carry.
   assert.equal(lib.deterministic, false);
-  assert.equal(lib.todoCount, 12);
-  assert.equal(lib.uiTodoCount, 12);
+  assert.equal(lib.todoCount, 13);
+  assert.equal(lib.uiTodoCount, 13);
   assert.equal(
     lib.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    12,
+    13,
   );
-  assert.equal(lib.silentDrops, 2);
+  assert.equal(lib.silentDrops, 1);
   assert.equal(ff.silentDrops, 18);
   assert.equal(report.aggregate.deterministicApps, 0);
-  assert.equal(report.aggregate.silentDrops, 20);
-  assert.equal(report.aggregate.todoTotal, 64);
+  assert.equal(report.aggregate.silentDrops, 19);
+  assert.equal(report.aggregate.todoTotal, 65);
   // Neither app has zero todos anymore.
   assert.equal(report.aggregate.noTodoApps, 0);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
-  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 20);
+  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 19);
   const text = migrationReportAsText(report);
   assert.match(text, /^apps with no residual todos: 0\/2$/m);
   assert.match(text, /^apps with no residual todos and no silent drops \(deterministic\): 0\/2$/m);
-  assert.match(text, /^silent drops \(total\): 20$/m);
+  assert.match(text, /^silent drops \(total\): 19$/m);
 });
 
 test('aggregate counts only deterministic apps toward the 95%/100% targets', () => {

@@ -3225,6 +3225,123 @@ test('a QR/barcode field value template emits a counted UI todo with a manual st
   assert.equal(rowStatus(withValue, mutated, 'Visit.Badge_QR property value'), 'dropped');
 });
 
+test('isephi and isencrypted field flags emit a counted UI todo with a manual step, not generated compliance handling', () => {
+  const flaggedField = (flag: string): string => `
+	form Patient
+	{
+		SSN
+		(
+			type = text
+			${flag} = true
+		)
+	}
+`;
+  const ephiField = dsApp(flaggedField('isephi'));
+  const ephiOut = collectOutputs(ephiField);
+  assert.equal(rowStatus(ephiField, ephiOut, 'Patient.SSN property isephi'), 'counted');
+  const ephiTodo = ephiOut.model.todos.find((t) => t.name === 'Patient.SSN property isephi');
+  assert.ok(ephiTodo, 'UI todo is emitted for an isephi-flagged field');
+  assert.ok(ephiTodo.manualStep, 'isephi field todo names a manual step');
+
+  const encryptedField = dsApp(flaggedField('isencrypted'));
+  const encryptedOut = collectOutputs(encryptedField);
+  assert.equal(rowStatus(encryptedField, encryptedOut, 'Patient.SSN property isencrypted'), 'counted');
+  const encryptedTodo = encryptedOut.model.todos.find((t) => t.name === 'Patient.SSN property isencrypted');
+  assert.ok(encryptedTodo, 'UI todo is emitted for an isencrypted-flagged field');
+  assert.ok(encryptedTodo.manualStep, 'isencrypted field todo names a manual step');
+
+  // Mutation test: removing the UI todo makes isephi a drop again — proving the
+  // flag is not silently carried by any generated privacy or encryption control.
+  const mutated = cloneOutputs(ephiOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Patient.SSN property isephi');
+  assert.equal(rowStatus(ephiField, mutated, 'Patient.SSN property isephi'), 'dropped');
+});
+
+test('a time/datetime field restricting the minute picker interval emits a counted UI todo with a manual step', () => {
+  const timeField = (widget: string): string => `
+	form Visit
+	{
+		From_Time
+		(
+			type = ${widget}
+			mins_displayinterval = 30
+		)
+	}
+`;
+  const time = dsApp(timeField('time'));
+  const timeOut = collectOutputs(time);
+  assert.equal(rowStatus(time, timeOut, 'Visit.From_Time property mins_displayinterval'), 'counted');
+  const timeTodo = timeOut.model.todos.find((t) => t.name === 'Visit.From_Time property mins_displayinterval');
+  assert.ok(timeTodo, 'UI todo is emitted for a time field restricting minute interval');
+  assert.ok(timeTodo.manualStep, 'mins_displayinterval todo names a manual step');
+
+  const datetime = dsApp(timeField('datetime'));
+  assert.equal(rowStatus(datetime, collectOutputs(datetime), 'Visit.From_Time property mins_displayinterval'), 'counted');
+
+  // No `mins_displayinterval` property set: nothing to restrict, no todo needed.
+  const noInterval = dsApp(`
+	form Visit
+	{
+		From_Time
+		(
+			type = time
+		)
+	}
+`);
+  assert.equal(rowStatus(noInterval, collectOutputs(noInterval), 'Visit.From_Time property mins_displayinterval'), undefined);
+
+  // Mutation test: removing the UI todo makes mins_displayinterval a drop again —
+  // proving it is not silently carried by the generated (plain native) time input.
+  const mutated = cloneOutputs(timeOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Visit.From_Time property mins_displayinterval');
+  assert.equal(rowStatus(time, mutated, 'Visit.From_Time property mins_displayinterval'), 'dropped');
+});
+
+test('a phone field restricting or presetting the country code emits a counted UI todo with a manual step', () => {
+  const phoneField = `
+	form Contact
+	{
+		Mobile
+		(
+			type = phonenumber
+			allowedcountries={in}
+			defaultcountry="in"
+		)
+	}
+`;
+  const phone = dsApp(phoneField);
+  const phoneOut = collectOutputs(phone);
+  assert.equal(rowStatus(phone, phoneOut, 'Contact.Mobile property allowedcountries'), 'counted');
+  const allowedTodo = phoneOut.model.todos.find((t) => t.name === 'Contact.Mobile property allowedcountries');
+  assert.ok(allowedTodo, 'UI todo is emitted for allowedcountries on a phone field');
+  assert.ok(allowedTodo.manualStep, 'allowedcountries todo names a manual step');
+
+  assert.equal(rowStatus(phone, phoneOut, 'Contact.Mobile property defaultcountry'), 'counted');
+  const defaultTodo = phoneOut.model.todos.find((t) => t.name === 'Contact.Mobile property defaultcountry');
+  assert.ok(defaultTodo, 'UI todo is emitted for defaultcountry on a phone field');
+  assert.ok(defaultTodo.manualStep, 'defaultcountry todo names a manual step');
+
+  // No country properties set: nothing to configure, no todo needed.
+  const plain = dsApp(`
+	form Contact
+	{
+		Mobile
+		(
+			type = phonenumber
+		)
+	}
+`);
+  const plainOut = collectOutputs(plain);
+  assert.equal(rowStatus(plain, plainOut, 'Contact.Mobile property allowedcountries'), undefined);
+  assert.equal(rowStatus(plain, plainOut, 'Contact.Mobile property defaultcountry'), undefined);
+
+  // Mutation test: removing the UI todo makes allowedcountries a drop again —
+  // proving it is not silently carried by the generated (plain tel input) phone field.
+  const mutated = cloneOutputs(phoneOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Contact.Mobile property allowedcountries');
+  assert.equal(rowStatus(phone, mutated, 'Contact.Mobile property allowedcountries'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;

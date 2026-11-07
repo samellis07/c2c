@@ -39,6 +39,7 @@
   },
   "fixtures/redistributable/library-application-system": {
     "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.": 1,
+    "Field Phone_Number sets `defaultcountry = in`; the generated phone field is a plain text input with no country code selector.": 1,
     "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.": 1,
     "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.": 1,
     "Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.": 1,

@@ -459,10 +459,12 @@ const FILE_WIDGETS = new Set<Widget>(['file', 'image', 'audio', 'video', 'signat
 /** Known remote document browsing sources for file fields that have no Catalyst equivalent. */
 const BROWSE_REMOTE_SOURCES = new Set(['google_docs', 'zoho_docs']);
 
-// A field marked `private` or `personal data` is a data-privacy flag, not a widget
-// setting. Catalyst has no generated field-level privacy or access control, so each
-// is recorded as a manual step rather than invented as UI.
-const PRIVACY_PROPERTY_KEYS = ['private', 'personal data'];
+// A field marked `private`, `personal data`, `isephi` (protected health
+// information) or `isencrypted` is a data-privacy/compliance flag, not a widget
+// setting. Catalyst has no generated field-level privacy, compliance tagging, or
+// at-rest encryption control, so each is recorded as a manual step rather than
+// invented as UI.
+const PRIVACY_PROPERTY_KEYS = ['private', 'personal data', 'isephi', 'isencrypted'];
 
 // A scan-capable field's `manual input` setting toggles a free-text fallback next to
 // the camera control. The generated scan field has no such fallback, so the setting
@@ -1124,6 +1126,32 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           manualStep: `Add a seconds-precision time control for ${field.name} by hand (the native ${widget} input shows only hours and minutes) — this is not generated.`,
         });
       }
+    }
+    const interval = prop(field, 'mins_displayinterval');
+    if (interval !== undefined) {
+      const name = `${formName}.${field.name} property mins_displayinterval`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`mins_displayinterval = ${interval}\`; the generated ${widget} input is a plain native picker with no minute-interval restriction.`,
+          manualStep: `Restrict ${field.name}'s minute picker to ${interval}-minute steps by hand (client-side and server-side validation) — the generated input currently accepts any minute value.`,
+        });
+      }
+    }
+  }
+  if (widget === 'phone') {
+    for (const key of ['allowedcountries', 'defaultcountry']) {
+      const value = prop(field, key);
+      if (value === undefined) continue;
+      const name = `${formName}.${field.name} property ${key}`;
+      if (todos.some((t) => t.area === 'field' && t.name === name)) continue;
+      todos.push({
+        area: 'field',
+        name,
+        reason: `Field ${field.name} sets \`${key} = ${value}\`; the generated phone field is a plain text input with no country code selector.`,
+        manualStep: `Add a country code selector (or input mask) to ${field.name} honoring \`${key} = ${value}\` by hand — the generated input accepts any phone-shaped text.`,
+      });
     }
   }
   if (field.lookup && (widget === 'lookup' || widget === 'lookup-multi')) {
