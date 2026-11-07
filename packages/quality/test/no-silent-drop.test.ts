@@ -2041,6 +2041,55 @@ test('alloweddays is emitted only for every weekday on a generated date widget',
   assert.equal(rowStatus(all, notDate, 'Visit.Day property alloweddays'), 'dropped');
 });
 
+test('a subform grid with auto width disabled is recorded as a manual column-width step', () => {
+  const grid = (value: string): App =>
+    dsApp(`
+	form Orders
+	{
+		must have Line_Items
+		(
+			type = grid
+			auto width = ${value}
+			must have Item
+			(
+				type = text
+			)
+		)
+	}
+`);
+  const fixed = dsApp(`
+	form Orders
+	{
+		must have Line_Items
+		(
+			type = grid
+			must have Item
+			(
+				type = text
+			)
+		)
+	}
+`);
+  const outFixed = collectOutputs(fixed);
+  assert.equal(rowStatus(fixed, outFixed, 'Orders.Line_Items property auto width'), undefined);
+
+  const auto = grid('true');
+  assert.equal(rowStatus(auto, collectOutputs(auto), 'Orders.Line_Items property auto width'), 'emitted');
+
+  const disabled = grid('false');
+  const out = collectOutputs(disabled);
+  assert.equal(rowStatus(disabled, out, 'Orders.Line_Items property auto width'), 'counted');
+  const todo = out.model.todos.find((t) => t.area === 'field' && t.name === 'Orders.Line_Items property auto width');
+  assert.ok(todo, 'expected a manual todo for auto width = false');
+  assert.ok(todo!.manualStep, 'auto width todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the setting a silent drop again —
+  // proving the generated subform grid really has no column-width control.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Orders.Line_Items property auto width');
+  assert.equal(rowStatus(disabled, mutated, 'Orders.Line_Items property auto width'), 'dropped');
+});
+
 test('qrcode and barcode field properties are emitted only when the generated field marks scan', () => {
   const source = dsApp(`
 	form Book

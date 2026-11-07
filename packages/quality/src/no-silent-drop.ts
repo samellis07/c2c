@@ -515,6 +515,11 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'visibility') return visibilityProved(text, ui);
   if (key === 'alloweddays') return allowedDaysProved(text, ui);
   if (key === 'source') return sourceProved(text, ui);
+  // `auto width = true` is the generated subform grid's only layout: its
+  // columns always size themselves to their content, so that value needs no
+  // manual step. `false` asks for fixed column widths, which the grid has no
+  // control for; buildField in model.ts records that as a manual step.
+  if (key === 'auto width') return text.toLowerCase() === 'true';
   if (key === 'start index') {
     const rawTrim = raw.trim();
     return columns.some((column) => {
