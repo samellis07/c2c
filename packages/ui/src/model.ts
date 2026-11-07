@@ -482,11 +482,12 @@ const VIDEO_DURATION_PROPERTY_KEY = 'duration';
 // setting is recorded as a manual step rather than invented as UI.
 const SHOW_ONLOAD_PROPERTY_KEY = 'show onload';
 
-// A barcode/QR field's `value` property is the Creator expression (static text plus
-// other field references) that becomes the code's payload. The generated barcode
-// widget is a static computed display with no such template, so the setting is
-// recorded as a manual step rather than invented as UI.
-const BARCODE_VALUE_PROPERTY_KEY = 'value';
+// A barcode/QR or formula field's `value` property is the Creator expression (static
+// text plus other field references, or an arithmetic/lookup formula) that becomes the
+// field's computed content. The generated barcode and formula widgets are static
+// computed displays with no such template evaluated, so the setting is recorded as a
+// manual step rather than invented as UI.
+const VALUE_PROPERTY_KEY = 'value';
 
 // `annotation = true` lets the user draw or mark up a captured photo before it is
 // stored. The generated image field uploads the chosen file unchanged with no
@@ -1260,15 +1261,29 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   if (widget === 'zia') ui.note = 'Filled after submit. The form shows the stored text; it does not call Zia.';
   if (widget === 'formula' || widget === 'autonumber' || widget === 'barcode') ui.note = 'Computed. The form shows it and does not accept a typed value.';
   if (widget === 'barcode') {
-    const codeValue = prop(field, BARCODE_VALUE_PROPERTY_KEY);
+    const codeValue = prop(field, VALUE_PROPERTY_KEY);
     if (codeValue !== undefined) {
-      const name = `${formName}.${field.name} property ${BARCODE_VALUE_PROPERTY_KEY}`;
+      const name = `${formName}.${field.name} property ${VALUE_PROPERTY_KEY}`;
       if (!todos.some((t) => t.area === 'field' && t.name === name)) {
         todos.push({
           area: 'field',
           name,
           reason: `Field ${field.name} sets \`value = ${codeValue}\`; the generated barcode/QR field has no computed-value template — it displays no payload of its own.`,
           manualStep: `Compute ${field.name}'s code payload by hand (the Creator \`value\` expression: static text plus other field references), e.g. in a function trigger that writes the column before the field is shown — this is not generated.`,
+        });
+      }
+    }
+  }
+  if (widget === 'formula') {
+    const expr = prop(field, VALUE_PROPERTY_KEY);
+    if (expr !== undefined) {
+      const name = `${formName}.${field.name} property ${VALUE_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`value = ${expr}\`; the generated formula field has no computed-value expression — it evaluates nothing.`,
+          manualStep: `Compute ${field.name}'s formula by hand (the Creator \`value\` expression: arithmetic, other field references, or lookups), e.g. in a function trigger that writes the column before the field is shown — this is not generated.`,
         });
       }
     }

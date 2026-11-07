@@ -3225,6 +3225,89 @@ test('a QR/barcode field value template emits a counted UI todo with a manual st
   assert.equal(rowStatus(withValue, mutated, 'Visit.Badge_QR property value'), 'dropped');
 });
 
+test('a formula field value expression emits a counted UI todo with a manual step, not a computed result', () => {
+  const totalField = `
+	form Invoice
+	{
+		Amount
+		(
+			type = decimal
+		)
+		Tax
+		(
+			type = decimal
+		)
+		Total
+		(
+			type = formula
+			value = Amount * Tax
+		)
+	}
+`;
+  const withValue = dsApp(totalField);
+  const withValueOut = collectOutputs(withValue);
+  assert.equal(rowStatus(withValue, withValueOut, 'Invoice.Total property value'), 'counted');
+  const todo = withValueOut.model.todos.find((t) => t.name === 'Invoice.Total property value');
+  assert.ok(todo, 'UI todo is emitted for a formula field with a value expression');
+  assert.ok(todo.manualStep, 'formula value-expression todo names a manual step');
+
+  // No `value` property set: nothing to compute, no todo needed.
+  const noValue = dsApp(`
+	form Invoice
+	{
+		Total
+		(
+			type = formula
+		)
+	}
+`);
+  assert.equal(rowStatus(noValue, collectOutputs(noValue), 'Invoice.Total property value'), undefined);
+
+  // Mutation test: removing the UI todo makes the value expression a drop again —
+  // proving it is not silently carried by the generated (static, computed-only) formula widget.
+  const mutated = cloneOutputs(withValueOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Invoice.Total property value');
+  assert.equal(rowStatus(withValue, mutated, 'Invoice.Total property value'), 'dropped');
+});
+
+test('a scan field camera = primary is proved outright; another facing stays a drop', () => {
+  const scanField = `
+	form Asset
+	{
+		Tag
+		(
+			type = text
+			qrcode = true
+			camera = primary
+		)
+	}
+`;
+  const primary = dsApp(scanField);
+  const primaryOut = collectOutputs(primary);
+  assert.equal(rowStatus(primary, primaryOut, 'Asset.Tag property camera'), 'emitted');
+
+  const secondary = dsApp(`
+	form Asset
+	{
+		Tag
+		(
+			type = text
+			qrcode = true
+			camera = secondary
+		)
+	}
+`);
+  // A facing other than the default is not generated (the scan field renders no
+  // capture control that reads `camera`), so it stays a drop.
+  assert.equal(rowStatus(secondary, collectOutputs(secondary), 'Asset.Tag property camera'), 'dropped');
+
+  // Mutation test: a non-scan field carrying the same `camera = primary` value is
+  // not proved by this rule — proving the check reads the scan field, not just the value.
+  const mutated = cloneOutputs(primaryOut);
+  mutated.model.forms[0]!.fields[0]!.scan = false;
+  assert.equal(rowStatus(primary, mutated, 'Asset.Tag property camera'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;

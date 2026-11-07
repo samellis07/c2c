@@ -506,6 +506,12 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   // case is a gap (listed through model.ts's dedicated UI todo). A false/omitted
   // value matches the generated behavior already, on any field.
   if (key === 'show onload') return text.toLowerCase() !== 'true';
+  // A scan field (qrcode/barcode) renders a plain input with `data-scan="true"` and
+  // never reads `camera` (client-runtime.js fieldControl): the device opens its own
+  // default camera regardless of value, same as an image field's unset capture
+  // attribute. Only `primary` names that default; any other value asks for a camera
+  // facing the generated field does not select, and stays a drop.
+  if (key === 'camera') return ui?.scan === true && text.toLowerCase() === 'primary';
   if (key === 'sortorder') return sortOrderProved(text, field, ui, app, out);
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');
