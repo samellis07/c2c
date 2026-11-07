@@ -2884,6 +2884,38 @@ test('a field with none of the toolbar/defaultrow/enable-linkname markers is nev
   assert.deepEqual(auditApp(plain), []);
 });
 
+test('a target field property on an image field is listed through a dedicated UI todo', () => {
+  const withTarget = appWithField({ ...field('Logo', 'image'), properties: [{ key: 'target', value: 'same window', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withTarget).filter((d) => d.name.includes('property target')),
+    [],
+  );
+  const todo = collectOutputs(withTarget).model.todos.find((t) => t.name === 'Orders.Logo property target');
+  assert.ok(todo, 'a UI todo names the target setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withTarget);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withTarget, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Logo property target'],
+  );
+});
+
+test('a target field property stays a silent drop on a non-image field', () => {
+  const plain = appWithField({ ...field('Website', 'url'), properties: [{ key: 'target', value: 'same window', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property target')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('property target'))
+      .map((d) => d.name),
+    ['Orders.Website property target'],
+  );
+});
+
 test('a subform field is proved against its own generated widget, not a same-named top-level field', () => {
   // The coverage ledger names a field property `${form}.${field} ${setting}` with
   // no subform path, so a subform field can share that name with a top-level
