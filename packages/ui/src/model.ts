@@ -482,6 +482,12 @@ const VIDEO_DURATION_PROPERTY_KEY = 'duration';
 // setting is recorded as a manual step rather than invented as UI.
 const SHOW_ONLOAD_PROPERTY_KEY = 'show onload';
 
+// A barcode/QR field's `value` property is the Creator expression (static text plus
+// other field references) that becomes the code's payload. The generated barcode
+// widget is a static computed display with no such template, so the setting is
+// recorded as a manual step rather than invented as UI.
+const BARCODE_VALUE_PROPERTY_KEY = 'value';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -1186,6 +1192,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   }
   if (widget === 'zia') ui.note = 'Filled after submit. The form shows the stored text; it does not call Zia.';
   if (widget === 'formula' || widget === 'autonumber' || widget === 'barcode') ui.note = 'Computed. The form shows it and does not accept a typed value.';
+  if (widget === 'barcode') {
+    const codeValue = prop(field, BARCODE_VALUE_PROPERTY_KEY);
+    if (codeValue !== undefined) {
+      const name = `${formName}.${field.name} property ${BARCODE_VALUE_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`value = ${codeValue}\`; the generated barcode/QR field has no computed-value template — it displays no payload of its own.`,
+          manualStep: `Compute ${field.name}'s code payload by hand (the Creator \`value\` expression: static text plus other field references), e.g. in a function trigger that writes the column before the field is shown — this is not generated.`,
+        });
+      }
+    }
+  }
   if (widget === 'name' || widget === 'address') {
     const parts = field.subfields.length ? field.subfields : defaultParts(widget);
     const partNames = parts.map((part) => part.name);

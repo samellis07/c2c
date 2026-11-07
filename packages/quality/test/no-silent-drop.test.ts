@@ -2975,6 +2975,43 @@ test('an image field enabling a link name or title emits a counted UI todo with 
   assert.equal(rowStatus(linked, mutated, 'Company.Logo property enable'), 'dropped');
 });
 
+test('a QR/barcode field value template emits a counted UI todo with a manual step, not a generated payload', () => {
+  const badgeField = `
+	form Visit
+	{
+		Badge_QR
+		(
+			type = qrcode
+			value = "VIS-\${Visit_No}"
+		)
+	}
+`;
+  const withValue = dsApp(badgeField);
+  const withValueOut = collectOutputs(withValue);
+  assert.equal(rowStatus(withValue, withValueOut, 'Visit.Badge_QR property value'), 'counted');
+  const todo = withValueOut.model.todos.find((t) => t.name === 'Visit.Badge_QR property value');
+  assert.ok(todo, 'UI todo is emitted for a barcode/QR field with a value template');
+  assert.ok(todo.manualStep, 'barcode/QR value-template todo names a manual step');
+
+  // No `value` property set: nothing to compute, no todo needed.
+  const noValue = dsApp(`
+	form Visit
+	{
+		Badge_QR
+		(
+			type = qrcode
+		)
+	}
+`);
+  assert.equal(rowStatus(noValue, collectOutputs(noValue), 'Visit.Badge_QR property value'), undefined);
+
+  // Mutation test: removing the UI todo makes the value template a drop again —
+  // proving it is not silently carried by the generated (static, computed-only) barcode widget.
+  const mutated = cloneOutputs(withValueOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Visit.Badge_QR property value');
+  assert.equal(rowStatus(withValue, mutated, 'Visit.Badge_QR property value'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
