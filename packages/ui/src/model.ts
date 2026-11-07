@@ -469,6 +469,13 @@ const PRIVACY_PROPERTY_KEYS = ['private', 'personal data'];
 // is recorded as a manual step rather than invented as UI.
 const SCAN_MANUAL_INPUT_PROPERTY_KEY = 'manual input';
 
+// `show onload = true` (scan field: "get input before the form is displayed"; image
+// field: launch the camera automatically) asks Creator to open the camera/scanner
+// before the user sees the form. The generated form opens its capture control only
+// on a user tap (the Scan button, the file/image input) and never on load, so the
+// setting is recorded as a manual step rather than invented as UI.
+const SHOW_ONLOAD_PROPERTY_KEY = 'show onload';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -991,6 +998,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} sets \`manual input = ${manualInput}\`; the generated scan field has no free-text fallback next to the camera.`,
           manualStep: `Add a manual text entry alongside the generated scan control, or leave the field scan-only, per your policy — this is not generated.`,
+        });
+      }
+    }
+  }
+  if (ui.scan || widget === 'image') {
+    const showOnload = prop(field, SHOW_ONLOAD_PROPERTY_KEY);
+    if (showOnload?.trim().toLowerCase() === 'true') {
+      const name = `${formName}.${field.name} property ${SHOW_ONLOAD_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`show onload = true\`; the generated ${ui.scan ? 'scan' : 'image'} field opens its ${ui.scan ? 'scanner' : 'camera'} only when the user taps the control, never automatically when the form loads.`,
+          manualStep: `In the Catalyst console, trigger the ${ui.scan ? 'scanner' : 'camera'} for ${field.name} automatically as the form loads, by hand — this is not generated.`,
         });
       }
     }
