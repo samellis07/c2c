@@ -2755,3 +2755,15 @@ test('a field with none of the toolbar/defaultrow/enable-linkname markers is nev
   const plain = appWithField(field('Title', 'text'));
   assert.deepEqual(auditApp(plain), []);
 });
+
+test('a subform field is proved against its own generated widget, not a same-named top-level field', () => {
+  // The coverage ledger names a field property `${form}.${field} ${setting}` with
+  // no subform path, so a subform field can share that name with a top-level
+  // field the audit must not confuse it with.
+  const app = appWithField({ ...field('Gender', 'picklist'), choices: ['Male', 'Female'] });
+  app.forms[0]!.fields.push({
+    ...field('Occupants', 'grid'),
+    subfields: [{ ...field('Gender', 'picklist'), choices: ['Male', 'Female', 'Third Gender'] }],
+  });
+  assert.deepEqual(auditApp(app), []);
+});
