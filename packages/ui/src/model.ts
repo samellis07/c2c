@@ -488,6 +488,12 @@ const SHOW_ONLOAD_PROPERTY_KEY = 'show onload';
 // recorded as a manual step rather than invented as UI.
 const BARCODE_VALUE_PROPERTY_KEY = 'value';
 
+// Creator's "Set Preview Duration" camera setting (3/5/10/15/20s auto-dismiss) on an
+// image or scan-capable field. 0 (or unset) matches the generated default — the
+// capture control relies on native device confirmation with no auto-dismiss timer —
+// so only a non-zero value is a manual step.
+const PREVIEW_DURATION_PROPERTY_KEY = 'preview duration';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -1052,6 +1058,18 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} sets \`show onload = true\`; the generated ${ui.scan ? 'scan' : 'image'} field opens its ${ui.scan ? 'scanner' : 'camera'} only when the user taps the control, never automatically when the form loads.`,
           manualStep: `In the Catalyst console, trigger the ${ui.scan ? 'scanner' : 'camera'} for ${field.name} automatically as the form loads, by hand — this is not generated.`,
+        });
+      }
+    }
+    const previewDuration = prop(field, PREVIEW_DURATION_PROPERTY_KEY);
+    if (previewDuration !== undefined && previewDuration.trim() !== '0') {
+      const name = `${formName}.${field.name} property ${PREVIEW_DURATION_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`preview duration = ${previewDuration}\`; the generated capture control has no auto-dismiss timer.`,
+          manualStep: `Add an auto-dismiss timer of ${previewDuration}s after a capture, or leave the preview open until the user confirms, per your policy — this is not generated.`,
         });
       }
     }
