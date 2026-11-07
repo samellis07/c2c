@@ -1260,8 +1260,20 @@ function auditPageElements(app: App, out: AuditOutputs, rows: CoverageRow[]): vo
       // failure on the node itself. That TODO is keyed by tag, not by this
       // element's export name (so same-tag siblings on the page keep distinct
       // TODOs), so it never matches `namedTodo` below; check it directly.
-      if (found && gap === 'content' && found.children.some((child) => child.kind === 'todo' && child.tag === found.tag)) {
+      const snippetTodoChild = found?.children.some((child) => child.kind === 'todo' && child.tag === found.tag) ?? false;
+      if (found && gap === 'content' && snippetTodoChild) {
         rows.push({ kind: 'page-element', name, status: 'counted', via: 'UI zml todo' });
+        return;
+      }
+      // A `dsp`/`dspZml` snippet that compiles successfully can still render
+      // empty (pure server-side logic with no static markup, or markup that
+      // is entirely a <style> block carried onto the page's scoped CSS
+      // instead). That reads as a dropped `content` payload, but nothing was
+      // lost: a failed compile is the only case that keeps this node counted
+      // through a nested same-tag TODO child, so its absence here means the
+      // snippet compiled fine and the empty output is correct.
+      if (found && gap === 'content' && found.kind === 'html' && !snippetTodoChild) {
+        rows.push({ kind: 'page-element', name, status: 'emitted', via: 'UI page element' });
         return;
       }
       const namedTodo = out.model.todos.some((todo) => todo.area === 'zml' && (todo.name === name || todo.name === `${page.name}.${zmlName(el.attributes)}`));
