@@ -533,46 +533,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "report-feature:Book_Report block options",
-      "kind": "report-feature",
-      "construct": "Book_Report block options",
-      "reason": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Book_Report report were not converted. In the Catalyst console, open the Book_Report report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Book_by_Genre block options",
-      "kind": "report-feature",
-      "construct": "Book_by_Genre block options",
-      "reason": "Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Book_by_Genre report were not converted. In the Catalyst console, open the Book_by_Genre report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:All_Member_Infos block options",
-      "kind": "report-feature",
-      "construct": "All_Member_Infos block options",
-      "reason": "Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the All_Member_Infos report were not converted. In the Catalyst console, open the All_Member_Infos report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:All_Book_Transactions block options",
-      "kind": "report-feature",
-      "construct": "All_Book_Transactions block options",
-      "reason": "Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the All_Book_Transactions report were not converted. In the Catalyst console, open the All_Book_Transactions report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:All_Staff_Members block options",
-      "kind": "report-feature",
-      "construct": "All_Staff_Members block options",
-      "reason": "Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
       "id": "translation:translation Language_Settings",
       "kind": "translation",
       "construct": "translation Language_Settings",
@@ -586,7 +546,7 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 6,
+    "todo": 11,
     "todoLocations": [
       {
         "location": "field Staff_Members.Staff_Name property personal data",
@@ -605,6 +565,36 @@
         "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
         "scope": "ui",
         "manualStep": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "report Book_Report block options",
+        "construct": "Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46."
+      },
+      {
+        "location": "report Book_by_Genre block options",
+        "construct": "Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music."
+      },
+      {
+        "location": "report All_Member_Infos block options",
+        "construct": "Report All_Member_Infos has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world."
+      },
+      {
+        "location": "report All_Book_Transactions block options",
+        "construct": "Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world."
+      },
+      {
+        "location": "report All_Staff_Members block options",
+        "construct": "Report All_Staff_Members has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world."
       },
       {
         "location": "page DashBoard.Book_Report",
@@ -630,41 +620,6 @@
       "detail": "Field Staff_Members.Phone_Number property defaultcountry is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Book_Transactions block options",
-      "detail": "Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the All_Book_Transactions report were not converted. In the Catalyst console, open the All_Book_Transactions report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Member_Infos block options",
-      "detail": "Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the All_Member_Infos report were not converted. In the Catalyst console, open the All_Member_Infos report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Staff_Members block options",
-      "detail": "Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: Book_by_Genre block options",
-      "detail": "Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the Book_by_Genre report were not converted. In the Catalyst console, open the Book_by_Genre report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: Book_Report block options",
-      "detail": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the Book_Report report were not converted. In the Catalyst console, open the Book_Report report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
     },
     {
       "kind": "deluge",
@@ -711,11 +666,46 @@
       "label": "page DashBoard.Book_Report",
       "detail": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
       "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Book_Transactions block options",
+      "detail": "Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world."
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Member_Infos block options",
+      "detail": "Report All_Member_Infos has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world."
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Staff_Members block options",
+      "detail": "Report All_Staff_Members has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world."
+    },
+    {
+      "kind": "ui",
+      "label": "report Book_by_Genre block options",
+      "detail": "Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music."
+    },
+    {
+      "kind": "ui",
+      "label": "report Book_Report block options",
+      "detail": "Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46."
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 6,
+    "todoCount": 11,
     "fillLockEntries": 0,
     "todoKinds": [
       {
@@ -731,6 +721,26 @@
         "count": 1
       },
       {
+        "construct": "Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report All_Member_Infos has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report All_Staff_Members has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+        "count": 1
+      },
+      {
+        "construct": "Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
         "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
         "count": 1
       },
@@ -743,13 +753,9 @@
         "count": 1
       }
     ],
-    "uiTodoCount": 6,
-    "silentDrops": 7,
+    "uiTodoCount": 11,
+    "silentDrops": 2,
     "silentDropKinds": [
-      {
-        "construct": "report-feature",
-        "count": 5
-      },
       {
         "construct": "field-property",
         "count": 1

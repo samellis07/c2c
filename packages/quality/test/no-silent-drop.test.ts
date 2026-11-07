@@ -1337,7 +1337,7 @@ test('a same-tag element under another name does not satisfy a named page elemen
   assert.deepEqual(dropNames(source, renamed), ['Dash.Hello']);
 });
 
-test('a kanban view that the model does not keep, and an options icon, are drops', () => {
+test('a kanban view that the model does not keep is a drop; an options icon is a recorded manual step', () => {
   const genre = field('Genre', 'picklist');
   genre.span = { start: 1, end: 40 };
   genre.choices = ['Fiction', 'History'];
@@ -1404,7 +1404,22 @@ test('a kanban view that the model does not keep, and an options icon, are drops
       },
     ],
   });
-  assert.deepEqual(dropNames(icon, collectOutputs(icon)), ['Book_by_Genre block options']);
+  // `icon` has no generated home on any view — recorded as a manual step
+  // naming just that property, not the whole block (`display field` is still
+  // proved by the kanban's group field).
+  const iconOut = collectOutputs(icon);
+  assert.equal(rowStatus(icon, iconOut, 'Book_by_Genre block options'), 'counted');
+  assert.deepEqual(dropNames(icon, iconOut), []);
+  const todo = iconOut.model.todos.find((t) => t.name === 'Book_by_Genre block options');
+  assert.ok(todo, 'UI todo is emitted for the unrecognized options property');
+  assert.ok(todo!.reason.includes('icon = books'), 'todo reason names the unrecognized property and value');
+  assert.ok(!todo!.reason.includes('display field'), 'todo reason omits the already-proved property');
+
+  // Mutation test: removing the UI todo makes the block a silent drop again —
+  // proving `icon` has no generated home of its own.
+  const mutatedIcon = cloneOutputs(iconOut);
+  mutatedIcon.model.todos = mutatedIcon.model.todos.filter((t) => t.name !== 'Book_by_Genre block options');
+  assert.equal(rowStatus(icon, mutatedIcon, 'Book_by_Genre block options'), 'dropped');
 });
 
 test('options display rows, records per row and label width clear only when the generated report carries them', () => {
@@ -1457,13 +1472,18 @@ test('options display rows, records per row and label width clear only when the 
   shrunk.model.reports[0]!.pageSize = 300;
   assert.deepEqual(dropNames(source, shrunk), ['All_Orders block options']);
 
-  // Unknown keys and values that are not carried fail closed.
+  // A value that is not carried (too large, or not a plain number) has no
+  // generated home — a counted manual step, same as an unrecognized key.
   const prop = (key: string, value: string) => ({ key, value, span: Z });
   const withBlock = (properties: ReturnType<typeof prop>[]) =>
     app({ ...source, reports: [{ ...source.reports[0]!, blocks: [{ name: 'options', properties, blocks: [], items: [], span: Z }] }] });
-  assert.deepEqual(dropNames(withBlock([prop('display rows', 'many')]), collectOutputs(withBlock([prop('display rows', 'many')]))), [
-    'All_Orders block options',
-  ]);
+  const invalidRows = withBlock([prop('display rows', 'many')]);
+  const invalidRowsOut = collectOutputs(invalidRows);
+  assert.deepEqual(dropNames(invalidRows, invalidRowsOut), []);
+  assert.ok(
+    invalidRowsOut.model.todos.find((t) => t.name === 'All_Orders block options')!.reason.includes('display rows = many'),
+    'todo reason names the uncarried display rows value',
+  );
   // `record count = enable` on a report that draws the rows table is carried
   // as the list header's row count, so it clears like the other density options.
   const counted = withBlock([prop('record count', 'enable')]);
@@ -1471,11 +1491,27 @@ test('options display rows, records per row and label width clear only when the 
   assert.equal(countedOut.model.reports[0]!.showRecordCount, true);
   assert.deepEqual(dropNames(counted, countedOut), []);
   assert.deepEqual(dropNames(withBlock([prop('record count', 'disable')]), collectOutputs(withBlock([prop('record count', 'disable')]))), []);
-  // A board view never draws the rows table: the density and record count stay a drop.
+  // A board view never draws the rows table: the density and record count
+  // have no generated home there either — recorded as a manual step.
   const board = app({ ...source, reports: [{ ...source.reports[0]!, type: 'kanban', groupBy: [{ field: 'Title' }] }] });
-  assert.deepEqual(dropNames(board, collectOutputs(board)), ['All_Orders block options']);
+  const boardOut = collectOutputs(board);
+  assert.deepEqual(dropNames(board, boardOut), []);
+  const boardTodo = boardOut.model.todos.find((t) => t.name === 'All_Orders block options')!;
+  // `display rows` is carried as the page size regardless of view, so it is
+  // proved here; only the density settings a board never draws are uncarried.
+  assert.ok(boardTodo.reason.includes('display records per row = 2'));
+  assert.ok(boardTodo.reason.includes('label width = 20%'));
+  assert.ok(!boardTodo.reason.includes('display rows ='));
   const boardCounted = app({ ...source, reports: [{ ...board.reports[0]!, blocks: [{ name: 'options', properties: [prop('record count', 'enable')], blocks: [], items: [], span: Z }] }] });
-  assert.deepEqual(dropNames(boardCounted, collectOutputs(boardCounted)), ['All_Orders block options']);
+  const boardCountedOut = collectOutputs(boardCounted);
+  assert.deepEqual(dropNames(boardCounted, boardCountedOut), []);
+  assert.ok(boardCountedOut.model.todos.find((t) => t.name === 'All_Orders block options')!.reason.includes('record count = enable'));
+
+  // Mutation test: removing the UI todo makes the uncarried board setting a
+  // silent drop again — proving it has no generated home of its own.
+  const mutatedBoard = cloneOutputs(boardOut);
+  mutatedBoard.model.todos = mutatedBoard.model.todos.filter((t) => t.name !== 'All_Orders block options');
+  assert.equal(rowStatus(board, mutatedBoard, 'All_Orders block options'), 'dropped');
 });
 
 test('a named report settings block other than options is recorded as a manual step, not silently dropped', () => {

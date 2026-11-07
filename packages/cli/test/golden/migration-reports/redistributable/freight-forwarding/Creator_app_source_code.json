@@ -58,7 +58,7 @@
       "shimmed": 486
     }
   },
-  "todoCount": 26,
+  "todoCount": 47,
   "todoKinds": [
     {
       "construct": "client-condition-uses-server",
@@ -89,7 +89,91 @@
       "count": 1
     },
     {
+      "construct": "Report Accounts has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Airports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Contacts has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
       "construct": "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+      "count": 1
+    },
+    {
+      "construct": "Report Containers has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Converted_Leads has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Deals has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Delivery_Orders has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report HS_Codes has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Invoices has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Leads has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Mode_to_SubMode has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Ports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Products has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Quotations has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report SOFs has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Submode_to_CT_ST_CMT has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Table_of_Containers has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Tax_Rates has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Users has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Vendors has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "Report Vessels has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "count": 1
     }
   ],
@@ -955,6 +1039,111 @@
       "location": "report Container_Movement_Tracking block report properties",
       "construct": "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
       "step": "In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false."
+    },
+    {
+      "location": "report SOFs block options",
+      "construct": "Report SOFs has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71."
+    },
+    {
+      "location": "report Leads block options",
+      "construct": "Report Leads has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add."
+    },
+    {
+      "location": "report Converted_Leads block options",
+      "construct": "Report Converted_Leads has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home."
+    },
+    {
+      "location": "report Accounts block options",
+      "construct": "Report Accounts has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world."
+    },
+    {
+      "location": "report Contacts block options",
+      "construct": "Report Contacts has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc."
+    },
+    {
+      "location": "report Deals block options",
+      "construct": "Report Deals has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71."
+    },
+    {
+      "location": "report Quotations block options",
+      "construct": "Report Quotations has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote."
+    },
+    {
+      "location": "report Delivery_Orders block options",
+      "construct": "Report Delivery_Orders has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time."
+    },
+    {
+      "location": "report Invoices block options",
+      "construct": "Report Invoices has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42."
+    },
+    {
+      "location": "report Airports block options",
+      "construct": "Report Airports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add."
+    },
+    {
+      "location": "report Ports block options",
+      "construct": "Report Ports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add."
+    },
+    {
+      "location": "report HS_Codes block options",
+      "construct": "Report HS_Codes has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add."
+    },
+    {
+      "location": "report Users block options",
+      "construct": "Report Users has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add."
+    },
+    {
+      "location": "report Containers block options",
+      "construct": "Report Containers has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add."
+    },
+    {
+      "location": "report Vendors block options",
+      "construct": "Report Vendors has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add."
+    },
+    {
+      "location": "report Products block options",
+      "construct": "Report Products has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add."
+    },
+    {
+      "location": "report Vessels block options",
+      "construct": "Report Vessels has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add."
+    },
+    {
+      "location": "report Tax_Rates block options",
+      "construct": "Report Tax_Rates has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add."
+    },
+    {
+      "location": "report Mode_to_SubMode block options",
+      "construct": "Report Mode_to_SubMode has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64."
+    },
+    {
+      "location": "report Submode_to_CT_ST_CMT block options",
+      "construct": "Report Submode_to_CT_ST_CMT has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64."
+    },
+    {
+      "location": "report Table_of_Containers block options",
+      "construct": "Report Table_of_Containers has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71."
     }
   ],
   "humanSteps": [
@@ -966,7 +1155,7 @@
     "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
     "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
   ],
-  "silentDrops": 39,
+  "silentDrops": 18,
   "residuals": [
     {
       "id": "field-property:New_Account.Annual_Revenue property format",
@@ -1153,174 +1342,6 @@
       "property": "property format",
       "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
       "step": "The display format for New_Invoice.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Grand_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:SOFs block options",
-      "kind": "report-feature",
-      "construct": "SOFs block options",
-      "reason": "Report SOFs block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the SOFs report were not converted. In the Catalyst console, open the SOFs report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Leads block options",
-      "kind": "report-feature",
-      "construct": "Leads block options",
-      "reason": "Report Leads block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Leads report were not converted. In the Catalyst console, open the Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Converted_Leads block options",
-      "kind": "report-feature",
-      "construct": "Converted_Leads block options",
-      "reason": "Report Converted_Leads block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Converted_Leads report were not converted. In the Catalyst console, open the Converted_Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Accounts block options",
-      "kind": "report-feature",
-      "construct": "Accounts block options",
-      "reason": "Report Accounts block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Accounts report were not converted. In the Catalyst console, open the Accounts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Contacts block options",
-      "kind": "report-feature",
-      "construct": "Contacts block options",
-      "reason": "Report Contacts block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Contacts report were not converted. In the Catalyst console, open the Contacts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Deals block options",
-      "kind": "report-feature",
-      "construct": "Deals block options",
-      "reason": "Report Deals block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Deals report were not converted. In the Catalyst console, open the Deals report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Quotations block options",
-      "kind": "report-feature",
-      "construct": "Quotations block options",
-      "reason": "Report Quotations block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Quotations report were not converted. In the Catalyst console, open the Quotations report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Delivery_Orders block options",
-      "kind": "report-feature",
-      "construct": "Delivery_Orders block options",
-      "reason": "Report Delivery_Orders block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Delivery_Orders report were not converted. In the Catalyst console, open the Delivery_Orders report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Invoices block options",
-      "kind": "report-feature",
-      "construct": "Invoices block options",
-      "reason": "Report Invoices block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Invoices report were not converted. In the Catalyst console, open the Invoices report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Airports block options",
-      "kind": "report-feature",
-      "construct": "Airports block options",
-      "reason": "Report Airports block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Airports report were not converted. In the Catalyst console, open the Airports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Ports block options",
-      "kind": "report-feature",
-      "construct": "Ports block options",
-      "reason": "Report Ports block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Ports report were not converted. In the Catalyst console, open the Ports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:HS_Codes block options",
-      "kind": "report-feature",
-      "construct": "HS_Codes block options",
-      "reason": "Report HS_Codes block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the HS_Codes report were not converted. In the Catalyst console, open the HS_Codes report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Users block options",
-      "kind": "report-feature",
-      "construct": "Users block options",
-      "reason": "Report Users block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Users report were not converted. In the Catalyst console, open the Users report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Containers block options",
-      "kind": "report-feature",
-      "construct": "Containers block options",
-      "reason": "Report Containers block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Containers report were not converted. In the Catalyst console, open the Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Vendors block options",
-      "kind": "report-feature",
-      "construct": "Vendors block options",
-      "reason": "Report Vendors block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Vendors report were not converted. In the Catalyst console, open the Vendors report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Products block options",
-      "kind": "report-feature",
-      "construct": "Products block options",
-      "reason": "Report Products block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Products report were not converted. In the Catalyst console, open the Products report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Vessels block options",
-      "kind": "report-feature",
-      "construct": "Vessels block options",
-      "reason": "Report Vessels block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Vessels report were not converted. In the Catalyst console, open the Vessels report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Tax_Rates block options",
-      "kind": "report-feature",
-      "construct": "Tax_Rates block options",
-      "reason": "Report Tax_Rates block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Tax_Rates report were not converted. In the Catalyst console, open the Tax_Rates report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Mode_to_SubMode block options",
-      "kind": "report-feature",
-      "construct": "Mode_to_SubMode block options",
-      "reason": "Report Mode_to_SubMode block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Mode_to_SubMode report were not converted. In the Catalyst console, open the Mode_to_SubMode report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Submode_to_CT_ST_CMT block options",
-      "kind": "report-feature",
-      "construct": "Submode_to_CT_ST_CMT block options",
-      "reason": "Report Submode_to_CT_ST_CMT block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Submode_to_CT_ST_CMT report were not converted. In the Catalyst console, open the Submode_to_CT_ST_CMT report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Table_of_Containers block options",
-      "kind": "report-feature",
-      "construct": "Table_of_Containers block options",
-      "reason": "Report Table_of_Containers block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Table_of_Containers report were not converted. In the Catalyst console, open the Table_of_Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
       "stepSource": "specific"
     },
     {
