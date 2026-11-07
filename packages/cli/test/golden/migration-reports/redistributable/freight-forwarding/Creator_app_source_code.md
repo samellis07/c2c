@@ -24,7 +24,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-26
+47
 
 - 11 client-condition-uses-server
 - 5 Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -33,7 +33,28 @@ App: Freight Forwarding and Feeder Solution
 - 1 Field Assistant_Phone is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Contact_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Report Accounts has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
+- 1 Report Airports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Contacts has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.
 - 1 Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
+- 1 Report Containers has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Converted_Leads has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.
+- 1 Report Deals has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+- 1 Report Delivery_Orders has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.
+- 1 Report HS_Codes has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Invoices has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.
+- 1 Report Leads has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.
+- 1 Report Mode_to_SubMode has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.
+- 1 Report Ports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Products has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Quotations has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.
+- 1 Report SOFs has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+- 1 Report Submode_to_CT_ST_CMT has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.
+- 1 Report Table_of_Containers has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+- 1 Report Tax_Rates has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Users has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Vendors has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 Report Vessels has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
 
 ## Field gaps
 
@@ -90,6 +111,48 @@ App: Freight Forwarding and Feeder Solution
   - Step: In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `report Container_Movement_Tracking block report properties` — Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
   - Step: In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false.
+- `report SOFs block options` — Report SOFs has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71.
+- `report Leads block options` — Report Leads has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add.
+- `report Converted_Leads block options` — Report Converted_Leads has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home.
+- `report Accounts block options` — Report Accounts has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world.
+- `report Contacts block options` — Report Contacts has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc.
+- `report Deals block options` — Report Deals has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71.
+- `report Quotations block options` — Report Quotations has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote.
+- `report Delivery_Orders block options` — Report Delivery_Orders has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time.
+- `report Invoices block options` — Report Invoices has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42.
+- `report Airports block options` — Report Airports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add.
+- `report Ports block options` — Report Ports has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add.
+- `report HS_Codes block options` — Report HS_Codes has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add.
+- `report Users block options` — Report Users has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add.
+- `report Containers block options` — Report Containers has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add.
+- `report Vendors block options` — Report Vendors has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add.
+- `report Products block options` — Report Products has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add.
+- `report Vessels block options` — Report Vessels has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add.
+- `report Tax_Rates block options` — Report Tax_Rates has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add.
+- `report Mode_to_SubMode block options` — Report Mode_to_SubMode has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64.
+- `report Submode_to_CT_ST_CMT block options` — Report Submode_to_CT_ST_CMT has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64.
+- `report Table_of_Containers block options` — Report Table_of_Containers has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71.
 
 ## Hidden from end users
 
@@ -109,7 +172,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## Not converted
 
-Silent drops: 39 (still counted; each has a guided step below)
+Silent drops: 18 (still counted; each has a guided step below)
 
 - `field-property:New_Account.Annual_Revenue property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Account.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Account.Annual_Revenue, then preview a record and confirm the value is displayed correctly.
@@ -145,47 +208,5 @@ Silent drops: 39 (still counted; each has a guided step below)
   - Step: The display format for New_Invoice.Tax_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Tax_Total, then preview a record and confirm the value is displayed correctly.
 - `field-property:New_Invoice.Grand_Total property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Invoice.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Grand_Total, then preview a record and confirm the value is displayed correctly.
-- `report-feature:SOFs block options` — not converted. Report SOFs block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the SOFs report were not converted. In the Catalyst console, open the SOFs report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Leads block options` — not converted. Report Leads block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Leads report were not converted. In the Catalyst console, open the Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Converted_Leads block options` — not converted. Report Converted_Leads block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Converted_Leads report were not converted. In the Catalyst console, open the Converted_Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Accounts block options` — not converted. Report Accounts block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Accounts report were not converted. In the Catalyst console, open the Accounts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Contacts block options` — not converted. Report Contacts block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Contacts report were not converted. In the Catalyst console, open the Contacts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Deals block options` — not converted. Report Deals block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Deals report were not converted. In the Catalyst console, open the Deals report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Quotations block options` — not converted. Report Quotations block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Quotations report were not converted. In the Catalyst console, open the Quotations report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Delivery_Orders block options` — not converted. Report Delivery_Orders block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Delivery_Orders report were not converted. In the Catalyst console, open the Delivery_Orders report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Invoices block options` — not converted. Report Invoices block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Invoices report were not converted. In the Catalyst console, open the Invoices report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Airports block options` — not converted. Report Airports block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Airports report were not converted. In the Catalyst console, open the Airports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Ports block options` — not converted. Report Ports block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Ports report were not converted. In the Catalyst console, open the Ports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:HS_Codes block options` — not converted. Report HS_Codes block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the HS_Codes report were not converted. In the Catalyst console, open the HS_Codes report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Users block options` — not converted. Report Users block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Users report were not converted. In the Catalyst console, open the Users report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Containers block options` — not converted. Report Containers block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Containers report were not converted. In the Catalyst console, open the Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Vendors block options` — not converted. Report Vendors block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Vendors report were not converted. In the Catalyst console, open the Vendors report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Products block options` — not converted. Report Products block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Products report were not converted. In the Catalyst console, open the Products report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Vessels block options` — not converted. Report Vessels block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Vessels report were not converted. In the Catalyst console, open the Vessels report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Tax_Rates block options` — not converted. Report Tax_Rates block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Tax_Rates report were not converted. In the Catalyst console, open the Tax_Rates report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Mode_to_SubMode block options` — not converted. Report Mode_to_SubMode block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Mode_to_SubMode report were not converted. In the Catalyst console, open the Mode_to_SubMode report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Submode_to_CT_ST_CMT block options` — not converted. Report Submode_to_CT_ST_CMT block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Submode_to_CT_ST_CMT report were not converted. In the Catalyst console, open the Submode_to_CT_ST_CMT report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
-- `report-feature:Table_of_Containers block options` — not converted. Report Table_of_Containers block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: The options for the Table_of_Containers report were not converted. In the Catalyst console, open the Table_of_Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
   - Step: The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.

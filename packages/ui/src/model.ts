@@ -1408,6 +1408,33 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   // `record count` is a header toggle on the same rows table as the density
   // options above: carried only when the report actually draws that table.
   const showRecordCount = status === 'generated' && DENSITY_VIEWS.has(view) && options.get('record count')?.toLowerCase() === 'enable';
+  // An `options` property this view never reads (a map's marker `display
+  // field`, a calendar's `display type`, a timeline's `week start day`, a
+  // kanban's `sort order` or `record count`, ...) has no generated home —
+  // mirrors optionProved in the quality audit. Recorded as a manual step so
+  // it is counted, not silently dropped.
+  if (status === 'generated' && options.size) {
+    const proved = (key: string, value: string): boolean => {
+      if (key === 'display field') return value === groupField || value === titleField;
+      if (key === 'start date') return value === startField;
+      if (key === 'end date') return value === endField;
+      if (key === 'display rows') return pageSize === reportPageSizeOption(value);
+      if (key === 'display records per row') return recordsPerRow === recordsPerRowOption(value);
+      if (key === 'label width') return labelWidth !== undefined && labelWidth === labelWidthOption(value);
+      if (key === 'record count') return (value.toLowerCase() === 'enable') === (showRecordCount === true);
+      return false;
+    };
+    const unproven = [...options].filter(([key, value]) => !proved(key, value));
+    if (unproven.length) {
+      const settings = unproven.map(([key, value]) => `${key} = ${value}`).join(', ');
+      todos.push({
+        area: 'report',
+        name: `${report.name} block options`,
+        reason: `Report ${report.name} has an \`options\` setting (${settings}) that Catalyst does not carry into the generated ${view} report.`,
+        manualStep: `In the Catalyst console, apply the \`options\` setting by hand on report ${report.name}: ${settings}.`,
+      });
+    }
+  }
   return {
     name: report.name,
     label: report.displayName || report.name,
