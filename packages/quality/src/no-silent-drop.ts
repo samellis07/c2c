@@ -732,12 +732,17 @@ function helpTextOf(annotation: PropertyBlock): string | undefined {
  *   UiField.help (decorations/labels.ts helpMessage). Proved only when the
  *   generated help equals this annotation's message — a different or missing
  *   help means this annotation was not the one carried.
+ * - A `type = none` description has its "Display As" set to neither tooltip
+ *   nor help text in Creator, so the message is never shown to a user.
+ *   Nothing is lost by not carrying it.
  * - The untyped `displayname` block beside `allow new entries` is the add-new
  *   dialog's title; other annotations have no consumer yet.
  */
 function annotationProved(annotation: PropertyBlock, ui: UiField | undefined): boolean {
   const message = helpTextOf(annotation);
   if (message !== undefined) return ui?.help === message;
+  const kind = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'type');
+  if (kind && unquote(kind.value).trim().toLowerCase() === 'none') return true;
   if (annotation.properties.some((p) => p.key.toLowerCase() === 'type')) return false;
   const display = annotation.properties.find((p) => p.key.toLowerCase() === 'displayname');
   if (!display) return false;
