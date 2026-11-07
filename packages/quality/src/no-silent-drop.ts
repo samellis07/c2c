@@ -738,10 +738,12 @@ function flagProved(flag: string, ui: UiField | undefined, field: Field): boolea
   // `description` declares the field's help text. It is carried when the
   // field's `type = help_text` or `type = tooltip` annotation message reaches
   // ui.help (decorations/labels.ts helpMessage); a bare flag with no such
-  // message is not.
+  // message is not — unless the description's own `type = none` is Creator's
+  // "do not display" mode, where showing nothing is the setting, not a drop.
   if (flag === 'description') {
     const message = helpTextMessage(field);
-    return message !== undefined && ui?.help === message;
+    if (message !== undefined) return ui?.help === message;
+    return field.annotations.some((annotation) => isNoDisplayDescription(annotation));
   }
   return false;
 }
@@ -753,6 +755,18 @@ function helpTextMessage(field: Field): string | undefined {
     if (message !== undefined) return message;
   }
   return undefined;
+}
+
+/**
+ * `description [ type = none, message = "…" ]` is Creator's "do not display"
+ * description mode: the message is stored for the builder but never shown to
+ * an end user. A generated field that carries no help text for it is the
+ * correct output, not a drop — unlike a `help_text`/`tooltip` type (which do
+ * reach the screen) or any other, genuinely unhandled type.
+ */
+function isNoDisplayDescription(annotation: PropertyBlock): boolean {
+  const kind = annotation.properties.find((p) => p.key.toLowerCase() === 'type');
+  return kind !== undefined && unquote(kind.value).trim().toLowerCase() === 'none';
 }
 
 /** Message of one annotation when it is `type = help_text` or `type = tooltip`, else undefined. */

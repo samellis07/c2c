@@ -2263,6 +2263,27 @@ test('flag description and a help_text annotation are emitted only as the genera
   assert.equal(rowStatus(bare, collectOutputs(bare), 'Visit.Notes flag description'), 'dropped');
 });
 
+test('a bare description flag is proved by a type = none annotation: Creator\'s "do not display" mode', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = none
+				message = "Not shown anywhere"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.equal(ui.help, undefined);
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+});
+
 test('flag description and a tooltip annotation are emitted only as the generated help', () => {
   const source = dsApp(`
 	form Visit
