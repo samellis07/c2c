@@ -76,6 +76,13 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
     value: 'false',
     why: 'The user cannot move the address pin on a map. The generated address field is plain text inputs and shows no map.',
   },
+  {
+    widget: 'address',
+    accept: undefined,
+    key: 'capture_coordinates',
+    value: 'false',
+    why: 'The device location is not requested. The generated address field is plain text inputs and stores no latitude or longitude.',
+  },
 ];
 
 /** True when `key = text` is a listed default the generated widget `ui` already behaves as. */
