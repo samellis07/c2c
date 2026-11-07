@@ -3281,6 +3281,38 @@ test('a target field property stays a silent drop on a non-image field', () => {
   );
 });
 
+test('an annotation field property on an image field is listed through a dedicated UI todo', () => {
+  const withAnnotation = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withAnnotation).filter((d) => d.name.includes('property annotation')),
+    [],
+  );
+  const todo = collectOutputs(withAnnotation).model.todos.find((t) => t.name === 'Orders.Photo property annotation');
+  assert.ok(todo, 'a UI todo names the annotation setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withAnnotation);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withAnnotation, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Photo property annotation'],
+  );
+});
+
+test('an annotation field property stays a silent drop on a non-image field', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property annotation')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('property annotation'))
+      .map((d) => d.name),
+    ['Orders.Notes property annotation'],
+  );
+});
+
 test('a subform field is proved against its own generated widget, not a same-named top-level field', () => {
   // The coverage ledger names a field property `${form}.${field} ${setting}` with
   // no subform path, so a subform field can share that name with a top-level

@@ -482,6 +482,12 @@ const VIDEO_DURATION_PROPERTY_KEY = 'duration';
 // setting is recorded as a manual step rather than invented as UI.
 const SHOW_ONLOAD_PROPERTY_KEY = 'show onload';
 
+// An image field's `annotation` setting lets Creator's own capture dialog draw
+// and mark up the photo before it is saved. The generated field has no drawing
+// or markup tool at all, so the setting is recorded as a manual step rather
+// than invented as UI.
+const IMAGE_ANNOTATION_PROPERTY_KEY = 'annotation';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -1004,6 +1010,18 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} sets \`target = ${target}\`; the generated image field has no clickable link, so there is no window to open it in.`,
           manualStep: `Make the image open ${target} when clicked, per your policy — this is not generated.`,
+        });
+      }
+    }
+    const annotation = prop(field, IMAGE_ANNOTATION_PROPERTY_KEY);
+    if (annotation?.trim().toLowerCase() === 'true') {
+      const name = `${formName}.${field.name} property ${IMAGE_ANNOTATION_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} is flagged \`annotation = true\`; the generated image field has no drawing or markup tool.`,
+          manualStep: `Add a drawing/markup tool for ${field.name}'s capture dialog by hand, or accept the plain photo, per your policy — this is not generated.`,
         });
       }
     }
