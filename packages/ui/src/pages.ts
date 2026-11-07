@@ -1124,13 +1124,19 @@ export function elementFromZml(
   }
   if (key === 'pc' && (attr(attributes, ['action']) || '').replace(/\s+/g, '').toLowerCase() === 'openreport') {
     const target = namedAttr(attributes, ['componentLinkName', 'linkName', 'formLinkName']);
+    const href = `#/report/${encodeURIComponent(target ?? '')}`;
+    // Same click-`parameters` gap as a button or text element pointed at a
+    // form/report: the open target is carried, the filter arguments are not.
+    const parameters = attr(attributes, ['parameters'])?.trim();
+    const droppedParameters = parameters && !href.includes(parameters) ? { droppedParameters: parameters } : {};
     return {
       tag,
       kind: 'container',
       ...(target ? { name: target } : {}),
-      href: `#/report/${encodeURIComponent(target ?? '')}`,
+      href,
       ...(width ? { width } : {}),
       ...(style ? { style } : {}),
+      ...droppedParameters,
       children,
     };
   }
@@ -1360,7 +1366,22 @@ export function elementFromZml(
     // filter by, but the generated element has nowhere to bind it; flag it as
     // a manual step so the filtering gets wired by hand.
     const criteria = kind === 'search' ? attr(attributes, ['criteriaString', 'criteria'])?.trim() : undefined;
-    return { tag, kind, ...(name ? { name } : {}), text: label, ...(href ? { href } : {}), ...(style ? { style } : {}), ...(criteria ? { droppedCriteria: criteria } : {}), children };
+    // A text/gauge element can carry the same click `parameters` a button
+    // does (the export points it at a form or report with arguments for the
+    // receiving end); those args are never wired through, so flag them too.
+    const parameters = kind !== 'search' ? attr(attributes, ['parameters'])?.trim() : undefined;
+    const droppedParameters = parameters && ![label, href].filter(Boolean).join('\n').includes(parameters) ? { droppedParameters: parameters } : {};
+    return {
+      tag,
+      kind,
+      ...(name ? { name } : {}),
+      text: label,
+      ...(href ? { href } : {}),
+      ...(style ? { style } : {}),
+      ...(criteria ? { droppedCriteria: criteria } : {}),
+      ...droppedParameters,
+      children,
+    };
   }
   const href =
     kind === 'report'
@@ -1380,6 +1401,10 @@ export function leaves(elements: UiElement[]): UiElement[] {
   const out: UiElement[] = [];
   const walk = (el: UiElement) => {
     if (el.kind === 'container') {
+      // A container still carries its own dropped click `parameters` (a
+      // `<pc>` opening a report with filter args the generator cannot wire)
+      // even though it is otherwise just a wrapper around its children.
+      if (el.droppedParameters) out.push(el);
       el.children.forEach(walk);
       return;
     }
