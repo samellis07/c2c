@@ -742,11 +742,15 @@ function flagProved(flag: string, ui: UiField | undefined, field: Field): boolea
   if (/^enable\s+linkname$/i.test(flag.trim())) return ui?.linkName === true;
   // `description` declares the field's help text. It is carried when the
   // field's `type = help_text` or `type = tooltip` annotation message reaches
-  // ui.help (decorations/labels.ts helpMessage); a bare flag with no such
-  // message is not.
+  // ui.help (decorations/labels.ts helpMessage). A description whose "Display
+  // As" is set to neither (`type = none`) is never shown to a user in
+  // Creator, so there is nothing for the flag to carry either — same
+  // reasoning as the `type = none` case in annotationProved, just reached
+  // from the other coverage row the same `description [...]` block produces.
   if (flag === 'description') {
     const message = helpTextMessage(field);
-    return message !== undefined && ui?.help === message;
+    if (message !== undefined) return ui?.help === message;
+    return descriptionAllNone(field);
   }
   return false;
 }
@@ -758,6 +762,18 @@ function helpTextMessage(field: Field): string | undefined {
     if (message !== undefined) return message;
   }
   return undefined;
+}
+
+/** True when the field has a description block and every one of them is `type = none` (Creator shows it nowhere). */
+function descriptionAllNone(field: Field): boolean {
+  const typed = field.annotations.filter((a) => a.properties.some((p) => p.key.trim().toLowerCase() === 'type'));
+  return (
+    typed.length > 0 &&
+    typed.every((a) => {
+      const kind = a.properties.find((p) => p.key.trim().toLowerCase() === 'type');
+      return kind !== undefined && unquote(kind.value).trim().toLowerCase() === 'none';
+    })
+  );
 }
 
 /** Message of one annotation when it is `type = help_text` or `type = tooltip`, else undefined. */

@@ -2421,6 +2421,38 @@ test('a description annotation with display type none is not a drop: Creator nev
   assert.equal(ui.help, undefined);
   const row = coverageLedger(source, out).find((r) => r.name.startsWith('Visit.Notes annotation'));
   assert.equal(row?.status, 'emitted');
+  // GREEN: the same `description [...]` block also produces a `flag
+  // description` coverage row (field.flags carries the bare `description`
+  // word beside the annotation). A type = none description carries nothing
+  // to either row, so the flag row is proved too, not left a silent drop.
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+});
+
+test('flag description stays a drop for an unhandled description display type (mutation)', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = none
+				message = "Internal note, never shown"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+  // RED: mutate the parsed block's display type away from the proven `none`
+  // to an unhandled value — the shortcut must not reach any type but a true
+  // none, so the flag goes back to a real, unproved drop.
+  const mutated = structuredClone(source);
+  const field = mutated.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  const typeProp = field.annotations[0]!.properties.find((p) => p.key === 'type')!;
+  typeProp.value = 'reminder';
+  assert.equal(rowStatus(mutated, collectOutputs(mutated), 'Visit.Notes flag description'), 'dropped');
 });
 
 test('an unhandled annotation type is still a silent drop', () => {
