@@ -2731,6 +2731,31 @@ test('an address field capturing GPS coordinates emits a counted UI todo with a 
   assert.equal(rowStatus(capturing, mutated, 'Site.Location property capture_coordinates'), 'dropped');
 });
 
+test('annotation = true on an image field emits a counted UI todo with a manual step, not a generated drawing tool', () => {
+  const photo = `
+	form Profile
+	{
+		Photo
+		(
+			type = image
+			annotation = true
+		)
+	}
+`;
+  const source = dsApp(photo);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Profile.Photo property annotation'), 'counted');
+  const todo = out.model.todos.find((t) => t.name === 'Profile.Photo property annotation');
+  assert.ok(todo, 'UI todo is emitted for an annotation-enabled image field');
+  assert.ok(todo.manualStep, 'annotation field todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the annotation flag a drop again — proving
+  // the generated image widget does not carry any drawing/markup tool of its own.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Profile.Photo property annotation');
+  assert.equal(rowStatus(source, mutated, 'Profile.Photo property annotation'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;

@@ -469,6 +469,12 @@ const PRIVACY_PROPERTY_KEYS = ['private', 'personal data'];
 // is recorded as a manual step rather than invented as UI.
 const SCAN_MANUAL_INPUT_PROPERTY_KEY = 'manual input';
 
+// `annotation = true` on an image field turns on Creator's draw-on-the-photo
+// markup tool. The generated image upload has no drawing surface of its own
+// (same upload/download path as a plain file field), so this is recorded as a
+// manual step rather than invented as UI.
+const IMAGE_ANNOTATION_PROPERTY_KEY = 'annotation';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -977,6 +983,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} is flagged \`capture_coordinates = true\`; the generated address field has no device-location pin or stored latitude/longitude.`,
           manualStep: `In the Catalyst console, capture and store the device's GPS coordinates for ${field.name} by hand (geolocation lookup plus latitude/longitude columns) — this is not generated.`,
+        });
+      }
+    }
+  }
+  if (widget === 'image') {
+    const value = prop(field, IMAGE_ANNOTATION_PROPERTY_KEY);
+    if (value?.trim().toLowerCase() === 'true') {
+      const name = `${formName}.${field.name} property ${IMAGE_ANNOTATION_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} is flagged \`annotation = true\`; the generated image upload has no drawing or markup tool.`,
+          manualStep: `Give users another way to mark up ${field.name} (an annotation widget or a separate review step) — the generated upload stores the file as-is, with no on-image drawing.`,
         });
       }
     }
