@@ -494,6 +494,17 @@ const BARCODE_VALUE_PROPERTY_KEY = 'value';
 // as UI. `false` (or absent) needs no step: default-equivalence.ts proves it.
 const ANNOTATION_PROPERTY_KEY = 'annotation';
 
+// A phone field's `allowedcountries` property restricts the country picker Creator
+// shows next to the number. The generated phone field is a plain text input with no
+// country picker at all, so the restriction is recorded as a manual step rather than
+// invented as UI.
+const ALLOWED_COUNTRIES_PROPERTY_KEY = 'allowedcountries';
+
+// A subform's `viewtype` property switches Creator's grid between its table layout
+// (the generated default) and a card-style list. The generated subform is always the
+// table, so a non-table viewtype is recorded as a manual step rather than invented as UI.
+const SUBFORM_VIEWTYPE_PROPERTY_KEY = 'viewtype';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -517,6 +528,11 @@ function bidirectionalReverseEligible(field: Field, formName: string, app: App, 
 function isEveryWeekday(text: string): boolean {
   const days = new Set(text.split(',').map((day) => day.trim()));
   return days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day));
+}
+
+/** `allowedhours = 00:00-23:00` (the full day) is the Creator default and needs no manual step. */
+function isFullDayHours(text: string): boolean {
+  return text.trim() === '00:00-23:00';
 }
 
 const REPORT_VIEW: Record<string, UiReport['view']> = {
@@ -1121,6 +1137,34 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
   }
+  if (widget === 'time') {
+    const allowedHours = prop(field, 'allowedhours');
+    if (allowedHours !== undefined && !isFullDayHours(allowedHours)) {
+      const name = `${formName}.${field.name} property allowedhours`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} restricts selectable times to \`${allowedHours}\`; the generated ${widget} input is a plain native control with no time-range restriction.`,
+          manualStep: `Add validation (client-side and server-side) so ${field.name} only accepts times within the Creator-allowed range (\`${allowedHours}\`) — the generated input currently accepts any time.`,
+        });
+      }
+    }
+  }
+  if (widget === 'phone') {
+    const allowedCountries = prop(field, ALLOWED_COUNTRIES_PROPERTY_KEY);
+    if (allowedCountries !== undefined && allowedCountries.trim() !== '') {
+      const name = `${formName}.${field.name} property ${ALLOWED_COUNTRIES_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} restricts the country picker to \`${allowedCountries}\`; the generated phone field is a plain text input with no country picker at all.`,
+          manualStep: `Add a country picker for ${field.name}, limited to the Creator-allowed countries (\`${allowedCountries}\`), by hand — this is not generated.`,
+        });
+      }
+    }
+  }
   if (field.lookup && (widget === 'lookup' || widget === 'lookup-multi')) {
     ui.lookup = {
       form: field.lookup.form,
@@ -1307,6 +1351,18 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} sets \`auto width = false\`; the generated subform grid has no fixed-column-width control, so its columns always size themselves.`,
           manualStep: `Give ${field.name}'s generated grid explicit column widths (CSS or a table layout) so columns stay fixed instead of auto-sizing — the generated grid currently has no width control for this.`,
+        });
+      }
+    }
+    const viewType = prop(field, SUBFORM_VIEWTYPE_PROPERTY_KEY);
+    if (viewType !== undefined && viewType.trim().toLowerCase() !== 'grid') {
+      const name = `${formName}.${field.name} property ${SUBFORM_VIEWTYPE_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`viewtype = ${viewType}\`; the generated subform is always a table grid, with no card/list layout.`,
+          manualStep: `Give ${field.name} a \`${viewType}\`-style layout by hand — the generated grid only renders as a table.`,
         });
       }
     }
