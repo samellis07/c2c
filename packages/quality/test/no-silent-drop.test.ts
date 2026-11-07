@@ -1254,6 +1254,61 @@ test('a search box whose criteria is not bound is counted by its own manual-step
   assert.ok(dropNames(source, mutated).includes('Invoice.Find'));
 });
 
+test('a text element whose click parameters are not carried through is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dashboard',
+        properties: [],
+        zml: [{ tag: 'text', attributes: { elementName: 'All_Calls', parameters: 'Owner == thisapp.loginuser' }, children: [], start: 10, end: 20 }],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Dashboard.All_Calls');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Dashboard.All_Calls' && /parameters/.test(todo.reason)));
+  // Without the generator's backing TODO the gap is a genuine drop, not a free pass.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Dashboard.All_Calls');
+  assert.ok(dropNames(source, mutated).includes('Dashboard.All_Calls'));
+});
+
+test('a pc element that opens a report is counted by its own manual-step TODO when its open parameters are not carried through', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dashboard',
+        properties: [],
+        zml: [
+          {
+            tag: 'pc',
+            attributes: { action: 'OpenReport', linkName: 'All_Events_List', parameters: 'Status == "Open"' },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Dashboard.All_Events_List');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Dashboard.All_Events_List' && /parameters/.test(todo.reason)));
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Dashboard.All_Events_List');
+  assert.ok(dropNames(source, mutated).includes('Dashboard.All_Events_List'));
+});
+
 test('a named dspZml snippet that fails to compile is counted by its own nested manual-translation TODO, not dropped', () => {
   const source = app({
     pages: [
