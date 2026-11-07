@@ -1336,6 +1336,43 @@ test('a named dspZml snippet that fails to compile is counted by its own nested 
   assert.equal(row?.via, 'UI zml todo');
 });
 
+test('a dsp snippet that compiles to a real render endpoint is emitted even though its static html is empty', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          {
+            tag: 'dsp',
+            attributes: { elementName: 'HTML Snippet' },
+            children: [],
+            text: 'htmlpage html_snippet() content <%{ %><style>.foo{color:red;}</style><%\n}%>',
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const row = coverageLedger(source, out).find((r) => r.name === 'Dash.HTML Snippet');
+  assert.equal(row?.status, 'emitted', row?.note);
+  const built = out.model.pages.find((p) => p.name === 'Dash')?.elements.find((el) => el.name === 'HTML Snippet');
+  // The whole snippet body is one Deluge island, so the static html left on
+  // the element is genuinely empty; the real output is the compiled endpoint.
+  assert.equal((built?.html ?? '').trim(), '');
+  assert.ok(built?.src, 'expected a compiled render endpoint path');
+  // Without that endpoint the empty static html is a genuine drop: a mutation
+  // that strips `src` (as if the audit ignored it) reproduces the drop.
+  const mutated = cloneOutputs(out);
+  const mutatedEl = mutated.model.pages.find((p) => p.name === 'Dash')?.elements.find((el) => el.name === 'HTML Snippet');
+  delete mutatedEl!.src;
+  assert.ok(dropNames(source, mutated).includes('Dash.HTML Snippet'));
+});
+
 test('a page element emitted as an empty stub is a drop', () => {
   const source = app({
     pages: [

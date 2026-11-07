@@ -1363,6 +1363,14 @@ function takeElement(pool: UiElement[], source: ZmlNode): UiElement | undefined 
  * Payload the generator currently drops while still emitting the node:
  * button `parameters`, search `criteria` / `criteriaString`, and KPI
  * functions other than count and sum (distinctCount and the rest).
+ *
+ * A server-side HTML snippet whose body is entirely a Deluge island (logic,
+ * a redirect, a `<style>` block) compiles to a real render endpoint
+ * (`ui.src`, a `functions/htmlpages/*.mjs` module the client fetches): the
+ * static `html` left on the element is only the markup outside that island,
+ * which is legitimately empty when the whole snippet was one island. The
+ * endpoint is the produced artifact, so an empty static `html` next to a real
+ * `src` is not a content drop.
  */
 function pageBehaviorGap(source: ZmlNode, ui: UiElement): string | undefined {
   const parameters = ciAttr(source.attributes, ['parameters']);
@@ -1375,7 +1383,7 @@ function pageBehaviorGap(source: ZmlNode, ui: UiElement): string | undefined {
   const fn = kpiFunction(source, ui);
   if (fn && !SUPPORTED_KPI.has(fn)) return `kpi ${fn}`;
   const payload = staticPayload(source, ui);
-  if (payload && ui.kind !== 'container' && ui.kind !== 'todo' && !ui.kpi && !(ui.text?.trim() || ui.html?.trim())) return 'content';
+  if (payload && ui.kind !== 'container' && ui.kind !== 'todo' && !ui.kpi && !ui.src && !(ui.text?.trim() || ui.html?.trim())) return 'content';
   return undefined;
 }
 
