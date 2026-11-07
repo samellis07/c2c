@@ -1253,6 +1253,35 @@ test('a page element whose payload was not generated is a drop even though the n
   for (const drop of drops) assert.match(drop.note ?? '', /Add one:/);
 });
 
+test('an avg (or average) KPI text element is emitted; other unsupported aggregate functions still drop', () => {
+  const element = (tag: string, attributes: Record<string, string>) => ({ tag, attributes, children: [], start: 10, end: 20 });
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          element('text', { elementName: 'Avg_Score', type: 'form data', value: 'thisapp.Exam.Score.avg' }),
+          element('text', { elementName: 'Average_Score', type: 'form data', value: 'thisapp.Exam.Score.average' }),
+          element('text', { elementName: 'Median_Score', type: 'form data', value: 'thisapp.Exam.Score.median' }),
+        ],
+        references: [],
+        span: { start: 1, end: 80 },
+      },
+    ],
+  });
+  const rows = coverageLedger(source);
+  // GREEN: the generated runtime now folds avg/average correctly (packages/ui/src/client/60-nav-pages.js
+  // kpiValue), so the coverage ledger no longer treats it as a silent drop.
+  assert.equal(rows.find((row) => row.name === 'Dash.Avg_Score')?.status, 'emitted');
+  assert.equal(rows.find((row) => row.name === 'Dash.Average_Score')?.status, 'emitted');
+  // RED (still): an aggregate kpiValue has never implemented (median) stays a named drop,
+  // proving the audit still gates on real support rather than accepting every function name.
+  const medianRow = rows.find((row) => row.name === 'Dash.Median_Score');
+  assert.equal(medianRow?.status, 'dropped');
+  assert.match(medianRow?.note ?? '', /kpi median/);
+});
+
 test('a button whose click parameters are not carried through is counted by its own manual-step TODO, not dropped', () => {
   const source = app({
     pages: [
@@ -2338,6 +2367,131 @@ test('timedisplayoptions requesting seconds is a counted manual step; a seconds-
   const notTime = cloneOutputs(collectOutputs(noSeconds));
   notTime.model.forms[0]!.fields.find((item) => item.name === 'Arrival')!.widget = 'text';
   assert.equal(rowStatus(noSeconds, notTime, 'Visit.Arrival property timedisplayoptions'), 'dropped');
+});
+
+test('allowedhours is emitted only for the full day on a generated time widget', () => {
+  const hours = (value: string): App =>
+    dsApp(`
+	form Visit
+	{
+		Start
+		(
+			type = time
+			allowedhours = ${value}
+		)
+	}
+`);
+  const fullDay = dsApp(`
+	form Visit
+	{
+		Start
+		(
+			type = time
+		)
+	}
+`);
+  assert.equal(rowStatus(fullDay, collectOutputs(fullDay), 'Visit.Start property allowedhours'), undefined);
+
+  const all = hours('00:00-23:00');
+  assert.equal(rowStatus(all, collectOutputs(all), 'Visit.Start property allowedhours'), 'emitted');
+
+  // A restricted range is not enforced by the generated input, but it is recorded
+  // as a counted manual step instead of silently dropped.
+  const restricted = hours('06:00-21:00');
+  const out = collectOutputs(restricted);
+  assert.equal(rowStatus(restricted, out, 'Visit.Start property allowedhours'), 'counted');
+  const todo = out.model.todos.find((t) => t.area === 'field' && t.name === 'Visit.Start property allowedhours');
+  assert.ok(todo, 'expected a manual todo for allowedhours = 06:00-21:00');
+  assert.match(todo!.reason, /06:00-21:00/);
+
+  // Mutation test: removing the UI todo makes the setting a silent drop again —
+  // proving the generated time input really has no range restriction.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Visit.Start property allowedhours');
+  assert.equal(rowStatus(restricted, mutated, 'Visit.Start property allowedhours'), 'dropped');
+});
+
+test('allowedcountries on a phone field is recorded as a manual country-picker step', () => {
+  const plain = dsApp(`
+	form Contact
+	{
+		Mobile
+		(
+			type = phonenumber
+		)
+	}
+`);
+  assert.equal(rowStatus(plain, collectOutputs(plain), 'Contact.Mobile property allowedcountries'), undefined);
+
+  const restricted = dsApp(`
+	form Contact
+	{
+		Mobile
+		(
+			type = phonenumber
+			allowedcountries = {in}
+		)
+	}
+`);
+  const out = collectOutputs(restricted);
+  assert.equal(rowStatus(restricted, out, 'Contact.Mobile property allowedcountries'), 'counted');
+  const todo = out.model.todos.find((t) => t.area === 'field' && t.name === 'Contact.Mobile property allowedcountries');
+  assert.ok(todo, 'expected a manual todo for allowedcountries');
+  assert.ok(todo!.manualStep, 'allowedcountries todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the setting a silent drop again —
+  // proving the generated phone field really has no country picker.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Contact.Mobile property allowedcountries');
+  assert.equal(rowStatus(restricted, mutated, 'Contact.Mobile property allowedcountries'), 'dropped');
+});
+
+test('a subform viewtype other than grid is recorded as a manual layout step', () => {
+  const view = (value: string): App =>
+    dsApp(`
+	form Orders
+	{
+		must have Line_Items
+		(
+			type = grid
+			viewtype = ${value}
+			must have Item
+			(
+				type = text
+			)
+		)
+	}
+`);
+  const defaultGrid = dsApp(`
+	form Orders
+	{
+		must have Line_Items
+		(
+			type = grid
+			must have Item
+			(
+				type = text
+			)
+		)
+	}
+`);
+  assert.equal(rowStatus(defaultGrid, collectOutputs(defaultGrid), 'Orders.Line_Items property viewtype'), undefined);
+
+  const grid = view('grid');
+  assert.equal(rowStatus(grid, collectOutputs(grid), 'Orders.Line_Items property viewtype'), 'emitted');
+
+  const list = view('list');
+  const out = collectOutputs(list);
+  assert.equal(rowStatus(list, out, 'Orders.Line_Items property viewtype'), 'counted');
+  const todo = out.model.todos.find((t) => t.area === 'field' && t.name === 'Orders.Line_Items property viewtype');
+  assert.ok(todo, 'expected a manual todo for viewtype = list');
+  assert.ok(todo!.manualStep, 'viewtype todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the setting a silent drop again —
+  // proving the generated subform really has no non-table layout.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Orders.Line_Items property viewtype');
+  assert.equal(rowStatus(list, mutated, 'Orders.Line_Items property viewtype'), 'dropped');
 });
 
 test('qrcode and barcode field properties are emitted only when the generated field marks scan', () => {

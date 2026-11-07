@@ -520,6 +520,12 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'visibility') return visibilityProved(text, ui);
   if (key === 'alloweddays') return allowedDaysProved(text, ui);
   if (key === 'timedisplayoptions') return timeDisplayProved(text, ui);
+  // `allowedhours = 00:00-23:00` (the full day) matches the generated time input's
+  // unrestricted native control; a narrower range needs a manual step (model.ts buildField).
+  if (key === 'allowedhours') return text.trim() === '00:00-23:00';
+  // `viewtype = grid` is the generated subform's only layout (always a table); any
+  // other value needs a manual step (model.ts buildField).
+  if (key === 'viewtype') return text.trim().toLowerCase() === 'grid';
   if (key === 'source') return sourceProved(text, ui);
   // `auto width = true` is the generated subform grid's only layout: its
   // columns always size themselves to their content, so that value needs no
@@ -1330,8 +1336,8 @@ function auditPageElements(app: App, out: AuditOutputs, rows: CoverageRow[]): vo
 
 type ZmlNode = App['pages'][number]['zml'][number];
 
-const SUPPORTED_KPI = new Set(['count', 'sum']);
-const UNSUPPORTED_KPI = new Set(['distinctcount', 'distinct', 'avg', 'average', 'min', 'max']);
+const SUPPORTED_KPI = new Set(['count', 'sum', 'avg', 'average']);
+const UNSUPPORTED_KPI = new Set(['distinctcount', 'distinct', 'min', 'max']);
 
 function walkZml(nodes: ZmlNode[], visit: (el: ZmlNode) => void): void {
   for (const node of nodes) {

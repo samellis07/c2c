@@ -82,12 +82,17 @@ function kpiValue(out, rows) {
   const fn = (out.getAttribute('data-kpi-fn') || '').toLowerCase();
   if (fn === 'count') return String(rows.length);
   let sum = 0;
+  let n = 0;
   for (const row of rows) {
     const raw = row && field ? row[field] : null;
-    const n = typeof raw === 'number' ? raw : Number(raw);
-    if (Number.isFinite(n)) sum += n;
+    const value = typeof raw === 'number' ? raw : Number(raw);
+    if (Number.isFinite(value)) {
+      sum += value;
+      n++;
+    }
   }
-  return Number.isInteger(sum) ? String(sum) : String(Math.round(sum * 100) / 100);
+  const result = fn === 'avg' || fn === 'average' ? (n ? sum / n : 0) : sum;
+  return Number.isInteger(result) ? String(result) : String(Math.round(result * 100) / 100);
 }
 
 /**
