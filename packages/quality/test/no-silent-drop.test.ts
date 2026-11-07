@@ -1347,6 +1347,39 @@ test('a KPI click-through whose drill-down parameters are not carried is counted
   assert.ok(dropNames(source, mutated).includes('Dashboard.All_Orders'));
 });
 
+test('an embedded report card whose criteria is not bound is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Request_Summary',
+        properties: [],
+        zml: [
+          {
+            tag: 'report',
+            attributes: { elementName: 'Report', linkName: 'Related_Orders', criteriaString: 'Request_ID == input.purchase_requisition' },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Request_Summary.Related_Orders');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(
+    out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Request_Summary.Related_Orders' && /criteria/.test(todo.reason)),
+  );
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Request_Summary.Related_Orders');
+  assert.ok(dropNames(source, mutated).includes('Request_Summary.Related_Orders'));
+});
+
 test('a named dspZml snippet that fails to compile is counted by its own nested manual-translation TODO, not dropped', () => {
   const source = app({
     pages: [

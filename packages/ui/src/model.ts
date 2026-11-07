@@ -1808,10 +1808,11 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       delete el.droppedParameters;
     }
     if (el.droppedCriteria) {
+      const what = el.tag.toLowerCase() === 'search' ? 'search' : 'report';
       todos.push({
         area: 'zml',
         name: `${page.name}.${el.name ?? el.tag}`,
-        reason: `ZML <${el.tag}> "${el.name ?? el.tag}" criteria "${el.droppedCriteria}" is not generated; wire the search filter by hand`,
+        reason: `ZML <${el.tag}> "${el.name ?? el.tag}" criteria "${el.droppedCriteria}" is not generated; wire the ${what} filter by hand`,
       });
       delete el.droppedCriteria;
     }
