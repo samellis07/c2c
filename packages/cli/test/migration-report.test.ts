@@ -54,12 +54,12 @@ test('committed fixtures carry the deterministic flag', () => {
   const lib = report.apps.find((app) => app.app === 'library-application-system');
   assert.ok(ff && lib);
   assert.equal(ff.deterministic, false);
-  assert.equal(ff.todoCount, 47);
+  assert.equal(ff.todoCount, 52);
   assert.equal(ff.fillLockEntries, 0);
-  assert.equal(ff.uiTodoCount, 36);
+  assert.equal(ff.uiTodoCount, 41);
   assert.equal(
     ff.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    47,
+    52,
   );
   // Both apps now carry personal-data field flags as counted manual-step UI
   // todos instead of silent drops, so lib has todos too (it did not before).
