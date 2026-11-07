@@ -469,6 +469,12 @@ const PRIVACY_PROPERTY_KEYS = ['private', 'personal data'];
 // is recorded as a manual step rather than invented as UI.
 const SCAN_MANUAL_INPUT_PROPERTY_KEY = 'manual input';
 
+// A video field's `duration` setting caps the recording length in Creator's own
+// capture dialog. The generated field hands recording off to the device's native
+// camera app with no such limit, so the setting is recorded as a manual step
+// rather than invented as UI.
+const VIDEO_DURATION_PROPERTY_KEY = 'duration';
+
 /**
  * A `bidirectional = Back` lookup pair gets a reverse column from the schema
  * generator only when one side is a linked grid (packages/schema/src/generator.ts
@@ -991,6 +997,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           name,
           reason: `Field ${field.name} sets \`manual input = ${manualInput}\`; the generated scan field has no free-text fallback next to the camera.`,
           manualStep: `Add a manual text entry alongside the generated scan control, or leave the field scan-only, per your policy — this is not generated.`,
+        });
+      }
+    }
+  }
+  if (widget === 'video') {
+    const duration = prop(field, VIDEO_DURATION_PROPERTY_KEY);
+    if (duration !== undefined) {
+      const name = `${formName}.${field.name} property ${VIDEO_DURATION_PROPERTY_KEY}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} sets \`duration = ${duration}\`; the generated video field hands recording off to the device camera app with no recording-length limit.`,
+          manualStep: `Enforce the ${duration}-second recording limit by hand (client-side timer, or server-side rejection of longer uploads), or accept recordings of any length, per your policy — this is not generated.`,
         });
       }
     }
