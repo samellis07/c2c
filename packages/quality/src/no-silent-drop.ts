@@ -1233,8 +1233,12 @@ function auditPageElements(app: App, out: AuditOutputs, rows: CoverageRow[]): vo
       // instead). That reads as a dropped `content` payload, but nothing was
       // lost: a failed compile is the only case that keeps this node counted
       // through a nested same-tag TODO child, so its absence here means the
-      // snippet compiled fine and the empty output is correct.
-      if (found && gap === 'content' && found.kind === 'html' && !snippetTodoChild) {
+      // snippet compiled fine and the empty output is correct. Scoped to the
+      // server-snippet tags specifically (not every `kind === 'html'`
+      // element, which also covers plain `<html>`/`<snippet>`/`<htmlsnippet>`
+      // blocks whose own content gaps are real drops, not compile artifacts).
+      const isServerSnippetTag = found?.tag === 'dsp' || found?.tag === 'dspzml';
+      if (found && gap === 'content' && found.kind === 'html' && isServerSnippetTag && !snippetTodoChild) {
         rows.push({ kind: 'page-element', name, status: 'emitted', via: 'UI page element' });
         return;
       }
