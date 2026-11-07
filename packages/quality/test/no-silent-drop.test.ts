@@ -2731,6 +2731,39 @@ test('an address field capturing GPS coordinates emits a counted UI todo with a 
   assert.equal(rowStatus(capturing, mutated, 'Site.Location property capture_coordinates'), 'dropped');
 });
 
+test('an image field enabling a link name or title emits a counted UI todo with a manual step, not a generated clickable image', () => {
+  const imageField = (value: string): string => `
+	form Company
+	{
+		Logo
+		(
+			type = image
+			enable = ${value}
+		)
+	}
+`;
+  const linked = dsApp(imageField('link'));
+  const linkedOut = collectOutputs(linked);
+  assert.equal(rowStatus(linked, linkedOut, 'Company.Logo property enable'), 'counted');
+  const todo = linkedOut.model.todos.find((t) => t.name === 'Company.Logo property enable');
+  assert.ok(todo, 'UI todo is emitted for an image field enabling a link name');
+  assert.ok(todo.manualStep, 'enable-link image todo names a manual step');
+
+  const titled = dsApp(imageField('link, title'));
+  assert.equal(rowStatus(titled, collectOutputs(titled), 'Company.Logo property enable'), 'counted');
+
+  // An `enable` value naming neither link nor title adds nothing a generated
+  // image field would need to carry.
+  const other = dsApp(imageField('download'));
+  assert.equal(rowStatus(other, collectOutputs(other), 'Company.Logo property enable'), 'dropped');
+
+  // Mutation test: removing the UI todo makes enable=link a drop again — proving
+  // the setting is not silently carried by any generated widget.
+  const mutated = cloneOutputs(linkedOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Company.Logo property enable');
+  assert.equal(rowStatus(linked, mutated, 'Company.Logo property enable'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
