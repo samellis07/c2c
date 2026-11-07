@@ -1110,6 +1110,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
     });
     if (!field.subfields.length) ui.note = 'The export lists no parts. The generated parts are the schema mapping defaults.';
   }
+  if (widget === 'address') {
+    const adjustUsingMap = prop(field, 'adjust_using_map');
+    if (adjustUsingMap !== undefined && adjustUsingMap.trim().toLowerCase() === 'true') {
+      const name = `${formName}.${field.name} property adjust_using_map`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} is flagged \`adjust_using_map = true\`; the generated address field is plain text inputs and shows no map to adjust the pin on.`,
+          manualStep: `Add a map component so ${field.name} lets the user drag the pin to refine the address — the generated field has no map.`,
+        });
+      }
+    }
+  }
   if (widget === 'subform') {
     // Columns come from the linked form — skipping the bidirectional pointer
     // back to this field and layout blocks that are not columns — or from

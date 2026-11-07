@@ -50,11 +50,14 @@ test('a non-default value of a listed property stays a drop', () => {
   assert.equal(status(dsApp('image', ['switch camera = false']), 'switch camera'), 'dropped');
   assert.equal(status(dsApp('image', ['show gallery = false']), 'show gallery'), 'dropped');
   assert.equal(status(dsApp('upload file', ['browse = unknown_cloud']), 'browse'), 'dropped');
-  assert.equal(status(dsApp('address', ['adjust_using_map = true']), 'adjust_using_map'), 'dropped');
 });
 
 test('browse with uncarried cloud document sources emits a counted UI todo', () => {
   assert.equal(status(dsApp('upload file', ['browse = local_drive, google_docs, zoho_docs']), 'browse'), 'counted');
+});
+
+test('adjust_using_map = true on an address field emits a counted UI todo', () => {
+  assert.equal(status(dsApp('address', ['adjust_using_map = true']), 'adjust_using_map'), 'counted');
 });
 
 test('a listed value on a widget the row does not name stays a drop', () => {

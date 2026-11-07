@@ -656,11 +656,14 @@ test('committed status doc is structurally canonical without gallery fixtures', 
 });
 
 test('an app with no todos is deterministic only when it also has no silent drops', () => {
-  // An address field with adjust_using_map=true has no workflow todos but is
-  // still a silent drop (the map-pin UI is not generated). The redistributable
-  // library fixture used to serve this role; it now carries its own todos
-  // (personal-data field flags), so it no longer has zero residual todos.
-  const dropSource = 'application "Demo"\n{\n\tform Profile\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tAttachment\n\t\t(\n\t\t\ttype = address\n\t\t\tadjust_using_map = true\n\t\t)\n\t}\n}\n';
+  // A time field with timedisplayoptions="hh:mm:ss" has no workflow todos but is
+  // still a silent drop (the generated datetime-local input shows hours and
+  // minutes, not seconds, and this is deliberately not a listed default
+  // equivalence -- see packages/quality/src/default-equivalence.ts). An
+  // address field with adjust_using_map=true used to serve this role; it now
+  // carries its own counted manual-step todo, so it no longer has zero
+  // residual todos.
+  const dropSource = 'application "Demo"\n{\n\tform Profile\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tStart\n\t\t(\n\t\t\ttype = time\n\t\t\ttimedisplayoptions = "hh:mm:ss"\n\t\t)\n\t}\n}\n';
   const library = deriveIr(parse(dropSource));
   const clean: App = {
     ...emptyApp('empty'),
