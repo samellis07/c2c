@@ -1234,6 +1234,21 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   let status: 'generated' | 'todo' = view === 'todo' ? 'todo' : 'generated';
   let todo: string | undefined;
   const options = reportOptions(report);
+  // Only `options` has a model home (reportOptions above, optionProved in the
+  // quality audit). Any other named settings block the Creator export
+  // carries — e.g. a native `filters`, `sorting` or `grouping` block, or one
+  // of Creator's other per-report settings groups — has none, so it is
+  // recorded as a manual step rather than silently discarded.
+  for (const block of report.blocks) {
+    if (block.name.trim().toLowerCase() === 'options') continue;
+    const settings = block.properties.map((property) => `${property.key.trim()} = ${unquote(property.value).trim()}`).join(', ') || '(no properties)';
+    todos.push({
+      area: 'report',
+      name: `${report.name} block ${block.name}`,
+      reason: `Report ${report.name} has a \`${block.name}\` settings block (${settings}) that Catalyst generates no equivalent for.`,
+      manualStep: `In the Catalyst console, apply the \`${block.name}\` settings by hand on report ${report.name}: ${settings}.`,
+    });
+  }
   const displayField = options.get('display field');
   const pageSize = reportPageSizeOption(options.get('display rows')) ?? LIMITS.zcqlRowsPerQuery;
   let groupField = groupBy[0]?.field;

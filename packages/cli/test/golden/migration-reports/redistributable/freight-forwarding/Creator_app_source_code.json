@@ -58,7 +58,7 @@
       "shimmed": 486
     }
   },
-  "todoCount": 25,
+  "todoCount": 26,
   "todoKinds": [
     {
       "construct": "client-condition-uses-server",
@@ -86,6 +86,10 @@
     },
     {
       "construct": "Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 1
+    },
+    {
+      "construct": "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
       "count": 1
     }
   ],
@@ -946,6 +950,11 @@
       "location": "field New_Lead.Mobile property personal data",
       "construct": "Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
       "step": "In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "location": "report Container_Movement_Tracking block report properties",
+      "construct": "Report Container_Movement_Tracking has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+      "step": "In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false."
     }
   ],
   "humanSteps": [
@@ -957,7 +966,7 @@
     "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
     "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
   ],
-  "silentDrops": 40,
+  "silentDrops": 39,
   "residuals": [
     {
       "id": "field-property:New_Account.Annual_Revenue property format",
@@ -1144,14 +1153,6 @@
       "property": "property format",
       "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
       "step": "The display format for New_Invoice.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Grand_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Container_Movement_Tracking block report properties",
-      "kind": "report-feature",
-      "construct": "Container_Movement_Tracking block report properties",
-      "reason": "Report Container_Movement_Tracking block report properties is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The report properties for Container_Movement_Tracking were not converted. In the Catalyst console, open the Container_Movement_Tracking report and configure its report properties, then preview it and verify the layout and visible data match the source app.",
       "stepSource": "specific"
     },
     {
