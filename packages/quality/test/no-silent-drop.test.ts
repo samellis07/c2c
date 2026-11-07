@@ -2307,6 +2307,39 @@ test('a subform grid with auto width disabled is recorded as a manual column-wid
   assert.equal(rowStatus(disabled, mutated, 'Orders.Line_Items property auto width'), 'dropped');
 });
 
+test('timedisplayoptions requesting seconds is a counted manual step; a seconds-free format is emitted', () => {
+  const field = (value: string, type = 'datetime'): string => `
+	form Visit
+	{
+		Arrival
+		(
+			type = ${type}
+			timedisplayoptions = "${value}"
+		)
+	}
+`;
+  const noSeconds = dsApp(field('hh:mm'));
+  assert.equal(rowStatus(noSeconds, collectOutputs(noSeconds), 'Visit.Arrival property timedisplayoptions'), 'emitted');
+  const noSecondsTime = dsApp(field('hh:mm a', 'time'));
+  assert.equal(rowStatus(noSecondsTime, collectOutputs(noSecondsTime), 'Visit.Arrival property timedisplayoptions'), 'emitted');
+
+  // A format that shows seconds is not enforced by the generated native input,
+  // but it is recorded as a counted manual step instead of silently dropped.
+  for (const type of ['datetime', 'time']) {
+    const seconds = dsApp(field('hh:mm:ss', type));
+    const secondsOut = collectOutputs(seconds);
+    assert.equal(rowStatus(seconds, secondsOut, 'Visit.Arrival property timedisplayoptions'), 'counted', type);
+    const todo = secondsOut.model.todos.find((t) => t.area === 'field' && t.name === 'Visit.Arrival property timedisplayoptions');
+    assert.ok(todo, `expected a manual todo for timedisplayoptions on a ${type} field`);
+    assert.match(todo!.reason, /hh:mm:ss/);
+  }
+
+  // Not a native time/datetime input any more: the default is no longer shown to hold.
+  const notTime = cloneOutputs(collectOutputs(noSeconds));
+  notTime.model.forms[0]!.fields.find((item) => item.name === 'Arrival')!.widget = 'text';
+  assert.equal(rowStatus(noSeconds, notTime, 'Visit.Arrival property timedisplayoptions'), 'dropped');
+});
+
 test('qrcode and barcode field properties are emitted only when the generated field marks scan', () => {
   const source = dsApp(`
 	form Book
