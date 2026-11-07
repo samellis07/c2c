@@ -43,6 +43,7 @@
     "Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.": 1,
     "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand": 1,
     "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand": 1,
-    "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand": 1
+    "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand": 1,
+    "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand": 1
   }
 }
