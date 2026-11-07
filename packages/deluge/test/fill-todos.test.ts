@@ -56,9 +56,13 @@ function sources(result: { files: { path: string; source: string }[] }): string 
   return result.files.map((file) => `${file.path}\n${file.source}`).join('\n---\n');
 }
 
-/** The walk fills script holes. An uninvoked form-event server body is generator accounting, not a hole. */
+/**
+ * The walk fills script holes. An uninvoked form-event server body and an
+ * uncarried translation block are generator accounting, not a hole: neither
+ * has a generated Deluge TODO() call for the walker to find.
+ */
 function fillableTodos<T extends { construct: string }>(todos: readonly T[]): T[] {
-  return todos.filter((todo) => todo.construct !== FORM_EVENT_SERVER_UNINVOKED);
+  return todos.filter((todo) => todo.construct !== FORM_EVENT_SERVER_UNINVOKED && todo.construct !== 'translation');
 }
 
 /**

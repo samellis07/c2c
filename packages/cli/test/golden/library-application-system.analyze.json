@@ -522,61 +522,6 @@
   ],
   "residuals": [
     {
-      "id": "field-property:Book.Genre property others option",
-      "kind": "field-property",
-      "construct": "Book.Genre property others option",
-      "form": "Book",
-      "field": "Genre",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for Book.Genre was not converted. In the Catalyst console, configure that setting for Book.Genre, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Book_Transaction.Member property sortorder",
-      "kind": "field-property",
-      "construct": "Book_Transaction.Member property sortorder",
-      "form": "Book_Transaction",
-      "field": "Member",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for Book_Transaction.Member was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Member, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Book_Transaction.Book property sortorder",
-      "kind": "field-property",
-      "construct": "Book_Transaction.Book property sortorder",
-      "form": "Book_Transaction",
-      "field": "Book",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for Book_Transaction.Book was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Book, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Staff_Members.Staff_Name property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Staff_Name property personal data",
-      "form": "Staff_Members",
-      "field": "Staff_Name",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
-      "step": "The personal-data setting for Staff_Members.Staff_Name was not converted. In the Catalyst console, mark Staff_Members.Staff_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Staff_Members.Staff_Email property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Staff_Email property personal data",
-      "form": "Staff_Members",
-      "field": "Staff_Email",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
-      "step": "The personal-data setting for Staff_Members.Staff_Email was not converted. In the Catalyst console, mark Staff_Members.Staff_Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:Staff_Members.Phone_Number property defaultcountry",
       "kind": "field-property",
       "construct": "Staff_Members.Phone_Number property defaultcountry",
@@ -586,89 +531,6 @@
       "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Staff_Members.Phone_Number property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Phone_Number property personal data",
-      "form": "Staff_Members",
-      "field": "Phone_Number",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
-      "step": "The personal-data setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, mark Staff_Members.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Book_Report block options",
-      "kind": "report-feature",
-      "construct": "Book_Report block options",
-      "reason": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Book_Report report were not converted. In the Catalyst console, open the Book_Report report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:Book_by_Genre block options",
-      "kind": "report-feature",
-      "construct": "Book_by_Genre block options",
-      "reason": "Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the Book_by_Genre report were not converted. In the Catalyst console, open the Book_by_Genre report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:All_Member_Infos block options",
-      "kind": "report-feature",
-      "construct": "All_Member_Infos block options",
-      "reason": "Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the All_Member_Infos report were not converted. In the Catalyst console, open the All_Member_Infos report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:All_Book_Transactions block options",
-      "kind": "report-feature",
-      "construct": "All_Book_Transactions block options",
-      "reason": "Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the All_Book_Transactions report were not converted. In the Catalyst console, open the All_Book_Transactions report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "report-feature:All_Staff_Members block options",
-      "kind": "report-feature",
-      "construct": "All_Staff_Members block options",
-      "reason": "Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "page-element:DashBoard.Book_Report #1",
-      "kind": "page-element",
-      "construct": "DashBoard.Book_Report",
-      "reason": "ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "page-element:DashBoard.Book_Report #2",
-      "kind": "page-element",
-      "construct": "DashBoard.Book_Report",
-      "reason": "ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "page-element:DashBoard.All_Book_Transactions #1",
-      "kind": "page-element",
-      "construct": "DashBoard.All_Book_Transactions",
-      "reason": "ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "page-element:DashBoard.All_Book_Transactions #2",
-      "kind": "page-element",
-      "construct": "DashBoard.All_Book_Transactions",
-      "reason": "ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
-      "stepSource": "specific"
     }
   ],
   "deluge": {
@@ -676,12 +538,76 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 1,
+    "todo": 12,
     "todoLocations": [
       {
         "location": "app",
         "construct": "translation",
-        "scope": "app"
+        "scope": "app",
+        "manualStep": "Translation \"Language_Settings\": 1 strings (e.g. \"LANGAGUE_WITH_LOGIN\") are not migrated: the block holds no string labels the client i18n table can carry. The generated app renders the default-language text only. To serve \"Language_Settings\", list these entries as label strings in the translation block."
+      },
+      {
+        "location": "field Staff_Members.Staff_Name property personal data",
+        "construct": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "field Staff_Members.Staff_Email property personal data",
+        "construct": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "field Staff_Members.Phone_Number property personal data",
+        "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "report Book_Report block options",
+        "construct": "Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46."
+      },
+      {
+        "location": "report Book_by_Genre block options",
+        "construct": "Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music."
+      },
+      {
+        "location": "report All_Member_Infos block options",
+        "construct": "Report All_Member_Infos has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world."
+      },
+      {
+        "location": "report All_Book_Transactions block options",
+        "construct": "Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world."
+      },
+      {
+        "location": "report All_Staff_Members block options",
+        "construct": "Report All_Staff_Members has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world."
+      },
+      {
+        "location": "page DashBoard.Book_Report",
+        "construct": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+        "scope": "ui"
+      },
+      {
+        "location": "page DashBoard.Book_Report",
+        "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+        "scope": "ui"
+      },
+      {
+        "location": "page DashBoard.All_Book_Transactions",
+        "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+        "scope": "ui"
       }
     ]
   },
@@ -690,28 +616,8 @@
       "kind": "deluge",
       "label": "app",
       "detail": "translation",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Book property sortorder",
-      "detail": "Field Book_Transaction.Book property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
-      "manualStep": "The sort order for Book_Transaction.Book was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Book, then preview the form or report and confirm values appear in that order."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Member property sortorder",
-      "detail": "Field Book_Transaction.Member property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The sort order for Book_Transaction.Member was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Member, then preview the form or report and confirm values appear in that order."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book.Genre property others option",
-      "detail": "Field Book.Genre property others option is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The property others option setting for Book.Genre was not converted. In the Catalyst console, configure that setting for Book.Genre, then preview the form or report and confirm the field behaves as expected."
+      "manualStep": "Translation \"Language_Settings\": 1 strings (e.g. \"LANGAGUE_WITH_LOGIN\") are not migrated: the block holds no string labels the client i18n table can carry. The generated app renders the default-language text only. To serve \"Language_Settings\", list these entries as label strings in the translation block."
     },
     {
       "kind": "deluge",
@@ -721,114 +627,140 @@
       "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Phone_Number property personal data",
-      "detail": "Field Staff_Members.Phone_Number property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The personal-data setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, mark Staff_Members.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled."
+      "kind": "ui",
+      "label": "field Staff_Members.Phone_Number property personal data",
+      "detail": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Staff_Email property personal data",
-      "detail": "Field Staff_Members.Staff_Email property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The personal-data setting for Staff_Members.Staff_Email was not converted. In the Catalyst console, mark Staff_Members.Staff_Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled."
+      "kind": "ui",
+      "label": "field Staff_Members.Staff_Email property personal data",
+      "detail": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Staff_Name property personal data",
-      "detail": "Field Staff_Members.Staff_Name property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The personal-data setting for Staff_Members.Staff_Name was not converted. In the Catalyst console, mark Staff_Members.Staff_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled."
+      "kind": "ui",
+      "label": "field Staff_Members.Staff_Name property personal data",
+      "detail": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.All_Book_Transactions",
-      "detail": "ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
+      "kind": "ui",
+      "label": "page DashBoard.All_Book_Transactions",
+      "detail": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.All_Book_Transactions",
-      "detail": "ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
+      "kind": "ui",
+      "label": "page DashBoard.Book_Report",
+      "detail": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.Book_Report",
-      "detail": "ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
+      "kind": "ui",
+      "label": "page DashBoard.Book_Report",
+      "detail": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.Book_Report",
-      "detail": "ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.",
-      "scope": "app",
-      "manualStep": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected."
+      "kind": "ui",
+      "label": "report All_Book_Transactions block options",
+      "detail": "Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Book_Transactions block options",
-      "detail": "Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the All_Book_Transactions report were not converted. In the Catalyst console, open the All_Book_Transactions report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
+      "kind": "ui",
+      "label": "report All_Member_Infos block options",
+      "detail": "Report All_Member_Infos has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Member_Infos block options",
-      "detail": "Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the All_Member_Infos report were not converted. In the Catalyst console, open the All_Member_Infos report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
+      "kind": "ui",
+      "label": "report All_Staff_Members block options",
+      "detail": "Report All_Staff_Members has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Staff_Members block options",
-      "detail": "Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
+      "kind": "ui",
+      "label": "report Book_by_Genre block options",
+      "detail": "Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music."
     },
     {
-      "kind": "deluge",
-      "label": "silent drop report-feature: Book_by_Genre block options",
-      "detail": "Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the Book_by_Genre report were not converted. In the Catalyst console, open the Book_by_Genre report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: Book_Report block options",
-      "detail": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app",
-      "manualStep": "The options for the Book_Report report were not converted. In the Catalyst console, open the Book_Report report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app."
+      "kind": "ui",
+      "label": "report Book_Report block options",
+      "detail": "Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46."
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 1,
+    "todoCount": 12,
     "fillLockEntries": 0,
     "todoKinds": [
       {
+        "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "count": 1
+      },
+      {
+        "construct": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "count": 1
+      },
+      {
+        "construct": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "count": 1
+      },
+      {
+        "construct": "Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report All_Member_Infos has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report All_Staff_Members has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+        "count": 1
+      },
+      {
+        "construct": "Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
         "construct": "translation",
+        "count": 1
+      },
+      {
+        "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+        "count": 1
+      },
+      {
+        "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+        "count": 1
+      },
+      {
+        "construct": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
         "count": 1
       }
     ],
-    "uiTodoCount": 0,
-    "silentDrops": 16,
+    "uiTodoCount": 11,
+    "silentDrops": 1,
     "silentDropKinds": [
       {
         "construct": "field-property",
-        "count": 7
-      },
-      {
-        "construct": "report-feature",
-        "count": 5
-      },
-      {
-        "construct": "page-element",
-        "count": 4
+        "count": 1
       }
     ]
   },
