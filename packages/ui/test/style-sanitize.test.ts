@@ -14,6 +14,7 @@ import {
   droppedStyleRules,
   droppedStyleRulesTodo,
   inlineConstantStyleCalls,
+  malformedStyleDeclarations,
   replaceStyleCalls,
   sanitizeSnippet as buildSanitize,
   stripStyleComments,
@@ -198,6 +199,36 @@ test('a page snippet that loses a style declaration is listed as a TODO', () => 
   }).find((el) => el.kind === 'html');
   assert.match(snippet?.html ?? '', /style="color: red" data-style-dropped="transform"/);
   assert.match(snippet?.html ?? '', /style="border: 1px solid rgb\(1, 2, 3\)"/);
+});
+
+test('a malformed inline declaration is named by its source text in the TODO, not as ?', () => {
+  const { model, html } = pageModel([
+    '<table><tr><td style = "width=3%">1</td><td style="color: red">x</td></tr></table>',
+    '<p style="margin=4px; color: blue">a</p><% if (true) { %><b>b</b><% } %>',
+  ]);
+  const todos = model.todos.filter((item) => /Inline style/.test(item.reason));
+  assert.deepEqual(
+    todos.map((item) => item.reason),
+    [
+      'Inline style declarations not carried over (unsafe or unsupported CSS): "width=3%"',
+      'Inline style declarations not carried over (unsafe or unsupported CSS): "margin=4px"',
+    ],
+  );
+  assert.match(todos[0]?.manualStep ?? '', /lost the inline style declarations "width=3%" to the sanitizer/);
+  assert.ok(todos.every((item) => !/declarations \?|: \?$/.test(`${item.reason} ${item.manualStep}`)), JSON.stringify(todos));
+  // The source text only feeds the manual step; the generated element does not carry it.
+  assert.ok(html.every((el) => el.refusedStyles === undefined));
+  assert.match(html[0]?.html ?? '', /data-style-dropped="\?"/);
+});
+
+test('malformed inline declarations are listed in document order and a refused named property is not one', () => {
+  assert.deepEqual(malformedStyleDeclarations(`<a style="width=3%; color: red">x</a><b style='behavior: url(x)'>y</b><i style="@import x;  a  =  b ">z</i>`), [
+    'width=3%',
+    '@import x',
+    'a = b',
+  ]);
+  assert.deepEqual(malformedStyleDeclarations('<p style="color: red; margin: 0">ok</p><p>nostyle</p>'), []);
+  assert.deepEqual(malformedStyleDeclarations(`<p style="x=${'1'.repeat(9000)}">big</p>`).map((text) => text.length), [80]);
 });
 
 /** Escape text for a double-quoted Deluge string literal (backslashes first, then quotes, in one pass). */

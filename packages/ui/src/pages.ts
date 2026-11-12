@@ -197,6 +197,8 @@ export interface UiElement {
   droppedTags?: string[];
   /** Static CSS rules in `<style>` elements the sanitizer dropped from `html`; the page counts them as one TODO. */
   droppedStyleRules?: number;
+  /** Source text of the malformed inline style declarations the sanitizer labels `?`, in document order; the page names them in its manual step. */
+  refusedStyles?: string[];
   staticCss?: string;
   /** Endpoint the runtime POSTs to for a server-rendered snippet (`data-snippet-src`). */
   src?: string;
@@ -1257,6 +1259,29 @@ export function droppedStyles(html: string, sanitized = false): string[] {
 }
 
 /**
+ * Source text of each inline style declaration `cleanStyle` refuses as `?`
+ * (not a `property: value` pair, such as `width=3%`), in document order, so a
+ * manual step can name what was written instead of `?`.
+ */
+export function malformedStyleDeclarations(raw: string): string[] {
+  const found: string[] = [];
+  for (const match of String(raw ?? '').matchAll(/\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    const value = match[1] ?? match[2] ?? '';
+    const show = (text: string) => {
+      const flat = text.replace(/\s+/g, ' ').trim();
+      return flat.length > 80 ? `${flat.slice(0, 77)}...` : flat;
+    };
+    if (value.length > STYLE_TEXT_MAX) {
+      found.push(show(value));
+      continue;
+    }
+    const pieces = (value.includes('/*') ? stripStyleComments(value) : value).split(';').map((piece) => piece.trim()).filter(Boolean);
+    for (const piece of pieces) if (cleanStyle(piece).dropped.includes('?')) found.push(show(piece));
+  }
+  return found;
+}
+
+/**
  * Top-level rules in a stylesheet: each `{}` block (an `@media` block counts
  * once) and each `;`-terminated `@` statement such as `@import`. Leftover
  * text after the last rule counts as one more, so non-empty CSS is never zero.
@@ -1931,6 +1956,8 @@ export function elementFromZml(
     const source = body ?? attr(attributes, ['value', 'content', 'html', 'text']) ?? '';
     const decoded = decodeXmlEntities(source);
     const resolved = resolveStaticConditionals(decoded);
+    const refused = malformedStyleDeclarations(resolved);
+    const refusedStyles = refused.length ? { refusedStyles: refused } : {};
     const popups = popupActions(resolved);
     const imageActions = dedupeImageActions([...zmlImageActions(resolved), ...zmlExecuteFunctionButtons(resolved)]);
     // The attribute is XML-escaped, so `<% %>` islands show up as `&lt;%`.
@@ -1971,6 +1998,7 @@ export function elementFromZml(
           kind,
           ...(name ? { name } : {}),
           html: compiled.html ?? '',
+          ...refusedStyles,
           ...lostCss,
           ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}),
           ...(compiled.includes?.length ? { includes: compiled.includes } : {}),
@@ -1986,6 +2014,7 @@ export function elementFromZml(
           kind,
           ...(name ? { name } : {}),
           html: compiled.html ?? '',
+          ...refusedStyles,
           ...lostCss,
           ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}),
           src: compiled.src,
@@ -2026,6 +2055,7 @@ export function elementFromZml(
           kind,
           ...(name ? { name } : {}),
           html: sanitizeSnippet(withoutDeluge),
+          ...refusedStyles,
           ...(popups.length ? { popups } : {}),
           children: [...snippetTodos, ...actionItems, ...children],
         };
@@ -2061,6 +2091,7 @@ export function elementFromZml(
       kind,
       ...(name ? { name } : {}),
       html,
+      ...refusedStyles,
       ...lostCss,
       ...(droppedTags.length ? { droppedTags } : {}),
       ...(popups.length ? { popups } : {}),
