@@ -1,0 +1,54 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Lookup_Path"
+{
+	forms
+	{
+		form Parent
+		{
+			Name
+			(
+				type = text
+				displayname = "Name"
+			)
+			Status
+			(
+				type = text
+				displayname = "Status"
+			)
+		}
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+			Owner
+			(
+				type = picklist
+				displayname = "Owner"
+				values = Parent.Name
+				displayformat = [Name]
+			)
+		}
+	}
+	reports
+	{
+		list Open_Items
+		{
+			displayName = "Open Items"
+			show all rows from Item [Owner.Status == "Open"]
+			(
+				Title as "Title"
+			)
+			filters
+			(
+				"Named" : Title == "a"
+			)
+		}
+	}
+}

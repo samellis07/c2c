@@ -1,0 +1,97 @@
+app: restaurants
+route: #/report/All_Restaurants
+state: denied
+viewport: desktop 1280
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Restaurants"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a href="#/form/Restaurant"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Restaurant"
+        li
+          a href="#/form/Visit"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Visit"
+        li
+          a aria-current="page" href="#/report/All_Restaurants"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "All Restaurants"
+        li
+          a href="#/page/Guide"
+            svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+              rect
+              rect
+              rect
+              rect
+            span
+              "Dining Guide"
+  main tabindex="-1"
+    section class="c2c-card c2c-denied" role="alert"
+      h1
+        "You don't have access to"
+        "All Restaurants"
+      p
+        "Ask the app administrator for access."
+      p
+        a class="c2c-link" href="#/"
+          "Go to home"
+  nav aria-label="Tabs"
+    a href="#/form/Restaurant"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Restaurant"
+    a href="#/form/Visit"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Visit"
+    a aria-current="page" href="#/report/All_Restaurants"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "All Restaurants"
+    a href="#/page/Guide"
+      svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+        rect
+        rect
+        rect
+        rect
+      span
+        "Dining Guide"

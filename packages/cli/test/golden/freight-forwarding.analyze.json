@@ -1,0 +1,1833 @@
+{
+  "schema": "c2c-analyze/1",
+  "app": {
+    "name": "Freight Forwarding and Feeder Solution",
+    "shape": "B",
+    "dialect": "D2"
+  },
+  "matrix": {
+    "matrix": "feature-matrix-v4",
+    "source": "feature-matrix-v4",
+    "sourceSha256": "1f256aed8a4e4826ce02181864bb3a6b0e60acab97465538fe695e9f178cb26e",
+    "snapshotDate": "2026-10-06",
+    "provisional": false
+  },
+  "features": {
+    "used": [
+      {
+        "id": 1,
+        "area": "Field type",
+        "feature": "Single line",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 160
+      },
+      {
+        "id": 2,
+        "area": "Field type",
+        "feature": "Multi line",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 3,
+        "area": "Field type",
+        "feature": "Email",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 4,
+        "area": "Field type",
+        "feature": "Phone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 7
+      },
+      {
+        "id": 5,
+        "area": "Field type",
+        "feature": "Number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 24
+      },
+      {
+        "id": 6,
+        "area": "Field type",
+        "feature": "Decimal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 27
+      },
+      {
+        "id": 8,
+        "area": "Field type",
+        "feature": "Currency",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 32
+      },
+      {
+        "id": 9,
+        "area": "Field type",
+        "feature": "Date",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 23
+      },
+      {
+        "id": 11,
+        "area": "Field type",
+        "feature": "Time",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 12,
+        "area": "Field type",
+        "feature": "Decision box",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 13,
+        "area": "Field type",
+        "feature": "Dropdown",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 122
+      },
+      {
+        "id": 15,
+        "area": "Field type",
+        "feature": "Multi select",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 17,
+        "area": "Field type",
+        "feature": "Lookup single",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 57
+      },
+      {
+        "id": 19,
+        "area": "Field type",
+        "feature": "Subform",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 8
+      },
+      {
+        "id": 22,
+        "area": "Field type",
+        "feature": "Image",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 7
+      },
+      {
+        "id": 26,
+        "area": "Field type",
+        "feature": "URL",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 29,
+        "area": "Field type",
+        "feature": "Auto number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 30,
+        "area": "Field type",
+        "feature": "Name (composite)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 32,
+        "area": "Field type",
+        "feature": "Section",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 65
+      },
+      {
+        "id": 44,
+        "area": "Field property",
+        "feature": "Mandatory",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 46
+      },
+      {
+        "id": 45,
+        "area": "Field property",
+        "feature": "Unique / no duplicates",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 17
+      },
+      {
+        "id": 46,
+        "area": "Field property",
+        "feature": "Default value",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 24
+      },
+      {
+        "id": 47,
+        "area": "Field property",
+        "feature": "Max length",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 128
+      },
+      {
+        "id": 49,
+        "area": "Field property",
+        "feature": "Field validation (format rules)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 32
+      },
+      {
+        "id": 50,
+        "area": "Field property",
+        "feature": "Hide / show field (field rules)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 51,
+        "area": "Field property",
+        "feature": "Enable / disable field",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 52,
+        "area": "Field property",
+        "feature": "Personal data / encrypt",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 56,
+        "area": "Field property",
+        "feature": "System record id",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 33
+      },
+      {
+        "id": 57,
+        "area": "Field property",
+        "feature": "Added user",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 58,
+        "area": "Report",
+        "feature": "List report",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 21
+      },
+      {
+        "id": 72,
+        "area": "Report",
+        "feature": "Custom filter criteria",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 77,
+        "area": "Report",
+        "feature": "Record-level custom action",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 83,
+        "area": "Workflow",
+        "feature": "Field rules",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 84,
+        "area": "Workflow",
+        "feature": "Load of form",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 7
+      },
+      {
+        "id": 85,
+        "area": "Workflow",
+        "feature": "User input of a field",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 27
+      },
+      {
+        "id": 88,
+        "area": "Workflow",
+        "feature": "Validation on form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 89,
+        "area": "Workflow",
+        "feature": "Successful form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 11
+      },
+      {
+        "id": 106,
+        "area": "Deluge",
+        "feature": "if / else",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 100
+      },
+      {
+        "id": 107,
+        "area": "Deluge",
+        "feature": "for each over a list",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 22
+      },
+      {
+        "id": 108,
+        "area": "Deluge",
+        "feature": "try / catch",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 109,
+        "area": "Deluge",
+        "feature": "List",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 110,
+        "area": "Deluge",
+        "feature": "Map",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 111,
+        "area": "Deluge",
+        "feature": "Date-time and app timezone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 11
+      },
+      {
+        "id": 112,
+        "area": "Deluge",
+        "feature": "Decimal precision",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 113,
+        "area": "Deluge",
+        "feature": "insert record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 114,
+        "area": "Deluge",
+        "feature": "fetch by criteria",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 43
+      },
+      {
+        "id": 115,
+        "area": "Deluge",
+        "feature": "update record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 119,
+        "area": "Deluge",
+        "feature": "sendmail",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 124,
+        "area": "Deluge",
+        "feature": "zoho.books.*",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 125,
+        "area": "Deluge",
+        "feature": "thisapp.*",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 127,
+        "area": "Deluge",
+        "feature": "alert",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 18
+      },
+      {
+        "id": 128,
+        "area": "Deluge",
+        "feature": "cancel submit",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 134,
+        "area": "Deluge",
+        "feature": "Subform row loop (input.Subform)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 135,
+        "area": "Deluge",
+        "feature": "Global Deluge function",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 143,
+        "area": "Security and portal",
+        "feature": "Roles (data hierarchy)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 144,
+        "area": "Security and portal",
+        "feature": "Profiles (feature permissions)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 146,
+        "area": "Security and portal",
+        "feature": "Customer portal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 165,
+        "area": "Platform",
+        "feature": "Connections (OAuth to Zoho or third parties)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      }
+    ],
+    "counts": {
+      "supported": 0,
+      "adapter": 58,
+      "needs-assessment": 0,
+      "gap": 0,
+      "blocker": 0
+    },
+    "needsAssessment": [],
+    "scope": [
+      {
+        "feature": "Payments",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Offline",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Form Email",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "C8 dialect",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Cliq bots",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Native mobile / MDM",
+        "label": "not supported in this version (counted; on the roadmap)"
+      },
+      {
+        "feature": "Marketplace publishing",
+        "label": "not applicable (out of scope)"
+      },
+      {
+        "feature": "Zia AI builder",
+        "label": "not applicable (out of scope)"
+      },
+      {
+        "feature": "On-prem Data Bridge",
+        "label": "not applicable (out of scope)"
+      }
+    ],
+    "excluded": 4,
+    "unmapped": [
+      {
+        "area": "Workflow",
+        "feature": "Function on records (not a matrix row)",
+        "uses": 1
+      }
+    ],
+    "notObservable": 47
+  },
+  "fieldGaps": [
+    {
+      "matrixId": "auto-number",
+      "count": 1,
+      "reason": "ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.",
+      "fields": [
+        {
+          "form": "New_Deal",
+          "field": "Auto_Number"
+        }
+      ]
+    },
+    {
+      "matrixId": "currency",
+      "count": 32,
+      "reason": "Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Annual_Revenue"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Expected_Revenue"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Annual_Revenue"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "List_Price"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Discount"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Tax"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Total"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Sub_Total"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Tax_Total"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Grand_Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Sales_Commission"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Excise_Duty"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "List_Price"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Discount"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Tax"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Sub_Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Tax_Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Grand_Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Excise_Duty"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Sales_Commission"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "List_Price"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Discount"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Tax"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Sub_Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Tax_Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Grand_Total"
+        }
+      ]
+    },
+    {
+      "matrixId": "decimal",
+      "count": 27,
+      "reason": "Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "New_Quotation",
+          "field": "Width_of_Cargo_cm"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Chargeable_Weight_KG"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Length_of_Cargo_cm"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Volume_CBM"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Height_of_Cargo_cm"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Gross_Weight_KG"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Quantity"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Length_of_Cargo_cm"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Volume_CBM"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Width_of_Cargo_cm"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Height_of_Cargo_cm"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Gross_Weight_KG"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Chargeable_Weight_KG"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Quantity"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Quantity"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FWD"
+        },
+        {
+          "form": "New_SOF",
+          "field": "AFT"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FWD2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "AFT2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FO"
+        },
+        {
+          "form": "New_SOF",
+          "field": "DO"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FW"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FO2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "DO2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FW2"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "G_Wt"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "NetWt"
+        }
+      ]
+    },
+    {
+      "matrixId": "email",
+      "count": 5,
+      "reason": "There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Email"
+        },
+        {
+          "form": "New_User",
+          "field": "Email"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Email"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Email"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Email"
+        }
+      ]
+    },
+    {
+      "matrixId": "image",
+      "count": 7,
+      "reason": "Stratus object key (same upload, download, and byte-migration path as file upload). Thumbnail, crop, and annotation are not generated.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Image"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Contact_Image"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Vendor_Image"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Deal_Image"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Photograph"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Photograph"
+        },
+        {
+          "form": "New_Product",
+          "field": "Product_Image"
+        }
+      ]
+    },
+    {
+      "matrixId": "lookup-single",
+      "count": 57,
+      "reason": "Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Account_Owner"
+        },
+        {
+          "form": "New_Account",
+          "field": "Lead_ID"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Contact_Owner"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Vendor"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Lead_ID"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Vendor_Owner"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Deal_Owner"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Destination_Airport"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Lead_ID"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Vessel_Name"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Lead_Owner"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Destination_Airport"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Account_ID"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Vessel_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Quote_Owner"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Deal_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Contact_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Destination_Airport"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "HS_Code"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Product_Name"
+        },
+        {
+          "form": "New_Product",
+          "field": "Product_Owner"
+        },
+        {
+          "form": "New_Product",
+          "field": "Vendor_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Delivery_Order_Owner"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Deal_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Quote_Number"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Contact_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Product_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Invoice_Owner"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Delivery_Order"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Deal_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Contact_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Product_Name"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Vessel_Name"
+        },
+        {
+          "form": "New_SOF",
+          "field": "New_Port"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Appointment"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_No"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_Seal_Number"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_Type"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_Size"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Destination_Airport"
+        }
+      ]
+    },
+    {
+      "matrixId": "multi-line",
+      "count": 12,
+      "reason": "Data Store text holds 10,000 characters. A generated length check rejects the rest. Multi-line formula output (up to 65,355) does not fit.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Description"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Description"
+        },
+        {
+          "form": "New_Deal",
+          "field": "General_Description"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Description"
+        },
+        {
+          "form": "New_Lead",
+          "field": "General_Description"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Description"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Terms_and_Conditions2"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Description"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Terms_and_Conditions2"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Description"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Remarks1"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Master_Remarks1"
+        }
+      ]
+    },
+    {
+      "matrixId": "multi-select",
+      "count": 4,
+      "reason": "No array column. Stored as text holding a JSON list. Criteria do not match list semantics. values = Form.Field on this type is a multi lookup (junction table), not this column.",
+      "fields": [
+        {
+          "form": "Map_Dependency_Mode",
+          "field": "Sub_Mode_of_Shipment"
+        },
+        {
+          "form": "Map_Submode",
+          "field": "Cargo_Type"
+        },
+        {
+          "form": "Map_Submode",
+          "field": "Shipment_Terms"
+        },
+        {
+          "form": "Map_Submode",
+          "field": "Container_Movement_Type"
+        }
+      ]
+    },
+    {
+      "matrixId": "phone",
+      "count": 7,
+      "reason": "There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Mobile"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Assistant_Phone"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Mobile"
+        }
+      ]
+    },
+    {
+      "matrixId": "subform",
+      "count": 6,
+      "reason": "The .ds token is grid. Every inline subform (nested fields, no values = Form.Field) becomes its own child table with a parent_id foreign key to the parent ROWID (ON-DELETE-CASCADE) and a row_order Int (0-based Creator row position). A form with several subforms gets one child table per subform; it is not a NoSQL collection. A nested subform inside a subform is not expanded. A grid whose values point at another form is a relation to that form’s table, not a second copy of it.",
+      "fields": [
+        {
+          "form": "New_Quotation",
+          "field": "Quoted_Items"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Ordered_Items"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Invoiced_Items"
+        },
+        {
+          "form": "New_SOF",
+          "field": "DETAILS1"
+        },
+        {
+          "form": "New_SOF",
+          "field": "STOPPAGES"
+        },
+        {
+          "form": "New_SOF",
+          "field": "NO_CARGO_OPERATIONS"
+        }
+      ]
+    },
+    {
+      "matrixId": "subform-relation",
+      "count": 2,
+      "reason": "The .ds token is grid with values = Form.Field and no nested fields: a related-list view of that form’s rows, not an inline subform. No child table and no row_order column are created for this grid. The foreign key lives on the target form’s own matching lookup field (declared there directly, or named by `bidirectional`); when that column does not already exist, one parent_id foreign key (ON-DELETE-CASCADE) is added to the target table instead.",
+      "fields": [
+        {
+          "form": "New_Delivery_Order",
+          "field": "Table_of_Containers"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Table_of_Containers"
+        }
+      ]
+    },
+    {
+      "matrixId": "time",
+      "count": 5,
+      "reason": "There is no time column. Stored as varchar HH:MM:SS. Range comparisons are generated code.",
+      "fields": [
+        {
+          "form": "New_SOF",
+          "field": "Time"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FROM"
+        },
+        {
+          "form": "New_SOF",
+          "field": "TO"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FROM2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "TO2"
+        }
+      ]
+    },
+    {
+      "matrixId": "url",
+      "count": 2,
+      "reason": "URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Website"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Website"
+        }
+      ]
+    }
+  ],
+  "hiddenParts": [],
+  "residuals": [],
+  "deluge": {
+    "units": 54,
+    "statements": 553,
+    "translated": 56,
+    "shimmed": 497,
+    "todo": 28,
+    "todoLocations": [
+      {
+        "location": "field privacy flags",
+        "construct": "Fields \"New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection needed for New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.Time property timedisplayoptions",
+        "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.FROM property timedisplayoptions",
+        "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.TO property timedisplayoptions",
+        "construct": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.FROM2 property timedisplayoptions",
+        "construct": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "field New_SOF.TO2 property timedisplayoptions",
+        "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "scope": "ui",
+        "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated."
+      },
+      {
+        "location": "report Container_Movement_Tracking block report properties",
+        "construct": "Report \"Container_Movement_Tracking\" has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false."
+      },
+      {
+        "location": "report SOFs block options",
+        "construct": "Report \"SOFs\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71."
+      },
+      {
+        "location": "report Leads block options",
+        "construct": "Report \"Leads\" has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add."
+      },
+      {
+        "location": "report Converted_Leads block options",
+        "construct": "Report \"Converted_Leads\" has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home."
+      },
+      {
+        "location": "report Accounts block options",
+        "construct": "Report \"Accounts\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world."
+      },
+      {
+        "location": "report Contacts block options",
+        "construct": "Report \"Contacts\" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc."
+      },
+      {
+        "location": "report Deals block options",
+        "construct": "Report \"Deals\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71."
+      },
+      {
+        "location": "report Quotations block options",
+        "construct": "Report \"Quotations\" has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote."
+      },
+      {
+        "location": "report Delivery_Orders block options",
+        "construct": "Report \"Delivery_Orders\" has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time."
+      },
+      {
+        "location": "report Invoices block options",
+        "construct": "Report \"Invoices\" has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42."
+      },
+      {
+        "location": "report Airports block options",
+        "construct": "Report \"Airports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add."
+      },
+      {
+        "location": "report Ports block options",
+        "construct": "Report \"Ports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add."
+      },
+      {
+        "location": "report HS_Codes block options",
+        "construct": "Report \"HS_Codes\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add."
+      },
+      {
+        "location": "report Users block options",
+        "construct": "Report \"Users\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add."
+      },
+      {
+        "location": "report Containers block options",
+        "construct": "Report \"Containers\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add."
+      },
+      {
+        "location": "report Vendors block options",
+        "construct": "Report \"Vendors\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add."
+      },
+      {
+        "location": "report Products block options",
+        "construct": "Report \"Products\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add."
+      },
+      {
+        "location": "report Vessels block options",
+        "construct": "Report \"Vessels\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add."
+      },
+      {
+        "location": "report Tax_Rates block options",
+        "construct": "Report \"Tax_Rates\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add."
+      },
+      {
+        "location": "report Mode_to_SubMode block options",
+        "construct": "Report \"Mode_to_SubMode\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64."
+      },
+      {
+        "location": "report Submode_to_CT_ST_CMT block options",
+        "construct": "Report \"Submode_to_CT_ST_CMT\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64."
+      },
+      {
+        "location": "report Table_of_Containers block options",
+        "construct": "Report \"Table_of_Containers\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71."
+      }
+    ]
+  },
+  "blockers": [
+    {
+      "kind": "ui",
+      "label": "field New_SOF.FROM property timedisplayoptions",
+      "detail": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.FROM2 property timedisplayoptions",
+      "detail": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.Time property timedisplayoptions",
+      "detail": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.TO property timedisplayoptions",
+      "detail": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field New_SOF.TO2 property timedisplayoptions",
+      "detail": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "scope": "ui",
+      "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field privacy flags",
+      "detail": "Fields \"New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection needed for New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "report Accounts block options",
+      "detail": "Report \"Accounts\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world."
+    },
+    {
+      "kind": "ui",
+      "label": "report Airports block options",
+      "detail": "Report \"Airports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Contacts block options",
+      "detail": "Report \"Contacts\" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc."
+    },
+    {
+      "kind": "ui",
+      "label": "report Container_Movement_Tracking block report properties",
+      "detail": "Report \"Container_Movement_Tracking\" has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false."
+    },
+    {
+      "kind": "ui",
+      "label": "report Containers block options",
+      "detail": "Report \"Containers\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Converted_Leads block options",
+      "detail": "Report \"Converted_Leads\" has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home."
+    },
+    {
+      "kind": "ui",
+      "label": "report Deals block options",
+      "detail": "Report \"Deals\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71."
+    },
+    {
+      "kind": "ui",
+      "label": "report Delivery_Orders block options",
+      "detail": "Report \"Delivery_Orders\" has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time."
+    },
+    {
+      "kind": "ui",
+      "label": "report HS_Codes block options",
+      "detail": "Report \"HS_Codes\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Invoices block options",
+      "detail": "Report \"Invoices\" has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42."
+    },
+    {
+      "kind": "ui",
+      "label": "report Leads block options",
+      "detail": "Report \"Leads\" has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Mode_to_SubMode block options",
+      "detail": "Report \"Mode_to_SubMode\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64."
+    },
+    {
+      "kind": "ui",
+      "label": "report Ports block options",
+      "detail": "Report \"Ports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Products block options",
+      "detail": "Report \"Products\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Quotations block options",
+      "detail": "Report \"Quotations\" has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote."
+    },
+    {
+      "kind": "ui",
+      "label": "report SOFs block options",
+      "detail": "Report \"SOFs\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71."
+    },
+    {
+      "kind": "ui",
+      "label": "report Submode_to_CT_ST_CMT block options",
+      "detail": "Report \"Submode_to_CT_ST_CMT\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64."
+    },
+    {
+      "kind": "ui",
+      "label": "report Table_of_Containers block options",
+      "detail": "Report \"Table_of_Containers\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71."
+    },
+    {
+      "kind": "ui",
+      "label": "report Tax_Rates block options",
+      "detail": "Report \"Tax_Rates\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Users block options",
+      "detail": "Report \"Users\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Vendors block options",
+      "detail": "Report \"Vendors\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add."
+    },
+    {
+      "kind": "ui",
+      "label": "report Vessels block options",
+      "detail": "Report \"Vessels\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add."
+    }
+  ],
+  "determinism": {
+    "deterministic": false,
+    "todoCount": 28,
+    "fillLockEntries": 0,
+    "todoKinds": [
+      {
+        "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+        "count": 1
+      },
+      {
+        "construct": "Fields \"New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Accounts\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Airports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Contacts\" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Container_Movement_Tracking\" has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Containers\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Converted_Leads\" has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Deals\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Delivery_Orders\" has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"HS_Codes\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Invoices\" has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Leads\" has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Mode_to_SubMode\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Ports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Products\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Quotations\" has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"SOFs\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Submode_to_CT_ST_CMT\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Table_of_Containers\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Tax_Rates\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Users\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Vendors\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Vessels\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      }
+    ],
+    "uiTodoCount": 28,
+    "silentDrops": 0,
+    "silentDropKinds": []
+  },
+  "score": {
+    "readiness": 79,
+    "band": "needs-work",
+    "features": 75,
+    "deluge": 82
+  },
+  "effort": {
+    "estimate": true,
+    "hours": 178.7,
+    "weights": {
+      "hoursPerFeature": {
+        "supported": 0,
+        "adapter": 2,
+        "needs-assessment": 4,
+        "gap": 8,
+        "blocker": 16
+      },
+      "hoursPerShimmedStatement": 0.1,
+      "hoursPerTodoStatement": 1,
+      "hoursPerSchemaTable": 0.5,
+      "hoursPerTodoForm": 4,
+      "hoursPerTodoReport": 4,
+      "hoursPerTodoPage": 8,
+      "hoursPerCronJob": 1
+    }
+  },
+  "catalyst": {
+    "tables": 26,
+    "nosqlCollections": 0,
+    "delugeUnits": 54,
+    "functions": 1,
+    "cronJobs": 0,
+    "slatePages": 42,
+    "cost": "not estimated"
+  }
+}

@@ -1,0 +1,15 @@
+application "Widget"
+{
+  time zone = "Asia/Kolkata"
+  form Item
+  {
+    Name
+    (
+      type = text
+    )
+  }
+  list Open_Items
+  {
+    show all rows from Item
+  }
+}

@@ -1,0 +1,138 @@
+app: restaurants
+route: #/form/Visit
+state: form
+viewport: phone 390
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Restaurants"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a href="#/form/Restaurant"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Restaurant"
+        li
+          a aria-current="page" href="#/form/Visit"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Visit"
+        li
+          a href="#/report/All_Restaurants"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "All Restaurants"
+        li
+          a href="#/page/Guide"
+            svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+              rect
+              rect
+              rect
+              rect
+            span
+              "Dining Guide"
+  main tabindex="-1"
+    section class="c2c-card" data-form-card=""
+      h1
+        "Visit"
+      form data-form="Visit" data-layout="one" data-mode="add"
+        div class="form-grid"
+          div class="c2c-field c2c-lookup" data-field="Restaurant" data-required="true" data-widget="lookup-multi"
+            div class="field"
+              span class="label field-title"
+                "Restaurant"
+              div class="control"
+                button aria-controls="#ref" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="#ref #ref" class="trigger " type="button"
+                  span class="srOnly"
+                    "Select records"
+                  span aria-hidden="true" class="value"
+                    span class="placeholder"
+                      "Select records"
+                  svg aria-hidden="true" class="lucide lucide-chevron-down chevron"
+                    path
+            select aria-label="Restaurant selected" class="c2c-lookup-chosen" name="Restaurant"
+          div class="c2c-field" data-field="Visited_On" data-widget="date"
+            div class="field"
+              label class="label" for="#ref"
+                "Visited On"
+              div class="anchor"
+                button aria-expanded="false" aria-haspopup="dialog" class="trigger" type="button"
+                  svg aria-hidden="true" class="lucide lucide-calendar-days"
+                    path
+                    path
+                    rect
+                    path
+                    path
+                    path
+                    path
+                    path
+                    path
+                    path
+                  span class="srOnly"
+                    "Select a date"
+                  span aria-hidden="true" class="valueText"
+                    span class="placeholder"
+                      "Select a date"
+                  svg aria-hidden="true" class="lucide lucide-chevron-down chevron"
+                    path
+            input aria-label="Visited On value" class="input" name="Visited_On" value=""
+        div class="c2c-form-actions"
+          button class="button primary md" tabindex="0" type="submit"
+            span class="labelSlot"
+              span class="labelContent"
+                span class="labelPhase"
+                  "Submit"
+  nav aria-label="Tabs"
+    a href="#/form/Restaurant"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Restaurant"
+    a aria-current="page" href="#/form/Visit"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Visit"
+    a href="#/report/All_Restaurants"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "All Restaurants"
+    a href="#/page/Guide"
+      svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+        rect
+        rect
+        rect
+        rect
+      span
+        "Dining Guide"

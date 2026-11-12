@@ -1,0 +1,12 @@
+# npm audit waiver list for tools/audit-gate.mjs. Keep this file EMPTY.
+# Add a line only to buy time on a high/critical advisory that cannot be
+# patched yet; every entry must carry an expiry date and a written reason.
+#
+# Format (pipe-delimited, one advisory per line):
+#   <advisory id or GHSA-xxxx> | <expiry YYYY-MM-DD> | <reason>
+#
+# Example:
+#   GHSA-aaaa-bbbb-cccc | 2026-11-01 | dev-only transitive dep, no fix released
+#
+# An entry whose expiry has passed no longer waives anything; the gate fails
+# again until the advisory is fixed or the entry is renewed with justification.

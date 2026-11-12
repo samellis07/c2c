@@ -1,0 +1,87 @@
+{
+  "schema": "c2c-fixture-migration-report/1",
+  "fixture": "sample-app/connections/c2c-conn-rest-putdel",
+  "app": "c2c-conn-rest-putdel",
+  "scope": [
+    {
+      "feature": "Payments",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Offline",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Form Email",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "C8 dialect",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Cliq bots",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Native mobile / MDM",
+      "label": "not supported in this version (counted; on the roadmap)"
+    },
+    {
+      "feature": "Marketplace publishing",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "Zia AI builder",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "On-prem Data Bridge",
+      "label": "not applicable (out of scope)"
+    }
+  ],
+  "converted": {
+    "forms": 2,
+    "reports": 2,
+    "pages": 0,
+    "functions": 0,
+    "catalyst": {
+      "tables": 2,
+      "nosqlCollections": 0,
+      "functions": 1,
+      "cronJobs": 0,
+      "slatePages": 4
+    },
+    "deluge": {
+      "statements": 18,
+      "translated": 4,
+      "shimmed": 14
+    }
+  },
+  "todoCount": 0,
+  "todoKinds": [],
+  "fieldGaps": [
+    {
+      "matrixId": "multi-line",
+      "count": 1,
+      "reason": "Data Store text holds 10,000 characters. A generated length check rejects the rest. Multi-line formula output (up to 65,355) does not fit.",
+      "fields": [
+        {
+          "form": "Conn_Rest_Put_Delete",
+          "field": "Rest_Response"
+        }
+      ]
+    }
+  ],
+  "manualSteps": [],
+  "hiddenParts": [],
+  "todoSteps": [],
+  "humanSteps": [
+    "Accept invite: accept the app invite mail",
+    "Sign in once: sign in to the deployed app once",
+    "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
+    "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
+  ],
+  "silentDrops": 0,
+  "residuals": []
+}

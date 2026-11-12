@@ -1,0 +1,1041 @@
+/**
+ * Record-read authorization shared by server handlers and the client prefetch
+ * endpoint. A prefetch must not return a row or a field the caller's profile
+ * could not read, including the record filter of a Creator report they can view.
+ *
+ * Missing profile data is deny. A client-supplied body is not a principal.
+ */
+
+import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from './criteria.js';
+import { WriteRuleError, normalizeDate, normalizeDateTime } from './write-rules.js';
+
+export class RecordAccessError extends Error {
+  readonly code = 'RECORD_ACCESS_DENIED';
+  constructor(message: string) {
+    super(message);
+    this.name = 'RecordAccessError';
+  }
+}
+
+export interface Principal {
+  /** Users_Permissions profile name. Table and field grants hang off this. */
+  profile: string;
+  /** Data-hierarchy role, when the platform user has one. */
+  role?: string;
+  /**
+   * zoho.loginuserid: the user's email, not a numeric account id.
+   * https://www.zoho.com/deluge/help/zoho-variables.html
+   */
+  userId?: string;
+  /**
+   * zoho.loginuser: the Creator username stored in Added_User. Not the email and not userId.
+   * https://www.zoho.com/deluge/help/zoho-variables.html
+   * https://help.zoho.com/portal/en/kb/creator/developer-guide/forms/add-and-manage-fields/articles/understand-system-fields
+   */
+  loginUser?: string;
+}
+
+/** Value substituted from the principal or the deploy environment at read time. Never taken from the request body. */
+export interface BoundValue {
+  __bind: 'loginUser' | 'loginUserId' | 'adminUser' | 'adminUserId';
+}
+
+/**
+ * Dry-run placeholders for the application owner identity (`zoho.adminuser` /
+ * `zoho.adminuserid`) when no owner is configured — the same sentinels
+ * `shim.zoho.adminUser` / `shim.zoho.adminUserId` return, so a report criteria
+ * comparing them fails closed instead of matching a stored value.
+ * https://www.zoho.com/deluge/help/zoho-variables.html
+ */
+export const DRY_RUN_ADMIN_USER = '<c2c-dry-run:adminuser>';
+export const DRY_RUN_ADMIN_USER_ID = '<c2c-dry-run:adminuserid>';
+
+/** Deploy environment override for the application owner identity. */
+function envIdentity(key: 'C2C_ADMIN_USER' | 'C2C_ADMIN_USER_ID'): string | undefined {
+  const value = typeof process !== 'undefined' ? process.env?.[key] : undefined;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+export interface FormGrant {
+  /**
+   * Fields this profile may read. Absent means every field.
+   * An empty list means the form is readable but no field value may be returned.
+   */
+  fields?: string[];
+  /**
+   * Extra criteria ANDed onto every read (OR of the report filters this profile
+   * can view). Absent means those reports do not narrow the rows.
+   */
+  recordFilter?: Criteria;
+  /** Profile may insert or update this form. Absent means no insert or update. Does not allow delete. */
+  write?: boolean;
+  /**
+   * Profile may delete records of this form. Absent means no delete.
+   * Creator keeps Delete separate from Create and Edit. The write bit does not set this.
+   * Predefined presets: Administrator yes; Write, Read, and portal-add no.
+   */
+  delete?: boolean;
+  /**
+   * Fields this profile may write. Absent, when `write` is set, means every
+   * field the caller names except read-only ones. An empty list means no field
+   * may be written. Hidden fields are not included.
+   */
+  writable?: string[];
+  /**
+   * `false` when the profile may add records to this form but has no View and
+   * no View All on it (a Create-only grant). No row or field may be read.
+   * Absent means readable.
+   */
+  read?: false;
+  /** Insert allowed. Absent follows `write`. `false` refuses an insert when `write` is set. */
+  create?: boolean;
+  /** Update allowed. Absent follows `write`. `false` refuses an update when `write` is set. */
+  edit?: boolean;
+  /**
+   * Record sharing by owner. The owner of a row is its `Added_User`, matched
+   * against the signed-in principal's login user.
+   * - `view`: no View All. Only the caller's own rows can be read, edited or deleted.
+   * - `modify`: View All without Modify All. Every granted row can be read; only
+   *   the caller's own rows can be edited or deleted.
+   * Absent means no owner restriction.
+   */
+  ownerScope?: 'view' | 'modify';
+}
+
+/** Column that names a row's owner for `ownerScope`. */
+export const OWNER_FIELD = 'Added_User';
+
+/**
+ * What the caller is about to do with the rows a read finds. `modify` adds the
+ * owner restriction of a `modify` grant (edit or delete of the row found).
+ */
+export type ReadIntent = 'read' | 'modify';
+
+/** Write kind for `authorizeWrite`. Absent checks only the `write` bit. */
+export type WriteOp = 'insert' | 'update';
+
+export interface AccessPolicy {
+  /** Profile name → form name → grant. A missing profile or form cannot be read. */
+  profiles: Record<string, Record<string, FormGrant>>;
+  /** Role names from the export. A principal role outside this list is denied. */
+  roles: string[];
+  /**
+   * Forms, reports, and pages that appear only in a hidden menu section.
+   * Direct navigation is denied even when a profile could otherwise read them.
+   */
+  hidden?: string[];
+  /** Profiles allowed to list users: the exact generated Administrator-preset names. */
+  admins?: string[];
+}
+
+export type WriteFieldKind = 'lookup' | 'subform' | 'composite' | 'file';
+
+/**
+ * Scalar storage family of a plain leaf field. Only these columns reject a
+ * blank string at the store (400 INVALID_INPUT on date, and the same
+ * class for number/decimal): a blank for one of them normalises to null.
+ * Text-family leaves (text, textarea, email, phone, url, rich text) keep ""
+ * because Creator's empty text is the empty string, not null.
+ */
+export type WriteScalar = 'number' | 'decimal' | 'date' | 'datetime' | 'time';
+
+/**
+ * Posted JSON shape of a plain leaf field, screened on the client-facing
+ * write path before any store rule runs: a string (capped by `maxLength`)
+ * for `text`, a finite number or its exact decimal text for `number` and
+ * `decimal`, the date, datetime, and clock text the store's own format
+ * check accepts for `date`, `datetime` and `time`, and a boolean for
+ * `boolean` (decision box). Only the client-facing write schema carries
+ * it; values a script sets are not screened against it.
+ */
+export type WriteInput = 'text' | 'number' | 'decimal' | 'date' | 'datetime' | 'time' | 'boolean';
+
+export interface WriteField {
+  /** Link name as stored on the form or subform. */
+  name: string;
+  readOnly?: boolean;
+  /** The export hides the field on the form; a posted value for it is refused. */
+  hidden?: boolean;
+  /**
+   * `lookup` values accept only the exact keys `id` and `label`.
+   * `subform` rows and `composite` (address / name) values accept only `fields`.
+   * `file` values accept only the exact key `key` (the upload reference).
+   */
+  kind?: WriteFieldKind;
+  /** Child fields of a subform or the parts of an address or name. */
+  fields?: readonly WriteField[];
+  /** Storage family of a plain leaf field; marks blank-to-null candidates. */
+  scalar?: WriteScalar;
+  /**
+   * Posted JSON shape of a plain leaf field (see `WriteInput`). Carried by
+   * the client-facing write schema only, like `choices`.
+   */
+  input?: WriteInput;
+  /**
+   * A genuinely multi-valued field — multi select, checkbox list, multi
+   * lookup — takes a JSON array of plain scalars. Every other leaf refuses
+   * an array. Structural (not client-only): script-set values keep it so a
+   * Deluge list assignment to a multi column still screens the same way.
+   */
+  multi?: boolean;
+  /**
+   * Character cap on a `text` leaf: the field's `maxchar`, or the Creator
+   * default the column got when unset — 255 for a single-line text (the
+   * schema mapping's varchar default), 10_000 for a multi-line or URL text
+   * column (the Catalyst text cap). A posted value past it is refused as
+   * `text-length`.
+   */
+  maxLength?: number;
+  /**
+   * Closed choice list of a single-choice picklist or radio. A posted value
+   * outside it is refused (400 INVALID_INPUT naming the field), as Creator
+   * refuses it from a client. Only the client-facing write schema carries it;
+   * values a script sets are not screened against it.
+   */
+  choices?: readonly string[];
+  /**
+   * `others option = true` on a single-choice field: the posted value is the
+   * typed free text, never a list member, so the choice list stays open and
+   * the value is screened as text instead — a plain string (no array or
+   * object), never the client's `__c2c_others__` marker itself, and at most
+   * `maxLength` characters. Only the client-facing write schema carries it.
+   */
+  othersOption?: boolean;
+  /**
+   * Creator-mandatory `othersOption` field: a posted blank text is refused as
+   * `mandatory-missing`, the same as any required field left empty.
+   */
+  required?: boolean;
+  /**
+   * Static Creator initial value (unquoted literal text), applied by the
+   * submit handler to fields absent from the request on insert.
+   * Absent when the field has no initial value or a dynamic one.
+   */
+  defaultValue?: string;
+}
+
+/**
+ * One unconditional field-rule denial. A `hide` or `disable` action with no
+ * criteria is static: the client never renders the field writable in the
+ * record events the rule covers, so a posted value for it could not have come
+ * from the form. `Subform.Field` names a subform column at row depth.
+ */
+export interface FieldRuleDenial {
+  /** Field link name (`Subform.Field` names a subform column). */
+  field: string;
+  /** The field-rule action that denies the write. */
+  action: 'hide' | 'disable';
+  /**
+   * Write ops the denying rule covers, from the workflow's record event
+   * (`on add` → insert, `on edit` → update). Absent means both.
+   */
+  ops?: readonly WriteOp[];
+}
+
+export interface WriteSchema {
+  /** Widget-level read-only fields (formula, autonumber, and the same). */
+  readonlyFields?: readonly string[];
+  /**
+   * Flat field names. Used only when `fields` is omitted. Subform and composite
+   * writes need `fields`; a flat list cannot say which names exist at which depth.
+   */
+  fieldNames?: readonly string[];
+  /** Hidden field names for the flat `fieldNames` depth; `fields` marks them per field. */
+  hiddenFields?: readonly string[];
+  /** Top-level fields of this form. Each depth allows only its own children. */
+  fields?: readonly WriteField[];
+  /**
+   * Unconditional field-rule denials for this form. A listed field is refused
+   * at the matching depth even when the profile grant would otherwise write it.
+   */
+  ruleDenied?: readonly FieldRuleDenial[];
+}
+
+/**
+ * Never taken from a client body, at any depth, in any case.
+ * `Owner` is the one exception, and only for the exact key `Owner` when this
+ * depth has an editable field whose link name is `Owner`.
+ */
+const SYSTEM_WRITE_DENY = new Set([
+  'rowid',
+  'creatorid',
+  'createdtime',
+  'modifiedtime',
+  'added_time',
+  'modified_time',
+  'c2c_source_id',
+  'added_user',
+  'modified_user',
+  'owner',
+]);
+
+/**
+ * The option value the generated client's "Others" entry carries; the real
+ * value is read from the sibling free-text input client-side, so the marker
+ * itself must never reach the store.
+ */
+const OTHERS_SENTINEL = '__c2c_others__';
+
+/** Platform-managed columns cannot be targeted by a single-field write. */
+export function isSystemWriteDenied(field: string): boolean {
+  return field.toLowerCase() !== 'owner' && SYSTEM_WRITE_DENY.has(field.toLowerCase());
+}
+
+const LOOKUP_KEYS = new Set(['id', 'label']);
+
+export function principalFromRequest(req: unknown): Principal | null {
+  if (!req || typeof req !== 'object') return null;
+  const record = req as Record<string, unknown>;
+  const catalyst = record.catalyst;
+  // Trusted sources only: req.user and req.catalyst.user, which the Catalyst auth layer sets. Anything else
+  // (req.auth, body, query, headers) can be caller-controlled and must never become the principal.
+  const candidates = [
+    record.user,
+    catalyst && typeof catalyst === 'object' ? (catalyst as Record<string, unknown>).user : undefined,
+  ];
+  for (const candidate of candidates) {
+    const principal = asPrincipal(candidate);
+    if (principal) return principal;
+  }
+  return null;
+}
+
+// Profile and form names arrive from the request (a route segment or a token
+// claim): "constructor" or "__proto__" must not resolve to an inherited member.
+function own<T>(map: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(map, key) ? map[key] : undefined;
+}
+
+export function authorizeRead(
+  policy: AccessPolicy,
+  principal: Principal | undefined,
+  form: string,
+  criteria: Criteria,
+  field?: string,
+  intent: ReadIntent = 'read',
+): { criteria: Criteria; fields?: readonly string[] } {
+  if (!principal?.profile) throw new RecordAccessError('record access: authenticated profile required');
+  if (principal.role && policy.roles.length > 0 && !policy.roles.includes(principal.role)) {
+    throw new RecordAccessError(`record access: unknown role ${principal.role}`);
+  }
+  const forms = own(policy.profiles, principal.profile);
+  if (!forms) throw new RecordAccessError(`record access: profile ${principal.profile} has no table permissions`);
+  const grant = own(forms, form);
+  if (!grant) throw new RecordAccessError(`record access: profile ${principal.profile} cannot read ${form}`);
+  if (grant.read === false) throw new RecordAccessError(`record access: profile ${principal.profile} cannot read ${form}`);
+  if (field && grant.fields && !grant.fields.includes(field)) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot read ${form}.${field}`);
+  }
+  let filter = grant.recordFilter;
+  if (filter) {
+    // An unmigrated criteria or a dependent record query narrows the same way:
+    // neither can be applied synchronously, so the read is refused.
+    if (criteriaHasTodo(filter) || criteriaHasRecordQuery(filter)) {
+      throw new RecordAccessError(`record access: record filter for ${form} could not be applied`);
+    }
+    filter = resolveBinds(filter, principal);
+  }
+  const owner = ownerFilter(grant, principal, intent);
+  const extra = filter && owner ? { op: 'and' as const, args: [filter, owner] } : filter ?? owner;
+  // A report's own criteria carries the same {__bind} placeholders the record
+  // filter does (zoho.loginuser / zoho.loginuserid). Resolve them the same way
+  // — an unresolved bind must never be compiled as a literal value.
+  if (criteriaHasRecordQuery(criteria)) {
+    throw new RecordAccessError(`record access: record filter for ${form} could not be applied`);
+  }
+  const bound = resolveBinds(criteria, principal);
+  // ZCQL has no literal true: an unfiltered read narrows to the scope alone.
+  const scoped = extra ? (bound.op === 'true' ? extra : { op: 'and' as const, args: [bound, extra] }) : bound;
+  return { criteria: scoped, fields: grant.fields };
+}
+
+/**
+ * The owner restriction a grant adds for this intent, bound to the caller.
+ * A principal without a login user cannot own a row, so the read is refused.
+ */
+function ownerFilter(grant: FormGrant, principal: Principal, intent: ReadIntent): Criteria | undefined {
+  const scope = grant.ownerScope;
+  if (scope !== 'view' && !(scope === 'modify' && intent === 'modify')) return undefined;
+  const user = principal.loginUser?.trim();
+  if (!user) throw new RecordAccessError('record access: login user is required to apply the record owner');
+  return { op: '==', field: OWNER_FIELD, value: user };
+}
+
+/**
+ * Reply values a caller may see after a write: the readable fields of the
+ * grant plus the row's system columns. A Create-only grant (`read: false`)
+ * keeps only the keys the caller itself submitted, plus the row id. Values a
+ * script or a stored row added to a hidden field never reach the reply.
+ */
+export function projectReadable(
+  policy: AccessPolicy,
+  principal: Principal | undefined,
+  form: string,
+  values: Record<string, unknown>,
+  submitted?: readonly string[],
+): Record<string, unknown> {
+  const forms = principal?.profile ? own(policy.profiles, principal.profile) : undefined;
+  const grant = forms ? own(forms, form) : undefined;
+  if (!grant) return pick(values, REPLY_ID_KEYS);
+  if (grant.read === false) return pick(values, [...REPLY_ID_KEYS, ...(submitted ?? [])]);
+  if (!grant.fields) return { ...values };
+  return pick(values, [...REPLY_ID_KEYS, ...REPLY_SYSTEM_KEYS, ...grant.fields]);
+}
+
+const REPLY_ID_KEYS = ['ID', 'ROWID'];
+const REPLY_SYSTEM_KEYS = ['Added_User', 'Added_Time', 'Modified_User', 'Modified_Time'];
+
+function pick(values: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(values, key)) out[key] = values[key];
+  }
+  return out;
+}
+
+/**
+ * Whether the profile may insert a row on `form`: the form is granted, the
+ * write bit is set, and create is not refused. The same conditions
+ * `authorizeWrite` checks for an insert, answered without throwing — the
+ * lookups endpoint reports it so a "add new record" affordance renders only
+ * for a caller the server would accept.
+ */
+export function canCreate(policy: AccessPolicy, principal: Principal | undefined, form: string): boolean {
+  if (!principal?.profile) return false;
+  if (principal.role && policy.roles.length > 0 && !policy.roles.includes(principal.role)) return false;
+  const forms = own(policy.profiles, principal.profile);
+  const grant = forms ? own(forms, form) : undefined;
+  return !!grant && grant.write === true && grant.create !== false;
+}
+
+/**
+ * Submit and upload authorization. The form must be viewable and editable.
+ *
+ * Policy is reject, not drop, at every depth. A key is accepted only when it
+ * is a known writable field of the form or subform at that depth. Hidden
+ * fields, read-only fields, unknown keys, and system columns are rejected
+ * with RecordAccessError. Nothing is stripped into a successful write, so a
+ * later insert cannot receive the rejected key.
+ *
+ * Lookup values accept only the exact keys `id` and `label` (a scalar id is
+ * also accepted). Address and name values accept only their known parts: a
+ * grant naming the composite field allows every known sub-part, because
+ * grants only ever name top-level fields. File, image, audio, video, and
+ * signature values accept only `{ key }`, the
+ * reference returned by the upload endpoint. A bare string or any other
+ * object, including `{}`, is rejected.
+ * ROWID, CREATORID, CREATEDTIME/Added_Time, MODIFIEDTIME/Modified_Time,
+ * c2c_source_id, added_user, modified_user, and Owner are rejected in any
+ * case. The exact key `Owner` is accepted only when this depth has an
+ * editable field named `Owner`.
+ *
+ * The returned values are the ones a dry run may accept.
+ */
+export function authorizeWrite(
+  policy: AccessPolicy,
+  principal: Principal | undefined,
+  form: string,
+  values: Record<string, unknown>,
+  schema?: WriteSchema,
+  op?: WriteOp,
+): { values: Record<string, unknown> } {
+  if (!principal?.profile) throw new RecordAccessError('record access: authenticated profile required');
+  if (principal.role && policy.roles.length > 0 && !policy.roles.includes(principal.role)) {
+    throw new RecordAccessError(`record access: unknown role ${principal.role}`);
+  }
+  const forms = own(policy.profiles, principal.profile);
+  if (!forms) throw new RecordAccessError(`record access: profile ${principal.profile} has no table permissions`);
+  const grant = own(forms, form);
+  if (!grant) throw new RecordAccessError(`record access: profile ${principal.profile} cannot view ${form}`);
+  if (!grant.write) throw new RecordAccessError(`record access: profile ${principal.profile} cannot edit ${form}`);
+  if (op === 'insert' && grant.create === false) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot add ${form}`);
+  }
+  if (op === 'update' && grant.edit === false) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot edit ${form}`);
+  }
+  const readonlyList = schema?.readonlyFields ?? [];
+  const hiddenList = schema?.hiddenFields ?? [];
+  const denied = ruleDeniedFor(schema?.ruleDenied, op);
+  const depth = depthOf(schema, grant, readonlyList, hiddenList);
+  return {
+    values: screenObject(form, values ?? {}, '', depth, principal, grant, readonlyList, hiddenList, denied, true),
+  };
+}
+
+/**
+ * The denials in force for this write op. When the caller did not say which
+ * op runs, a denial listed for either op applies: the rule hides or disables
+ * the field in a context the request cannot be distinguished from.
+ */
+function ruleDeniedFor(list: readonly FieldRuleDenial[] | undefined, op: WriteOp | undefined): readonly FieldRuleDenial[] {
+  if (!list?.length) return [];
+  return list.filter((item) => !item.ops || !op || item.ops.includes(op));
+}
+
+/**
+ * Live delete authorization. View, create, and edit do not imply delete.
+ *
+ * The form must be granted to the profile, and `grant.delete` must be set.
+ * A missing principal, an unknown role, or a missing profile is denied before
+ * any read. The record filter is not applied here; the scoped read that finds
+ * ROWIDs does that.
+ */
+/**
+ * User listing authorization for Creator's `app.users()` and `app.userEmailIds()`.
+ * Only a profile named in the generated `policy.admins` — the exact,
+ * case-sensitive Administrator-preset names — may list application users.
+ * Lookalikes ("administrator", "Administrator ") and low-privilege profiles
+ * (e.g. Employee, Staff, Customer, Developer) are refused.
+ */
+export function canListUsers(principal: Principal | undefined, policy?: AccessPolicy): boolean {
+  if (!principal?.profile || !policy?.admins?.length) return false;
+  return policy.admins.includes(principal.profile);
+}
+
+/**
+ * Bulk import authorization for `body.import === true` writes. The field-rule
+ * skip is a server-side capability, never a client-supplied flag: only an
+ * Administrator profile named in `policy.admins` may post an import write.
+ * Any other signed-in caller gets the same denials as a plain post.
+ */
+export function canImport(principal: Principal | undefined, policy?: AccessPolicy): boolean {
+  return canListUsers(principal, policy);
+}
+
+export function authorizeUserListing(principal: Principal | undefined, policy?: AccessPolicy): void {
+  if (!canListUsers(principal, policy)) {
+    throw new RecordAccessError(`record access: profile ${principal?.profile ?? '(none)'} cannot list users`);
+  }
+}
+
+export function authorizeDelete(policy: AccessPolicy, principal: Principal | undefined, form: string): void {
+  if (!principal?.profile) throw new RecordAccessError('record access: authenticated profile required');
+  if (principal.role && policy.roles.length > 0 && !policy.roles.includes(principal.role)) {
+    throw new RecordAccessError(`record access: unknown role ${principal.role}`);
+  }
+  const forms = own(policy.profiles, principal.profile);
+  if (!forms) throw new RecordAccessError(`record access: profile ${principal.profile} has no table permissions`);
+  const grant = own(forms, form);
+  if (!grant) throw new RecordAccessError(`record access: profile ${principal.profile} cannot view ${form}`);
+  if (!grant.delete) throw new RecordAccessError(`record access: profile ${principal.profile} cannot delete ${form}`);
+}
+
+interface DepthField {
+  name: string;
+  readOnly: boolean;
+  hidden: boolean;
+  kind?: WriteFieldKind;
+  scalar?: WriteScalar;
+  input?: WriteInput;
+  multi?: boolean;
+  maxLength?: number;
+  choices?: readonly string[];
+  othersOption?: boolean;
+  required?: boolean;
+  children: DepthField[];
+}
+
+interface Depth {
+  /** No field list: only non-system scalars. Subforms need `schema.fields`. */
+  open: boolean;
+  fields: DepthField[];
+}
+
+function depthOf(
+  schema: WriteSchema | undefined,
+  grant: FormGrant,
+  readonlyNames: readonly string[],
+  hiddenNames: readonly string[],
+): Depth {
+  if (schema?.fields) {
+    return { open: false, fields: schema.fields.map((field) => toDepth(field, readonlyNames)) };
+  }
+  const names = schema?.fieldNames ?? grant.writable ?? grant.fields;
+  if (!names) return { open: true, fields: [] };
+  return {
+    open: false,
+    fields: names.map((name) => ({
+      name,
+      readOnly: readonlyNames.some((item) => item.toLowerCase() === name.toLowerCase()),
+      hidden: hiddenNames.some((item) => item.toLowerCase() === name.toLowerCase()),
+      children: [],
+    })),
+  };
+}
+
+function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthField {
+  const readOnly =
+    !!field.readOnly || readonlyNames.some((name) => name.toLowerCase() === field.name.toLowerCase());
+  return {
+    name: field.name,
+    readOnly,
+    hidden: !!field.hidden,
+    ...(field.kind ? { kind: field.kind } : {}),
+    ...(field.scalar ? { scalar: field.scalar } : {}),
+    ...(field.input ? { input: field.input } : {}),
+    ...(field.multi ? { multi: true } : {}),
+    ...(field.maxLength !== undefined ? { maxLength: field.maxLength } : {}),
+    ...(field.choices?.length ? { choices: field.choices } : {}),
+    ...(field.othersOption ? { othersOption: true } : {}),
+    ...(field.required ? { required: true } : {}),
+    children: (field.fields ?? []).map((child) => toDepth(child, readonlyNames)),
+  };
+}
+
+/**
+ * Creator initial values for fields absent from the request
+ * (API and import inserts, which never saw the Slate prefill). Only fields
+ * whose value is missing, undefined or null are filled, and only on insert —
+ * the caller guards the edit path. Read-only fields, lookups and file
+ * references never take a static default. A posted "" stays "": it is
+ * present, not absent (the user, or the API caller, cleared the cell).
+ */
+export function applyInitialValues(values: Record<string, unknown>, fields: readonly WriteField[] | undefined): void {
+  if (!fields) return;
+  for (const field of fields) {
+    if (field.readOnly) continue;
+    if (field.kind === 'subform') {
+      const rows = values[field.name];
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (isPlainRecord(row)) applyInitialValues(row, field.fields);
+        }
+      }
+      continue;
+    }
+    if (field.kind === 'composite') {
+      const inner = values[field.name];
+      if (isPlainRecord(inner)) applyInitialValues(inner, field.fields);
+      continue;
+    }
+    if (field.kind === 'lookup' || field.kind === 'file') continue;
+    if (field.defaultValue === undefined) continue;
+    const current = values[field.name];
+    if (current === undefined || current === null) values[field.name] = field.defaultValue;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function systemDenied(key: string, depth: Depth): boolean {
+  if (!SYSTEM_WRITE_DENY.has(key.toLowerCase())) return false;
+  if (key !== 'Owner') return true;
+  const field = depth.fields.find((item) => item.name === 'Owner');
+  return !(field && !field.readOnly);
+}
+
+function screenObject(
+  form: string,
+  values: Record<string, unknown>,
+  prefix: string,
+  depth: Depth,
+  principal: Principal,
+  grant: FormGrant,
+  readonlyList: readonly string[],
+  hiddenList: readonly string[],
+  denied: readonly FieldRuleDenial[],
+  grantApplies: boolean,
+): Record<string, unknown> {
+  const accepted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values)) {
+    const dotted = prefix ? `${prefix}.${key}` : key;
+    // A parsed "__proto__" key is an own key; accepted[key] = value would set the
+    // prototype of the accepted values instead of writing a field.
+    if (key === '__proto__' || systemDenied(key, depth)) {
+      throw new RecordAccessError(`record access: ${form}.${dotted} is not client-writable`);
+    }
+    const rule = ruleDenialAt(dotted, denied);
+    if (rule) {
+      throw new RecordAccessError(`record access: ${form}.${dotted} is ${rule.action === 'hide' ? 'hidden' : 'disabled'} by a field rule`);
+    }
+    if (depth.open) {
+      if (readonlyList.some((name) => name.toLowerCase() === key.toLowerCase())) {
+        throw new RecordAccessError(`record access: ${form}.${dotted} is read-only`);
+      }
+      if (hiddenList.some((name) => name.toLowerCase() === key.toLowerCase())) {
+        throw new RecordAccessError(`record access: ${form}.${dotted} is hidden`);
+      }
+      accepted[key] = screenScalar(form, dotted, value, principal);
+      continue;
+    }
+    const field = matchField(depth.fields, key);
+    if (!field) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    assertAllowed(form, dotted, field, principal, grant, readonlyList, grantApplies);
+    accepted[key] = screenFieldValue(form, dotted, field, value, principal, grant, readonlyList, hiddenList, denied);
+  }
+  return accepted;
+}
+
+/**
+ * The unconditional field-rule denial in force at `dotted` for `op`, or
+ * undefined. This is the same match a write goes through in screenObject:
+ * the op filter of ruleDeniedFor and the path match of ruleDenialAt, so
+ * generators filtering seed data keep the handler's rule as the one source.
+ */
+export function writeRuleDeniedAt(
+  dotted: string,
+  denied: readonly FieldRuleDenial[] | undefined,
+  op?: WriteOp,
+): FieldRuleDenial | undefined {
+  return ruleDenialAt(dotted, ruleDeniedFor(denied, op));
+}
+
+/**
+ * The denial for this key path, or undefined. `Sub[0].Field` normalises to
+ * the field-rule target `Sub.Field`, so a rule naming a subform column
+ * refuses writes to that column in every row.
+ */
+function ruleDenialAt(dotted: string, denied: readonly FieldRuleDenial[]): FieldRuleDenial | undefined {
+  const path = dotted.replace(/\[\d+\]/g, '');
+  const lower = path.toLowerCase();
+  return denied.find((item) => item.field === path || item.field.toLowerCase() === lower);
+}
+
+function matchField(fields: readonly DepthField[], key: string): DepthField | undefined {
+  return fields.find((field) => field.name === key) ?? fields.find((field) => field.name.toLowerCase() === key.toLowerCase());
+}
+
+function assertAllowed(
+  form: string,
+  dotted: string,
+  field: DepthField,
+  principal: Principal,
+  grant: FormGrant,
+  readonlyList: readonly string[],
+  grantApplies: boolean,
+): void {
+  if (field.hidden) {
+    throw new RecordAccessError(`record access: ${form}.${dotted} is hidden`);
+  }
+  if (field.readOnly || readonlyList.some((name) => name.toLowerCase() === field.name.toLowerCase())) {
+    throw new RecordAccessError(`record access: ${form}.${dotted} is read-only`);
+  }
+  // Inside a granted composite the parent's grant covers every known
+  // sub-part: grants only name top-level fields, so a sub-part can never
+  // appear in grant.fields or grant.writable. Read-only, system-column and
+  // unknown-key checks still apply at every depth.
+  if (!grantApplies) return;
+  if (grant.fields && !grant.fields.includes(field.name)) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot write hidden ${form}.${dotted}`);
+  }
+  if (grant.writable && !grant.writable.includes(field.name)) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+  }
+}
+
+function screenFieldValue(
+  form: string,
+  dotted: string,
+  field: DepthField,
+  value: unknown,
+  principal: Principal,
+  grant: FormGrant,
+  readonlyList: readonly string[],
+  hiddenList: readonly string[],
+  denied: readonly FieldRuleDenial[],
+): unknown {
+  if (value == null) return value;
+  if (field.kind === 'file') return screenFile(form, dotted, value, principal);
+  if (field.kind === 'lookup') return screenLookup(form, dotted, field.multi === true, value, principal);
+  if (field.kind === 'subform') {
+    if (!Array.isArray(value)) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    return value.map((row, index) => {
+      const path = `${dotted}[${index}]`;
+      if (!isPlainRecord(row)) {
+        throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${path}`);
+      }
+      return screenObject(form, row, path, { open: false, fields: field.children }, principal, grant, readonlyList, hiddenList, denied, true);
+    });
+  }
+  if (field.kind === 'composite') {
+    if (!isPlainRecord(value)) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    return screenObject(form, value, dotted, { open: false, fields: field.children }, principal, grant, readonlyList, hiddenList, denied, false);
+  }
+  // A blank optional scalar is "no value", not "". The store rejects
+  // "" for typed columns (400 INVALID_INPUT on date), so it becomes null.
+  // Text-family leaves have no scalar marker and keep "" (Creator's empty
+  // text is the empty string). This runs on insert and on update alike:
+  // clearing a typed cell posts null either way.
+  if (field.scalar && typeof value === 'string' && value.trim() === '') return null;
+  if (field.othersOption) {
+    // The client posts the typed free text for the "Others" entry. A direct
+    // post must meet the same bar: a plain string, never the marker option
+    // value itself, inside the field's character cap, and non-blank when the
+    // field is mandatory (an empty Others text is an empty field).
+    if (typeof value !== 'string') {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    if (value === OTHERS_SENTINEL) {
+      throw new RecordAccessError(`record access: ${form}.${dotted} is not client-writable`);
+    }
+    if (field.required && value.trim() === '') {
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'mandatory-missing' }]);
+    }
+    if (field.maxLength !== undefined && value.length > field.maxLength) {
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'text-length' }]);
+    }
+    return value;
+  }
+  if (field.choices && !(typeof value === 'string' && value === '') && !field.choices.includes(String(value))) {
+    throw new WriteRuleError(form, [{ column: field.name, rule: 'not-a-choice' }]);
+  }
+  return screenLeaf(form, dotted, field, value, principal);
+}
+
+function screenFile(form: string, dotted: string, value: unknown, principal: Principal): { key: string } {
+  const key = isPlainRecord(value) ? value.key : undefined;
+  const keys = isPlainRecord(value) ? Object.keys(value) : [];
+  if (keys.length !== 1 || keys[0] !== 'key' || typeof key !== 'string' || key.length === 0) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}: file reference must be { key }`);
+  }
+  return { key };
+}
+
+function screenLookup(form: string, dotted: string, multi: boolean, value: unknown, principal: Principal): unknown {
+  if (Array.isArray(value)) {
+    // A list of ids is the multi lookup's shape; a single lookup refuses it.
+    if (!multi) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    return value.map((item, index) => screenLookup(form, `${dotted}[${index}]`, true, item, principal));
+  }
+  if (!isPlainRecord(value)) return value;
+  const accepted: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(value)) {
+    const path = `${dotted}.${key}`;
+    if (SYSTEM_WRITE_DENY.has(key.toLowerCase()) || !LOOKUP_KEYS.has(key)) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${path}`);
+    }
+    if (inner != null && (isPlainRecord(inner) || Array.isArray(inner))) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${path}`);
+    }
+    accepted[key] = inner;
+  }
+  return accepted;
+}
+
+/**
+ * Flat-store expansion for composite (name/address) values on the write
+ * path. The store keeps one column per part (`Name_first_name`), while
+ * `authorizeWrite` keeps the posted nesting (`Name: { first_name }`), so the
+ * runtime expands a nested plain object into `Parent_child` keys before its
+ * write-rule check — but ONLY when a matching flat rule exists for every
+ * sub-key. A nested value shaped like a lookup (`{ id, label }`) or a file
+ * reference (`{ key }`) is a single store column already and is never
+ * expanded. A nested object with no flat match at all passes through
+ * untouched (the write-rule check still refuses a missing mandatory column);
+ * a partial match — some sub-key without a flat column — is refused with
+ * RecordAccessError, never dropped silently. The input is never mutated, and
+ * error texts name fields only, never record values.
+ */
+export function expandCompositeWrites(
+  form: string,
+  values: Record<string, unknown>,
+  rules: readonly { name: string }[] | undefined,
+): Record<string, unknown> {
+  if (!rules?.length) return values;
+  const columns = new Set(rules.map((rule) => rule.name));
+  let out: Record<string, unknown> | undefined;
+  for (const [key, value] of Object.entries(values)) {
+    if (!isPlainRecord(value)) continue;
+    const parts = Object.keys(value);
+    if (parts.length === 0) continue;
+    // Lookup and file references are single store columns already.
+    if (parts.length === 1 && parts[0] === 'key') continue;
+    if (parts.every((part) => LOOKUP_KEYS.has(part))) continue;
+    const flat = parts.map((part) => `${key}_${part}`);
+    if (!flat.some((name) => columns.has(name))) continue;
+    for (let index = 0; index < parts.length; index += 1) {
+      if (!columns.has(flat[index]!)) {
+        throw new RecordAccessError(`record access: ${form}.${key}.${parts[index]} is not a writable column`);
+      }
+    }
+    if (!out) out = { ...values };
+    delete out[key];
+    for (let index = 0; index < parts.length; index += 1) {
+      out[flat[index]!] = (value as Record<string, unknown>)[parts[index]!];
+    }
+  }
+  return out ?? values;
+}
+
+function screenScalar(form: string, dotted: string, value: unknown, principal: Principal): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => {
+      if (item != null && (isPlainRecord(item) || Array.isArray(item))) {
+        throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}[${index}]`);
+      }
+      return item;
+    });
+  }
+  if (isPlainRecord(value)) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+  }
+  return value;
+}
+
+/**
+ * The posted JSON shape of a schema-listed leaf. A JSON array is the multi
+ * select / checkbox list / multi lookup shape and is refused for anything
+ * else; a plain object is refused everywhere. A leaf with an `input` mark
+ * then accepts only what its client control can send: a string inside the
+ * field's character cap for `text`; a finite number or its exact decimal
+ * text for `number` and `decimal` (digits and scale stay store rules); the
+ * date, datetime or clock text the store's own format check accepts for
+ * `date`, `datetime` and `time`; and a boolean for `boolean`. A shape
+ * mismatch is the same refusal a nested object gets; a value inside the
+ * shape but outside the field's rule answers with the store's
+ * WriteRuleError shape, naming the field and the rule — never the value.
+ */
+function screenLeaf(form: string, dotted: string, field: DepthField, value: unknown, principal: Principal): unknown {
+  if (Array.isArray(value)) {
+    if (!field.multi) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    return value.map((item, index) => {
+      if (item != null && (isPlainRecord(item) || Array.isArray(item))) {
+        throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}[${index}]`);
+      }
+      return item;
+    });
+  }
+  if (isPlainRecord(value)) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+  }
+  switch (field.input) {
+    case 'text':
+      if (typeof value !== 'string') {
+        throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+      }
+      if (field.maxLength !== undefined && value.length > field.maxLength) {
+        throw new WriteRuleError(form, [{ column: field.name, rule: 'text-length' }]);
+      }
+      return value;
+    case 'number':
+    case 'decimal':
+      // The control posts whole numbers as JS numbers and keeps decimal
+      // text exact; a non-finite number or any other type is not writable.
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+          throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+        }
+        return value;
+      }
+      if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())) return value;
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    case 'date': {
+      const text = typeof value === 'string' ? value : '';
+      const serial = /^(\d{4}-\d{2}-\d{2})T00:00:00$/.exec(text.trim());
+      if (normalizeDate(serial ? serial[1]! : text).ok) return value;
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
+    }
+    case 'datetime':
+      if (typeof value === 'string' && normalizeDateTime(value).ok) return value;
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
+    case 'time':
+      if (typeof value === 'string' && validClock(value)) return value;
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
+    case 'boolean':
+      if (typeof value === 'boolean') return value;
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    default:
+      return value;
+  }
+}
+
+/** `HH:mm` or `HH:mm:ss`, the only clock text a `type = time` control posts. */
+function validClock(text: string): boolean {
+  const match = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(text.trim());
+  if (!match) return false;
+  return Number(match[1]) <= 23 && Number(match[2]) <= 59 && (match[3] === undefined || Number(match[3]) <= 59);
+}
+
+export function projectFields(
+  values: Record<string, unknown>,
+  fields: readonly string[] | undefined,
+): Record<string, unknown> {
+  if (!fields) return { ...values };
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(values, field)) out[field] = values[field];
+  }
+  return out;
+}
+
+function asPrincipal(value: unknown): Principal | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  // Profile names must survive verbatim: admin and grant checks are exact,
+  // case-sensitive matches against the generated policy. A verified profile
+  // literally named "Administrator " or "administrator" is not an admin.
+  const rawProfile = record.profile ?? record.profileName ?? record.profile_name;
+  const profile = typeof rawProfile === 'string' && rawProfile.trim() ? rawProfile : undefined;
+  if (!profile) return null;
+  const role = text(record.role ?? record.roleName ?? record.role_name);
+  const userId = text(record.userId ?? record.user_id ?? record.email ?? record.id);
+  const loginUser = text(record.loginUser ?? record.login_user);
+  const principal: Principal = { profile };
+  if (role) principal.role = role;
+  if (userId) principal.userId = userId;
+  if (loginUser) principal.loginUser = loginUser;
+  return principal;
+}
+
+function text(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function resolveBinds(criteria: Criteria, principal: Principal): Criteria {
+  switch (criteria.op) {
+    case 'and':
+    case 'or':
+      return { ...criteria, args: criteria.args.map((arg) => resolveBinds(arg, principal)) };
+    case 'not':
+      return { ...criteria, arg: resolveBinds(criteria.arg, principal) };
+    case '==':
+    case '!=':
+    case '<':
+    case '>':
+    case '<=':
+    case '>=':
+    case 'contains':
+    case 'startsWith':
+    case 'endsWith':
+    case 'in':
+      return { ...criteria, value: resolveValue(criteria.value, principal) };
+    default:
+      return criteria;
+  }
+}
+
+function resolveValue(value: unknown, principal: Principal): unknown {
+  if (Array.isArray(value)) return value.map((item) => resolveValue(item, principal));
+  if (!value || typeof value !== 'object' || !('__bind' in value)) return value;
+  const bind = (value as { __bind?: unknown }).__bind;
+  if (bind === 'loginUser') {
+    if (!principal.loginUser) throw new RecordAccessError('record access: login user is required to apply the record filter');
+    return principal.loginUser;
+  }
+  if (bind === 'loginUserId') {
+    if (!principal.userId) throw new RecordAccessError('record access: login user is required to apply the record filter');
+    return principal.userId;
+  }
+  // The application owner is deploy configuration, not the caller: C2C_ADMIN_USER /
+  // C2C_ADMIN_USER_ID set it, the labelled sentinel is the dry-run default.
+  if (bind === 'adminUserId') return envIdentity('C2C_ADMIN_USER_ID') ?? DRY_RUN_ADMIN_USER_ID;
+  if (bind === 'adminUser') return envIdentity('C2C_ADMIN_USER') ?? DRY_RUN_ADMIN_USER;
+  throw new RecordAccessError('record access: record filter could not be applied');
+}

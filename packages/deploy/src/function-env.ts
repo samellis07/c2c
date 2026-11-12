@@ -1,0 +1,337 @@
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { unquote, type App, type PropertyBlock } from '../../core/src/ir.js';
+import { API_FUNCTION, assertEnvVariablesWithinLimit, isReservedEnvKey } from './function-dir.js';
+import { restWithRetry, type RetryOptions } from './retry.js';
+import type { RestFn } from './tables.js';
+
+export interface DeclaredConnectionSecret {
+  connectionName: string;
+  propertyKey: string;
+  envKey: string;
+  secretValue?: string;
+}
+
+export interface FunctionEnvInput {
+  dc?: string;
+  /** Accepted for callers; never written — ENV and PROJECT_ID names are reserved (RESERVED_ENV_KEYS). */
+  env?: string;
+  /** Accepted for callers; never written — see env. */
+  projectId?: string;
+  /** Accepted for callers; never written — APP_URL and CATALYST_APP_URL are refused (RESERVED_ENV_KEYS). */
+  appUrl?: string;
+  bucketName?: string;
+  /** Real schema tables only — a name here becomes TABLE_<NAME>_ID. Names of
+   *  anything else (project, role, job pool, bucket) must never reach this. */
+  tables?: ReadonlyArray<{ name: string; id?: string }>;
+  connectionSecrets?: readonly DeclaredConnectionSecret[];
+  existingEnv?: Record<string, string>;
+}
+
+export function sanitizeEnvKey(name: string): string {
+  return name
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+}
+
+const SECRET_PROP_RE = /secret|apikey|api_key|password|token/i;
+
+export function extractConnectionSecrets(app: App): DeclaredConnectionSecret[] {
+  const secrets: DeclaredConnectionSecret[] = [];
+  const seen = new Set<string>();
+
+  const walk = (blocks: readonly PropertyBlock[]) => {
+    for (const block of blocks) {
+      if (block.name.toLowerCase() === 'connections') {
+        for (const conn of block.blocks) {
+          const connName = conn.name.trim();
+          for (const prop of conn.properties) {
+            if (SECRET_PROP_RE.test(prop.key)) {
+              const envKey = `${sanitizeEnvKey(connName)}_${sanitizeEnvKey(prop.key)}`;
+              if (!seen.has(envKey)) {
+                seen.add(envKey);
+                const val = unquote(prop.value ?? '').trim();
+                secrets.push({
+                  connectionName: connName,
+                  propertyKey: prop.key,
+                  envKey,
+                  ...(val ? { secretValue: val } : {}),
+                });
+              }
+            }
+          }
+        }
+      }
+      if (block.blocks && block.blocks.length > 0) {
+        walk(block.blocks);
+      }
+    }
+  };
+
+  walk(app.configuration);
+  return secrets;
+}
+
+export function isDerivableEnvKey(key: string): boolean {
+  if (
+    key === 'PROJECT_ID' ||
+    key === 'CATALYST_PROJECT_ID' ||
+    key === 'DC' ||
+    key === 'CATALYST_DC' ||
+    key === 'C2C_ZOHO_DC' ||
+    key === 'ENV' ||
+    key === 'CATALYST_ENV' ||
+    key === 'APP_URL' ||
+    key === 'CATALYST_APP_URL' ||
+    key === 'C2C_STRATUS_BUCKET' ||
+    key === 'STRATUS_BUCKET' ||
+    key === 'TABLE_ID'
+  ) {
+    return true;
+  }
+  if (/^TABLE_[A-Z0-9_]+_ID$/.test(key) || /^TABLE_ID_[A-Z0-9_]+$/.test(key)) {
+    return true;
+  }
+  return false;
+}
+
+export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string> {
+  const existing = input.existingEnv ?? {};
+  const out: Record<string, string> = {};
+
+  // Derivable DC. Catalyst refuses DC/CATALYST_DC, ENV/CATALYST_ENV and
+  // PROJECT_ID/CATALYST_PROJECT_ID in env_variables (RESERVED_ENV_KEYS), so the
+  // file carries only c2c's own name; an older file's reserved names are read
+  // as inputs and dropped.
+  const dc = input.dc ?? existing.C2C_ZOHO_DC ?? existing.DC ?? existing.CATALYST_DC;
+  if (dc) out.C2C_ZOHO_DC = dc;
+
+  // Derivable Bucket
+  const bucket = input.bucketName ?? existing.C2C_STRATUS_BUCKET ?? existing.STRATUS_BUCKET;
+  if (bucket) {
+    out.C2C_STRATUS_BUCKET = bucket;
+    out.STRATUS_BUCKET = bucket;
+  }
+
+  // Table IDs. Each table is written once as TABLE_<NAME>_ID: the generated
+  // code resolves tables by name and reads neither spelling, so the legacy
+  // TABLE_ID_<NAME> double is never emitted — Catalyst refuses an
+  // env_variables payload over its aggregate size limit.
+  let firstTableId: string | undefined;
+
+  // From input.tables
+  if (input.tables) {
+    for (const table of input.tables) {
+      if (table.id) {
+        if (!firstTableId) firstTableId = table.id;
+        out[`TABLE_${sanitizeEnvKey(table.name)}_ID`] = table.id;
+      }
+    }
+  }
+
+  // Existing table keys if not set. A TABLE_ID_<NAME> key left over from an
+  // env written before the dedup still carries its id forward, folded into the
+  // canonical TABLE_<NAME>_ID spelling.
+  for (const [k, v] of Object.entries(existing)) {
+    const legacy = /^TABLE_ID_([A-Z0-9_]+)$/.exec(k)?.[1];
+    const canonical = legacy === undefined ? k : `TABLE_${legacy}_ID`;
+    if (/^TABLE_.*_ID$/.test(canonical)) {
+      if (out[canonical] === undefined) out[canonical] = v;
+      if (!firstTableId && /^[0-9]+$/.test(v)) firstTableId = v;
+    }
+  }
+
+  if (firstTableId) {
+    out.TABLE_ID = firstTableId;
+  } else if (existing.TABLE_ID) {
+    out.TABLE_ID = existing.TABLE_ID;
+  }
+
+  // Declared Connection Secrets
+  if (input.connectionSecrets) {
+    for (const secret of input.connectionSecrets) {
+      // User's existing value is preserved!
+      out[secret.envKey] = existing[secret.envKey] ?? secret.secretValue ?? '';
+    }
+  }
+
+  // Preserve any other existing keys, never a reserved one. TABLE_ID_<NAME>
+  // doubles are not re-emitted: their ids already folded into TABLE_<NAME>_ID.
+  for (const [k, v] of Object.entries(existing)) {
+    if (out[k] === undefined && !isReservedEnvKey(k) && !/^TABLE_ID_[A-Z0-9_]+$/.test(k)) {
+      out[k] = v;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * The env a deploy writes into catalyst-config.json: the supplied --function-env
+ * map plus the c2c variables derived from the deploy itself. A supplied
+ * non-empty value wins; an empty or absent one takes the derived value.
+ */
+export function deployFunctionEnv(
+  supplied: Readonly<Record<string, string>>,
+  derived: { dc?: string; bucket?: string },
+): Record<string, string> {
+  const out: Record<string, string> = { ...supplied };
+  const fill = (key: string, value: string | undefined) => {
+    if (value && !out[key]) out[key] = value;
+  };
+  fill('C2C_ZOHO_DC', derived.dc);
+  fill('C2C_STRATUS_BUCKET', derived.bucket);
+  return out;
+}
+
+export function writeOrUpdateFunctionEnv(
+  outDir: string,
+  input: FunctionEnvInput,
+): { path: string; env: Record<string, string>; connectionSecretKeys: string[] } {
+  mkdirSync(outDir, { recursive: true });
+  const fenvPath = join(outDir, 'function-env.json');
+  let existing: Record<string, string> = {};
+  try {
+    existing = JSON.parse(readFileSync(fenvPath, 'utf8'));
+  } catch {
+    existing = {};
+  }
+
+  const env = buildFunctionEnv({ ...input, existingEnv: existing });
+  const tmpPath = `${fenvPath}.tmp-${process.pid}`;
+  writeFileSync(tmpPath, `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmpPath, fenvPath);
+  // Replacing an existing file inherits the temporary file's mode; explicitly
+  // enforce the secret-file permissions in case the destination predated this fix.
+  chmodSync(fenvPath, 0o600);
+
+  const connectionSecretKeys: string[] = [];
+  if (input.connectionSecrets) {
+    for (const s of input.connectionSecrets) {
+      if (!connectionSecretKeys.includes(s.envKey)) connectionSecretKeys.push(s.envKey);
+    }
+  }
+  for (const key of Object.keys(env)) {
+    if (!isDerivableEnvKey(key) && !connectionSecretKeys.includes(key)) {
+      connectionSecretKeys.push(key);
+    }
+  }
+
+  return { path: fenvPath, env, connectionSecretKeys };
+}
+
+export function readConnectionSecretKeys(outDir: string, knownKeys?: readonly string[]): string[] {
+  const keys = new Set<string>(knownKeys ?? []);
+  const fenvPath = join(outDir, 'function-env.json');
+  try {
+    const data = JSON.parse(readFileSync(fenvPath, 'utf8')) as Record<string, unknown>;
+    for (const k of Object.keys(data)) {
+      if (!isDerivableEnvKey(k)) keys.add(k);
+    }
+  } catch {
+    // ignore
+  }
+  return [...keys];
+}
+
+/**
+ * Secret --function-env values reach the c2c_api function over the Catalyst
+ * admin env route at deploy time, never through a generated file:
+ * catalyst-config.json env_variables carries each secret NAME with an empty
+ * value (the generated project is the customer's and is often committed), and
+ * this POST restores the real values right after `catalyst deploy` lands.
+ * Route per plugin/references/facts/functions.md "Manage env vars as one
+ * replace-only set" — a configuration write replaces every variable, so the
+ * live set is re-read and merged before the POST.
+ */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+/** The function list body tolerates both a bare array and the usual {data:[…]} envelope. */
+function functionEntries(body: unknown): Record<string, unknown>[] {
+  const record = asRecord(body);
+  const candidates = [Array.isArray(body) ? body : undefined, asRecord(record?.data)?.functions, record?.functions, record?.data];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.filter((entry): entry is Record<string, unknown> => !!asRecord(entry));
+  }
+  return [];
+}
+
+function stringField(entry: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = entry[key];
+    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  }
+  return undefined;
+}
+
+/** The deployed function's Catalyst id, found by its fixed name in the project function list. */
+export function functionIdFromList(body: unknown, name: string = API_FUNCTION): string | undefined {
+  for (const entry of functionEntries(body)) {
+    const entryName = stringField(entry, ['function_name', 'name']);
+    if (entryName !== name) continue;
+    const id = stringField(entry, ['function_id', 'id']);
+    if (id) return id;
+  }
+  return undefined;
+}
+
+/** Accept only Catalyst's observed data.configuration.environment.variables object. */
+export function liveFunctionVariables(body: unknown): Record<string, string> {
+  const variables = asRecord(asRecord(asRecord(asRecord(asRecord(body)?.data)?.configuration)?.environment)?.variables);
+  if (!variables) throw new Error('live env read-back has an unknown shape; refusing a replace-only write');
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(variables)) {
+    if (typeof value !== 'string') throw new Error('live env read-back contains a non-string value; refusing a replace-only write');
+    out[key] = value;
+  }
+  return out;
+}
+
+async function call(rest: RestFn, request: Parameters<RestFn>[0], opts: RetryOptions, what: string): Promise<unknown> {
+  const { result } = await restWithRetry(rest, request, opts);
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`${what} failed (HTTP ${result.status})`);
+  }
+  return result.body;
+}
+
+/**
+ * POST the secret values onto the live function. Returns the applied names,
+ * sorted. The configuration write replaces every variable, so the POST body is
+ * the live set merged with the secrets — the names the deploy wrote name-only
+ * plus every variable already there.
+ */
+export async function applyFunctionEnvSecrets(
+  rest: RestFn,
+  projectId: string,
+  secrets: Readonly<Record<string, string>>,
+  requiredKeys: readonly string[] = [],
+  opts: RetryOptions = {},
+): Promise<string[]> {
+  const names = Object.keys(secrets).sort();
+  if (!names.length && !requiredKeys.length) return [];
+  const prefix = `/baas/v1/project/${projectId}`;
+  const list = await call(rest, { method: 'GET', path: `${prefix}/function` }, opts, `listing functions in project ${projectId}`);
+  const id = functionIdFromList(list);
+  if (!id) throw new Error(`function ${API_FUNCTION} is not in the project function list after its deploy`);
+  const detail = await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `reading ${API_FUNCTION} configuration`);
+  const live = liveFunctionVariables(detail);
+  const absent = requiredKeys.filter((key) => !(key in live));
+  if (absent.length) throw new Error(`live env read-back is missing deployed variable(s) ${absent.join(', ')}; refusing a replace-only write`);
+  if (!names.length) return [];
+  const variables = { ...live, ...secrets };
+  assertEnvVariablesWithinLimit(variables);
+  await call(rest, { method: 'POST', path: `${prefix}/function/${id}/configuration`, body: { variables } }, opts, `setting ${API_FUNCTION} env vars`);
+  const verified = liveFunctionVariables(await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `verifying ${API_FUNCTION} env vars`));
+  // Catalyst may omit empty, name-only seed placeholders from its read-back.
+  // They are intentionally not proof of a failed write; all non-empty values
+  // and every secret must still match exactly.
+  if (Object.entries(variables).some(([key, value]) => value !== '' && verified[key] !== value)) {
+    throw new Error('live env read-back did not match the deployed env_variables after update; set the variables in the Catalyst console or MCP env tools');
+  }
+  return names;
+}

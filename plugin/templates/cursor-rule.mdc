@@ -1,0 +1,9 @@
+---
+description: Zoho Creator to Zoho Catalyst migration (c2c). Use when the user mentions Creator, Catalyst migration, .ds export, Deluge conversion, or any /c2c- command.
+alwaysApply: false
+---
+Follow `<c2c-plugin>/C2C.md` (rules) and `<c2c-plugin>/skills/c2c-migrate/SKILL.md` (playbook). Load sub-skills from `<c2c-plugin>/skills/c2c-*/SKILL.md` only when the playbook says so.
+
+Before any step run the doctor (`<c2c-plugin>/skills/c2c-preflight/SKILL.md`). It requires the Catalyst agent skills (`C2C_CATALYST_SKILLS_DIR`), the Catalyst MCP connector (signed in) and the Catalyst CLI (signed in, same org and DC). If it is red, stop after analyze/plan and give the user the exact fixes it printed.
+
+Run the converter as `<c2c-plugin>/bin/c2c <verb>`. Every live step needs the user's explicit yes and `--confirm`. The user does every login, consent and console click.

@@ -1,0 +1,240 @@
+app: restaurants
+route: #/form/Restaurant
+state: invalid
+viewport: phone 390
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Restaurants"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a aria-current="page" href="#/form/Restaurant"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Restaurant"
+        li
+          a href="#/form/Visit"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Visit"
+        li
+          a href="#/report/All_Restaurants"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "All Restaurants"
+        li
+          a href="#/page/Guide"
+            svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+              rect
+              rect
+              rect
+              rect
+            span
+              "Dining Guide"
+  main tabindex="-1"
+    section class="c2c-card" data-form-card=""
+      h1
+        "Restaurant"
+      form data-form="Restaurant" data-layout="one" data-mode="add"
+        div class="form-grid"
+          div class="c2c-field" data-field="Name" data-required="true" data-widget="text"
+            div class="field"
+              label class="label" for="#ref"
+                "Name"
+              input aria-describedby="#ref" aria-invalid="true" class="input" name="Name" type="text"
+              span class="messageSlot"
+                span class="error" role="alert"
+                  span class="srOnly"
+                    "Enter Name."
+                  span aria-hidden="true" class="words"
+                    span class="word"
+                      "Enter"
+                    span class="word"
+                      "Name."
+            p class="c2c-error" data-error-for="Name" role="alert"
+              "Enter Name."
+          div class="c2c-field" data-field="Cuisine" data-widget="select"
+            div class="field"
+              label class="label c2c-label" for="#ref"
+                "Cuisine"
+              select class="input" name="Cuisine"
+                option value=""
+                option value="Italian"
+                  "Italian"
+                option value="Japanese"
+                  "Japanese"
+                option value="Mexican"
+                  "Mexican"
+          div class="c2c-field" data-field="Rating" data-widget="decimal"
+            div
+              div class="field"
+                div class="head"
+                  label class="label" for="#ref"
+                    "Rating"
+                div class="control"
+                  button aria-controls="#ref" aria-label="Decrease Rating" class="step" type="button"
+                    span class="icon"
+                      svg aria-hidden="true" class="lucide lucide-minus"
+                        path
+                  div class="valueWrap"
+                    span class="value"
+                      span class="affix"
+                      span class="number"
+                        span aria-hidden="true" class="display"
+                          span class="column"
+                            span class="sizer"
+                              "0"
+                            span class="glyph"
+                              "0"
+                            span class="glyph"
+                              "1"
+                            span class="glyph"
+                              "2"
+                            span class="glyph"
+                              "3"
+                            span class="glyph"
+                              "4"
+                            span class="glyph"
+                              "5"
+                            span class="glyph"
+                              "6"
+                            span class="glyph"
+                              "7"
+                            span class="glyph"
+                              "8"
+                            span class="glyph"
+                              "9"
+                          span class="symbol"
+                            "."
+                          span class="column"
+                            span class="sizer"
+                              "0"
+                            span class="glyph"
+                              "0"
+                            span class="glyph"
+                              "1"
+                            span class="glyph"
+                              "2"
+                            span class="glyph"
+                              "3"
+                            span class="glyph"
+                              "4"
+                            span class="glyph"
+                              "5"
+                            span class="glyph"
+                              "6"
+                            span class="glyph"
+                              "7"
+                            span class="glyph"
+                              "8"
+                            span class="glyph"
+                              "9"
+                          span class="column"
+                            span class="sizer"
+                              "0"
+                            span class="glyph"
+                              "0"
+                            span class="glyph"
+                              "1"
+                            span class="glyph"
+                              "2"
+                            span class="glyph"
+                              "3"
+                            span class="glyph"
+                              "4"
+                            span class="glyph"
+                              "5"
+                            span class="glyph"
+                              "6"
+                            span class="glyph"
+                              "7"
+                            span class="glyph"
+                              "8"
+                            span class="glyph"
+                              "9"
+                        input class="input" role="spinbutton" type="text" value=""
+                      span class="affix"
+                  button aria-controls="#ref" aria-label="Increase Rating" class="step" type="button"
+                    span class="icon"
+                      svg aria-hidden="true" class="lucide lucide-plus"
+                        path
+                        path
+                span aria-live="polite" class="srOnly"
+            input name="Rating" type="hidden" value=""
+          div class="c2c-field" data-field="Website" data-widget="url"
+            div class="field"
+              label class="label" for="#ref"
+                "Website"
+              input class="input" name="Website" type="url"
+        div class="alert danger c2c-banner" role="alert"
+          span class="icon"
+            span class="glyph"
+              svg aria-hidden="true" class="lucide lucide-circle-x lucide-x-circle"
+                circle
+                path
+                path
+          div class="copy"
+            div class="content"
+              strong class="title"
+                span class="line"
+                  "Check the highlighted fields."
+        div class="c2c-form-actions"
+          button class="button primary md" tabindex="0" type="submit"
+            span class="labelSlot"
+              span class="labelContent"
+                span class="labelPhase"
+                  "Save"
+  nav aria-label="Tabs"
+    a aria-current="page" href="#/form/Restaurant"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Restaurant"
+    a href="#/form/Visit"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Visit"
+    a href="#/report/All_Restaurants"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "All Restaurants"
+    a href="#/page/Guide"
+      svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+        rect
+        rect
+        rect
+        rect
+      span
+        "Dining Guide"

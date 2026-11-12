@@ -1,0 +1,136 @@
+application "c2c-conn-creator-src"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Src_Item
+		{
+			displayname = "Conn Src Item"
+			must have Src_Code
+			(
+				type = text
+				displayname = "Code"
+				row = 1
+				column = 1
+				width = medium
+			)
+			Src_Title
+			(
+				type = text
+				displayname = "Title"
+				row = 2
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Src_Items
+		{
+			displayName = "All Conn Src Items"
+			show all rows from Conn_Src_Item
+			(
+				Src_Code as "Code"
+				Src_Title as "Title"
+			)
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Src_Item}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Src_Item
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Src_Item
+				{
+					displayname = "c2c-conn-creator-src"
+					icon = "design-todo"
+					form Conn_Src_Item
+					{
+					}
+					report All_Conn_Src_Items
+					{
+					}
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,228 @@
+/**
+ * Read the deployed Slate app URL back from the Slate API.
+ * `slate:link` can print only "Slate linked successfully" and `deploy slate`
+ * can finish without an "App Url:" line, so the URL is looked up by app name:
+ * GET /slate/v1/project/<id>/app lists the apps; when the row has no domain of
+ * its own, GET /slate/v1/project/<id>/app/<appId>/deployment/<deploymentId>
+ * (zgraphql origin) reports `domain` and `origin_domain`. These are read-only
+ * calls — they retry a transient 429/5xx like every other read.
+ */
+import { restWithRetry, type RetryOptions } from './retry.js';
+import type { RestFn } from './tables.js';
+
+export interface SlateAppRef {
+  id: string;
+  name: string;
+  domain?: string;
+  deploymentId?: string;
+}
+
+/** Rows of GET /slate/v1/project/<id>/app (`data[]`). */
+export function slateApps(body: unknown): SlateAppRef[] {
+  const root = asRecord(body) ?? {};
+  const data = Array.isArray(root.data) ? root.data : [];
+  const out: SlateAppRef[] = [];
+  for (const item of data) {
+    const record = asRecord(item);
+    if (!record) continue;
+    const id = decimalOf(record.id ?? record.app_id);
+    const name = stringOf(record.name);
+    if (!id || !name) continue;
+    const config = asRecord(record.deployment_type_config);
+    const build = asRecord(config?.current_build);
+    out.push({
+      id,
+      name,
+      ...(stringOf(record.domain) || stringOf(config?.domain) || stringOf(config?.origin_domain)
+        ? { domain: (stringOf(record.domain) ?? stringOf(config?.domain) ?? stringOf(config?.origin_domain))! }
+        : {}),
+      ...(decimalOf(config?.id ?? build?.deployment_id) ? { deploymentId: decimalOf(config?.id ?? build?.deployment_id)! } : {}),
+    });
+  }
+  return out;
+}
+
+/** `domain`, else `origin_domain`, of a deployment read-back body. */
+export function slateDeploymentDomain(body: unknown): string | undefined {
+  const root = asRecord(body) ?? {};
+  const data = asRecord(root.data) ?? root;
+  return stringOf(data.domain) ?? stringOf(data.origin_domain);
+}
+
+/**
+ * `.catalyst/slate-config.toml` inside the uploaded Slate tree: framework +
+ * deployment the link registered. The deploy writes it after the React build
+ * because a clean `vite build` empties dist/ (catalyst-slate reference,
+ * "slate-config.toml wiped by clean builds"). The source is already the built
+ * output, so the framework is `static`.
+ */
+export function slateConfigToml(): string {
+  return 'framework = "static"\ndeployment_name = "default"\n';
+}
+
+/** A host or https URL → `https://<host>` — only a plain host, the same set the CORS domain check accepts. */
+export function slateUrlOf(domain: string | undefined): string | undefined {
+  const raw = domain?.trim();
+  if (!raw) return undefined;
+  const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && /^[a-z0-9][a-z0-9.-]*$/i.test(parsed.host) ? `https://${parsed.host}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Slate app names: [UNVERIFIED] the rule is Catalyst's own refusal text, "App
+ * name must be alphanumeric and cannot contain consecutive hyphens or hyphens
+ * at the beginning or end." No length limit is documented, so none is enforced.
+ */
+const SLATE_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+
+/** Why `name` is not a valid Slate app name, or undefined. */
+export function slateNameProblem(name: string): string | undefined {
+  return SLATE_NAME.test(name) ? undefined : `${JSON.stringify(name)} is not a Slate app name — letters and digits, single hyphens between them, no hyphen at the start or end`;
+}
+
+/**
+ * The Slate app name a deploy uses for a project: every run of characters
+ * outside letters and digits becomes one hyphen, edge hyphens are dropped.
+ * Deterministic, and a name that is already valid is returned unchanged.
+ */
+export function slateAppName(projectName: string): string {
+  return projectName.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
+}
+
+/** Waits between Slate list reads after a build: three waits, 14 s in total. */
+export const SLATE_LIST_WAITS_MS: readonly number[] = [2000, 4000, 8000];
+
+/**
+ * After a Slate build printed its App Url but the CLI exited non-zero, poll the
+ * app list until exactly one app named `appName` appears. The list can lag the
+ * build, so one read is not proof of absence. Fail-closed: true only when the
+ * app is listed and any domain it reports is the printed host.
+ */
+export async function waitForSlateApp(
+  rest: RestFn,
+  projectId: string,
+  appName: string,
+  printedUrl: string,
+  opts: RetryOptions = {},
+  waits: readonly number[] = SLATE_LIST_WAITS_MS,
+): Promise<boolean> {
+  const printed = slateUrlOf(printedUrl);
+  if (!printed) return false;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt <= waits.length; attempt += 1) {
+    if (attempt > 0) await sleep(waits[attempt - 1] as number);
+    let listed: Awaited<ReturnType<typeof restWithRetry>>;
+    try {
+      listed = await restWithRetry(rest, { method: 'GET', path: `/slate/v1/project/${projectId}/app` }, opts);
+    } catch {
+      continue;
+    }
+    if (listed.result.status < 200 || listed.result.status >= 300) continue;
+    const matches = slateApps(listed.result.body).filter((item) => item.name === appName);
+    if (matches.length > 1) return false;
+    const app = matches[0];
+    if (!app) continue;
+    const domain = slateUrlOf(app.domain);
+    return domain === undefined || domain === printed;
+  }
+  return false;
+}
+
+/** Waits between served-domain read-backs: the domain can lag the app listing after a deploy (~28 s in total). */
+export const SLATE_DOMAIN_WAITS_MS: readonly number[] = [4000, 8000, 16000];
+
+/**
+ * `readSlateAppUrl`, waiting while the answer is "listed but not served yet":
+ * the named app is in the list but no domain resolves. The domain can lag the
+ * build, so one read is not proof there is none. Bounded and fail-closed: an
+ * absent app or two same-name apps return at once (absence stays a note,
+ * ambiguity is a human's pick), and an app that never serves a domain comes
+ * back with readSlateAppUrl's note.
+ */
+export async function waitForSlateDomain(
+  rest: RestFn,
+  projectId: string,
+  appName: string,
+  opts: RetryOptions = {},
+  waits: readonly number[] = SLATE_DOMAIN_WAITS_MS,
+): Promise<SlateRead> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let found = await readSlateAppUrl(rest, projectId, appName, opts);
+  for (let attempt = 0; attempt < waits.length && !found.url && found.listed && found.apps.length === 1; attempt += 1) {
+    await sleep(waits[attempt] as number);
+    found = await readSlateAppUrl(rest, projectId, appName, opts);
+  }
+  return found;
+}
+
+/**
+ * What the customer does when the Slate app list refuses (first use of Slate
+ * not completed in the console yet). The raw HTTP status stays in debug output.
+ */
+export const SLATE_FIRST_USE_GUIDANCE =
+  'Slate first use is not complete: in the Catalyst console open the project, click Slate, then click Start Exploring and wait for the Slate page to load. ' +
+  'To check it is done, the Slate page lists apps (or an empty app list) instead of the Start Exploring screen. Then run deploy --resume to continue.';
+
+export interface SlateRead {
+  /** The raw HTTP status of a refused app list, for debug output only. */
+  rawStatus?: number;
+  /** The app list answered 2xx; `apps` is then the exact-name match set. */
+  listed: boolean;
+  /** Exact-name matches — can exceed one: the API does not make app names unique. */
+  apps: SlateAppRef[];
+  /** The served URL — set only when exactly one app matched and a domain resolved. */
+  url?: string;
+  /** One printable line explaining why `url` is unset. */
+  note?: string;
+}
+
+/**
+ * Read the served URL of the Slate app named `appName` back from the API.
+ * Never throws for a server refusal and never picks between same-name apps:
+ * two matches are reported with their candidates, a missing app and a failed
+ * list get a one-line note so the absent CORS domain is explained.
+ */
+export async function readSlateAppUrl(rest: RestFn, projectId: string, appName: string, opts: RetryOptions = {}): Promise<SlateRead> {
+  const base = `/slate/v1/project/${projectId}`;
+  const listed = await restWithRetry(rest, { method: 'GET', path: `${base}/app` }, opts);
+  if (listed.result.status < 200 || listed.result.status >= 300) {
+    return { listed: false, apps: [], rawStatus: listed.result.status, note: `slate url not found: ${SLATE_FIRST_USE_GUIDANCE}` };
+  }
+  const matches = slateApps(listed.result.body).filter((item) => item.name === appName);
+  if (matches.length > 1) {
+    const candidates = matches.map((app) => slateUrlOf(app.domain) ?? `app id ${app.id}`).join(', ');
+    return { listed: true, apps: matches, note: `${matches.length} Slate apps named "${appName}" (${candidates}) — pass --slate-domain <host>` };
+  }
+  const app = matches[0];
+  if (!app) return { listed: true, apps: [], note: `slate url not found: no app named "${appName}" in the project's Slate app list` };
+  const direct = slateUrlOf(app.domain);
+  if (direct) return { listed: true, apps: matches, url: direct };
+  if (app.deploymentId) {
+    const deployment = await restWithRetry(rest, { method: 'GET', path: `${base}/app/${app.id}/deployment/${app.deploymentId}`, origin: 'zgraphql' }, opts);
+    if (deployment.result.status >= 200 && deployment.result.status < 300) {
+      const url = slateUrlOf(slateDeploymentDomain(deployment.result.body));
+      if (url) return { listed: true, apps: matches, url };
+    }
+  }
+  return { listed: true, apps: matches, note: `slate url not found: the Slate app "${appName}" reports no served domain yet` };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function stringOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function decimalOf(value: unknown): string | undefined {
+  if (typeof value === 'string' && /^[0-9]+$/.test(value.trim())) return value.trim();
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return undefined;
+}

@@ -1,0 +1,176 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Lead Management",
+  "source": {
+    "file": "Lead_Management.ds",
+    "origin": "Creator gallery app lead-management, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-industry-types",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Industry_Type",
+          "record": {
+            "Industry_Name": "Industry_Name bravo 693"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Industry_Types",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Industry_Type": [
+            {
+              "Industry_Name": "Industry_Name bravo 693"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Creator's baseline read held one record left by the earlier session's race ('Industry_Name bravo 693'); replayed as a setup write so the stored state matches the capture."
+      ]
+    },
+    {
+      "id": "add-industry-type-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Industry_Type",
+          "record": {
+            "Industry_Name": "Industry_Name bravo 661"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Industry Type Added Successfully!"
+          },
+          "bind": {
+            "r_add_industry_type_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Industry_Type": [
+            {
+              "Industry_Name": "Industry_Name bravo 661"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-industry-type-invalid-duplicate-industry-name",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Industry_Type",
+          "record": {
+            "Industry_Name": "Industry_Name bravo 661"
+          },
+          "bind": {
+            "r_add_industry_type_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Industry_Type",
+          "record": {
+            "Industry_Name": "Industry_Name bravo 661"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Industry_Name": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Industry_Type": [
+            {
+              "Industry_Name": "Industry_Name bravo 661"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-industry-types",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Industry_Type",
+          "record": {
+            "Industry_Name": "Industry_Name bravo 693"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Industry_Type",
+          "record": {
+            "Industry_Name": "Industry_Name bravo 661"
+          },
+          "bind": {
+            "r_add_industry_type_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Industry_Types",
+          "expect": {
+            "outcome": "rows",
+            "count": 2
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 2
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Industry_Type": [
+            {
+              "Industry_Name": "Industry_Name bravo 693"
+            },
+            {
+              "Industry_Name": "Industry_Name bravo 661"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Creator's post-mutation read listed the pre-existing record and the new r4 record; the duplicate refusal added no third record."
+      ]
+    }
+  ]
+}

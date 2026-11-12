@@ -1,0 +1,5424 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { deriveIr, emptyApp, parse, parseProject, type App, type Field, type Workflow } from '../../core/src/index.js';
+import { buildModel } from '../../ui/src/model.js';
+import { generateUi } from '../../ui/src/index.js';
+import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath, generate, submitBodyReadsClientState, submitMergeBlockers } from '../../deluge/src/generate.js';
+import { reportCriteria } from '../../deluge/src/translate.js';
+import { compileCriteria } from '../../shims/src/criteria.js';
+import { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError } from '../src/no-silent-drop.js';
+import { dueInstants } from '../../shims/src/jobs.js';
+
+const Z = { start: 0, end: 0 };
+
+function workflow(partial: Partial<Workflow> & Pick<Workflow, 'name' | 'event'>): Workflow {
+  return { deluge: null, properties: [], span: Z, ...partial };
+}
+
+function field(name: string, type: string): Field {
+  return { name, type, modifiers: [], required: false, unique: false, properties: [], subfields: [], annotations: [], flags: [], span: Z };
+}
+
+function app(partial: Partial<App>): App {
+  return { ...emptyApp('empty'), name: 'Demo_App', ...partial };
+}
+
+function coveredApp(): App {
+  return app({
+    forms: [
+      {
+        name: 'Orders',
+        properties: [],
+        fields: [field('Title', 'text')],
+        actions: [],
+        blocks: [],
+        span: Z,
+      },
+    ],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [],
+        views: [],
+        span: Z,
+      },
+    ],
+    pages: [{ name: 'Home', properties: [], zml: [], references: [], span: Z }],
+    workflows: [
+      workflow({ name: 'Stamp', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;', span: Z } }),
+      workflow({
+        name: 'Daily',
+        container: 'schedule',
+        event: 'on schedule',
+        properties: [
+          { key: 'start', value: '"2017-01-03 09:30:00"', span: Z },
+          { key: 'frequency', value: 'daily', span: Z },
+        ],
+      }),
+      workflow({ name: 'Sale approval', container: 'approval', form: 'Orders', event: 'on approve' }),
+      workflow({ name: 'Pay now', container: 'form', form: 'Orders', event: 'on load' }),
+    ],
+  });
+}
+
+test('a produced construct is never listed as a drop', () => {
+  assert.deepEqual(auditApp(coveredApp()), []);
+});
+
+test('carried field layout values emit; unknown values and nav layouts on a field stay drops', () => {
+  const layouts: [string, number][] = [
+    ['2', 2],
+    ['3', 3],
+    ['onecolumn', 1],
+    ['twocolumn', 2],
+  ];
+  for (const [value, columns] of layouts) {
+    const known = app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Status', 'radiobuttons'), properties: [{ key: 'layout', value, span: Z }], choices: ['Open', 'Closed'] }], actions: [], blocks: [], span: Z }] });
+    assert.deepEqual(auditApp(known), [], `layout ${value} should reach the generated field`);
+    // Mutation: a different option column count in generated output must not prove this value.
+    const outputs = collectOutputs(known);
+    const ui = outputs.model.forms[0].fields.find((item) => item.name === 'Status');
+    assert.equal(ui?.optionColumns, columns, `layout ${value} carried the wrong column count`);
+    ui!.optionColumns = columns === 2 ? 3 : 2;
+    assert.equal(
+      auditApp(known, outputs).filter((drop) => drop.property === 'property layout').length,
+      1,
+      `layout ${value} must not pass when the generated field lost its arrangement`,
+    );
+  }
+  const card = app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Status', 'radiobuttons'), properties: [{ key: 'layout', value: 'onecolumncard', span: Z }], choices: ['Open', 'Closed'] }], actions: [], blocks: [], span: Z }] });
+  assert.deepEqual(auditApp(card), [], 'layout onecolumncard should reach the generated field');
+  const cardOut = collectOutputs(card);
+  cardOut.model.forms[0].fields.find((item) => item.name === 'Status')!.optionCard = false;
+  assert.equal(auditApp(card, cardOut).filter((drop) => drop.property === 'property layout').length, 1, 'a lost card wrapper must not pass');
+
+  for (const value of ['fourcolumn', 'slidingpane', 'tabbar']) {
+    const unknown = app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Status', 'radiobuttons'), properties: [{ key: 'layout', value, span: Z }], choices: ['Open', 'Closed'] }], actions: [], blocks: [], span: Z }] });
+    assert.equal(auditApp(unknown).filter((drop) => drop.property === 'property layout').length, 1, `layout ${value} should remain a drop on a field`);
+  }
+});
+
+test('a radio "others option" setting emits; stripping the Others entry brings the drop back', () => {
+  const orders = (partial: Partial<Field>) => app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Status', 'radiobuttons'), choices: ['Open', 'Closed'], ...partial }], actions: [], blocks: [], span: Z }] });
+  // `others option = true`: the generated radio draws an "Others" choice with a
+  // free-text box (client-runtime.js fieldControl) and the submit stub leaves
+  // the field open, so the property is emitted, not listed.
+  const on = orders({ properties: [{ key: 'others option', value: 'true', span: Z }] });
+  assert.deepEqual(auditApp(on), [], 'others option should reach the generated radio');
+  const out = collectOutputs(on);
+  const ui = out.model.forms[0].fields.find((item) => item.name === 'Status')!;
+  assert.equal(ui.widget, 'radio');
+  assert.equal(ui.othersOption, true);
+  // Mutation: a generated field without the Others entry must not prove the setting.
+  ui.othersOption = false;
+  assert.equal(auditApp(on, out).filter((drop) => drop.property === 'property others option').length, 1, 'a lost Others entry must not pass');
+  // The bare `others option` word is the same setting (hasOthersOption reads
+  // field.flags too): carried, and the same mutation exposes the drop.
+  const flagged = orders({ flags: ['others option'] });
+  assert.deepEqual(auditApp(flagged), [], 'bare others option flag should reach the generated radio');
+  const flagOut = collectOutputs(flagged);
+  flagOut.model.forms[0].fields.find((item) => item.name === 'Status')!.othersOption = false;
+  assert.equal(auditApp(flagged, flagOut).filter((drop) => drop.property === 'flag others option').length, 1, 'a lost Others entry must not pass for the flag spelling');
+  // `others option = false` is the closed default: nothing to carry, no drop.
+  assert.deepEqual(auditApp(orders({ properties: [{ key: 'others option', value: 'false', span: Z }] })), []);
+  // The `allow other` spellings open the stored-value check (ir.ts
+  // closedChoices) but draw no Others input: they must stay flagged drops,
+  // never pass silently.
+  assert.equal(auditApp(orders({ flags: ['allow other'] })).filter((drop) => drop.property === 'flag allow other').length, 1, 'allow other flag must stay flagged');
+  assert.equal(auditApp(orders({ properties: [{ key: 'allow other choice', value: 'true', span: Z }] })).filter((drop) => drop.property === 'property allow other choice').length, 1, 'allow other choice property must stay flagged');
+});
+
+function appWithValidatedField(properties: { key: string; value: string; span: typeof Z }[]): App {
+  return app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Title', 'text'), properties }], actions: [], blocks: [], span: Z }] });
+}
+
+test('a regex or min/max-char rule is covered once the UI field names the server gap', () => {
+  for (const properties of [[{ key: 'maxchar', value: '12', span: Z }], [{ key: 'minchar', value: '3', span: Z }], [{ key: 'regex', value: '"^[A-Z]+$"', span: Z }]]) {
+    assert.deepEqual(auditApp(appWithValidatedField(properties)), []);
+  }
+});
+
+test('a regex or min/max-char rule with no server-gap note is a drop', () => {
+  const withRule = appWithValidatedField([{ key: 'maxchar', value: '12', span: Z }, { key: 'regex', value: '"^[A-Z]+$"', span: Z }]);
+  const out = collectOutputs(withRule);
+  const titleField = out.model.forms[0]!.fields.find((f) => f.name === 'Title')!;
+  titleField.note = undefined;
+  const drops = auditApp(withRule, out);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0]!.kind, 'field-property');
+});
+
+test('a generic validation note does not cover a specific length or pattern rule', () => {
+  const withRule = appWithValidatedField([{ key: 'regex', value: '"^[A-Z]+$"', span: Z }]);
+  const out = collectOutputs(withRule);
+  out.model.forms[0]!.fields.find((f) => f.name === 'Title')!.note = 'This field has validation rules.';
+  assert.equal(auditApp(withRule, out).filter((d) => d.kind === 'field-property').length, 1);
+});
+
+test('a translation block is emitted when its strings ship in the client i18n table', () => {
+  const withTranslation = app({
+    ...coveredApp(),
+    translations: [{ json: '{"de":{"FormField.Orders.Title":" Titel "}}', data: { de: { 'FormField.Orders.Title': ' Titel ' } }, span: { start: 10, end: 200 } }],
+  });
+  // The generated client's i18n table carries the label: the block is emitted,
+  // not a manual step.
+  assert.deepEqual(auditApp(withTranslation), []);
+  const rows = coverageLedger(withTranslation).filter((r) => r.kind === 'translation');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['emitted:slate/assets/model.js i18n'],
+  );
+  // Break the output — no i18n table on the model — and the drop returns.
+  const broken = collectOutputs(withTranslation);
+  delete broken.model.i18n;
+  const drops = auditApp(withTranslation, broken);
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    ['translation: translation de'],
+  );
+  assert.match(drops[0]!.note, /never reached the generated client i18n table/);
+  // A wrong value under the key is not the block's label either.
+  const wrong = collectOutputs(withTranslation);
+  wrong.model.i18n = { de: { 'FormField.Orders.Title': ' falsch ' } };
+  assert.equal(auditApp(withTranslation, wrong).length, 1);
+});
+
+test('a translation block whose carried pieces are honored is emitted, not a manual step', () => {
+  const carried = app({
+    ...coveredApp(),
+    translations: [
+      { json: '{"de":{"Language Properties":{"Status":true}}}', data: { de: { 'Language Properties': { Status: true } } }, span: { start: 10, end: 200 } },
+      { json: '{"Language_Settings":{"LANGAGUE_WITH_LOGIN":"browser"}}', data: { Language_Settings: { LANGAGUE_WITH_LOGIN: 'browser' } }, span: { start: 210, end: 300 } },
+    ],
+  });
+  // The properties-only block's settings are honored in place; the
+  // Language_Settings block's pick lands on the model.
+  assert.deepEqual(auditApp(carried), []);
+  const rows = coverageLedger(carried).filter((r) => r.kind === 'translation');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['emitted:language properties honored', 'emitted:slate/assets/model.js languageWithLogin'],
+  );
+  // Break the output — no languageWithLogin on the model — and the settings
+  // block is a drop.
+  const broken = collectOutputs(carried);
+  delete broken.model.languageWithLogin;
+  const drops = auditApp(carried, broken);
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    ['translation: translation block'],
+  );
+  assert.match(drops[0]!.note, /languageWithLogin/);
+});
+
+test('a translation block with pieces that have no generated equivalent stays a counted manual step', () => {
+  const untranslatable = app({
+    ...coveredApp(),
+    translations: [{ json: '{"de":{"Language Properties":{"Status":true,"Auto Translate":true}}}', data: { de: { 'Language Properties': { Status: true, 'Auto Translate': true } } }, span: { start: 10, end: 200 } }],
+  });
+  // The generator lists the block as a manual step (a todo inside its span).
+  assert.deepEqual(auditApp(untranslatable), []);
+  const rows = coverageLedger(untranslatable).filter((r) => r.kind === 'translation');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['counted:todo'],
+  );
+  // Without the listing the block is a drop; its warning is not coverage.
+  const out = collectOutputs(untranslatable);
+  assert.ok(out.warnings.some((w) => w.construct === 'translation-not-migrated'));
+  out.todos = out.todos.filter((t) => t.construct !== 'translation');
+  const drops = auditApp(untranslatable, out);
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    ['translation: translation de'],
+  );
+  assert.match(drops[0]!.note, /migration-report warning/);
+});
+
+test('an unlisted phone device form setting (e.g. offline sync scope) fails until the manual step exists', () => {
+  const withDeviceScope = app({
+    ...coveredApp(),
+    devices: [
+      {
+        device: 'phone',
+        sections: [],
+        unused: [],
+        forms: [{ name: 'Orders', properties: [{ key: 'sync', value: '"owned"', span: Z }], span: Z }],
+        components: [],
+        span: Z,
+      },
+    ],
+  });
+  // The generator lists the manual step, so the audit passes.
+  assert.deepEqual(auditApp(withDeviceScope), []);
+  // Without the listing, the same device-form setting fails: the generated
+  // client has no per-device config and would silently keep syncing every
+  // record instead of the configured scope.
+  const unlisted = collectOutputs(withDeviceScope);
+  unlisted.warnings = [];
+  const drops = auditApp(withDeviceScope, unlisted);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0]!.kind, 'device');
+  assert.equal(drops[0]!.name, 'phone:Orders');
+});
+
+test('the web device label placement is consumed, not a device drop', () => {
+  const webPlacement = app({
+    ...coveredApp(),
+    devices: [
+      {
+        device: 'web',
+        sections: [],
+        unused: [],
+        forms: [{ name: 'Orders', properties: [{ key: 'label placement', value: 'left', span: Z }], span: Z }],
+        components: [],
+        span: Z,
+      },
+    ],
+  });
+  assert.deepEqual(auditApp(webPlacement).filter((d) => d.kind === 'device'), []);
+});
+
+test('an unsurfaced integration call fails until the connections report lists it', () => {
+  const sms = app({
+    workflows: [workflow({ name: 'Notify', container: 'form', form: 'Orders', event: 'on success', deluge: { text: 'zoho.sms.send("template", "9876543210");', span: Z } })],
+  });
+  // The connections analysis lists the call as unsupported, so the audit passes.
+  assert.deepEqual(auditApp(sms), []);
+  // Without the listing, the same call fails.
+  const unlisted = collectOutputs(sms);
+  unlisted.connections = { entries: [], unsupported: [], urlDcs: [], diagnostics: [] };
+  const drops = auditApp(sms, unlisted);
+  assert.ok(drops.some((d) => d.kind === 'integration' && d.name.includes('zoho.sms.send')));
+});
+
+test('the integration audit enumerates calls the connections analysis could drop', () => {
+  // An unadapted task and a connectionless invokeurl: the connections report
+  // lists both, so the audit passes. If the report ever stopped listing one,
+  // the audit's own walk of the script still flags it as a drop.
+  const w = app({
+    workflows: [
+      workflow({
+        name: 'Notify',
+        container: 'form',
+        form: 'Orders',
+        event: 'on load',
+        deluge: {
+          text: 'zoho.foo.bar("x");\nresp = invokeurl [ url: "https://www.zohoapis.com/crm/v2/Leads" type: GET ];',
+          span: Z,
+        },
+      }),
+    ],
+  });
+  assert.deepEqual(
+    auditApp(w).filter((d) => d.kind === 'integration'),
+    [],
+  );
+  const unlisted = collectOutputs(w);
+  unlisted.connections = { entries: [], unsupported: [], urlDcs: [], diagnostics: [] };
+  const drops = auditApp(w, unlisted).filter((d) => d.kind === 'integration');
+  assert.deepEqual(
+    drops.map((d) => d.name).sort(),
+    ['invokeurl in Notify (on load)', 'zoho.foo.bar in Notify (on load)'],
+  );
+});
+
+test('a commented-out script declares no behaviour and is not a drop', () => {
+  const commented = app({
+    workflows: [
+      workflow({ name: 'Old', container: 'form', form: 'Orders', event: 'on load', deluge: { text: '/* input.Title = "x"; */\n// hide Title;\n', span: Z } }),
+    ],
+  });
+  assert.deepEqual(auditApp(commented), []);
+});
+
+test('integration mentions in comments and strings are not calls', () => {
+  const quiet = app({
+    workflows: [
+      workflow({ name: 'A', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1; // zoho.sms.send("t", "123");', span: Z } }),
+      workflow({ name: 'B', container: 'form', form: 'Orders', event: 'on load', deluge: { text: '/* zoho.sms.send("t", "123"); */', span: Z } }),
+      workflow({ name: 'C', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1; // resp = invokeurl;', span: Z } }),
+      workflow({ name: 'D', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = "use zoho.sms.send() here";', span: Z } }),
+      workflow({ name: 'E', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = "the invokeurl statement";', span: Z } }),
+    ],
+  });
+  assert.deepEqual(
+    auditApp(quiet).filter((d) => d.kind === 'integration'),
+    [],
+  );
+});
+
+function chartReport(allowDrilldown: boolean): App['reports'][number] {
+  return {
+    name: 'Sales_Chart',
+    type: 'pivotchart',
+    modifiers: [],
+    form: 'Orders',
+    flags: [],
+    properties: [],
+    columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+    customActions: [],
+    conditionalFormats: [],
+    filters: [],
+    groupBy: [],
+    sortBy: [],
+    blocks: [
+      {
+        name: 'report properties',
+        properties: [{ key: 'allow drilldown and view underlying data', value: allowDrilldown ? 'true' : 'false', span: Z }],
+        blocks: [],
+        items: [],
+        span: Z,
+      },
+    ],
+    views: [],
+    span: Z,
+  };
+}
+
+test('a chart report with drilldown allowed flags the manual click-to-filter step', () => {
+  const withChart = app({ ...coveredApp(), reports: [...coveredApp().reports, chartReport(true)] });
+  // The generator records the manual click-to-filter step, so the audit passes.
+  assert.deepEqual(auditApp(withChart), []);
+  // Without that todo, the same chart is a silent drop: Creator promised
+  // drilldown, the generated chart has no click handler, and nothing says so.
+  const unlisted = collectOutputs(withChart);
+  unlisted.model = { ...unlisted.model, todos: unlisted.model.todos.filter((t) => !(t.area === 'report' && t.name === 'Sales_Chart')) };
+  const drops = auditApp(withChart, unlisted);
+  assert.ok(drops.some((d) => d.kind === 'report-feature' && d.name === 'Sales_Chart drilldown'));
+});
+
+test('a chart report without drilldown allowed needs no click-to-filter todo', () => {
+  const withChart = app({ ...coveredApp(), reports: [...coveredApp().reports, chartReport(false)] });
+  assert.deepEqual(auditApp(withChart), []);
+});
+
+test('a permissions literal outside every profile and role is a drop', () => {
+  const orphan = app({ permissions: [{ owner: 'Ghost', value: '{Chat:false}', span: Z }] });
+  const drops = auditApp(orphan);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0]!.kind, 'permission');
+});
+
+function connApp(link: string, permissionsValue: string): App {
+  return app({
+    permissions: [{ owner: link, value: permissionsValue, span: Z }],
+    configuration: [
+      {
+        name: 'connections',
+        properties: [],
+        items: [],
+        blocks: [
+          {
+            name: link,
+            properties: [
+              { key: 'displayname', value: '"FS CRM"', span: Z },
+              { key: 'permissions', value: permissionsValue, span: Z },
+            ],
+            items: [],
+            blocks: [],
+            span: Z,
+          },
+        ],
+        span: Z,
+      },
+    ],
+  });
+}
+
+test('a connection permissions literal is covered once the connections report lists its scopes', () => {
+  const conn = connApp('fs_crm', '{"create_cases_record","fetch_cases_record"}');
+  assert.deepEqual(auditApp(conn).filter((d) => d.kind === 'permission'), []);
+  // With the scopes listing removed from the real report, the literal is a drop again.
+  const out = collectOutputs(conn);
+  const listed = out.connections.diagnostics.length;
+  out.connections = {
+    ...out.connections,
+    diagnostics: out.connections.diagnostics.filter((d) => !d.startsWith('connection fs_crm: declares granted scopes')),
+  };
+  assert.ok(out.connections.diagnostics.length < listed);
+  assert.equal(auditApp(conn, out).filter((d) => d.kind === 'permission').length, 1);
+});
+
+test('a permissions literal is covered only by a diagnostic that lists every scope it grants', () => {
+  const literal = '{"create_cases_record","fetch_cases_record","update_cases_record"}';
+  const covered = (diagnostics: string[]) => {
+    const conn = connApp('fs_crm', literal);
+    const out = collectOutputs(conn);
+    out.connections = { ...out.connections, diagnostics };
+    return auditApp(conn, out).filter((d) => d.kind === 'permission').length === 0;
+  };
+  // Exact set.
+  assert.equal(covered(['connection fs_crm: declares granted scopes create_cases_record, fetch_cases_record, update_cases_record; carry them to the Catalyst connection']), true);
+  // Superset.
+  assert.equal(covered(['connection fs_crm: declares granted scopes create_cases_record, extra_scope, fetch_cases_record, update_cases_record; carry them to the Catalyst connection']), true);
+  // A subset (missing update_cases_record) still drops.
+  assert.equal(covered(['connection fs_crm: declares granted scopes create_cases_record, fetch_cases_record; carry them to the Catalyst connection']), false);
+  // A diagnostic listing other scopes still drops.
+  assert.equal(covered(['connection fs_crm: declares granted scopes other_scope; carry them to the Catalyst connection']), false);
+  // A different connection's diagnostic never covers.
+  assert.equal(covered(['connection fs_books: declares granted scopes create_cases_record, fetch_cases_record, update_cases_record; carry them to the Catalyst connection']), false);
+  // A link name sharing the prefix never covers, in either direction.
+  assert.equal(covered(['connection fs_crm2: declares granted scopes create_cases_record, fetch_cases_record, update_cases_record; carry them to the Catalyst connection']), false);
+  const prefixed = connApp('fs_crm2', literal);
+  const out = collectOutputs(prefixed);
+  out.connections = {
+    ...out.connections,
+    diagnostics: ['connection fs_crm: declares granted scopes create_cases_record, fetch_cases_record, update_cases_record; carry them to the Catalyst connection'],
+  };
+  assert.equal(auditApp(prefixed, out).filter((d) => d.kind === 'permission').length, 1);
+  // An unrelated diagnostic that merely names the connection never covers.
+  assert.equal(covered(['connection fs_crm: used for crm and books']), false);
+});
+
+test('a subform maxrow cap is carried to the UI model and enforced by the generated grid', () => {
+  const lines = field('Lines', 'grid');
+  lines.properties = [{ key: 'maxrow', value: '7', span: Z }];
+  lines.subfields = [field('Qty', 'number')];
+  const capped = app({ forms: [{ name: 'Orders', properties: [], fields: [lines], actions: [], blocks: [], span: Z }] });
+  const out = collectOutputs(capped);
+  const uiField = out.model.forms.find((f) => f.name === 'Orders')?.fields.find((f) => f.name === 'Lines');
+  assert.equal(uiField?.maxRows, 7);
+  assert.equal(out.model.todos.some((t) => t.area === 'field' && t.name === 'Orders.Lines'), false);
+  assert.match(uiField?.note ?? '', /browser only/i, 'the client-side cap is named as a browser-only check');
+  assert.deepEqual(auditApp(capped).filter((d) => d.name.includes('maxrow')), []);
+});
+
+test('an unparseable maxrow field property is listed through the generated field todo', () => {
+  const withMaxRow = appWithField({
+    ...field('Lines', 'subform'),
+    properties: [{ key: 'maxrow', value: 'none', span: Z }],
+    subfields: [field('Qty', 'number')],
+  });
+  const out = collectOutputs(withMaxRow);
+  assert.ok(out.model.todos.some((t) => t.area === 'field' && t.name === 'Orders.Lines' && /row cap|row count|maximum row/i.test(t.reason)));
+  assert.deepEqual(auditApp(withMaxRow).filter((d) => d.name.includes('maxrow')), []);
+  const unlisted = collectOutputs(withMaxRow);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withMaxRow, unlisted);
+  assert.ok(drops.some((d) => d.name === 'Orders.Lines property maxrow'));
+});
+
+test('a permissions literal holding a value that is not a scope name stays a drop', () => {
+  const conn = connApp('fs_books', '{"create_invoice","https://maps.example/secret","get_customer"}');
+  const report = collectOutputs(conn);
+  // The URL is never copied into the report's scope list.
+  assert.ok(report.connections.diagnostics.every((d) => !d.includes('https://')));
+  assert.equal(auditApp(conn, report).filter((d) => d.kind === 'permission').length, 1);
+});
+
+test('a not-equal-to-null view criteria compiles to IS NOT NULL, not a literal that never matches', () => {
+  // `Status != null` is the common Deluge idiom for a custom view's "is not
+  // empty" filter. ZCQL is SQL three-valued: a comparison with a literal NULL
+  // is UNKNOWN, never TRUE, for every row — stored blank or not. The real
+  // generator must carry this as `notNull` (compiling to `IS NOT NULL`), the
+  // only ZCQL shape that actually matches the non-blank rows.
+  const criteria = reportCriteria('Status != null');
+  assert.deepEqual(criteria, { op: 'notNull', field: 'Status' });
+  assert.equal(compileCriteria(criteria), 'Status IS NOT NULL');
+
+  // Same idiom for "is empty".
+  const empty = reportCriteria('Status == null');
+  assert.deepEqual(empty, { op: 'isNull', field: 'Status' });
+  assert.equal(compileCriteria(empty), 'Status IS NULL');
+});
+
+function formOf(name: string, names: string[]): App['forms'][number] {
+  return { name, properties: [], fields: names.map((n) => field(n, 'text')), actions: [], blocks: [], span: Z };
+}
+
+test('a merged on-user-input route is produced when the script is written into it', () => {
+  const booking = app({
+    forms: [
+      formOf('Add_Services', ['ID', 'Service_Time']),
+      formOf('Appointment_Booking', ['Service', 'Schedule_upto', 'Staff_Name']),
+    ],
+    workflows: [
+      workflow({
+        name: 'Run_Scripts_On_Always1',
+        container: 'form',
+        form: 'Appointment_Booking',
+        event: 'on user input of Schedule_Date_Time',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'if (input.Service != null) {\n  getServiceDetails = Add_Services[ID == input.Service];\n  input.Schedule_upto = getServiceDetails.Service_Time;\n}',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+      workflow({
+        name: 'Run_Scripts_On_Always2',
+        container: 'form',
+        form: 'Appointment_Booking',
+        event: 'on user input of Staff_Name',
+        span: { start: 50, end: 70, file: 'app.ds' },
+        deluge: { text: 'hide input.Staff_Name;', span: { start: 52, end: 68, file: 'app.ds' } },
+      }),
+    ],
+  });
+  const out = collectOutputs(booking);
+  assert.ok(out.files.some((f) => f.path === 'functions/aio/appointment-booking/input-handlers.mjs'));
+  assert.ok(out.files.some((f) => f.path.includes('client/handlers/appointment-booking/on-user-input-of-schedule-date-time')));
+  const prefetch = out.files.find((f) => f.path.endsWith('input-handlers-prefetch.mjs'));
+  assert.ok(prefetch);
+  assert.match(prefetch.source, /slots\[/);
+  assert.doesNotMatch(prefetch.source, /thisapp\.call/);
+  assert.deepEqual(auditApp(booking, out).filter((d) => d.kind === 'workflow'), []);
+  const schedule = out.coverage?.find((c) => c.event.includes('Schedule_Date_Time'));
+  assert.equal(schedule?.serverInvoked, true);
+  const client = out.files.find((f) => f.path.includes('on-user-input-of-schedule-date-time'));
+  assert.ok(client);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10), false);
+
+  // The merged leaf is not the per-event slug. Without coverage, the client
+  // file, and the counted server-half TODO, the same script is a silent drop.
+  const stripped = {
+    ...out,
+    coverage: [],
+    todos: out.todos.filter((t) => t.construct !== FORM_EVENT_SERVER_UNINVOKED),
+    files: out.files.filter((f) => !f.path.includes('on-user-input-of-schedule-date-time')),
+  };
+  const drops = auditApp(booking, stripped).filter((d) => d.kind === 'workflow');
+  assert.equal(drops.length, 1);
+  assert.match(drops[0]!.name, /Schedule_Date_Time/);
+});
+
+test('a thisapp field write in a merged route is covered and is not prefetched', () => {
+  const hours = app({
+    forms: [formOf('Timesheet', ['End_Time', 'Hours'])],
+    functions: [],
+    workflows: [
+      workflow({
+        name: 'Run_Scripts_On_Always2',
+        container: 'form',
+        form: 'Timesheet',
+        event: 'on user input of End_Time',
+        span: { start: 10, end: 30, file: 'app.ds' },
+        deluge: { text: 'input.Hours = thisapp.timesheet.getHours(input.End_Time);', span: { start: 12, end: 28, file: 'app.ds' } },
+      }),
+      workflow({
+        name: 'Show_Note',
+        container: 'form',
+        form: 'Timesheet',
+        event: 'on user input of Hours',
+        span: { start: 40, end: 55, file: 'app.ds' },
+        deluge: { text: 'hide input.Hours;', span: { start: 42, end: 50, file: 'app.ds' } },
+      }),
+    ],
+  });
+  const out = collectOutputs(hours);
+  assert.ok(out.files.some((f) => f.path === 'functions/aio/timesheet/input-handlers.mjs'));
+  const prefetch = out.files.filter((f) => f.path.includes('prefetch')).map((f) => f.source).join('\n');
+  assert.doesNotMatch(prefetch, /thisapp\.call/);
+  assert.deepEqual(auditApp(hours, out).filter((d) => d.kind === 'workflow'), []);
+  const hoursServer = out.coverage?.find((c) => c.event === 'on user input of End_Time');
+  assert.equal(hoursServer?.serverInvoked, true);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10), false);
+  const guard = out.files.find((f) => f.path.includes('on-user-input-of-end-time'));
+  assert.ok(guard);
+  assert.match(guard.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(clientPostsServerPath(guard.source, '/forms/Timesheet/input'), true);
+  const hidden = {
+    ...out,
+    coverage: (out.coverage ?? []).filter((c) => c.event !== 'on user input of End_Time'),
+    todos: out.todos.filter((t) => !(t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10)),
+    files: out.files.filter((f) => !f.path.includes('on-user-input-of-end-time')),
+  };
+  const drops = auditApp(hours, hidden).filter((d) => d.kind === 'workflow');
+  assert.equal(drops.length, 1);
+  assert.match(drops[0]!.name, /End_Time/);
+});
+
+test('an on-start sendmail merged with an empty sibling is the handler module', () => {
+  const mail = app({
+    forms: [formOf('Add_User', ['Email'])],
+    workflows: [
+      workflow({
+        name: 'Send_Email_Form_Propertie',
+        container: 'form',
+        form: 'Add_User',
+        event: 'on start',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 36, file: 'app.ds' },
+        },
+      }),
+      workflow({
+        name: 'Field_Scripts8',
+        container: 'form',
+        form: 'Add_User',
+        event: '',
+        span: { start: 80, end: 90, file: 'app.ds' },
+        deluge: { text: '', span: { start: 82, end: 88, file: 'app.ds' } },
+      }),
+    ],
+  });
+  const out = collectOutputs(mail);
+  assert.ok(out.files.some((f) => f.path === 'functions/aio/add-user/handler-handlers.mjs'));
+  assert.ok(!out.files.some((f) => f.path.endsWith('/on-start.mjs')));
+  const blob = out.files.map((f) => f.source).join('\n');
+  assert.match(blob, /shim\.mail\.send/);
+  assert.doesNotMatch(blob, /slots\[.*mail\.send|mail\.send[\s\S]*slots\[/);
+  assert.deepEqual(auditApp(mail, out).filter((d) => d.kind === 'workflow'), []);
+  const started = out.coverage?.find((c) => c.name === 'Send_Email_Form_Propertie');
+  assert.equal(started?.serverInvoked, false);
+  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10));
+  const cleared = {
+    ...out,
+    coverage: [],
+    todos: out.todos.filter((t) => t.construct !== FORM_EVENT_SERVER_UNINVOKED),
+  };
+  const drops = auditApp(mail, cleared).filter((d) => d.kind === 'workflow');
+  assert.equal(drops.length, 1);
+  assert.match(drops[0]!.name, /on start/);
+});
+
+test('a client run posts /input and credits the merged server half', () => {
+  // The same hide+sendmail script keeps its client half; the generated
+  // shim.client.run guard posts the merged route, so the server part is
+  // invoked and no form-event-server-uninvoked todo remains.
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'pop_sub_mode_of_shipment',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on user input of Mode_of_Shipment',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'hide Mode_of_Shipment;\nsendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const serverPath = '/forms/New_Lead/input';
+  const client = out.files.find((f) => f.path.includes('client/handlers/new-lead/'));
+  const server = out.files.find((f) => f.path.startsWith('functions/aio/new-lead/') && !f.path.includes('prefetch') && !f.path.endsWith('_lib.mjs'));
+  assert.ok(client);
+  assert.ok(server);
+  assert.match(server.source, /path: "\/forms\/New_Lead\/input"/);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(clientPostsServerPath(client.source, serverPath), true);
+  const entry = out.coverage?.find((c) => c.name === 'pop_sub_mode_of_shipment');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  assert.ok(entry.paths.includes(server.path));
+  assert.ok(entry.paths.some((p) => p.startsWith('client/')));
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+});
+
+test('a server-only on-input script is wired through a guarded client run', () => {
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'pop_sub_mode_of_shipment',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on user input of Mode_of_Shipment',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const serverPath = '/forms/New_Lead/input';
+  const server = out.files.find((f) => f.path.startsWith('functions/aio/new-lead/') && !f.path.includes('prefetch') && !f.path.endsWith('_lib.mjs'));
+  assert.ok(server);
+  assert.match(server.source, /path: "\/forms\/New_Lead\/input"/);
+  // A single-script route needs no scriptEvents map: the client run posts the
+  // route and the module runs its one body.
+  assert.doesNotMatch(server.source, /export const scriptEvents/);
+  const client = out.files.find((f) => f.path.includes('client/handlers/new-lead/'));
+  assert.ok(client);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(clientPostsServerPath(client.source, serverPath), true);
+  const entry = out.coverage?.find((c) => c.name === 'pop_sub_mode_of_shipment');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  assert.ok(entry.paths.includes(server.path));
+  assert.ok(entry.paths.includes(client.path));
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+});
+
+test('a server body on an event nothing posts stays counted', () => {
+  // A plain form workflow on `on start` emits the /forms/<form>/handler route;
+  // the guarded client run cannot express it and, not being a presuccess
+  // action, the submit pipeline does not call it, so it stays counted.
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'on_start_mail',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on start',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const entry = out.coverage?.find((c) => c.name === 'on_start_mail');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, false);
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10 && t.end === 40));
+  // Crediting the uninvoked server file is the failure this guards. With the
+  // count removed and the flag forced true, the audit would pass with nothing
+  // listed. The real output must not take that shape.
+  const forced = {
+    ...out,
+    todos: out.todos.filter((t) => t.construct !== FORM_EVENT_SERVER_UNINVOKED),
+    coverage: (out.coverage ?? []).map((c) => (c.name === 'on_start_mail' ? { ...c, serverInvoked: true as const } : c)),
+  };
+  assert.equal(auditApp(lead, forced).filter((d) => d.kind === 'workflow').length, 0);
+  assert.equal(entry.serverInvoked, false);
+  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED));
+});
+
+test('an on start presuccess body is credited: the submit pipeline runs it', () => {
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'presuccess_mail',
+        type: 'presuccess',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on start',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const server = out.files.find((f) => /path: "\/forms\/New_Lead\/handler"/.test(f.source));
+  assert.ok(server);
+  assert.match(server.source, /^export const presuccess = true;$/m);
+  const entry = out.coverage?.find((c) => c.name === 'presuccess_mail');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  assert.ok(entry.paths.includes(server.path));
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+});
+
+test('a handler route merging a presuccess body with another server script stays counted', () => {
+  // The pipeline runs a whole module, never one script of a merged route, so
+  // a route that also carries a non-presuccess `on start` script is not
+  // marked and neither script is credited.
+  const mail = { text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];', span: { start: 12, end: 38, file: 'app.ds' } };
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({ name: 'presuccess_mail', type: 'presuccess', container: 'form', form: 'New_Lead', event: 'on start', span: { start: 10, end: 40, file: 'app.ds' }, deluge: mail }),
+      workflow({ name: 'plain_start', container: 'form', form: 'New_Lead', event: 'on start', span: { start: 50, end: 80, file: 'app.ds' }, deluge: { ...mail, span: { start: 52, end: 78, file: 'app.ds' } } }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const server = out.files.find((f) => /path: "\/forms\/New_Lead\/handler"/.test(f.source));
+  assert.ok(server);
+  assert.doesNotMatch(server.source, /export const presuccess/);
+  for (const name of ['presuccess_mail', 'plain_start']) {
+    const entry = out.coverage?.find((c) => c.name === name);
+    assert.ok(entry, name);
+    assert.equal(entry.serverInvoked, false, name);
+  }
+  assert.equal(out.todos.filter((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED).length, 2);
+});
+
+test('submit still credits an on-success server half the browser posts', () => {
+  const orders = app({
+    forms: [formOf('Orders', ['Title'])],
+    workflows: [
+      workflow({
+        name: 'Stamp',
+        container: 'form',
+        form: 'Orders',
+        event: 'on success',
+        span: { start: 10, end: 30, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 28, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(orders);
+  const entry = out.coverage?.find((c) => c.name === 'Stamp');
+  assert.equal(entry?.serverInvoked, true);
+  assert.ok(entry?.paths.some((p) => p.startsWith('functions/aio/')));
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+  assert.deepEqual(auditApp(orders, out).filter((d) => d.kind === 'workflow'), []);
+});
+
+test('a prefetch URL is not a post of the server route', () => {
+  const path = '/forms/New_Lead/input';
+  assert.equal(clientPostsServerPath(`POST ${path}/prefetch`, path), false);
+  assert.equal(clientPostsServerPath(`{"prefetch":"${path}/prefetch"}`, path), false);
+  assert.equal(clientPostsServerPath(`await postJson("${path}", body)`, path), true);
+  assert.equal(clientPostsServerPath(`await postJson("${path}/other", body)`, path), false);
+});
+
+test('rows are numbered and carry no app names', () => {
+  const groups = groupDrops([
+    [
+      { kind: 'translation', name: 'translation de', note: 'The de block is not migrated.' },
+      { kind: 'translation', name: 'translation de', note: 'The de block is not migrated.' },
+    ],
+    [{ kind: 'integration', name: 'zoho.sms.send in Notify (on success)', note: 'No checklist row.' }],
+  ]);
+  assert.equal(groups[0]!.occurrences, 2);
+  assert.equal(groups[0]!.apps, 1);
+  const body = renderNoSilentDrop(2, groups, 'example-audit');
+  assert.match(body, /^1\. \[translation\]/m);
+  assert.match(body, /^2\. \[integration\]/m);
+  assert.doesNotMatch(body, /bug-tracker|leave-tracker|Demo_App/);
+  const clean = renderNoSilentDrop(3, [], 'example-audit');
+  assert.match(clean, /No silent drops/);
+});
+
+test('a dotted related report sort is flagged instead of silently disappearing', () => {
+  const sorted = coveredApp();
+  sorted.reports[0]!.sortBy = [{ field: 'Author.Name', order: 'ascending' }];
+  const model = buildModel(sorted);
+  const note = model.todos.find((t) => t.area === 'report' && t.name === 'All_Orders');
+  assert.ok(note, 'expected a report-area todo naming the unmigrated sort field');
+  assert.match(note!.reason, /Sort by "Author\.Name" is not migrated/);
+  assert.match(note!.manualStep ?? '', /All_Orders.*Author\.Name/);
+});
+
+test('a plain report sort and built-in ID sorts are not flagged', () => {
+  const own = coveredApp();
+  own.reports[0]!.sortBy = [{ field: 'Title', order: 'ascending' }];
+  assert.equal(buildModel(own).todos.some((t) => t.area === 'report' && t.name === 'All_Orders'), false);
+  const id = coveredApp();
+  id.reports[0]!.sortBy = [{ field: 'ROWID', order: 'descending' }];
+  assert.equal(buildModel(id).todos.some((t) => t.area === 'report' && t.name === 'All_Orders'), false);
+});
+
+/** coveredApp plus a payments workflow and a blueprint, so every workflow kind is present. */
+function everyKindApp(): App {
+  const base = coveredApp();
+  return app({
+    ...base,
+    workflows: [
+      ...base.workflows,
+      workflow({ name: 'Checkout payments', container: 'form', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;', span: Z } }),
+    ],
+  });
+}
+
+/** The real outputs with every produced construct and every listing removed. */
+function bareOutputs(a: App): ReturnType<typeof collectOutputs> {
+  const out = collectOutputs(a);
+  return {
+    ...out,
+    schema: { ...out.schema, tables: [], fields: [], issues: [] },
+    model: { ...out.model, forms: [], reports: [], pages: [], todos: [] },
+    files: [],
+    todos: [],
+    schedules: new Map(),
+    specs: [],
+  };
+}
+
+test('a construct neither produced nor listed is a drop of its own kind', () => {
+  const a = everyKindApp();
+  assert.deepEqual(auditApp(a), [], 'the real outputs produce or list everything');
+  const drops = auditApp(a, bareOutputs(a));
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    [
+      'form: Orders',
+      'field: Orders.Title',
+      'report: All_Orders',
+      'page: Home',
+      'workflow: Orders on load',
+      'schedule: Daily',
+      'approval: Sale approval',
+      'workflow: Checkout payments',
+    ],
+  );
+  for (const d of drops) assert.match(d.note, /Add one:/);
+});
+
+/** A form schedule (`form = Orders`) reminding on Orders.Due_Date, optionally `status = inactive`. */
+function formScheduleApp(status?: string): App {
+  return app({
+    forms: [
+      {
+        name: 'Orders',
+        properties: [],
+        fields: [field('Title', 'text'), field('Due_Date', 'date')],
+        actions: [],
+        blocks: [],
+        span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'Reminder',
+        container: 'schedule',
+        event: 'on schedule',
+        form: 'Orders',
+        properties: [
+          { key: 'start', value: 'Due_Date at "09:00:00"', span: Z },
+          { key: 'time zone', value: '"Asia/Kolkata"', span: Z },
+          ...(status ? [{ key: 'status', value: status, span: Z }] : []),
+        ],
+        deluge: { text: 'x = 1;', span: Z },
+      }),
+    ],
+  });
+}
+
+test('an inactive form schedule is carried as a sweep that never fires, not silently swept anyway', () => {
+  const active = formScheduleApp();
+  assert.deepEqual(auditApp(active), [], 'an active form schedule should reach the generated sweep');
+  const activePlan = collectOutputs(active).schedules.get(active.workflows[0]!);
+  assert.equal(activePlan?.kind, 'form');
+  assert.equal(activePlan?.sweep?.active, undefined, 'an active schedule carries no active flag');
+
+  const inactive = formScheduleApp('inactive');
+  assert.deepEqual(auditApp(inactive), [], 'status = inactive should still reach the generated sweep, not drop the whole workflow');
+  const plan = collectOutputs(inactive).schedules.get(inactive.workflows[0]!);
+  assert.equal(plan?.kind, 'form');
+  // RED before the fix: the sweep spec carried no record of `status = inactive`,
+  // so the disabled schedule fired on the sweeper's very next tick.
+  assert.equal(plan?.sweep?.active, false, 'status = inactive must be carried onto the sweep spec');
+
+  // Mutation: with the flag lost (as it was before planForm read `status`),
+  // the due-row check must not let it through — proving the flag is actually
+  // read, not merely present and ignored.
+  const due = dueInstants(plan!.sweep!, { Due_Date: '2026-01-01' }, Date.parse('2025-12-31T00:00:00Z'), Date.parse('2026-01-02T00:00:00Z'));
+  assert.deepEqual(due, [], 'an inactive schedule must never fire a due row');
+  const corrupted = { ...plan!.sweep!, active: true };
+  const stillDue = dueInstants(corrupted, { Due_Date: '2026-01-01' }, Date.parse('2025-12-31T00:00:00Z'), Date.parse('2026-01-02T00:00:00Z'));
+  assert.ok(stillDue.length > 0, 'the mutation must prove dueInstants actually reads the active flag, not just that it is false by construction');
+});
+
+test('a fidelity note or todo lists each construct the generators did not produce', () => {
+  const a = everyKindApp();
+  const out = bareOutputs(a);
+  out.schema.issues = [{ severity: 'unsupported', form: 'Orders', message: 'not migrated' } as (typeof out.schema.issues)[number]];
+  out.schema.fields = [{ form: 'Orders', field: 'Title', status: 'unsupported' } as (typeof out.schema.fields)[number]];
+  out.model.todos = [
+    { area: 'report', name: 'All_Orders' } as (typeof out.model.todos)[number],
+    // A page is listed through one of its ZML snippets.
+    { area: 'zml', name: 'Home.panel1' } as (typeof out.model.todos)[number],
+  ];
+  // A todo inside a workflow's span lists that workflow's manual step.
+  out.todos = [{ construct: 'manual', start: 0, end: 0 }];
+  assert.deepEqual(auditApp(a, out), []);
+  // A ZML todo of another page whose name merely starts the same does not list Home.
+  out.model.todos = [{ area: 'report', name: 'All_Orders' } as (typeof out.model.todos)[number], { area: 'zml', name: 'Homepage.panel1' } as (typeof out.model.todos)[number]];
+  assert.deepEqual(auditApp(a, out).map((d) => `${d.kind}: ${d.name}`), ['page: Home']);
+});
+
+test('only a blank or fully commented script is vacuous', () => {
+  const one = (w: Workflow) => app({ workflows: [w] });
+  const kinds = (a: App) => auditApp(a, bareOutputs(a)).map((d) => d.kind);
+  // Whitespace only: nothing to migrate.
+  assert.deepEqual(kinds(one(workflow({ name: 'Blank', container: 'form', form: 'Orders', event: 'on load', deluge: { text: '  \n\t', span: Z } }))), []);
+  // An unparseable script parses to an unknown statement, so it is never vacuous: with no handler and no todo it is a drop.
+  assert.deepEqual(kinds(one(workflow({ name: 'Broken', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'if (', span: Z } }))), ['workflow']);
+  // Field rules are behaviour even without a script.
+  const ruled = workflow({ name: 'Rules', container: 'form', form: 'Orders', event: 'on load' });
+  ruled.fieldRules = [{ actions: [], span: Z }];
+  assert.deepEqual(kinds(one(ruled)), ['workflow']);
+});
+
+test('a translation block with unmigratable pieces is named as a block and counted only by a todo', () => {
+  // Empty language tables carry nothing; a `Custom Actions` object has no
+  // generated equivalent: the generator's todo inside the block's span is
+  // the counted manual step.
+  const multi = app({ translations: [{ json: '{}', data: { de: {}, fr: { 'Custom Actions': { Add: {} } } }, span: { start: 10, end: 200 } }] });
+  const out = collectOutputs(multi);
+  // Generation itself lists the block as a manual step, so nothing is dropped.
+  assert.deepEqual(auditApp(multi, out), []);
+  // Without that todo the block is a silent drop, named as a block.
+  const noTodo = { ...out, todos: out.todos.filter((t) => t.construct !== 'translation') };
+  assert.deepEqual(auditApp(multi, noTodo).map((d) => d.name), ['translation block']);
+  // A todo inside the span counts it once; a todo outside does not.
+  const outsideOnly = { ...noTodo, todos: [{ construct: 'manual', start: 0, end: 5 }] };
+  assert.deepEqual(auditApp(multi, outsideOnly).map((d) => d.name), ['translation block']);
+  const insideManual = { ...noTodo, todos: [{ construct: 'manual', start: 20, end: 30 }] };
+  assert.deepEqual(auditApp(multi, insideManual), []);
+  // A single-language block is named by its language, warned or not.
+  const de = app({ translations: [{ json: '{}', data: { de: { 'Custom Actions': { Add: {} } } }, span: Z }] });
+  const deOut = collectOutputs(de);
+  deOut.warnings = [{ construct: 'translation-not-migrated', name: 'translation de' } as (typeof deOut.warnings)[number]];
+  deOut.todos = [];
+  assert.deepEqual(auditApp(de, deOut).map((d) => d.name), ['translation de']);
+});
+
+test('an empty translation block carries nothing and is emitted, not dropped', () => {
+  const empty = app({ translations: [{ json: '{}', data: { de: {}, fr: {} }, span: { start: 10, end: 200 } }] });
+  assert.deepEqual(auditApp(empty), []);
+  const rows = coverageLedger(empty).filter((r) => r.kind === 'translation');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['emitted:language properties honored'],
+  );
+});
+
+/** A creator function whose body has no translatable statement: the generator warns `function-untranslated` and writes no module. A bare `openUrl(...)` body is excluded here — that now classifies (and is counted) as a navigation function with its own supported/unsupported outcome, not this generic path. */
+function warningOnlyFunctionApp(): App {
+  return app({
+    functions: [
+      {
+        name: 'Navi',
+        kind: 'creator',
+        deluge: [{ text: '// not yet implemented', span: { start: 0, end: 23 } }],
+        properties: [],
+        span: { start: 0, end: 500 },
+      },
+    ],
+  });
+}
+
+test('a function warned about but not emitted is listed as a todo, not a silent drop', () => {
+  const a = warningOnlyFunctionApp();
+  const out = collectOutputs(a);
+  assert.ok(out.warnings.some((w) => w.construct === 'function-untranslated' && w.name === 'Navi'));
+  assert.ok(!out.files.some((f) => f.path === 'functions/custom/navi.mjs'));
+  assert.ok(out.todos.some((t) => t.construct === 'function-untranslated'));
+  assert.deepEqual(auditApp(a, out), []);
+});
+
+test('a todo inside a warned function counts it once — a warning alone never does', () => {
+  const a = warningOnlyFunctionApp();
+  const out = collectOutputs(a);
+  out.todos = [{ construct: 'manual', start: 0, end: 10 }];
+  const rows = coverageLedger(a, out).filter((r) => r.kind === 'function');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['counted:todo'],
+  );
+  assert.deepEqual(auditApp(a, out), []);
+});
+
+/** App with one emitted workflow whose script has two assign statements. */
+function twoStatementApp(): App {
+  const base = coveredApp();
+  return app({
+    ...base,
+    workflows: [workflow({ name: 'Stamp', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;\ny = 2;', span: Z } })],
+  });
+}
+
+test('every declared statement is emitted or counted (C3)', () => {
+  const a = twoStatementApp();
+  const rows = coverageLedger(a);
+  const stmts = rows.filter((r) => r.kind === 'statement');
+  assert.equal(stmts.length, 2);
+  assert.ok(stmts.every((r) => r.status === 'emitted'));
+  assert.deepEqual(auditApp(a), []);
+});
+
+test('a fake generator that skips a statement fails generation', () => {
+  const a = twoStatementApp();
+  const out = collectOutputs(a);
+  // The handler module still exists, but the ledger has no row for `y = 2;`.
+  out.statementCoverage = out.statementCoverage.filter((c) => !(c.kind === 'assign' && c.start === 7));
+  const drops = auditApp(a, out);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0]!.kind, 'statement');
+  assert.match(drops[0]!.name, /Stamp/);
+  assert.throws(() => assertCovered(a, out), SilentDropError);
+});
+
+/** Two emitted workflows with identical statements: deleting one unit's row must not be covered by the other unit's. */
+function twoUnitApp(): App {
+  const base = coveredApp();
+  return app({
+    ...base,
+    workflows: [
+      workflow({ name: 'StampA', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;\ny = 2;', span: { start: 0, end: 12 } } }),
+      workflow({ name: 'StampB', container: 'form', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;\ny = 2;', span: { start: 100, end: 112 } } }),
+    ],
+  });
+}
+
+test('a statement row can only satisfy a statement in its own unit', () => {
+  const a = twoUnitApp();
+  const out = collectOutputs(a);
+  const units = new Set(out.statementCoverage.map((c) => c.unit));
+  assert.ok(units.has('workflow StampA (on load)') && units.has('workflow StampB (on success)'));
+  // Remove StampA's `y = 2;` row. StampB still emits its own `y = 2;` row of
+  // the same kind: before unit-scoping that row covered the deletion.
+  out.statementCoverage = out.statementCoverage.filter((c) => !(c.unit === 'workflow StampA (on load)' && c.kind === 'assign' && c.start === 7));
+  const drops = auditApp(a, out);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['workflow StampA (on load) assign statement'],
+  );
+});
+
+test('deleting one emitted statement row per unit is detected across gallery apps', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR/gallery is not available' : false }, () => {
+  const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+  for (const name of ['admission-management', 'sales-management', 'course-planner']) {
+    const appUnderTest = parseProject(join(gallery, name)).ir;
+    const out = collectOutputs(appUnderTest);
+    const emittedByUnit = new Map<string, typeof out.statementCoverage>();
+    for (const c of out.statementCoverage) {
+      if (c.bucket !== 'translated' && c.bucket !== 'shimmed') continue;
+      const list = emittedByUnit.get(c.unit) ?? [];
+      list.push(c);
+      emittedByUnit.set(c.unit, list);
+    }
+    let tested = 0;
+    let caught = 0;
+    for (const list of emittedByUnit.values()) {
+      const victim = list[0]!;
+      const mutated = { ...out, statementCoverage: out.statementCoverage.filter((c) => c !== victim) };
+      const drops = coverageLedger(appUnderTest, mutated).filter((r) => r.status === 'dropped' && r.kind === 'statement');
+      // A unit whose owner is itself dropped or counted reports at the owner
+      // row, so a missing statement row surfaces only under an emitted owner.
+      if (!drops.length) continue;
+      tested++;
+      const baseline = coverageLedger(appUnderTest, out).filter((r) => r.status === 'dropped' && r.kind === 'statement').length;
+      if (drops.length > baseline) caught++;
+    }
+    assert.equal(caught, tested, `${name}: ${caught}/${tested} single-row deletions detected`);
+  }
+});
+
+test('a statement visited but accounted nowhere fails generation', () => {
+  const a = twoStatementApp();
+  const out = collectOutputs(a);
+  out.statementCoverage = out.statementCoverage.map((c) => (c.kind === 'assign' && c.start === 7 ? { ...c, bucket: 'skipped' as const } : c));
+  const drops = auditApp(a, out);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0]!.kind, 'statement');
+  assert.match(drops[0]!.note, /silent drop/);
+});
+
+test('assertNoSkippedStatements throws on a skipped non-block row only', () => {
+  const row = { unit: 'workflow W (on load)', kind: 'assign', start: 0, end: 5 };
+  assert.throws(() => assertNoSkippedStatements([{ ...row, bucket: 'skipped' }]), /silent drop/);
+  // A `block` only recurses; 'skipped' is its resting bucket, not a drop.
+  assert.doesNotThrow(() =>
+    assertNoSkippedStatements([
+      { ...row, kind: 'block', bucket: 'skipped' },
+      { ...row, bucket: 'translated' },
+    ]),
+  );
+});
+
+// The translator accounts every statement it can parse, so no script reaches a
+// 'skipped' row on its own. A child process replaces translate() with one
+// that reports its rows as skipped and runs the real generate(): the gate
+// inside generate() is what must refuse the app.
+const SKIPPING_TRANSLATE = `
+import { mock } from 'node:test';
+const [translateUrl, generateUrl, appJson] = process.argv.slice(1);
+const real = await import(translateUrl);
+mock.module(translateUrl, {
+  namedExports: {
+    ...real,
+    translate: (src, options) => {
+      const out = real.translate(src, options);
+      return { ...out, coverage: out.coverage.map((c) => ({ ...c, bucket: 'skipped' })) };
+    },
+  },
+});
+const { generate } = await import(generateUrl);
+try {
+  generate(JSON.parse(appJson));
+  console.log('generated');
+} catch (e) {
+  console.log(e.message);
+}
+`;
+
+test('generate() refuses an app whose translator leaves a statement skipped', () => {
+  const a = app({
+    ...coveredApp(),
+    workflows: [workflow({ name: 'Load', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;', span: Z } })],
+  });
+  // Control: the same app generates when every statement is accounted.
+  assert.ok(generate(a).statementCoverage.some((c) => c.kind === 'assign' && c.bucket !== 'skipped'));
+  const child = spawnSync(
+    process.execPath,
+    [
+      '--experimental-test-module-mocks',
+      '--no-warnings',
+      '--input-type=module',
+      '-e',
+      SKIPPING_TRANSLATE,
+      new URL('../../deluge/src/translate.js', import.meta.url).href,
+      new URL('../../deluge/src/generate.js', import.meta.url).href,
+      JSON.stringify(a),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.match(child.stdout, /^silent drop: a assign statement in workflow Load \(on load\) was visited but emitted nothing/);
+});
+
+test('a todo-bucket statement with no covering TODO item fails generation', () => {
+  const a = app({
+    ...coveredApp(),
+    workflows: [workflow({ name: 'Gap', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;\nzoho.unknownthing.go("x");', span: Z } })],
+  });
+  const out = collectOutputs(a);
+  // Force the second statement into the todo bucket without any TODO item.
+  const second = out.statementCoverage.find((c) => c.start === 7);
+  assert.ok(second);
+  second.bucket = 'todo';
+  out.todos = out.todos.filter((t) => t.end <= 7 || t.start >= 30);
+  const drops = auditApp(a, out);
+  assert.deepEqual(drops.filter((d) => d.kind === 'statement').map((d) => d.name), ['workflow Gap (on load) expr statement']);
+});
+
+const SPAN = {
+  report: { start: 1000, end: 2000 },
+  column: { start: 1100, end: 1200 },
+  filter: { start: 1300, end: 1400 },
+  action: { start: 1500, end: 1600 },
+  format: { start: 1700, end: 1800 },
+  field: { start: 2000, end: 2600 },
+  type: { start: 2010, end: 2050 },
+  max: { start: 2100, end: 2200 },
+  initial: { start: 2300, end: 2400 },
+  page: { start: 3000, end: 3400 },
+  panel: { start: 3010, end: 3080 },
+};
+
+/** Report, page, and field whose generated artefacts carry every declared feature. */
+function richApp(): App {
+  const title = field('Title', 'text');
+  title.span = SPAN.field;
+  title.initialValue = '"Hello"';
+  title.properties = [
+    { key: 'type', value: 'text', span: SPAN.type },
+    { key: 'max char', value: '40', span: SPAN.max },
+    { key: 'initial value', value: '"Hello"', span: SPAN.initial },
+  ];
+  return app({
+    forms: [{ name: 'Orders', properties: [], fields: [title], actions: [], blocks: [], span: SPAN.field }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        criteria: 'Title == "Open"',
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: SPAN.column }],
+        customActions: [{ name: 'Export', column: false, properties: [], flags: [], blocks: [], span: SPAN.action }],
+        conditionalFormats: [{ name: 'Hot', condition: 'Title == "Open"', properties: [], span: SPAN.format }],
+        filters: [{ field: 'Title', span: SPAN.filter }],
+        groupBy: [],
+        sortBy: [],
+        blocks: [],
+        views: [],
+        span: SPAN.report,
+      },
+    ],
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [{ tag: 'panel', attributes: { elementName: 'Panel' }, children: [], start: SPAN.panel.start, end: SPAN.panel.end }],
+        references: [],
+        span: SPAN.page,
+      },
+    ],
+  });
+}
+
+function cloneOutputs(out: ReturnType<typeof collectOutputs>): ReturnType<typeof collectOutputs> {
+  return {
+    ...out,
+    schema: JSON.parse(JSON.stringify(out.schema)) as ReturnType<typeof collectOutputs>['schema'],
+    model: JSON.parse(JSON.stringify(out.model)) as ReturnType<typeof collectOutputs>['model'],
+    todos: [...out.todos],
+  };
+}
+
+function dropNames(appUnderTest: App, out: ReturnType<typeof collectOutputs>): string[] {
+  return auditApp(appUnderTest, out).map((drop) => drop.name);
+}
+
+test('a report feature, page element, or field setting is emitted only when the generated artefact contains it', () => {
+  const source = richApp();
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const dropped = rows.filter((row) => row.status === 'dropped').map((row) => `${row.kind}: ${row.name}`);
+  assert.deepEqual(dropped, []);
+  for (const name of [
+    'All_Orders column Title',
+    'All_Orders filter Title',
+    'All_Orders custom action Export',
+    'All_Orders conditional format Hot',
+    'All_Orders criteria',
+    'Dash.Panel',
+    'Orders.Title property max char',
+    'Orders.Title property initial value',
+    'Orders.Title initial value',
+  ]) {
+    assert.equal(rows.find((row) => row.name === name)?.status, 'emitted', name);
+  }
+
+  const withoutColumn = cloneOutputs(out);
+  const columnReport = withoutColumn.model.reports[0]!;
+  columnReport.columns = columnReport.columns.filter((column) => column.field !== 'Title');
+  columnReport.phoneColumns = (columnReport.phoneColumns ?? []).filter((column) => column.field !== 'Title');
+  for (const block of columnReport.detailBlocks ?? []) block.fields = block.fields.filter((item) => item.field !== 'Title');
+  assert.deepEqual(dropNames(source, withoutColumn), ['All_Orders column Title']);
+
+  const withoutFilter = cloneOutputs(out);
+  withoutFilter.model.reports[0]!.filters = [];
+  assert.deepEqual(dropNames(source, withoutFilter), ['All_Orders filter Title']);
+
+  const withoutAction = cloneOutputs(out);
+  const actionReport = withoutAction.model.reports[0]!;
+  actionReport.customActions = [];
+  actionReport.columns = actionReport.columns.filter((column) => column.field !== 'Export');
+  assert.deepEqual(dropNames(source, withoutAction), ['All_Orders custom action Export']);
+
+  const withoutFormat = cloneOutputs(out);
+  delete withoutFormat.model.reports[0]!.conditionalFormats;
+  assert.deepEqual(dropNames(source, withoutFormat), ['All_Orders conditional format Hot']);
+
+  const withoutCriteria = cloneOutputs(out);
+  delete withoutCriteria.model.reports[0]!.criteria;
+  assert.deepEqual(dropNames(source, withoutCriteria), ['All_Orders criteria']);
+
+  const withoutPanel = cloneOutputs(out);
+  withoutPanel.model.pages[0]!.elements = [];
+  assert.deepEqual(dropNames(source, withoutPanel), ['Dash.Panel']);
+
+  const withoutMax = cloneOutputs(out);
+  const maxField = withoutMax.model.forms[0]!.fields.find((item) => item.name === 'Title')!;
+  delete maxField.maxLength;
+  for (const table of withoutMax.schema.tables) {
+    for (const column of table.columns) if (column.name === 'Title' || column.field === 'Title') delete column.length;
+  }
+  assert.deepEqual(dropNames(source, withoutMax), ['Orders.Title property max char']);
+
+  const withoutInitial = cloneOutputs(out);
+  const initialField = withoutInitial.model.forms[0]!.fields.find((item) => item.name === 'Title')!;
+  delete initialField.initialValue;
+  for (const table of withoutInitial.schema.tables) {
+    for (const column of table.columns) if (column.name === 'Title' || column.field === 'Title') delete column.defaultValue;
+  }
+  assert.deepEqual(dropNames(source, withoutInitial).sort(), ['Orders.Title initial value', 'Orders.Title property initial value']);
+
+  const counted = cloneOutputs(out);
+  const countedReport = counted.model.reports[0]!;
+  countedReport.columns = [];
+  countedReport.phoneColumns = [];
+  countedReport.detailBlocks = [];
+  counted.todos.push({ construct: 'manual', start: SPAN.column.start, end: SPAN.column.end });
+  const countedRow = coverageLedger(source, counted).find((row) => row.name === 'All_Orders column Title');
+  assert.equal(countedRow?.status, 'counted');
+  assert.equal(dropNames(source, counted).includes('All_Orders column Title'), false);
+});
+
+/**
+ * Report whose one custom action carries a `confirmation before execution`
+ * block: Creator's grammar has no separate `destructive` boolean, so this
+ * block is itself the destructive-action marker.
+ */
+function appWithActionConfirmation(): App {
+  const source = coveredApp();
+  const report = source.reports[0]!;
+  report.customActions = [
+    {
+      name: 'Cancel Order',
+      workflow: undefined,
+      column: false,
+      properties: [],
+      flags: [],
+      blocks: [
+        {
+          name: 'confirmation before execution',
+          properties: [
+            { key: 'message for individual record', value: '"Cancel this order? This cannot be undone."', span: SPAN.action },
+            { key: 'confirm button text', value: '"Yes"', span: Z },
+            { key: 'cancel button text', value: '"No"', span: Z },
+          ],
+          blocks: [],
+          items: [],
+          span: SPAN.action,
+        },
+      ],
+      span: SPAN.action,
+    },
+  ];
+  return source;
+}
+
+test('a custom action confirmation dialog is emitted only when the built action carries the same message', () => {
+  const source = appWithActionConfirmation();
+  const out = collectOutputs(source);
+  const built = out.model.reports.find((r) => r.name === 'All_Orders');
+  assert.equal(built?.customActions.find((a) => a.name === 'Cancel Order')?.confirm?.message, 'Cancel this order? This cannot be undone.');
+  assert.deepEqual(dropNames(source, out), []);
+
+  // Mutation: strip the carried confirmation (a regression in model.ts would
+  // drop it silently). The button would run without ever showing the dialog
+  // text Creator configured, and nothing else flags it — that is the drop.
+  const mutated = cloneOutputs(out);
+  const mutatedAction = mutated.model.reports[0]!.customActions.find((a) => a.name === 'Cancel Order')!;
+  delete (mutatedAction as { confirm?: unknown }).confirm;
+  assert.deepEqual(dropNames(source, mutated), ['All_Orders custom action Cancel Order confirmation']);
+
+  // A UI todo naming the feature covers the gap instead of carrying the message.
+  const listed = cloneOutputs(mutated);
+  listed.model.todos.push({ area: 'report', name: 'All_Orders custom action Cancel Order confirmation', reason: 'Cancel Order: confirmation dialog not migrated; add it by hand.' });
+  assert.deepEqual(dropNames(source, listed), []);
+
+  // An action with no confirmation block at all is never a drop.
+  const noConfirm = appWithActionConfirmation();
+  noConfirm.reports[0]!.customActions[0]!.blocks = [];
+  const noConfirmOut = collectOutputs(noConfirm);
+  assert.deepEqual(dropNames(noConfirm, noConfirmOut), []);
+});
+
+test('a detail view proves against the layout kept for its device', () => {
+  const block = (name: string, title: string, relatedField: string | undefined, fields: string[]) => ({
+    name,
+    title,
+    ...(relatedField ? { relatedField } : {}),
+    fields: fields.map((f) => ({ field: f, properties: [], subcolumns: [], span: Z })),
+    properties: [],
+    span: Z,
+  });
+  const view = (kind: 'quickview' | 'detailview', device: string | undefined, blocks: ReturnType<typeof block>[]) => ({
+    kind,
+    ...(device ? { device } : {}),
+    layoutProperties: [],
+    blocks,
+    menus: {},
+    actions: {},
+    properties: [],
+    span: Z,
+  });
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text'), field('Name', 'text'), field('Qty', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [],
+        views: [
+          // Two "Overview" blocks: a field section and a related list.
+          view('detailview', 'web', [block('datablock1', 'Overview', undefined, ['Title']), block('datablock2', 'Overview', 'Items', ['Name', 'Qty'])]),
+          view('detailview', 'phone', [block('datablock1', 'Phone Card', undefined, ['Title'])]),
+        ],
+        span: Z,
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const built = out.model.reports.find((item) => item.name === 'All_Orders')!;
+  assert.equal(built.detailDevice, 'web');
+  assert.deepEqual((built.deviceDetailBlocks ?? []).map((variant) => variant.device), ['phone']);
+  const rows = coverageLedger(source, out);
+  // The related "Overview" block lands on the related layout block, not the first same-title block.
+  assert.equal(rows.find((row) => row.name === 'All_Orders detailview web')?.status, 'emitted');
+  assert.equal(rows.find((row) => row.name === 'All_Orders detailview phone')?.status, 'emitted');
+  assert.equal(dropNames(source, out).includes('All_Orders detailview phone'), false);
+  // Break the generated output: without the carried phone layout the drop returns.
+  const mutated = cloneOutputs(out);
+  delete mutated.model.reports.find((item) => item.name === 'All_Orders')!.deviceDetailBlocks;
+  assert.ok(dropNames(source, mutated).includes('All_Orders detailview phone'));
+});
+
+test('a detail view is not lost when an earlier report shares its name', () => {
+  const block = (name: string, fields: string[]) => ({
+    name,
+    fields: fields.map((f) => ({ field: f, properties: [], subcolumns: [], span: Z })),
+    properties: [],
+    span: Z,
+  });
+  const view = (kind: 'detailview', device: string, blocks: ReturnType<typeof block>[]) => ({
+    kind,
+    device,
+    layoutProperties: [],
+    blocks,
+    menus: {},
+    actions: {},
+    properties: [],
+    span: Z,
+  });
+  const report = (overrides: Partial<App['reports'][number]>): App['reports'][number] => ({
+    name: 'All_Orders',
+    type: 'list',
+    modifiers: [],
+    form: 'Orders',
+    flags: [],
+    properties: [],
+    columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+    customActions: [],
+    conditionalFormats: [],
+    filters: [],
+    groupBy: [],
+    sortBy: [],
+    blocks: [],
+    views: [],
+    span: Z,
+    ...overrides,
+  });
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    // Two reports declared under the same name (e.g. a device-scoped
+    // redeclaration): the first carries the detail view, the second none.
+    reports: [report({ views: [view('detailview', 'web', [block('datablock1', ['Title'])])] }), report({})],
+  });
+  const out = collectOutputs(source);
+  assert.equal(out.model.reports.length, 2);
+  assert.deepEqual(out.model.reports[0]!.detailBlocks, [{ title: 'datablock1', fields: [{ field: 'Title', label: 'Title' }] }]);
+  assert.equal(out.model.reports[1]!.detailBlocks, undefined);
+  const rows = coverageLedger(source, out);
+  assert.equal(rows.find((row) => row.name === 'All_Orders detailview web')?.status, 'emitted');
+  assert.equal(dropNames(source, out).includes('All_Orders detailview web'), false);
+  // Break the generated output: without the carried layout the drop returns.
+  const mutated = cloneOutputs(out);
+  delete mutated.model.reports[0]!.detailBlocks;
+  assert.ok(dropNames(source, mutated).includes('All_Orders detailview web'));
+});
+
+test('a page element whose payload was not generated is a drop even though the node exists', () => {
+  const element = (tag: string, attributes: Record<string, string>) => ({ tag, attributes, children: [], start: 10, end: 20 });
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          element('panel', { elementName: 'Panel' }),
+          element('button', { elementName: 'Go', parameters: 'View all Books' }),
+          element('search', { elementName: 'Search', linkName: 'Book_Report', criteriaString: 'Title.contains(input.searchString)' }),
+          element('text', { elementName: 'Fine', type: 'form data', value: 'thisapp.Book.Fine_Amount.distinctCount' }),
+          element('text', { elementName: 'Total', type: 'form data', value: 'thisapp.Book.Fine_Amount.count' }),
+        ],
+        references: [],
+        span: { start: 1, end: 80 },
+      },
+    ],
+  });
+  const rows = coverageLedger(source);
+  assert.equal(rows.find((row) => row.name === 'Dash.Panel')?.status, 'emitted');
+  assert.equal(rows.find((row) => row.name === 'Dash.Total')?.status, 'emitted');
+  // A button's click `parameters` and a search box's `criteria` are now recorded as
+  // manual steps instead of disappearing, so only the unsupported KPI stays a drop.
+  assert.equal(rows.find((row) => row.name === 'Dash.Go')?.status, 'counted');
+  assert.equal(rows.find((row) => row.name === 'Dash.Book_Report')?.status, 'counted');
+  const drops = rows.filter((row) => row.status === 'dropped');
+  assert.deepEqual(
+    drops.map((drop) => drop.name).sort(),
+    ['Dash.Fine'],
+  );
+  for (const drop of drops) assert.match(drop.note ?? '', /Add one:/);
+});
+
+test('a button whose click parameters are not carried through is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Invoice',
+        properties: [],
+        zml: [{ tag: 'button', attributes: { elementName: 'Go', parameters: 'View all Books' }, children: [], start: 10, end: 20 }],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Invoice.Go');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Invoice.Go' && /parameters/.test(todo.reason)));
+  // Without the generator's backing TODO the gap is a genuine drop, not a free pass.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Invoice.Go');
+  assert.ok(dropNames(source, mutated).includes('Invoice.Go'));
+});
+
+test('a search box whose criteria is not bound is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Invoice',
+        properties: [],
+        zml: [
+          {
+            tag: 'search',
+            attributes: { elementName: 'Find', criteriaString: 'Title.contains(input.searchString)' },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Invoice.Find');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Invoice.Find' && /criteria/.test(todo.reason)));
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Invoice.Find');
+  assert.ok(dropNames(source, mutated).includes('Invoice.Find'));
+});
+
+test('a text element whose click parameters are not carried through is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dashboard',
+        properties: [],
+        zml: [{ tag: 'text', attributes: { elementName: 'All_Calls', parameters: 'Owner == thisapp.loginuser' }, children: [], start: 10, end: 20 }],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Dashboard.All_Calls');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Dashboard.All_Calls' && /parameters/.test(todo.reason)));
+  // Without the generator's backing TODO the gap is a genuine drop, not a free pass.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Dashboard.All_Calls');
+  assert.ok(dropNames(source, mutated).includes('Dashboard.All_Calls'));
+});
+
+test('a pc element that opens a report is counted by its own manual-step TODO when its open parameters are not carried through', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dashboard',
+        properties: [],
+        zml: [
+          {
+            tag: 'pc',
+            attributes: { action: 'OpenReport', linkName: 'All_Events_List', parameters: 'Status == "Open"' },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Dashboard.All_Events_List');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Dashboard.All_Events_List' && /parameters/.test(todo.reason)));
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Dashboard.All_Events_List');
+  assert.ok(dropNames(source, mutated).includes('Dashboard.All_Events_List'));
+});
+
+test('a pc OpenReport whose URL parameters match a form field is emitted, not a parameters drop', () => {
+  const source = app({
+    forms: [
+      {
+        name: 'Add_Sales',
+        properties: [],
+        fields: [field('Status', 'radiobuttons')],
+        actions: [],
+        blocks: [],
+        span: Z,
+      },
+    ],
+    reports: [
+      {
+        name: 'Sales_Report',
+        type: 'list',
+        modifiers: [],
+        form: 'Add_Sales',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Status', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [],
+        views: [],
+        span: Z,
+      },
+    ],
+    pages: [
+      {
+        name: 'Sales_Details',
+        properties: [],
+        zml: [
+          {
+            tag: 'pc',
+            attributes: { action: 'OpenReport', componentLinkName: 'Sales_Report', parameters: 'Status=Estimation' },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: Z,
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((item) => item.name === 'Sales_Details.Sales_Report');
+  assert.equal(row?.status, 'emitted');
+  assert.equal(row?.via, 'UI page element');
+  assert.equal(
+    out.model.todos.some((todo) => todo.area === 'zml' && /parameters/.test(todo.reason)),
+    false,
+  );
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = [];
+  assert.equal(dropNames(source, mutated).includes('Sales_Details.Sales_Report'), false);
+});
+
+test('a KPI click-through whose drill-down parameters are not carried is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dashboard',
+        properties: [],
+        zml: [
+          {
+            tag: 'text',
+            attributes: {
+              elementName: 'Open_Count',
+              type: 'Form Data',
+              value: 'thisapp.Orders.ID.count',
+              action: 'OpenReport',
+              parameters: 'Status=Open',
+              componentLinkName: 'All_Orders',
+            },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Dashboard.All_Orders');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Dashboard.All_Orders' && /parameters/.test(todo.reason)));
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Dashboard.All_Orders');
+  assert.ok(dropNames(source, mutated).includes('Dashboard.All_Orders'));
+});
+
+test('an embedded report card whose criteria is not bound is counted by its own manual-step TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Request_Summary',
+        properties: [],
+        zml: [
+          {
+            tag: 'report',
+            attributes: { elementName: 'Report', linkName: 'Related_Orders', criteriaString: 'Request_ID == input.purchase_requisition' },
+            children: [],
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const row = rows.find((r) => r.name === 'Request_Summary.Related_Orders');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+  assert.ok(
+    out.model.todos.some((todo) => todo.area === 'zml' && todo.name === 'Request_Summary.Related_Orders' && /criteria/.test(todo.reason)),
+  );
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'Request_Summary.Related_Orders');
+  assert.ok(dropNames(source, mutated).includes('Request_Summary.Related_Orders'));
+});
+
+test('a named dspZml snippet that fails to compile is counted by its own nested manual-translation TODO, not dropped', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Invoice',
+        properties: [],
+        zml: [
+          {
+            tag: 'dspZml',
+            attributes: { elementName: 'ZML Snippet' },
+            children: [],
+            text: '<% while (x < 1) { z = 1; } %>',
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const rows = coverageLedger(source);
+  const row = rows.find((r) => r.name === 'Invoice.ZML Snippet');
+  assert.equal(row?.status, 'counted');
+  assert.equal(row?.via, 'UI zml todo');
+});
+
+test('a dsp snippet that compiles to a real render endpoint is emitted even though its static html is empty', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          {
+            tag: 'dsp',
+            attributes: { elementName: 'HTML Snippet' },
+            children: [],
+            text: 'htmlpage html_snippet() content <%{ %><style>.foo{color:red;}</style><%\n}%>',
+            start: 10,
+            end: 20,
+          },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const row = coverageLedger(source, out).find((r) => r.name === 'Dash.HTML Snippet');
+  assert.equal(row?.status, 'emitted', row?.note ?? 'expected emitted');
+  const built = out.model.pages.find((p) => p.name === 'Dash')?.elements.find((el) => el.name === 'HTML Snippet');
+  // The whole snippet body is one Deluge island, so the static html left on
+  // the element is genuinely empty; the real output is the compiled endpoint.
+  assert.equal((built?.html ?? '').trim(), '');
+  assert.ok(built?.src, 'expected a compiled render endpoint path');
+  // Without that endpoint the empty static html is a genuine drop: a mutation
+  // that strips `src` (as if the audit ignored it) reproduces the drop.
+  const mutated = cloneOutputs(out);
+  const mutatedEl = mutated.model.pages.find((p) => p.name === 'Dash')?.elements.find((el) => el.name === 'HTML Snippet');
+  delete mutatedEl!.src;
+  assert.ok(dropNames(source, mutated).includes('Dash.HTML Snippet'));
+});
+
+test('a page element emitted as an empty stub is a drop', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          { tag: 'text', attributes: { elementName: 'Hello' }, children: [], text: 'Hello', start: 10, end: 20 },
+          { tag: 'text', attributes: { elementName: 'World' }, children: [], text: 'World', start: 21, end: 30 },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.deepEqual(dropNames(source, out), []);
+  const stub = cloneOutputs(out);
+  const walk = (els: typeof stub.model.pages[number]['elements']): void => {
+    for (const el of els) {
+      if (el.kind === 'text') el.text = '';
+      walk(el.children);
+    }
+  };
+  walk(stub.model.pages[0]!.elements);
+  assert.deepEqual(dropNames(source, stub).sort(), ['Dash.Hello', 'Dash.World']);
+});
+
+test('a same-tag element under another name does not satisfy a named page element', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          { tag: 'text', attributes: { elementName: 'Hello' }, children: [], text: 'Hello', start: 10, end: 20 },
+          { tag: 'text', attributes: { elementName: 'World' }, children: [], text: 'World', start: 21, end: 30 },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.deepEqual(dropNames(source, out), []);
+  const renamed = cloneOutputs(out);
+  const walk = (els: typeof renamed.model.pages[number]['elements']): void => {
+    for (const el of els) {
+      if (el.name === 'Hello') el.name = 'SomethingElse';
+      walk(el.children);
+    }
+  };
+  walk(renamed.model.pages[0]!.elements);
+  assert.deepEqual(dropNames(source, renamed), ['Dash.Hello']);
+});
+
+test('a kanban view that the model does not keep is a drop; an options icon is a recorded manual step', () => {
+  const genre = field('Genre', 'picklist');
+  genre.span = { start: 1, end: 40 };
+  genre.choices = ['Fiction', 'History'];
+  genre.properties = [
+    { key: 'type', value: 'picklist', span: { start: 2, end: 8 } },
+    { key: 'values', value: '{"Fiction","History"}', span: { start: 9, end: 16 } },
+  ];
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [genre], actions: [], blocks: [], span: { start: 1, end: 40 } }],
+    reports: [
+      {
+        name: 'Book_by_Genre',
+        type: 'kanban',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Genre', properties: [], subcolumns: [], span: { start: 100, end: 120 } }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [
+          {
+            name: 'options',
+            properties: [{ key: 'display field', value: 'Genre', span: { start: 130, end: 140 } }],
+            blocks: [],
+            items: [],
+            span: { start: 130, end: 150 },
+          },
+        ],
+        views: [],
+        span: { start: 90, end: 200 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.equal(out.model.reports[0]!.view, 'kanban');
+  assert.deepEqual(dropNames(source, out), []);
+
+  const listed = cloneOutputs(out);
+  listed.model.reports[0]!.view = 'list';
+  delete listed.model.reports[0]!.note;
+  assert.deepEqual(dropNames(source, listed), ['Book_by_Genre view kanban']);
+
+  const icon = app({
+    ...source,
+    reports: [
+      {
+        ...source.reports[0]!,
+        blocks: [
+          {
+            name: 'options',
+            properties: [
+              { key: 'display field', value: 'Genre', span: { start: 130, end: 140 } },
+              { key: 'icon', value: 'books', span: { start: 141, end: 148 } },
+            ],
+            blocks: [],
+            items: [],
+            span: { start: 130, end: 150 },
+          },
+        ],
+      },
+    ],
+  });
+  // `icon` has no generated home on any view — recorded as a manual step
+  // naming just that property, not the whole block (`display field` is still
+  // proved by the kanban's group field).
+  const iconOut = collectOutputs(icon);
+  assert.equal(rowStatus(icon, iconOut, 'Book_by_Genre block options'), 'counted');
+  assert.deepEqual(dropNames(icon, iconOut), []);
+  const todo = iconOut.model.todos.find((t) => t.name === 'Book_by_Genre block options');
+  assert.ok(todo, 'UI todo is emitted for the unrecognized options property');
+  assert.ok(todo!.reason.includes('icon = books'), 'todo reason names the unrecognized property and value');
+  assert.ok(!todo!.reason.includes('display field'), 'todo reason omits the already-proved property');
+
+  // Mutation test: removing the UI todo makes the block a silent drop again —
+  // proving `icon` has no generated home of its own.
+  const mutatedIcon = cloneOutputs(iconOut);
+  mutatedIcon.model.todos = mutatedIcon.model.todos.filter((t) => t.name !== 'Book_by_Genre block options');
+  assert.equal(rowStatus(icon, mutatedIcon, 'Book_by_Genre block options'), 'dropped');
+});
+
+test('map options display field and radius clear only when the generated report carries them', () => {
+  const source = deriveIr(
+    parse(`application "Demo"
+{
+	form Site
+	{
+		Name
+		(
+			type = text
+		)
+		Address
+		(
+			type = address
+			latitude
+			(
+				type = decimal
+			)
+			longitude
+			(
+				type = decimal
+			)
+		)
+	}
+	map Pins
+	{
+		show all rows from Site
+		(
+			Name
+			Address
+		)
+		options
+		(
+			display field = Address
+			radius = 1000
+		)
+	}
+}
+`),
+  );
+  const out = collectOutputs(source);
+  const pins = out.model.reports.find((item) => item.name === 'Pins')!;
+  assert.equal(pins.view, 'map');
+  assert.equal(pins.mapField, 'Address');
+  assert.equal(pins.mapRadius, 1000);
+  assert.deepEqual(dropNames(source, out), []);
+  assert.equal(rowStatus(source, out, 'Pins block options'), 'emitted');
+
+  const stripped = cloneOutputs(out);
+  delete stripped.model.reports[0]!.mapField;
+  delete stripped.model.reports[0]!.mapRadius;
+  assert.deepEqual(dropNames(source, stripped), ['Pins block options']);
+});
+
+test('calendar options display type week clears only when the generated report carries it', () => {
+  const source = deriveIr(
+    parse(`application "Demo"
+{
+	form Booking
+	{
+		Room
+		(
+			type = text
+		)
+		Check_In
+		(
+			type = datetime
+		)
+	}
+	calendar Weekly
+	{
+		show all rows from Booking
+		(
+			Room
+			Check_In
+		)
+		options
+		(
+			display type = week
+			display field = Room
+			start date = Check_In
+		)
+	}
+}
+`),
+  );
+  const out = collectOutputs(source);
+  const weekly = out.model.reports.find((item) => item.name === 'Weekly')!;
+  assert.equal(weekly.displayType, 'week');
+  assert.deepEqual(dropNames(source, out), []);
+  assert.equal(rowStatus(source, out, 'Weekly block options'), 'emitted');
+
+  const stripped = cloneOutputs(out);
+  delete stripped.model.reports[0]!.displayType;
+  assert.deepEqual(dropNames(source, stripped), ['Weekly block options']);
+});
+
+test('calendar options display type day clears only when the generated report carries it', () => {
+  const source = deriveIr(
+    parse(`application "Demo"
+{
+	form Reservation
+	{
+		Table
+		(
+			type = text
+		)
+		Booked_At
+		(
+			type = datetime
+		)
+	}
+	calendar Daily
+	{
+		show all rows from Reservation
+		(
+			Table
+			Booked_At
+		)
+		options
+		(
+			display type = day
+			display field = Table
+			start date = Booked_At
+		)
+	}
+}
+`),
+  );
+  const out = collectOutputs(source);
+  const daily = out.model.reports.find((item) => item.name === 'Daily')!;
+  assert.equal(daily.displayType, 'day');
+  assert.deepEqual(dropNames(source, out), []);
+  assert.equal(rowStatus(source, out, 'Daily block options'), 'emitted');
+
+  const stripped = cloneOutputs(out);
+  delete stripped.model.reports[0]!.displayType;
+  assert.deepEqual(dropNames(source, stripped), ['Daily block options']);
+});
+
+test('kanban options sort order clears only when the generated board carries the lane order', () => {
+  const source = deriveIr(
+    parse(`application "Demo"
+{
+	form Product_Delivery_Details
+	{
+		Invoice_ID
+		(
+			type = text
+		)
+		Status
+		(
+			type = text
+		)
+	}
+	kanban Product_Requests
+	{
+		show all rows from Product_Delivery_Details
+		(
+			Invoice_ID
+			Status
+		)
+		options
+		(
+			display field = Status
+			sort order = ascending
+			record count = enable
+		)
+	}
+}
+`),
+  );
+  const out = collectOutputs(source);
+  const board = out.model.reports.find((item) => item.name === 'Product_Requests')!;
+  assert.equal(board.sortOrder, 'ascending');
+  assert.equal(board.showRecordCount, true);
+  assert.deepEqual(dropNames(source, out), []);
+  assert.equal(rowStatus(source, out, 'Product_Requests block options'), 'emitted');
+
+  // Mutation test: clearing either carried setting on its own makes it (and
+  // only it) a drop again — proving each has its own generated home.
+  const noSort = cloneOutputs(out);
+  delete noSort.model.reports[0]!.sortOrder;
+  assert.deepEqual(dropNames(source, noSort), ['Product_Requests block options']);
+
+  const noCount = cloneOutputs(out);
+  noCount.model.reports[0]!.showRecordCount = false;
+  assert.deepEqual(dropNames(source, noCount), ['Product_Requests block options']);
+});
+
+test('options display rows, records per row and label width clear only when the generated report carries them', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [
+          {
+            name: 'options',
+            properties: [
+              { key: 'display rows', value: '10', span: Z },
+              { key: 'display records per row', value: '2', span: Z },
+              { key: 'label width', value: '20%', span: Z },
+            ],
+            blocks: [],
+            items: [],
+            span: Z,
+          },
+        ],
+        views: [],
+        span: Z,
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.equal(out.model.reports[0]!.pageSize, 10);
+  assert.equal(out.model.reports[0]!.recordsPerRow, 2);
+  assert.equal(out.model.reports[0]!.labelWidth, '20%');
+  assert.deepEqual(dropNames(source, out), []);
+
+  // A mutation to any carried setting returns the drop (audit proves the
+  // generated output, not the export).
+  const tampered = cloneOutputs(out);
+  tampered.model.reports[0]!.recordsPerRow = 3;
+  assert.deepEqual(dropNames(source, tampered), ['All_Orders block options']);
+  const shrunk = cloneOutputs(out);
+  shrunk.model.reports[0]!.pageSize = 300;
+  assert.deepEqual(dropNames(source, shrunk), ['All_Orders block options']);
+
+  // A value that is not carried (too large, or not a plain number) has no
+  // generated home — a counted manual step, same as an unrecognized key.
+  const prop = (key: string, value: string) => ({ key, value, span: Z });
+  const withBlock = (properties: ReturnType<typeof prop>[]) =>
+    app({ ...source, reports: [{ ...source.reports[0]!, blocks: [{ name: 'options', properties, blocks: [], items: [], span: Z }] }] });
+  const invalidRows = withBlock([prop('display rows', 'many')]);
+  const invalidRowsOut = collectOutputs(invalidRows);
+  assert.deepEqual(dropNames(invalidRows, invalidRowsOut), []);
+  assert.ok(
+    invalidRowsOut.model.todos.find((t) => t.name === 'All_Orders block options')!.reason.includes('display rows = many'),
+    'todo reason names the uncarried display rows value',
+  );
+  // `record count = enable` on a report that draws the rows table is carried
+  // as the list header's row count, so it clears like the other density options.
+  const counted = withBlock([prop('record count', 'enable')]);
+  const countedOut = collectOutputs(counted);
+  assert.equal(countedOut.model.reports[0]!.showRecordCount, true);
+  assert.deepEqual(dropNames(counted, countedOut), []);
+  assert.deepEqual(dropNames(withBlock([prop('record count', 'disable')]), collectOutputs(withBlock([prop('record count', 'disable')]))), []);
+  // A board view never draws the rows table: the density settings (records
+  // per row, label width) have no generated home there — recorded as a
+  // manual step. `record count` does have a board home (the board's overall
+  // row count), so it is not named among the uncarried settings.
+  const board = app({ ...source, reports: [{ ...source.reports[0]!, type: 'kanban', groupBy: [{ field: 'Title' }] }] });
+  const boardOut = collectOutputs(board);
+  assert.deepEqual(dropNames(board, boardOut), []);
+  const boardTodo = boardOut.model.todos.find((t) => t.name === 'All_Orders block options')!;
+  // `display rows` is carried as the page size regardless of view, so it is
+  // proved here; only the density settings a board never draws are uncarried.
+  assert.ok(boardTodo.reason.includes('display records per row = 2'));
+  assert.ok(boardTodo.reason.includes('label width = 20%'));
+  assert.ok(!boardTodo.reason.includes('display rows ='));
+  // `record count = enable` on a kanban board is carried as the board's
+  // overall row count, so it clears instead of staying a manual step.
+  const boardCounted = app({ ...source, reports: [{ ...board.reports[0]!, blocks: [{ name: 'options', properties: [prop('record count', 'enable')], blocks: [], items: [], span: Z }] }] });
+  const boardCountedOut = collectOutputs(boardCounted);
+  assert.equal(boardCountedOut.model.reports[0]!.showRecordCount, true);
+  assert.deepEqual(dropNames(boardCounted, boardCountedOut), []);
+  assert.equal(boardCountedOut.model.todos.some((t) => t.name === 'All_Orders block options'), false);
+
+  // Mutation test: clearing the carried board flag makes `record count`
+  // uncarried again — proving the flag, not the key's mere presence, is read.
+  const boardCountedMutated = cloneOutputs(boardCountedOut);
+  boardCountedMutated.model.reports[0]!.showRecordCount = false;
+  assert.deepEqual(dropNames(boardCounted, boardCountedMutated), ['All_Orders block options']);
+
+  // Mutation test: removing the UI todo makes the uncarried board setting a
+  // silent drop again — proving it has no generated home of its own.
+  const mutatedBoard = cloneOutputs(boardOut);
+  mutatedBoard.model.todos = mutatedBoard.model.todos.filter((t) => t.name !== 'All_Orders block options');
+  assert.equal(rowStatus(board, mutatedBoard, 'All_Orders block options'), 'dropped');
+});
+
+test('a named report settings block other than options is recorded as a manual step, not silently dropped', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [
+          {
+            name: 'toolbar',
+            properties: [
+              { key: 'show add button', value: 'true', span: Z },
+              { key: 'show export', value: 'true', span: Z },
+            ],
+            blocks: [],
+            items: [],
+            span: Z,
+          },
+        ],
+        views: [],
+        span: Z,
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'All_Orders block toolbar'), 'counted');
+  assert.deepEqual(dropNames(source, out), []);
+
+  const todo = out.model.todos.find((t) => t.name === 'All_Orders block toolbar');
+  assert.ok(todo, 'UI todo is emitted for the non-options settings block');
+  assert.ok(todo!.reason.includes('toolbar'), 'todo reason names the block');
+  assert.ok(todo!.reason.includes('show add button = true'), 'todo reason names the block properties and values');
+  assert.ok(todo!.manualStep, 'toolbar block todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the block a silent drop again —
+  // proving the block has no generated home of its own.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'All_Orders block toolbar');
+  assert.equal(rowStatus(source, mutated, 'All_Orders block toolbar'), 'dropped');
+});
+
+test('a toolbar with export explicitly disabled is carried by the generated report chrome', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [{
+      name: 'All_Orders', type: 'list', modifiers: [], form: 'Orders', flags: [], properties: [],
+      columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }], customActions: [],
+      conditionalFormats: [], filters: [], groupBy: [], sortBy: [], views: [],
+      blocks: [{ name: 'toolbar', properties: [{ key: 'show export', value: 'false', span: Z }], blocks: [], items: [], span: Z }], span: Z,
+    }],
+  });
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'All_Orders block toolbar'), 'emitted');
+  assert.equal(out.model.todos.some((todo) => todo.name === 'All_Orders block toolbar'), false);
+
+});
+
+test('a toolbar with the add button explicitly hidden is carried by the generated report chrome', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [{
+      name: 'All_Orders', type: 'list', modifiers: [], form: 'Orders', flags: [], properties: [],
+      columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }], customActions: [],
+      conditionalFormats: [], filters: [], groupBy: [], sortBy: [], views: [],
+      blocks: [{ name: 'toolbar', properties: [{ key: 'show add button', value: 'false', span: Z }], blocks: [], items: [], span: Z }], span: Z,
+    }],
+  });
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'All_Orders block toolbar'), 'emitted');
+  assert.equal(out.model.todos.some((todo) => todo.name === 'All_Orders block toolbar'), false);
+
+});
+
+test('report permission add is carried, not a counted manual step', () => {
+  // Catalyst's generated report has no add-record affordance of its own, so
+  // `permission { add = ... }` cannot be gated the way `edit` gates
+  // rowActions.edit. It must still be counted, never silently uncarried.
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [{
+      name: 'All_Orders', type: 'list', modifiers: [], form: 'Orders', flags: [], properties: [],
+      columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }], customActions: [],
+      conditionalFormats: [], filters: [], groupBy: [], sortBy: [], views: [],
+      blocks: [{
+        name: 'permission',
+        properties: [
+          { key: 'add', value: 'true', span: Z },
+          { key: 'edit', value: 'false', span: Z },
+        ],
+        blocks: [],
+        items: [],
+        span: Z,
+      }],
+      span: Z,
+    }],
+  });
+  const out = collectOutputs(source);
+  // `edit` still gates rowActions.edit directly.
+  assert.deepEqual(out.model.reports[0]!.rowActions, { add: true, edit: false, delete: true });
+  assert.equal(rowStatus(source, out, 'All_Orders block permission'), 'emitted');
+  assert.deepEqual(dropNames(source, out), []);
+
+  const todo = out.model.todos.find((t) => t.name === 'All_Orders block permission');
+  assert.equal(todo, undefined, 'the carried add permission has no UI todo');
+
+  // Mutation test: removing the permission block leaves no manual step.
+  const mutated = cloneOutputs(out);
+  assert.equal(rowStatus(source, mutated, 'All_Orders block permission'), 'emitted');
+});
+
+test('an additional unconsumed permission key is not proved by the add/edit consumers', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [{
+      name: 'All_Orders', type: 'list', modifiers: [], form: 'Orders', flags: [], properties: [],
+      columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }], customActions: [],
+      conditionalFormats: [], filters: [], groupBy: [], sortBy: [], views: [],
+      blocks: [{
+        name: 'permission',
+        properties: [
+          { key: 'add', value: 'true', span: Z },
+          { key: 'export', value: 'true', span: Z },
+        ],
+        blocks: [],
+        items: [],
+        span: Z,
+      }],
+      span: Z,
+    }],
+  });
+  const out = collectOutputs(source);
+  // `add` is carried, but the unknown `export` key has no consumer: the block
+  // must never be reported as emitted, so it stays a counted or dropped row.
+  assert.notEqual(rowStatus(source, out, 'All_Orders block permission'), 'emitted');
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'All_Orders block permission');
+  assert.equal(rowStatus(source, mutated, 'All_Orders block permission'), 'dropped');
+});
+
+test('report permission edit alone is fully carried with no manual step', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [{
+      name: 'All_Orders', type: 'list', modifiers: [], form: 'Orders', flags: [], properties: [],
+      columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }], customActions: [],
+      conditionalFormats: [], filters: [], groupBy: [], sortBy: [], views: [],
+      blocks: [{ name: 'permission', properties: [{ key: 'edit', value: 'false', span: Z }], blocks: [], items: [], span: Z }],
+      span: Z,
+    }],
+  });
+  const out = collectOutputs(source);
+  assert.deepEqual(out.model.reports[0]!.rowActions, { add: false, edit: false, delete: true });
+  assert.equal(rowStatus(source, out, 'All_Orders block permission'), 'emitted');
+  assert.equal(out.model.todos.some((todo) => todo.name === 'All_Orders block permission'), false);
+});
+
+test('a group-by properties block carrying display record count is generated as the rows-table header toggle', () => {
+  const prop = (key: string, value: string) => ({ key, value, span: Z });
+  const withBlock = (properties: ReturnType<typeof prop>[], type = 'list') =>
+    app({
+      forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+      reports: [
+        {
+          name: 'All_Orders',
+          type,
+          modifiers: [],
+          form: 'Orders',
+          flags: [],
+          properties: [],
+          columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+          customActions: [],
+          conditionalFormats: [],
+          filters: [],
+          groupBy: [{ field: 'Title' }],
+          sortBy: [],
+          blocks: [{ name: 'properties', properties, blocks: [], items: [], span: Z }],
+          views: [],
+          span: Z,
+        },
+      ],
+    });
+
+  // `display record count = true` on a list report is the rows-table header
+  // count: generated, proved emitted, and no manual step remains.
+  const counted = withBlock([prop('display record count', 'true')]);
+  const countedOut = collectOutputs(counted);
+  assert.equal(countedOut.model.reports[0]!.showRecordCount, true);
+  assert.equal(rowStatus(counted, countedOut, 'All_Orders block properties'), 'emitted');
+  assert.equal(countedOut.model.todos.some((t) => t.name === 'All_Orders block properties'), false);
+  assert.deepEqual(dropNames(counted, countedOut), []);
+
+  // `= false` asks for the generated default — emitted, no manual step.
+  const off = withBlock([prop('display record count', 'false')]);
+  const offOut = collectOutputs(off);
+  assert.equal(offOut.model.reports[0]!.showRecordCount ?? false, false);
+  assert.equal(rowStatus(off, offOut, 'All_Orders block properties'), 'emitted');
+
+  // A kanban board carries the same toggle as its own overall row count
+  // (the same home `options { record count = enable }` uses), so no manual
+  // step remains.
+  const board = withBlock([prop('display record count', 'true')], 'kanban');
+  const boardOut = collectOutputs(board);
+  assert.equal(boardOut.model.reports[0]!.showRecordCount, true);
+  assert.equal(rowStatus(board, boardOut, 'All_Orders block properties'), 'emitted');
+  assert.equal(boardOut.model.todos.some((t) => t.name === 'All_Orders block properties'), false);
+  assert.deepEqual(dropNames(board, boardOut), []);
+
+  // Mutation test: clearing the carried board flag makes it a drop again —
+  // proving the board reads the flag, not just the key's presence.
+  const mutatedBoard = cloneOutputs(boardOut);
+  mutatedBoard.model.reports[0]!.showRecordCount = false;
+  assert.equal(rowStatus(board, mutatedBoard, 'All_Orders block properties'), 'dropped');
+
+  // Other properties in the same block still list — the manual step names
+  // only what the generated report does not carry.
+  const mixed = withBlock([prop('display record count', 'true'), prop('title', 'Custom')]);
+  const mixedOut = collectOutputs(mixed);
+  assert.equal(mixedOut.model.reports[0]!.showRecordCount, true);
+  const mixedTodo = mixedOut.model.todos.find((t) => t.name === 'All_Orders block properties');
+  assert.ok(mixedTodo, 'uncarried block properties still list');
+  assert.ok(mixedTodo!.reason.includes('title = Custom'));
+  assert.ok(!mixedTodo!.reason.includes('display record count'));
+  assert.equal(rowStatus(mixed, mixedOut, 'All_Orders block properties'), 'counted');
+
+  // Mutation test: clearing the generated toggle makes a carried `true` a drop again.
+  const mutated = cloneOutputs(countedOut);
+  mutated.model.reports[0]!.showRecordCount = false;
+  assert.equal(rowStatus(counted, mutated, 'All_Orders block properties'), 'dropped');
+});
+
+test('both display record count spellings — group-by properties and report properties — drive the same toggle without masking each other', () => {
+  const prop = (key: string, value: string) => ({ key, value, span: Z });
+  const report = (name: string, blocks: { name: string; properties: ReturnType<typeof prop>[] }[]) => ({
+    name,
+    type: 'list',
+    modifiers: [],
+    form: 'Orders',
+    flags: [],
+    properties: [],
+    columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+    customActions: [],
+    conditionalFormats: [],
+    filters: [],
+    groupBy: [{ field: 'Title' }],
+    sortBy: [],
+    blocks: blocks.map((block) => ({ ...block, blocks: [], items: [], span: Z })),
+    views: [],
+    span: Z,
+  });
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [
+      // Only the group-by `properties` spelling.
+      report('Group_Only', [{ name: 'properties', properties: [prop('display record count', 'true')] }]),
+      // Only the top-level `report properties` spelling.
+      report('Report_Props_Only', [{ name: 'report properties', properties: [prop('display record count', 'true')] }]),
+      // Both spellings at once: `properties` says true, `report properties`
+      // says false — the carried `true` must not be masked by the other block.
+      report('Both_Blocks', [
+        { name: 'properties', properties: [prop('display record count', 'true')] },
+        { name: 'report properties', properties: [prop('display record count', 'false')] },
+      ]),
+    ],
+  });
+  const out = collectOutputs(source);
+  const [groupOnly, reportPropsOnly, both] = out.model.reports;
+  assert.equal(groupOnly!.showRecordCount, true);
+  assert.equal(reportPropsOnly!.showRecordCount, true);
+  assert.equal(both!.showRecordCount, true);
+  assert.equal(rowStatus(source, out, 'Group_Only block properties'), 'emitted');
+  // `report properties` properties beyond the carried toggle have no generated
+  // home, so the block keeps its manual step — counted, never dropped.
+  assert.equal(rowStatus(source, out, 'Report_Props_Only block report properties'), 'counted');
+  assert.deepEqual(dropNames(source, out), []);
+
+  // Clearing the group-by-carried toggle drops only that report's block — the
+  // `report properties` spelling on the sibling report is unaffected: the two
+  // spellings are evaluated per report, not collapsed into one flag.
+  const mutated = cloneOutputs(out);
+  mutated.model.reports[0]!.showRecordCount = false;
+  assert.equal(rowStatus(source, mutated, 'Group_Only block properties'), 'dropped');
+  assert.equal(rowStatus(source, mutated, 'Report_Props_Only block report properties'), 'counted');
+});
+
+// A submit-kind body on /forms/<form>/submit runs only for the posts the
+// generated UI still sends there: add posts go to submitEndpoint, edit posts
+// to editSubmitEndpoint (falling back to submitEndpoint). Each case pins which
+// body is credited and checks the credit against the UI model's endpoints.
+function submitScopeApp(successes: { name: string; recordEvent?: string; client: boolean }[]): App {
+  const mail = (tag: string) => `sendmail[from: zoho.loginuserid to: "a@b.c" subject: "${tag}" message: "hi"];`;
+  let at = 100;
+  const span = () => {
+    const start = at;
+    at += 100;
+    return { start, end: start + 50, file: 'app.ds' };
+  };
+  const body = (name: string, event: string, text: string, extra: Partial<Workflow> = {}) => {
+    const s = span();
+    return workflow({ name, container: 'form', form: 'Orders', event, span: s, deluge: { text, span: { start: s.start + 1, end: s.end - 1, file: 'app.ds' } }, ...extra });
+  };
+  return app({
+    forms: [formOf('Orders', ['Title'])],
+    workflows: [
+      ...successes.map((w) =>
+        body(w.name, 'on success', (w.client ? 'openUrl("https://example.com", "same window");\n' : '') + mail(w.name), w.recordEvent ? { recordEvent: w.recordEvent } : {}),
+      ),
+      body('AddBody', 'on add', mail('add')),
+      body('EditBody', 'on edit', mail('edit')),
+      body('BothBody', 'on add or edit', mail('both')),
+    ],
+  });
+}
+
+// A submit body the success module owns merges into it: `moved` bodies leave
+// `/submit` entirely, `copied` bodies keep a `/submit` copy for the posts the
+// success route does not own, and `stay` bodies are never merged.
+for (const [label, successes, expected] of [
+  ['an add-only success with a client part owns add; edits post to the plain submit', [{ name: 'Succ', recordEvent: 'on add', client: true }], { AddBody: 'moved', EditBody: 'stay', BothBody: 'copied' }],
+  ['an edit-only success with a client part owns only edit posts', [{ name: 'Succ', recordEvent: 'on edit', client: true }], { AddBody: 'stay', EditBody: 'moved', BothBody: 'copied' }],
+  ['add- and edit-scoped successes own every submit post', [{ name: 'SuccA', recordEvent: 'on add', client: true }, { name: 'SuccE', recordEvent: 'on edit', client: true }], { AddBody: 'moved', EditBody: 'moved', BothBody: 'moved' }],
+  ['a server-only success registers no client handler and owns nothing', [{ name: 'Succ', client: false }], { AddBody: 'stay', EditBody: 'stay', BothBody: 'stay' }],
+] as const) {
+  test(`submit-scope credit: ${label}`, () => {
+    const orders = submitScopeApp([...successes]);
+    const out = collectOutputs(orders);
+    const successFile = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
+    const submitFile = out.files.find((f) => f.path.startsWith('functions/aio/orders/') && f.source.includes('path: "/forms/Orders/submit"'));
+    const subjects = { AddBody: 'add', EditBody: 'edit', BothBody: 'both' } as const;
+    for (const [name, where] of Object.entries(expected)) {
+      const entry = out.coverage?.find((c) => c.name === name);
+      assert.ok(entry, name);
+      // Merged or not, the body runs: owned scopes inside the success module,
+      // the rest on the `/submit` posts the generated UI still sends.
+      assert.equal(entry.serverInvoked, true, name);
+      const counted = out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === entry.start);
+      assert.equal(counted, false, `${name} counted`);
+      const tag = `"subject": "${subjects[name as keyof typeof subjects]}"`;
+      const inSuccess = successFile ? successFile.source.split(tag).length - 1 : 0;
+      const inSubmit = submitFile ? submitFile.source.split(tag).length - 1 : 0;
+      if (where === 'moved') {
+        assert.ok(successFile, 'success module emitted');
+        assert.ok(entry.paths.includes(successFile!.path), `${name} credits the success module`);
+        assert.ok(!submitFile || !entry.paths.includes(submitFile.path), `${name} out of the submit module`);
+        assert.equal(inSuccess, 1, `${name} merged body runs exactly once on success`);
+        assert.equal(inSubmit, 0, `${name} absent from submit`);
+      } else if (where === 'copied') {
+        assert.ok(successFile && submitFile, 'both modules emitted');
+        assert.ok(entry.paths.includes(successFile!.path) && entry.paths.includes(submitFile!.path), `${name} credits both modules`);
+        assert.equal(inSuccess, 1, `${name} merged once on success`);
+        assert.equal(inSubmit, 1, `${name} kept once on submit`);
+      } else {
+        assert.ok(submitFile, 'submit module emitted');
+        assert.ok(entry.paths.includes(submitFile!.path), `${name} credits the submit module`);
+        assert.equal(inSuccess, 0, `${name} not in success`);
+        assert.equal(inSubmit, 1, `${name} once on submit`);
+      }
+    }
+    assert.equal(auditApp(orders, out).filter((d) => d.kind === 'workflow').length, 0);
+  });
+}
+
+test('merged submit bodies run after the on-success body, under their owned scope, only after the write', () => {
+  const orders = submitScopeApp([{ name: 'Succ', recordEvent: 'on add', client: true }]);
+  const out = collectOutputs(orders);
+  const success = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs')!;
+  assert.ok(success);
+  const handle = success.source.slice(success.source.indexOf('export async function handle'));
+  // The success script runs first; the merged `on add` body follows it.
+  const succAt = handle.indexOf('"subject": "Succ"');
+  const mergedAt = handle.indexOf('"subject": "add"');
+  assert.ok(succAt > -1 && mergedAt > succAt, 'merged body keeps the original order after the on-success body');
+  // Scope guard: the add-owned merge runs only on add posts.
+  const guardAt = handle.lastIndexOf('if (!ctx.rowId)', mergedAt);
+  assert.ok(guardAt > succAt && guardAt < mergedAt, 'merged add body is guarded to add posts');
+  // The body runs inside handle(ctx), which the handler calls only after
+  // writeLive commits the row and the validate siblings pass.
+  const callAt = success.source.indexOf('await handle(ctx)');
+  const writeAt = success.source.indexOf('await writeLive(');
+  const mergedFileAt = success.source.indexOf('"subject": "add"');
+  assert.ok(writeAt > -1 && callAt > writeAt, 'handle runs after the committed write');
+  assert.ok(mergedFileAt > success.source.indexOf('export async function handle'), 'merged body is inside handle');
+});
+
+test('a submit body reading client-only request state stays counted', () => {
+  // The merge must not lift a body that reads state only a generated client
+  // posts; the predicate is the fail-closed gate the plan applies.
+  assert.equal(submitBodyReadsClientState('const row = shim.subform.currentRow(ctx, "Sub");\nctx.subformRow;'), true);
+  assert.equal(submitBodyReadsClientState('await shim.mail.send(ctx, {});'), false);
+});
+
+// An unsafe submit-kind body must never merge into the on-success module:
+// the merged body runs after `writeLive` commits the row, so a `cancel
+// submit`, an `input` write the saved row needs, or an alert to the
+// submitter would silently change behavior. Each case is its own .ds — one
+// marker per shape — so dropping a marker from submitMergeBlockers fails
+// exactly the case it guards. The add-scoped success owns every add post.
+const mergeGuardDs = (deluge: string): App =>
+  dsApp(`
+	form Orders
+	{
+		Title
+		(
+			type = text
+		)
+	}
+	workflow
+	{
+	form
+	{
+		Guard_W
+		{
+			type =  form
+			form = Orders
+			on add
+			{
+				actions
+				{
+					on success
+					(
+						openUrl("https://example.com", "same window");
+						sendmail
+						(
+							from : "zoho.loginuserid"
+							to : "a@b.c"
+							subject : "safe"
+							message : "hi"
+						)
+					)
+				}
+				actions
+				{
+					${deluge}
+				}
+			}
+		}
+	}
+	}
+`);
+
+for (const [label, deluge, reason] of [
+  [
+    'a `cancel submit` body',
+    `cancel submit;
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'cancels-submit',
+  ],
+  [
+    'an `input` write the saved row needs',
+    `input.Title = "unsafe";
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'writes-input',
+  ],
+  [
+    'an `alert` to the submitter',
+    `alert "careful";
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'alerts',
+  ],
+  [
+    'an `info` to the submitter',
+    `info "note";
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'alerts',
+  ],
+] as const) {
+  test(`a submit body with ${label} stays counted instead of merging post-commit`, () => {
+    const source = mergeGuardDs(deluge);
+    const out = collectOutputs(source);
+    const entry = out.coverage?.find((c) => c.name === 'Guard_W' && c.event === 'on add');
+    assert.ok(entry, 'the bare on add body is tracked');
+    assert.equal(entry.serverInvoked, false);
+    const todo = out.todos.find((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === entry.start);
+    assert.ok(todo, 'the body stays a counted uninvoked todo');
+    assert.deepEqual(todo.manualReasons, [reason]);
+    const success = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
+    assert.ok(success, 'the owning success module is emitted');
+    // The unsafe body never reaches the post-commit module; the safe
+    // on-success script is still there.
+    assert.equal(success.source.split('"subject": "unsafe"').length - 1, 0);
+    assert.equal(success.source.split('"subject": "safe"').length - 1, 1);
+    assert.ok(!entry.paths.includes(success.path));
+  });
+}
+
+test('a clean post-save submit body still merges once, after the write', () => {
+  const source = mergeGuardDs(`sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`);
+  const out = collectOutputs(source);
+  const entry = out.coverage?.find((c) => c.name === 'Guard_W' && c.event === 'on add');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  const todo = out.todos.find((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === entry.start);
+  assert.equal(todo, undefined);
+  const success = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs')!;
+  assert.ok(success);
+  assert.equal(success.source.split('"subject": "unsafe"').length - 1, 1);
+  assert.ok(entry.paths.includes(success.path));
+  const handle = success.source.slice(success.source.indexOf('export async function handle'));
+  assert.ok(handle.indexOf('"subject": "unsafe"') > handle.indexOf('"subject": "safe"'), 'merged body runs after the on-success body');
+  assert.ok(success.source.indexOf('await handle(ctx)') > success.source.indexOf('await writeLive('), 'handle runs after the write');
+});
+
+test('the merge predicate fails closed on a non post-save or unknown phase', () => {
+  const mail = 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];';
+  const serverMail = 'await shim.mail.send(ctx, {});';
+  // A phase-qualified event (on validate) and every event this model does
+  // not name as the post-save slot are not provably post-save: they stay.
+  for (const event of ['on validate', 'on submit', 'on load', 'on frobnicate']) {
+    const reasons = submitMergeBlockers(workflow({ name: 'W', event, deluge: { text: mail, span: Z } }), serverMail);
+    assert.deepEqual(reasons, ['pre-save-phase'], event);
+  }
+  // A bare `actions` script under `on add` / `on edit` / `on add or edit` is
+  // Creator's post-save slot; a clean body lists no blocker.
+  for (const event of ['on add', 'on edit', 'on add or edit']) {
+    assert.deepEqual(submitMergeBlockers(workflow({ name: 'W', event, deluge: { text: mail, span: Z } }), serverMail), [], event);
+  }
+  // Each unsafe marker alone is its own blocker; a body carrying several
+  // lists them all.
+  const w = (event: string, text: string) => workflow({ name: 'W', event, deluge: { text, span: Z } });
+  assert.deepEqual(submitMergeBlockers(w('on add', 'cancel submit;'), serverMail), ['cancels-submit']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'input.Title = "x";'), serverMail), ['writes-input']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'input.Tags:ui.add(tags);'), serverMail), ['writes-input']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'alert "no";'), serverMail), ['alerts']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'x = ctx.subformRow;'), 'ctx.subformRow;'), ['reads-client-state']);
+});
+
+function dsApp(body: string): App {
+  return deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`));
+}
+
+function rowStatus(source: App, out: ReturnType<typeof collectOutputs>, name: string): string | undefined {
+  return coverageLedger(source, out).find((row) => row.name === name)?.status;
+}
+
+const LINKED_PAIR = `
+	form Company
+	{
+		Branches
+		(
+			type = grid
+			values = Site.ID
+			bidirectional = Owner
+		)
+	}
+	form Site
+	{
+		Name
+		(
+			type = text
+		)
+		Owner
+		(
+			type = picklist
+			values = Company.ID
+			bidirectional = Branches
+		)
+	}
+`;
+
+test('a bidirectional lookup pair is emitted only when the schema stores its named reverse column', () => {
+  const source = dsApp(LINKED_PAIR);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Company.Branches property bidirectional'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'emitted');
+
+  // The reverse relation gone from the generated schema: both sides drop.
+  const unrelated = cloneOutputs(out);
+  for (const table of unrelated.schema.tables) {
+    for (const column of table.columns) if (column.name === 'Owner') delete column.relation;
+  }
+  assert.equal(rowStatus(source, unrelated, 'Company.Branches property bidirectional'), 'dropped');
+  assert.equal(rowStatus(source, unrelated, 'Site.Owner property bidirectional'), 'dropped');
+
+  // A generator that ignored the name and added its fallback back column.
+  const fallback = cloneOutputs(out);
+  const site = fallback.schema.tables.find((table) => table.form === 'Site')!;
+  const owner = site.columns.find((column) => column.name === 'Owner')!;
+  site.columns.push({ ...owner, name: 'Company_id', creatorType: 'subform', field: undefined });
+  assert.equal(rowStatus(source, fallback, 'Company.Branches property bidirectional'), 'dropped');
+  assert.equal(rowStatus(source, fallback, 'Site.Owner property bidirectional'), 'dropped');
+});
+
+test('a grid whose reverse field is not declared is proved by the back column the schema generator creates', () => {
+  const source = dsApp(`
+	form Company
+	{
+		Branches
+		(
+			type = grid
+			values = Site.ID
+			bidirectional = Head_Office
+		)
+	}
+	form Site
+	{
+		Name
+		(
+			type = text
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const back = out.schema.tables.find((table) => table.form === 'Site')!.columns.find((column) => column.name === 'Head_Office');
+  assert.equal(back?.relation?.table, out.schema.tables.find((table) => table.form === 'Company')!.name);
+  assert.equal(rowStatus(source, out, 'Company.Branches property bidirectional'), 'emitted');
+
+  const missing = cloneOutputs(out);
+  const site = missing.schema.tables.find((table) => table.form === 'Site')!;
+  site.columns = site.columns.filter((column) => column.name !== 'Head_Office');
+  assert.equal(rowStatus(source, missing, 'Company.Branches property bidirectional'), 'dropped');
+});
+
+test('a same-named lookup on a child table never proves the reverse column of the form table', () => {
+  const source = dsApp(`
+	form Parent
+	{
+		Kids
+		(
+			type = grid
+			values = Child.ID
+			bidirectional = Back
+		)
+	}
+	form Child
+	{
+		Back
+		(
+			type = text
+		)
+		Inner
+		(
+			type = grid
+			Back
+			(
+				type = picklist
+				values = Parent.ID
+			)
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const parent = out.schema.tables.find((table) => table.form === 'Parent' && table.role === 'form')!;
+  const inner = out.schema.tables.find((table) => table.form === 'Child' && table.role !== 'form' && table.columns.some((column) => column.name === 'Back'));
+  assert.equal(inner?.columns.find((column) => column.name === 'Back')?.relation?.table, parent.name);
+  const own = out.schema.tables.find((table) => table.form === 'Child' && table.role === 'form')!;
+  assert.equal(own.columns.find((column) => column.name === 'Back')?.relation, undefined);
+  assert.equal(rowStatus(source, out, 'Parent.Kids property bidirectional'), 'dropped');
+});
+
+test('a mutual bidirectional pair of declared lookups is proved by the partner side storage, no todo', () => {
+  const source = dsApp(`
+	form Company
+	{
+		Main_Site
+		(
+			type = picklist
+			values = Site.ID
+			bidirectional = Owner
+		)
+	}
+	form Site
+	{
+		Owner
+		(
+			type = picklist
+			values = Company.ID
+			bidirectional = Main_Site
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Company.Main_Site property bidirectional'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name === 'Company.Main_Site property bidirectional'), false);
+  assert.equal(out.model.todos.some((t) => t.name === 'Site.Owner property bidirectional'), false);
+
+  // The partner's stored column gone from the generated schema: both sides drop.
+  const missing = cloneOutputs(out);
+  const site = missing.schema.tables.find((table) => table.form === 'Site' && table.role === 'form')!;
+  site.columns = site.columns.filter((column) => column.name !== 'Owner');
+  assert.equal(rowStatus(source, missing, 'Company.Main_Site property bidirectional'), 'dropped');
+});
+
+test('a mutual bidirectional pair of a list and a filtered picklist is proved by the junction and the named column', () => {
+  const source = dsApp(`
+	form Add_Project
+	{
+		Jobs
+		(
+			type = list
+			values = Add_Job.ID
+			bidirectional = Project
+		)
+	}
+	form Add_Job
+	{
+		Project
+		(
+			type = picklist
+			values = Add_Project[ID > 0].ID
+			bidirectional = Jobs
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Add_Project.Jobs property bidirectional'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Add_Job.Project property bidirectional'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name === 'Add_Project.Jobs property bidirectional'), false);
+  assert.equal(out.model.todos.some((t) => t.name === 'Add_Job.Project property bidirectional'), false);
+
+  // The junction carrying the multi side gone: the single side's flag drops.
+  const missing = cloneOutputs(out);
+  missing.schema.tables = missing.schema.tables.filter((table) => !(table.role === 'junction' && table.form === 'Add_Project'));
+  assert.equal(rowStatus(source, missing, 'Add_Job.Project property bidirectional'), 'dropped');
+});
+
+test('a bidirectional flag whose named partner does not point back is recorded as a manual step', () => {
+  const source = dsApp(`
+	form Company
+	{
+		Main_Site
+		(
+			type = picklist
+			values = Site.ID
+			bidirectional = Owner
+		)
+	}
+	form Site
+	{
+		Owner
+		(
+			type = picklist
+			values = Company.ID
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Company.Main_Site property bidirectional'), 'counted');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), undefined);
+
+  const mainSiteTodo = out.model.todos.find((t) => t.name === 'Company.Main_Site property bidirectional');
+  assert.ok(mainSiteTodo, 'UI todo is emitted for the ungenerated reverse lookup');
+  assert.ok(mainSiteTodo.manualStep, 'bidirectional todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the pair a silent drop again — proving
+  // the reverse reference is not actually carried by any generated widget.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Company.Main_Site property bidirectional');
+  assert.equal(rowStatus(source, mutated, 'Company.Main_Site property bidirectional'), 'dropped');
+});
+
+test('a bidirectional lookup still eligible through a linked grid side keeps the real generated relation, no extra todo', () => {
+  const source = dsApp(LINKED_PAIR);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Company.Branches property bidirectional'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name === 'Company.Branches property bidirectional'), false);
+  assert.equal(out.model.todos.some((t) => t.name === 'Site.Owner property bidirectional'), false);
+});
+
+test('alloweddays is emitted only for every weekday on a generated date widget', () => {
+  const days = (value: string, type = 'date'): string => `
+	form Visit
+	{
+		Day
+		(
+			type = ${type}
+			alloweddays = ${value}
+		)
+	}
+`;
+  const all = dsApp(days('0,1,2,3,4,5,6'));
+  const out = collectOutputs(all);
+  assert.equal(rowStatus(all, out, 'Visit.Day property alloweddays'), 'emitted');
+  const datetime = dsApp(days('0,1,2,3,4,5,6', 'datetime'));
+  assert.equal(rowStatus(datetime, collectOutputs(datetime), 'Visit.Day property alloweddays'), 'emitted');
+
+  for (const value of ['1,2,3,4,5', '0', '6', '0,1,2,3,4,5,5']) {
+    const restricted = dsApp(days(value));
+    const restrictedOut = collectOutputs(restricted);
+    assert.equal(rowStatus(restricted, restrictedOut, 'Visit.Day property alloweddays'), 'counted', value);
+    assert.deepEqual(restrictedOut.model.forms[0]!.fields[0]!.allowedDays, value === '0,1,2,3,4,5,5' ? undefined : value.split(',').map(Number));
+    const todo = restrictedOut.model.todos.find((t) => t.area === 'field' && t.name === 'Visit.Day property alloweddays');
+    assert.ok(todo, `expected a manual todo for alloweddays = ${value}`);
+    assert.match(todo!.manualStep ?? '', /validation/);
+  }
+
+  // Mutation test: removing the generated restriction restores the counted TODO.
+  const restricted = dsApp(days('1,2,3,4,5'));
+  const mutated = cloneOutputs(collectOutputs(restricted));
+  delete mutated.model.forms[0]!.fields[0]!.allowedDays;
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Visit.Day property alloweddays');
+  assert.equal(rowStatus(restricted, mutated, 'Visit.Day property alloweddays'), 'dropped');
+
+  // Not a native date input any more: the default is no longer shown to hold.
+  const notDate = cloneOutputs(out);
+  notDate.model.forms[0]!.fields.find((item) => item.name === 'Day')!.widget = 'text';
+  assert.equal(rowStatus(all, notDate, 'Visit.Day property alloweddays'), 'dropped');
+});
+
+test('a subform grid with auto width disabled is carried as a fixed-width grid', () => {
+  const grid = (value: string, widths = true): App =>
+    dsApp(`
+	form Orders
+	{
+		must have Line_Items
+		(
+			type = grid
+			auto width = ${value}
+			must have Item
+			(
+				type = text
+				${widths ? 'width = 200px' : ''}
+			)
+			Qty
+			(
+				type = number
+				${widths ? 'width = 115px' : ''}
+			)
+		)
+	}
+`);
+  const fixed = dsApp(`
+	form Orders
+	{
+		must have Line_Items
+		(
+			type = grid
+			must have Item
+			(
+				type = text
+			)
+		)
+	}
+`);
+  const outFixed = collectOutputs(fixed);
+  assert.equal(rowStatus(fixed, outFixed, 'Orders.Line_Items property auto width'), undefined);
+
+  const auto = grid('true');
+  assert.equal(rowStatus(auto, collectOutputs(auto), 'Orders.Line_Items property auto width'), 'emitted');
+
+  const disabled = grid('false');
+  const out = collectOutputs(disabled);
+  assert.equal(rowStatus(disabled, out, 'Orders.Line_Items property auto width'), 'emitted');
+  const items = out.model.forms[0]!.fields.find((item) => item.name === 'Line_Items')!;
+  assert.equal(items.autoWidth, false);
+  assert.equal(items.subfields?.find((item) => item.name === 'Item')?.width, '200px');
+  assert.equal(items.subfields?.find((item) => item.name === 'Qty')?.width, '115px');
+  assert.equal(out.model.todos.some((t) => t.name === 'Orders.Line_Items property auto width'), false);
+
+  // Mutation: if the flag is not carried, the setting is a silent drop again.
+  const mutated = cloneOutputs(out);
+  delete mutated.model.forms[0]!.fields.find((item) => item.name === 'Line_Items')!.autoWidth;
+  assert.equal(rowStatus(disabled, mutated, 'Orders.Line_Items property auto width'), 'dropped');
+
+  // Mutation: declared column widths must actually sit on the generated columns.
+  const stripped = cloneOutputs(out);
+  for (const sub of stripped.model.forms[0]!.fields.find((item) => item.name === 'Line_Items')!.subfields ?? []) {
+    delete sub.width;
+  }
+  assert.equal(rowStatus(disabled, stripped, 'Orders.Line_Items property auto width'), 'dropped');
+
+  // No declared per-column widths: the fixed-layout flag is the emission.
+  const noWidths = grid('false', false);
+  const outBare = collectOutputs(noWidths);
+  assert.equal(rowStatus(noWidths, outBare, 'Orders.Line_Items property auto width'), 'emitted');
+  assert.equal(outBare.model.forms[0]!.fields.find((item) => item.name === 'Line_Items')!.autoWidth, false);
+  assert.equal(outBare.model.todos.some((t) => t.name === 'Orders.Line_Items property auto width'), false);
+});
+
+test('timedisplayoptions requesting seconds is a counted manual step; a seconds-free format is emitted', () => {
+  const field = (value: string, type = 'datetime'): string => `
+	form Visit
+	{
+		Arrival
+		(
+			type = ${type}
+			timedisplayoptions = "${value}"
+		)
+	}
+`;
+  const noSeconds = dsApp(field('hh:mm'));
+  assert.equal(rowStatus(noSeconds, collectOutputs(noSeconds), 'Visit.Arrival property timedisplayoptions'), 'emitted');
+  const noSecondsTime = dsApp(field('hh:mm a', 'time'));
+  assert.equal(rowStatus(noSecondsTime, collectOutputs(noSecondsTime), 'Visit.Arrival property timedisplayoptions'), 'emitted');
+
+  // A format that shows seconds on a datetime field sets timeStep = 1 and
+  // showSeconds = true on the model and is emitted without a manual todo.
+  const datetimeSeconds = dsApp(field('hh:mm:ss', 'datetime'));
+  const datetimeOut = collectOutputs(datetimeSeconds);
+  assert.equal(rowStatus(datetimeSeconds, datetimeOut, 'Visit.Arrival property timedisplayoptions'), 'emitted');
+  const datetimeField = datetimeOut.model.forms[0]!.fields.find((item) => item.name === 'Arrival')!;
+  assert.equal(datetimeField.timeStep, 1);
+  assert.equal(datetimeField.showSeconds, true);
+  assert.equal(datetimeOut.model.todos.some((t) => t.name === 'Visit.Arrival property timedisplayoptions'), false);
+
+  // A time field with seconds remains a counted manual step.
+  const timeSeconds = dsApp(field('hh:mm:ss', 'time'));
+  const timeOut = collectOutputs(timeSeconds);
+  assert.equal(rowStatus(timeSeconds, timeOut, 'Visit.Arrival property timedisplayoptions'), 'counted');
+  const timeTodo = timeOut.model.todos.find((t) => t.area === 'field' && t.name === 'Visit.Arrival property timedisplayoptions');
+  assert.ok(timeTodo, 'expected a manual todo for timedisplayoptions on a time field');
+  assert.match(timeTodo!.reason, /hh:mm:ss/);
+
+  // Not a native time/datetime input any more: the default is no longer shown to hold.
+  const notTime = cloneOutputs(collectOutputs(noSeconds));
+  notTime.model.forms[0]!.fields.find((item) => item.name === 'Arrival')!.widget = 'text';
+  assert.equal(rowStatus(noSeconds, notTime, 'Visit.Arrival property timedisplayoptions'), 'dropped');
+});
+
+test('qrcode and barcode field properties are emitted only when the generated field marks scan', () => {
+  const source = dsApp(`
+	form Book
+	{
+		Code
+		(
+			type = text
+			qrcode = true
+		)
+		Isbn
+		(
+			type = text
+			barcode = true
+		)
+		Plain
+		(
+			type = text
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Book.Code property qrcode'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Book.Isbn property barcode'), 'emitted');
+
+  // The generated field lost its scan marker: both properties return.
+  const unmarked = cloneOutputs(out);
+  const book = unmarked.model.forms.find((f) => f.name === 'Book')!;
+  book.fields.find((f) => f.name === 'Code')!.scan = false;
+  book.fields.find((f) => f.name === 'Isbn')!.scan = false;
+  assert.equal(rowStatus(source, unmarked, 'Book.Code property qrcode'), 'dropped');
+  assert.equal(rowStatus(source, unmarked, 'Book.Isbn property barcode'), 'dropped');
+});
+
+test('a blank displayname override is emitted only when the generated label falls back to the field name', () => {
+  const source = dsApp(`
+	form Lead
+	{
+		Industry
+		(
+			type = text
+			displayname = ""
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Lead.Industry property displayname'), 'emitted');
+
+  // The generated label diverges from the field name: the blank override no longer proves equivalent.
+  const relabeled = cloneOutputs(out);
+  relabeled.model.forms[0]!.fields.find((item) => item.name === 'Industry')!.label = 'Something Else';
+  assert.equal(rowStatus(source, relabeled, 'Lead.Industry property displayname'), 'dropped');
+});
+
+const LOOKUP_APP = `
+	form Course
+	{
+		Course_Name
+		(
+			type = text
+		)
+	}
+	form Enrolment
+	{
+		Course
+		(
+			type = picklist
+			values = Course.ID
+			displayformat = [Course_Name]
+			searchable = true
+		)
+	}
+`;
+
+type CarriedLookup = { form: string; field?: string; displayFields?: string[]; displayFormat?: unknown[] };
+
+function lookupUi(out: ReturnType<typeof collectOutputs>) {
+  return out.model.forms.find((f) => f.name === 'Enrolment')!.fields.find((f) => f.name === 'Course')!;
+}
+
+test('displayformat is emitted only when the generated lookup carries its resolved display field', () => {
+  const source = dsApp(LOOKUP_APP);
+  const out = collectOutputs(source);
+  const name = 'Enrolment.Course property displayformat';
+  assert.equal(lookupUi(out).lookup?.field, 'Course_Name');
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The generated lookup resolves to a different parent field: the .ds format was not carried.
+  const wrong = cloneOutputs(out);
+  lookupUi(wrong).lookup!.field = 'ID';
+  assert.equal(rowStatus(source, wrong, name), 'dropped');
+
+  // No generated lookup at all: the format has nowhere to live.
+  const gone = cloneOutputs(out);
+  delete lookupUi(gone).lookup;
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+});
+
+test('a multi-field displayformat is emitted only when the generated lookup carries its format terms', () => {
+  const source = dsApp(`
+	form Person
+	{
+		First_Name
+		(
+			type = text
+		)
+	}
+	form Booking
+	{
+		Guest
+		(
+			type = picklist
+			values = Person.ID
+			displayformat = [Person.First_Name + " (" + Person.ID + ")"]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const name = 'Booking.Guest property displayformat';
+  const ui = out.model.forms.find((f) => f.name === 'Booking')!.fields.find((f) => f.name === 'Guest')!;
+  const carried = ui.lookup as CarriedLookup | undefined;
+  assert.equal(carried?.field, 'Person');
+  assert.ok(carried?.displayFields?.length || carried?.displayFormat?.length);
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The generated lookup kept only the first field of the format: terms dropped.
+  const flat = cloneOutputs(out);
+  const got = flat.model.forms.find((f) => f.name === 'Booking')!.fields.find((f) => f.name === 'Guest')!;
+  const gotLookup = got.lookup as CarriedLookup | undefined;
+  delete gotLookup!.displayFields;
+  delete gotLookup!.displayFormat;
+  assert.equal(rowStatus(source, flat, name), 'dropped');
+});
+
+test('a notes field value is emitted only as the generated notesHtml', () => {
+  const source = dsApp(`
+	form Board
+	{
+		Note
+		(
+			type = add-notes
+			value = "<b>Info</b> banner"
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const name = 'Board.Note property value';
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Note')!;
+  assert.equal(ui.widget, 'notes');
+  assert.equal(ui.notesHtml, '<b>Info</b> banner');
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The notes widget lost its stored markup.
+  const gone = cloneOutputs(out);
+  delete gone.model.forms[0]!.fields.find((f) => f.name === 'Note')!.notesHtml;
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+
+  // A different markup text: the .ds value was not carried.
+  const wrong = cloneOutputs(out);
+  wrong.model.forms[0]!.fields.find((f) => f.name === 'Note')!.notesHtml = '<b>Other</b>';
+  assert.equal(rowStatus(source, wrong, name), 'dropped');
+
+  // The same property on a non-notes widget is never proved by notesHtml.
+  const text = dsApp(`
+	form Board
+	{
+		Note
+		(
+			type = text
+			value = "x"
+		)
+	}
+`);
+  assert.equal(rowStatus(text, collectOutputs(text), 'Board.Note property value'), 'dropped');
+});
+
+test('flag description and a help_text annotation are emitted only as the generated help', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = help_text
+				message = "Bring ID"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.equal(ui.help, 'Bring ID');
+  const annotationRow = coverageLedger(source, out).find((row) => row.name.startsWith('Visit.Notes annotation'));
+  assert.equal(annotationRow?.status, 'emitted');
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+
+  // The generated field carries different help text: neither item was carried.
+  const wrong = cloneOutputs(out);
+  wrong.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help = 'Other text';
+  assert.equal(rowStatus(source, wrong, 'Visit.Notes flag description'), 'dropped');
+  assert.equal(coverageLedger(source, wrong).find((row) => row.name.startsWith('Visit.Notes annotation'))?.status, 'dropped');
+
+  // No generated help at all.
+  const gone = cloneOutputs(out);
+  delete gone.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help;
+  assert.equal(rowStatus(source, gone, 'Visit.Notes flag description'), 'dropped');
+
+  // A description flag with no help_text message has nothing carried.
+  const bare = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+		)
+	}
+`);
+  assert.equal(rowStatus(bare, collectOutputs(bare), 'Visit.Notes flag description'), 'dropped');
+});
+
+test('flag description and a tooltip annotation are emitted only as the generated help', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = tooltip
+				message = "Hover me"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.equal(ui.help, 'Hover me');
+  const annotationRow = coverageLedger(source, out).find((row) => row.name.startsWith('Visit.Notes annotation'));
+  assert.equal(annotationRow?.status, 'emitted');
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+
+  // The generated field carries different help text: neither item was carried.
+  const wrong = cloneOutputs(out);
+  wrong.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help = 'Other text';
+  assert.equal(rowStatus(source, wrong, 'Visit.Notes flag description'), 'dropped');
+  assert.equal(coverageLedger(source, wrong).find((row) => row.name.startsWith('Visit.Notes annotation'))?.status, 'dropped');
+
+  // No generated help at all.
+  const gone = cloneOutputs(out);
+  delete gone.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help;
+  assert.equal(rowStatus(source, gone, 'Visit.Notes flag description'), 'dropped');
+});
+
+test('a description annotation with display type none is not a drop: Creator never shows it', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = none
+				message = "Internal note, never shown"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.equal(ui.help, undefined);
+  const row = coverageLedger(source, out).find((r) => r.name.startsWith('Visit.Notes annotation'));
+  assert.equal(row?.status, 'emitted');
+  // GREEN: the same `description [...]` block also produces a `flag
+  // description` coverage row (field.flags carries the bare `description`
+  // word beside the annotation). A type = none description carries nothing
+  // to either row, so the flag row is proved too, not left a silent drop.
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+});
+
+test('flag description stays a drop for an unhandled description display type (mutation)', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = none
+				message = "Internal note, never shown"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+  // RED: mutate the parsed block's display type away from the proven `none`
+  // to an unhandled value — the shortcut must not reach any type but a true
+  // none, so the flag goes back to a real, unproved drop.
+  const mutated = structuredClone(source);
+  const field = mutated.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  const typeProp = field.annotations[0]!.properties.find((p) => p.key === 'type')!;
+  typeProp.value = 'reminder';
+  assert.equal(rowStatus(mutated, collectOutputs(mutated), 'Visit.Notes flag description'), 'dropped');
+});
+
+test('an unhandled annotation type is still a silent drop', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			[
+				type = reminder
+				message = "Hover me"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const row = coverageLedger(source, out).find((r) => r.name.startsWith('Visit.Notes annotation'));
+  assert.equal(row?.status, 'dropped');
+});
+
+test('searchable is emitted only when the field generated a lookup widget', () => {
+  const source = dsApp(LOOKUP_APP);
+  const out = collectOutputs(source);
+  const name = 'Enrolment.Course property searchable';
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The lookup widget is gone: the ?q= endpoint it searches no longer exists.
+  const gone = cloneOutputs(out);
+  delete lookupUi(gone).lookup;
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+
+  // searchable = false is not honoured by the always-searchable endpoint, but
+  // the generated field notes it as a manual step.
+  const off = dsApp(`
+	form Course
+	{
+		Course_Name
+		(
+			type = text
+		)
+	}
+	form Enrolment
+	{
+		Course
+		(
+			type = picklist
+			values = Course.ID
+			searchable = false
+		)
+	}
+`);
+  const offOut = collectOutputs(off);
+  assert.equal(rowStatus(off, offOut, 'Enrolment.Course property searchable'), 'counted');
+  const todo = offOut.model.todos.find((t) => t.area === 'field' && t.name === 'Enrolment.Course property searchable');
+  assert.ok(todo, 'expected a manual todo for searchable = false');
+  assert.ok(todo.manualStep, 'searchable = false todo names a manual step');
+});
+
+test('a report column naming the group field is emitted by the group headers', () => {
+  const source = dsApp(`
+	form Project
+	{
+		Status
+		(
+			type = picklist
+			values = {"Open","Closed"}
+		)
+		Title
+		(
+			type = text
+		)
+	}
+	report By_Status
+	{
+		show all rows from Project
+		(
+			Status as "Status"
+			Title
+		)
+		group by
+		(
+			Status ascending
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const built = out.model.reports.find((r) => r.name === 'By_Status')!;
+  assert.equal(built.groupField, 'Status');
+  const name = 'By_Status column Status';
+  if (!built.columns.some((column) => column.field === 'Status')) {
+    // The column reached the model only through the group headers.
+    assert.equal(rowStatus(source, out, name), 'emitted');
+  }
+  // Without the generated group field the column is a silent drop.
+  const gone = cloneOutputs(out);
+  const mutated = gone.model.reports.find((r) => r.name === 'By_Status')!;
+  delete mutated.groupField;
+  mutated.columns = mutated.columns.filter((column) => column.field !== 'Status');
+  mutated.phoneColumns = (mutated.phoneColumns ?? []).filter((column) => column.field !== 'Status');
+  for (const block of mutated.detailBlocks ?? []) block.fields = block.fields.filter((item) => item.field !== 'Status');
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+});
+
+const USERS_LOOKUP_APP = `
+	form Raise_an_Idea
+	{
+		Idea
+		(
+			type = text
+		)
+		Approver
+		(
+			type = picklist
+			module = users
+			displayformat = [username]
+		)
+	}
+`;
+
+function approverUi(out: ReturnType<typeof collectOutputs>) {
+  return out.model.forms.find((f) => f.name === 'Raise_an_Idea')!.fields.find((f) => f.name === 'Approver')!;
+}
+
+test('module = users and its displayformat are emitted only by the generated users lookup', () => {
+  const source = dsApp(USERS_LOOKUP_APP);
+  const out = collectOutputs(source);
+  const moduleRow = 'Raise_an_Idea.Approver property module';
+  const formatRow = 'Raise_an_Idea.Approver property displayformat';
+  assert.equal(approverUi(out).widget, 'users');
+  assert.deepEqual(approverUi(out).lookup, { form: 'users', field: 'username', endpoint: '/lookups/users/username' });
+  assert.equal(rowStatus(source, out, moduleRow), 'emitted');
+  assert.equal(rowStatus(source, out, formatRow), 'emitted');
+
+  // Remove the generated lookup: both items return.
+  const gone = cloneOutputs(out);
+  delete approverUi(gone).lookup;
+  assert.equal(rowStatus(source, gone, moduleRow), 'dropped');
+  assert.equal(rowStatus(source, gone, formatRow), 'dropped');
+
+  // A lookup bound to an ordinary form is not the system Users module.
+  const wrong = cloneOutputs(out);
+  approverUi(wrong).lookup!.form = 'Employee';
+  approverUi(wrong).lookup!.endpoint = '/lookups/Employee/username';
+  assert.equal(rowStatus(source, wrong, moduleRow), 'dropped');
+
+  // The users widget without its endpoint serves nothing.
+  const noRoute = cloneOutputs(out);
+  delete (approverUi(noRoute).lookup as { endpoint?: string }).endpoint;
+  assert.equal(rowStatus(source, noRoute, moduleRow), 'dropped');
+
+  // A lookup resolving to a different display attribute did not carry the format.
+  const other = cloneOutputs(out);
+  approverUi(other).lookup!.field = 'email';
+  assert.equal(rowStatus(source, other, formatRow), 'dropped');
+});
+
+const CARRY_REPORT = `
+	form Appointment_Booking
+	{
+		Customer_Name
+		(
+			type = name
+			displayname = "Customer Name"
+			first_name
+			(
+				type = first_name
+			)
+			last_name
+			(
+				type = last_name
+			)
+		)
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Customer_Name
+			(
+				first_name
+				last_name
+			)
+		)
+	}
+`;
+
+test('composite report subcolumns are carried as view columns, unknown columns stay dropped', () => {
+  const source = dsApp(CARRY_REPORT);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'All_Appointments column Customer_Name column first_name'), 'emitted');
+  assert.equal(rowStatus(source, out, 'All_Appointments column Customer_Name column last_name'), 'emitted');
+
+  const ghost = dsApp(`
+	form Appointment_Booking
+	{
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Ghost_Field
+			Phone_Number ( bogus_part )
+		)
+	}
+`);
+  const ghostOut = collectOutputs(ghost);
+  // Fails closed: a column that names nothing the form stores is a drop,
+  // not an empty column the audit calls emitted.
+  assert.equal(rowStatus(ghost, ghostOut, 'All_Appointments column Ghost_Field'), 'dropped');
+  assert.equal(rowStatus(ghost, ghostOut, 'All_Appointments column Phone_Number column bogus_part'), 'dropped');
+});
+
+const RECORD_STATUS_REPORT = `
+	form Orders
+	{
+		Title
+		(
+			type = text
+		)
+	}
+	list Orders_List
+	{
+		show all rows from Orders
+		(
+			Title
+			Record_Status as "Record Status"
+		)
+	}
+`;
+
+test('a report column naming the record-status system field is listed through a dedicated UI todo', () => {
+  const source = dsApp(RECORD_STATUS_REPORT);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Orders_List column Title'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Orders_List column Record_Status'), 'counted');
+  const todo = out.model.todos.find((t) => t.name === 'Orders_List column Record_Status');
+  assert.ok(todo, 'a UI todo names the record-status column');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same column is a silent drop.
+  const unlisted = collectOutputs(source);
+  unlisted.model = { ...unlisted.model, todos: unlisted.model.todos.filter((t) => t.name !== 'Orders_List column Record_Status') };
+  const drops = auditApp(source, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders_List column Record_Status'],
+  );
+});
+
+test('a report column naming an unrecognized field stays a silent drop, not the record-status manual step', () => {
+  const source = dsApp(`
+	form Orders
+	{
+		Title
+		(
+			type = text
+		)
+	}
+	list Orders_List
+	{
+		show all rows from Orders
+		(
+			Title
+			Ghost_Field
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(out.model.todos.some((t) => t.name.includes('Ghost_Field')), false);
+  assert.equal(rowStatus(source, out, 'Orders_List column Ghost_Field'), 'dropped');
+});
+
+test('a record-status column on a machine-governed form is emitted from the status column', () => {
+  const governed = coveredApp();
+  governed.reports[0]!.columns = [
+    { field: 'Title', properties: [], subcolumns: [], span: Z },
+    { field: 'Record_Status', label: 'Record Status', properties: [], subcolumns: [], span: Z },
+  ];
+  governed.workflows = [workflow({ name: 'Approve', container: 'approval', type: 'approval', form: 'Orders', event: 'on start' })];
+  const out = collectOutputs(governed);
+  assert.equal(rowStatus(governed, out, 'All_Orders column Record_Status'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name === 'All_Orders column Record_Status'), false);
+  const stub = generateUi(governed).files.find((f) => f.path.startsWith('functions/reports/'));
+  assert.ok(stub, 'the report endpoint is generated');
+  assert.match(String(stub!.data), /projected\.Record_Status = row\["Status"\]/);
+});
+
+test('a customlayouts settings block names its nested layout templates', () => {
+  const source = coveredApp();
+  source.reports[0]!.blocks = [
+    {
+      name: 'customlayouts',
+      properties: [],
+      items: [],
+      blocks: [
+        {
+          name: 'template',
+          properties: [
+            { key: 'displayname', value: '"Custom Layout 1"', span: Z },
+            { key: 'content', value: '"<panel/>"', span: Z },
+          ],
+          blocks: [],
+          items: [],
+          span: Z,
+        },
+      ],
+      span: Z,
+    },
+  ];
+  const out = collectOutputs(source);
+  const todo = out.model.todos.find((t) => t.name === 'All_Orders block customlayouts');
+  assert.ok(todo, 'a UI todo names the customlayouts block');
+  assert.match(todo!.reason, /`customlayouts` settings block \(template "Custom Layout 1"\)/);
+  assert.equal(rowStatus(source, out, 'All_Orders block customlayouts'), 'counted');
+});
+
+test('an empty settings block configures nothing: no manual step and no drop', () => {
+  const source = dsApp(`
+	form Orders
+	{
+		Title
+		(
+			type = text
+		)
+	}
+	list All_Orders
+	{
+		show all rows from Orders
+		(
+			Title
+		)
+		customlayouts
+		(
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(out.model.todos.some((t) => t.name === 'All_Orders block customlayouts'), false);
+  assert.equal(rowStatus(source, out, 'All_Orders block customlayouts'), 'emitted');
+});
+
+test('a quickview that omits declared columns does not drop them', () => {
+  const source = dsApp(`${CARRY_REPORT}
+	web
+	{
+		reports
+		{
+			report All_Appointments
+			{
+				quickview
+				(
+					layout
+					(
+						datablock1
+						(
+							fields
+							(
+								Phone_Number
+							)
+						)
+					)
+				)
+			}
+		}
+	}
+`);
+  const out = collectOutputs(source);
+  for (const name of [
+    'All_Appointments column Customer_Name',
+    'All_Appointments column Customer_Name column first_name',
+    'All_Appointments column Customer_Name column last_name',
+  ]) {
+    assert.equal(rowStatus(source, out, name), 'emitted', name);
+  }
+});
+
+test('a report column is proved only by the generated view (mutation)', () => {
+  const source = dsApp(CARRY_REPORT);
+  const out = collectOutputs(source);
+  const mutated = cloneOutputs(out);
+  mutated.model.reports[0]!.columns = mutated.model.reports[0]!.columns.filter(
+    (column) => column.field !== 'Customer_Name.last_name',
+  );
+  assert.equal(rowStatus(source, mutated, 'All_Appointments column Customer_Name column last_name'), 'dropped');
+});
+
+test('a source list the generated controls draw is emitted; an undrawn source stays a drop', () => {
+  const photo = (value: string, type = 'image'): string => `
+	form Profile
+	{
+		Photo
+		(
+			type = ${type}
+			source = ${value}
+		)
+	}
+`;
+  for (const value of ['file', 'public_url,file', 'public_url,file,camera', 'file,camera', 'public_url']) {
+    const source = dsApp(photo(value));
+    assert.equal(rowStatus(source, collectOutputs(source), 'Profile.Photo property source'), 'emitted', value);
+  }
+  // `source` is honoured on the generic file widget too, not only image.
+  const fileField = dsApp(photo('file', 'upload file'));
+  assert.equal(rowStatus(fileField, collectOutputs(fileField), 'Profile.Photo property source'), 'emitted');
+
+  // A source token the controls do not draw keeps the whole property counted.
+  const unknown = dsApp(photo('web,file'));
+  assert.equal(rowStatus(unknown, collectOutputs(unknown), 'Profile.Photo property source'), 'dropped');
+
+  // The proof is the carried list: a field without it is a drop again.
+  const source = dsApp(photo('file'));
+  const missing = cloneOutputs(collectOutputs(source));
+  delete missing.model.forms[0]!.fields.find((item) => item.name === 'Photo')!.uploadSources;
+  assert.equal(rowStatus(source, missing, 'Profile.Photo property source'), 'dropped');
+});
+
+test('preview duration = 0 on an image field is emitted; a non-zero value is generated as an auto-dismiss timer', () => {
+  const photo = (duration: string): string => `
+	form Profile
+	{
+		Photo
+		(
+			type = image
+			preview duration = ${duration}
+		)
+	}
+`;
+  const defaultZero = dsApp(photo('0'));
+  assert.equal(rowStatus(defaultZero, collectOutputs(defaultZero), 'Profile.Photo property preview duration'), 'emitted');
+
+  const nonZero = dsApp(photo('3'));
+  const nonZeroOut = collectOutputs(nonZero);
+  assert.equal(rowStatus(nonZero, nonZeroOut, 'Profile.Photo property preview duration'), 'emitted');
+  assert.equal(nonZeroOut.model.todos.some((t) => t.name === 'Profile.Photo property preview duration'), false, 'no manual-step todo remains');
+  const photoField = nonZeroOut.model.forms[0]!.fields.find((f) => f.name === 'Photo')!;
+  assert.equal(photoField.previewDuration, 3);
+
+  // Mutation test: breaking default equivalence makes preview duration = 0 a drop again.
+  const mutated = cloneOutputs(collectOutputs(defaultZero));
+  mutated.model.forms[0]!.fields.find((f) => f.name === 'Photo')!.widget = 'text';
+  assert.equal(rowStatus(defaultZero, mutated, 'Profile.Photo property preview duration'), 'dropped');
+
+  // Mutation test: stripping the carried ui.previewDuration makes the non-zero
+  // value a drop again — proving it is not silently carried any other way.
+  const withoutDuration = cloneOutputs(nonZeroOut);
+  delete withoutDuration.model.forms[0]!.fields.find((f) => f.name === 'Photo')!.previewDuration;
+  assert.equal(rowStatus(nonZero, withoutDuration, 'Profile.Photo property preview duration'), 'dropped');
+});
+
+test('aspect ratio = original on an image field is emitted; a fixed crop ratio is a counted UI todo', () => {
+  const photo = (ratio: string): string => `
+	form Profile
+	{
+		Photo
+		(
+			type = image
+			aspect ratio = ${ratio}
+		)
+	}
+`;
+  // `original` keeps the file's own proportions — already the generated widget's
+  // behaviour, proved by DEFAULT_EQUIVALENCE.
+  const original = dsApp(photo('original'));
+  assert.equal(rowStatus(original, collectOutputs(original), 'Profile.Photo property aspect ratio'), 'emitted');
+
+  // A fixed crop ratio is a manual step: the generated image field has no crop step.
+  const fixed = dsApp(photo('square'));
+  const fixedOut = collectOutputs(fixed);
+  assert.equal(rowStatus(fixed, fixedOut, 'Profile.Photo property aspect ratio'), 'counted');
+  const todo = fixedOut.model.todos.find((t) => t.name === 'Profile.Photo property aspect ratio');
+  assert.ok(todo, 'a UI todo names the fixed crop aspect ratio setting');
+  assert.ok(todo.reason.includes('aspect ratio = square'));
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Mutation test: breaking default equivalence makes aspect ratio = original a drop again.
+  const mutated = cloneOutputs(collectOutputs(original));
+  mutated.model.forms[0]!.fields.find((f) => f.name === 'Photo')!.widget = 'text';
+  assert.equal(rowStatus(original, mutated, 'Profile.Photo property aspect ratio'), 'dropped');
+
+  // Mutation test: removing the UI todo makes the fixed ratio a drop again.
+  const withoutTodo = cloneOutputs(fixedOut);
+  withoutTodo.model.todos = withoutTodo.model.todos.filter((t) => t.name !== 'Profile.Photo property aspect ratio');
+  assert.equal(rowStatus(fixed, withoutTodo, 'Profile.Photo property aspect ratio'), 'dropped');
+});
+
+test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo; unknown stays drop', () => {
+  const fileField = (browse: string): string => `
+	form Attachment
+	{
+		File_Attachment
+		(
+			type = upload file
+			browse = ${browse}
+		)
+	}
+`;
+  const localOnly = dsApp(fileField('local_drive'));
+  assert.equal(rowStatus(localOnly, collectOutputs(localOnly), 'Attachment.File_Attachment property browse'), 'emitted');
+
+  const cloudSources = dsApp(fileField('local_drive, google_docs, zoho_docs'));
+  const cloudOut = collectOutputs(cloudSources);
+  assert.equal(rowStatus(cloudSources, cloudOut, 'Attachment.File_Attachment property browse'), 'counted');
+  const todo = cloudOut.model.todos.find((t) => t.name === 'Attachment.File_Attachment property browse');
+  assert.ok(todo, 'UI todo is emitted for uncarried cloud browse options');
+  assert.ok(todo.reason.includes('google_docs, zoho_docs'));
+  assert.ok(todo.manualStep?.includes('Google Drive, Zoho WorkDrive'));
+
+  // Unknown browse source stays a drop.
+  const unknown = dsApp(fileField('local_drive, dropbox'));
+  assert.equal(rowStatus(unknown, collectOutputs(unknown), 'Attachment.File_Attachment property browse'), 'dropped');
+
+  // Mutation test: removing the UI todo makes local_drive, google_docs, zoho_docs a drop again.
+  const mutated = cloneOutputs(cloudOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Attachment.File_Attachment property browse');
+  assert.equal(rowStatus(cloudSources, mutated, 'Attachment.File_Attachment property browse'), 'dropped');
+});
+
+test('file count = 1 is emitted; a higher count emits a counted UI todo, not a silent drop', () => {
+  const fileField = (count: string): string => `
+	form Attachment
+	{
+		File_Attachment
+		(
+			type = upload file
+			file count = ${count}
+		)
+	}
+`;
+  const singleFile = dsApp(fileField('1'));
+  assert.equal(rowStatus(singleFile, collectOutputs(singleFile), 'Attachment.File_Attachment property file count'), 'emitted');
+
+  const multiFile = dsApp(fileField('10'));
+  const multiOut = collectOutputs(multiFile);
+  assert.equal(rowStatus(multiFile, multiOut, 'Attachment.File_Attachment property file count'), 'counted');
+  const todo = multiOut.model.todos.find((t) => t.name === 'Attachment.File_Attachment property file count');
+  assert.ok(todo, 'UI todo is emitted for a file count above 1');
+  assert.ok(todo.reason.includes('file count = 10'));
+  assert.ok(todo.manualStep?.includes('10 files'));
+
+  // Mutation test: removing the UI todo makes file count = 10 a drop again.
+  const mutated = cloneOutputs(multiOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Attachment.File_Attachment property file count');
+  assert.equal(rowStatus(multiFile, mutated, 'Attachment.File_Attachment property file count'), 'dropped');
+
+  // Mutation test: breaking default equivalence makes file count = 1 a drop again.
+  const brokenWidget = cloneOutputs(collectOutputs(singleFile));
+  brokenWidget.model.forms[0]!.fields.find((f) => f.name === 'File_Attachment')!.widget = 'text';
+  assert.equal(rowStatus(singleFile, brokenWidget, 'Attachment.File_Attachment property file count'), 'dropped');
+});
+
+test('private and personal data field flags emit one counted manual step per app listing the fields, not one per field', () => {
+  const flaggedField = (flag: string): string => `
+	form Patient
+	{
+		SSN
+		(
+			type = text
+			${flag} = true
+		)
+	}
+`;
+  const privateField = dsApp(flaggedField('private'));
+  const privateOut = collectOutputs(privateField);
+  assert.equal(rowStatus(privateField, privateOut, 'Patient.SSN property private'), 'counted');
+  assert.equal(privateOut.model.todos.length, 1);
+  const privateTodo = privateOut.model.todos.find((t) => t.name === 'privacy flags');
+  assert.ok(privateTodo, 'UI todo is emitted for a private field');
+  assert.match(privateTodo.reason, /Patient\.SSN \(private = true\)/);
+  assert.match(privateTodo.reason, /Catalyst generates no privacy or access control/);
+  assert.ok(privateTodo.manualStep, 'private field todo names a manual step');
+  assert.match(privateTodo.manualStep, /Patient\.SSN \(private = true\)/);
+
+  const personalDataField = dsApp(flaggedField('personal data'));
+  const personalDataOut = collectOutputs(personalDataField);
+  assert.equal(rowStatus(personalDataField, personalDataOut, 'Patient.SSN property personal data'), 'counted');
+  assert.equal(personalDataOut.model.todos.length, 1);
+  const personalDataTodo = personalDataOut.model.todos.find((t) => t.name === 'privacy flags');
+  assert.ok(personalDataTodo, 'UI todo is emitted for a personal-data field');
+  assert.match(personalDataTodo.reason, /Patient\.SSN \(personal data = true\)/);
+  assert.ok(personalDataTodo.manualStep, 'personal data field todo names a manual step');
+  assert.match(personalDataTodo.manualStep, /Patient\.SSN \(personal data = true\)/);
+
+  const multiFieldApp = dsApp(`
+	form Patient
+	{
+		SSN
+		(
+			type = text
+			private = true
+			personal data = true
+		)
+		Email
+		(
+			type = email
+			personal data = true
+		)
+	}
+	form Billing
+	{
+		Card_Note
+		(
+			type = text
+			private = true
+		)
+	}
+`);
+  const multiOut = collectOutputs(multiFieldApp);
+  assert.equal(multiOut.model.todos.length, 1, 'emits one privacy manual step per app across all flagged fields');
+  const appTodo = multiOut.model.todos[0]!;
+  assert.equal(appTodo.name, 'privacy flags');
+  assert.match(
+    appTodo.reason,
+    /Fields "Patient\.SSN \(private = true, personal data = true\), Patient\.Email \(personal data = true\), Billing\.Card_Note \(private = true\)" are flagged for data privacy; Catalyst generates no privacy or access control for these fields\./,
+  );
+  assert.ok(appTodo.manualStep);
+  assert.match(
+    appTodo.manualStep,
+    /Patient\.SSN \(private = true, personal data = true\), Patient\.Email \(personal data = true\), Billing\.Card_Note \(private = true\)/,
+  );
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.SSN property private'), 'counted');
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.SSN property personal data'), 'counted');
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.Email property personal data'), 'counted');
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Billing.Card_Note property private'), 'counted');
+
+  // Mutation test: removing the UI todo makes the private flag a drop again — proving
+  // the flag is not silently carried by any generated widget.
+  const mutated = cloneOutputs(privateOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'privacy flags');
+  assert.equal(rowStatus(privateField, mutated, 'Patient.SSN property private'), 'dropped');
+
+  // Partial mutation test: dropping one field from the per-app listing makes only that field's flag a drop.
+  const partialMutated = cloneOutputs(multiOut);
+  partialMutated.model.todos = partialMutated.model.todos.map((t) => ({
+    ...t,
+    reason: t.reason.replace(', Patient.Email (personal data = true)', ''),
+    manualStep: t.manualStep?.replace(', Patient.Email (personal data = true)', ''),
+  }));
+  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Patient.SSN property private'), 'counted');
+  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Patient.SSN property personal data'), 'counted');
+  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Patient.Email property personal data'), 'dropped');
+  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Billing.Card_Note property private'), 'counted');
+});
+
+test('encrypt and encryptdata field flags are counted through the shared privacy todo', () => {
+  for (const key of ['encrypt', 'encryptdata']) {
+    const source = dsApp(`
+	form Patient
+	{
+		SSN
+		(
+			type = text
+			${key} = true
+		)
+	}
+`);
+    const out = collectOutputs(source);
+    assert.equal(rowStatus(source, out, `Patient.SSN property ${key}`), 'counted');
+    assert.match(out.model.todos.find((todo) => todo.name === 'privacy flags')?.reason ?? '', new RegExp(`SSN \\(${key} = true\\)`));
+    const mutated = cloneOutputs(out);
+    mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'privacy flags');
+    assert.equal(rowStatus(source, mutated, `Patient.SSN property ${key}`), 'dropped');
+  }
+});
+
+test('an address field capturing GPS coordinates is generated by the location pin', () => {
+  const addressField = (value: string): string => `
+	form Site
+	{
+		Location
+		(
+			type = address
+			capture_coordinates = ${value}
+		)
+	}
+`;
+  const capturing = dsApp(addressField('true'));
+  const capturingOut = collectOutputs(capturing);
+  assert.equal(rowStatus(capturing, capturingOut, 'Site.Location property capture_coordinates'), 'emitted');
+  assert.equal(capturingOut.model.todos.some((t) => t.name === 'Site.Location property capture_coordinates'), false);
+
+  // Not requesting coordinates is the generated field's own default behaviour.
+  const notCapturing = dsApp(addressField('false'));
+  assert.equal(rowStatus(notCapturing, collectOutputs(notCapturing), 'Site.Location property capture_coordinates'), 'emitted');
+
+});
+
+test('an address field adjusting its pin on a map is generated by the map control', () => {
+  const addressField = (value: string): string => `
+	form Site
+	{
+		Location
+		(
+			type = address
+			adjust_using_map = ${value}
+		)
+	}
+`;
+  const adjustable = dsApp(addressField('true'));
+  const adjustableOut = collectOutputs(adjustable);
+  assert.equal(rowStatus(adjustable, adjustableOut, 'Site.Location property adjust_using_map'), 'emitted');
+  assert.equal(adjustableOut.model.todos.some((t) => t.name === 'Site.Location property adjust_using_map'), false);
+
+  // Not showing a map is the generated field's own default behaviour.
+  const plain = dsApp(addressField('false'));
+  assert.equal(rowStatus(plain, collectOutputs(plain), 'Site.Location property adjust_using_map'), 'emitted');
+
+  // Mutation test: clearing ui.adjustUsingMap makes adjust_using_map=true a drop again.
+  const mutated = cloneOutputs(adjustableOut);
+  const uiField = mutated.model.forms[0]?.fields.find((f) => f.name === 'Location');
+  if (uiField) delete uiField.adjustUsingMap;
+  assert.equal(rowStatus(adjustable, mutated, 'Site.Location property adjust_using_map'), 'dropped');
+});
+
+test('an image field enabling a link name or title is emitted on the generated field, while unknown enable tokens stay dropped', () => {
+  const imageField = (value: string): string => `
+	form Company
+	{
+		Logo
+		(
+			type = image
+			enable = ${value}
+		)
+	}
+`;
+  const linked = dsApp(imageField('link'));
+  const linkedOut = collectOutputs(linked);
+  assert.equal(rowStatus(linked, linkedOut, 'Company.Logo property enable'), 'emitted');
+  assert.equal(linkedOut.model.todos.some((t) => t.name === 'Company.Logo property enable'), false);
+
+  const titled = dsApp(imageField('link, title'));
+  const titledOut = collectOutputs(titled);
+  assert.equal(rowStatus(titled, titledOut, 'Company.Logo property enable'), 'emitted');
+  assert.equal(titledOut.model.todos.some((t) => t.name === 'Company.Logo property enable'), false);
+
+  // An `enable` value naming neither link nor title is not carried by the generated image field.
+  const other = dsApp(imageField('download'));
+  assert.equal(rowStatus(other, collectOutputs(other), 'Company.Logo property enable'), 'dropped');
+
+  // Mutation test: removing the carried imageLink flag makes enable=link a drop again.
+  const mutated = cloneOutputs(linkedOut);
+  const logo = mutated.model.forms[0]!.fields.find((f) => f.name === 'Logo')!;
+  delete logo.imageLink;
+  assert.equal(rowStatus(linked, mutated, 'Company.Logo property enable'), 'dropped');
+});
+
+test('a QR/barcode field value template emits a counted UI todo with a manual step, not a generated payload', () => {
+  const badgeField = `
+	form Visit
+	{
+		Badge_QR
+		(
+			type = qrcode
+			value = "VIS-\${Visit_No}"
+		)
+	}
+`;
+  const withValue = dsApp(badgeField);
+  const withValueOut = collectOutputs(withValue);
+  assert.equal(rowStatus(withValue, withValueOut, 'Visit.Badge_QR property value'), 'counted');
+  const todo = withValueOut.model.todos.find((t) => t.name === 'Visit.Badge_QR property value');
+  assert.ok(todo, 'UI todo is emitted for a barcode/QR field with a value template');
+  assert.ok(todo.manualStep, 'barcode/QR value-template todo names a manual step');
+
+  // No `value` property set: nothing to compute, no todo needed.
+  const noValue = dsApp(`
+	form Visit
+	{
+		Badge_QR
+		(
+			type = qrcode
+		)
+	}
+`);
+  assert.equal(rowStatus(noValue, collectOutputs(noValue), 'Visit.Badge_QR property value'), undefined);
+
+  // Mutation test: removing the UI todo makes the value template a drop again —
+  // proving it is not silently carried by the generated (static, computed-only) barcode widget.
+  const mutated = cloneOutputs(withValueOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Visit.Badge_QR property value');
+  assert.equal(rowStatus(withValue, mutated, 'Visit.Badge_QR property value'), 'dropped');
+});
+
+test('a non-zero preview duration on an image field is generated as an auto-dismiss timer, not a todo', () => {
+  const timed = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'preview duration', value: '3', span: Z }] });
+  const timedOut = collectOutputs(timed);
+  assert.equal(rowStatus(timed, timedOut, 'Orders.Photo property preview duration'), 'emitted');
+  assert.equal(timedOut.model.todos.some((t) => t.name === 'Orders.Photo property preview duration'), false, 'no manual-step todo remains');
+  assert.equal(timedOut.model.forms[0]!.fields.find((f) => f.name === 'Photo')!.previewDuration, 3);
+
+  // 0 is the generated capture control's own default (no auto-dismiss timer).
+  const untimed = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'preview duration', value: '0', span: Z }] });
+  assert.equal(rowStatus(untimed, collectOutputs(untimed), 'Orders.Photo property preview duration'), 'emitted');
+
+  // Mutation test: stripping the carried ui.previewDuration makes the non-zero
+  // value a drop again — proving the setting is not silently carried any other way.
+  const mutated = cloneOutputs(timedOut);
+  delete mutated.model.forms[0]!.fields.find((f) => f.name === 'Photo')!.previewDuration;
+  assert.equal(rowStatus(timed, mutated, 'Orders.Photo property preview duration'), 'dropped');
+});
+
+test('preview duration = 0 on a scan field is proved the same no-auto-dismiss default as an image field; non-zero stays a counted todo', () => {
+  const scanDefault = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'preview duration', value: '0', span: Z }],
+  });
+  assert.equal(rowStatus(scanDefault, collectOutputs(scanDefault), 'Orders.Code property preview duration'), 'emitted');
+
+  // A scan field has no photo to preview: a non-zero value stays a counted
+  // manual step, unlike the generated image-field timer above.
+  const scanTimed = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'preview duration', value: '3', span: Z }],
+  });
+  const scanTimedOut = collectOutputs(scanTimed);
+  assert.equal(rowStatus(scanTimed, scanTimedOut, 'Orders.Code property preview duration'), 'counted');
+  const scanTodo = scanTimedOut.model.todos.find((t) => t.name === 'Orders.Code property preview duration');
+  assert.ok(scanTodo, 'a UI todo names the non-zero preview duration setting on a scan field');
+  assert.ok(scanTodo.manualStep, 'the todo names a manual step');
+  assert.equal(scanTimedOut.model.forms[0]!.fields.find((f) => f.name === 'Code')!.previewDuration, undefined, 'a scan field carries no previewDuration');
+
+  // Mutation test: removing the UI todo makes the scan field's non-zero value a drop again.
+  const mutatedScan = cloneOutputs(scanTimedOut);
+  mutatedScan.model.todos = mutatedScan.model.todos.filter((t) => t.name !== 'Orders.Code property preview duration');
+  assert.equal(rowStatus(scanTimed, mutatedScan, 'Orders.Code property preview duration'), 'dropped');
+
+  // A non-scan, non-image field gets no default-equivalence: the setting stays a drop.
+  const plainText = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'preview duration', value: '0', span: Z }] });
+  assert.deepEqual(
+    auditApp(plainText)
+      .filter((d) => d.name.includes('preview duration'))
+      .map((d) => d.name),
+    ['Orders.Notes property preview duration'],
+  );
+});
+
+test('displayformat on a connection-datasource field emits a counted UI todo of its own', () => {
+  const bound = appWithField({
+    ...field('CRM_Contact', 'picklist'),
+    properties: [
+      { key: 'datasource', value: 'zohocrm1_contacts', span: Z },
+      { key: 'displayformat', value: '[last_name]', span: Z },
+    ],
+  });
+  const boundOut = collectOutputs(bound);
+  assert.equal(rowStatus(bound, boundOut, 'Orders.CRM_Contact property displayformat'), 'counted');
+  const todo = boundOut.model.todos.find((t) => t.name === 'Orders.CRM_Contact property displayformat');
+  assert.ok(todo, 'a UI todo names the displayformat setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // RED: without the UI todo, displayformat on a connection-bound field is a
+  // silent drop — the generated field has no connection binding to read a
+  // display field from, so nothing else proves this setting.
+  const mutated = cloneOutputs(boundOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Orders.CRM_Contact property displayformat');
+  assert.equal(rowStatus(bound, mutated, 'Orders.CRM_Contact property displayformat'), 'dropped');
+});
+
+test('displayformat on a picklist with no in-app lookup emits a counted UI todo naming it', () => {
+  const picklist = appWithField({
+    ...field('Owner', 'picklist'),
+    properties: [
+      { key: 'datasource', value: 'zohocrm1_contacts', span: Z },
+      { key: 'displayformat', value: '[last_name]', span: Z },
+    ],
+  });
+  const out = collectOutputs(picklist);
+  assert.equal(rowStatus(picklist, out, 'Orders.Owner property displayformat'), 'counted');
+  const todo = out.model.todos.find((t) => t.name === 'Orders.Owner property displayformat');
+  assert.ok(todo, 'a UI todo names the displayformat setting');
+  assert.ok(todo.reason.includes('[last_name]'), 'the todo names the format expression');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // RED: before this check existed, a static picklist's displayformat was
+  // neither emitted nor counted — a silent drop. Removing the UI todo
+  // reproduces that: the setting goes back to being dropped with no manual
+  // step recorded anywhere.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Orders.Owner property displayformat');
+  assert.equal(rowStatus(picklist, mutated, 'Orders.Owner property displayformat'), 'dropped');
+});
+
+test('a picklist whose values literal groups options under labels draws them as optgroups', () => {
+  const grouped = appWithField({
+    ...field('Status', 'picklist'),
+    properties: [
+      { key: 'type', value: 'picklist', span: Z },
+      { key: 'values', value: '{"New":{"Open","Hold"},"Done":{"Closed"}}', span: Z },
+    ],
+    choices: ['Open', 'Hold', 'Closed'],
+    optionGroups: [
+      { label: 'New', choices: ['Open', 'Hold'] },
+      { label: 'Done', choices: ['Closed'] },
+    ],
+  });
+  const out = collectOutputs(grouped);
+  assert.equal(rowStatus(grouped, out, 'Orders.Status option groups'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name === 'Orders.Status option groups'), false, 'no manual-step todo remains');
+  const ui = out.model.forms[0]!.fields.find((item) => item.name === 'Status')!;
+  assert.deepEqual(ui.choices, ['Open', 'Hold', 'Closed'], 'the generated select lists the member options flat');
+  assert.deepEqual(ui.optionGroups, [
+    { label: 'New', choices: ['Open', 'Hold'] },
+    { label: 'Done', choices: ['Closed'] },
+  ], 'the generated select carries the group headers');
+
+  // RED: before the generated field carried the headers, they were only
+  // counted through a manual-step todo. Stripping the carried groups
+  // reproduces that loss: the headers are dropped with no trace anywhere.
+  const mutated = cloneOutputs(out);
+  for (const f of mutated.model.forms) for (const fld of f.fields) delete (fld as { optionGroups?: unknown }).optionGroups;
+  assert.equal(rowStatus(grouped, mutated, 'Orders.Status option groups'), 'dropped');
+});
+
+test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
+  const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+  const contacts = parseProject(join(gallery, 'contacts')).ir;
+  assert.equal(rowStatus(contacts, collectOutputs(contacts), 'New_Contact.Picture property preview duration'), 'emitted');
+
+  const taskzdone = parseProject(join(gallery, 'taskzdone')).ir;
+  const taskzOut = collectOutputs(taskzdone);
+  assert.equal(rowStatus(taskzdone, taskzOut, 'Add_Attachment.File_Attachment property browse'), 'counted');
+  const todo = taskzOut.model.todos.find((t) => t.name === 'Add_Attachment.File_Attachment property browse');
+  assert.ok(todo, 'TaskzDone Add_Attachment.File_Attachment property browse has a counted UI todo');
+});
+
+test(
+  'gallery apps: Point of Sale scan field preview duration = 0 is emitted, Recruitment Tracker image preview duration = 3 is generated as an auto-dismiss timer',
+  { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false },
+  () => {
+    const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+    const pointOfSale = parseProject(join(gallery, 'point-of-sale')).ir;
+    assert.equal(rowStatus(pointOfSale, collectOutputs(pointOfSale), 'Add_stock.Barcode_Number property preview duration'), 'emitted');
+
+    const recruitment = parseProject(join(gallery, 'recruitment-tracker')).ir;
+    const recruitmentOut = collectOutputs(recruitment);
+    assert.equal(recruitmentOut.model.todos.some((t) => t.name.endsWith('property preview duration')), false, 'no manual-step todo remains');
+    assert.equal(rowStatus(recruitment, recruitmentOut, 'Add_Recruiter.Photo property preview duration'), 'emitted');
+    const photo = recruitmentOut.model.forms.find((f) => f.name === 'Add_Recruiter')!.fields.find((item) => item.name === 'Photo')!;
+    assert.equal(photo.previewDuration, 3);
+  },
+);
+
+test('allow new entries and its displayname dialog title are emitted through the lookup picker', () => {
+  const source = `application "Demo"
+{
+\tsection Main
+\t{
+\t\tform Department
+\t\t{
+\t\t\tDepartment_Name
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t}
+\t\tform Course
+\t\t{
+\t\t\tDepartment
+\t\t\t(
+\t\t\t\ttype = picklist
+\t\t\t\tvalues = Department.ID
+\t\t\t\tdisplayformat = [Department_Name]
+\t\t\t\tallow new entries
+\t\t\t\t[
+\t\t\t\t\tdisplayname = "Add New Department"
+\t\t\t\t]
+\t\t\t)
+\t\t}
+\t}
+}
+`;
+  const appUnderTest = deriveIr(parse(source));
+  const out = collectOutputs(appUnderTest);
+  const rows = coverageLedger(appUnderTest, out);
+  assert.equal(
+    rows.find((row) => row.name === 'Course.Department flag allow new entries')?.status,
+    'emitted',
+    'the picker opens the parent form add screen and selects the new row',
+  );
+  assert.equal(
+    rows.find((row) => row.name.startsWith('Course.Department annotation'))?.status,
+    'emitted',
+    'the displayname annotation is the add-new dialog title',
+  );
+
+  // Mutation: remove the carried affordance and the same constructs drop again.
+  const without = cloneOutputs(out);
+  delete without.model.forms.find((form) => form.name === 'Course')!.fields.find((item) => item.name === 'Department')!.lookup!.addNew;
+  const names = dropNames(appUnderTest, without);
+  assert.ok(names.includes('Course.Department flag allow new entries'), names.join(', '));
+  assert.ok(names.some((name) => name.startsWith('Course.Department annotation')), names.join(', '));
+});
+
+function appWithField(f: Field): App {
+  return app({ forms: [{ name: 'Orders', properties: [], fields: [f], actions: [], blocks: [], span: Z }] });
+}
+
+test('a toolbar field property is proved by the generated field setting, not a todo', () => {
+  const withToolbar = appWithField({ ...field('Notes', 'richtext'), properties: [{ key: 'toolbar', value: 'enable', span: Z }] });
+  // `toolbar = enable` is carried as the generated field's `toolbar` flag, so the audit emits it.
+  assert.deepEqual(
+    auditApp(withToolbar).filter((d) => d.name.includes('toolbar')),
+    [],
+  );
+  // Without the generated flag (and with no field-level todo standing in for it), the same setting is a silent drop.
+  const unlisted = collectOutputs(withToolbar);
+  const forms = unlisted.model.forms.map((f) =>
+    f.name === 'Orders' ? { ...f, fields: f.fields.map((u) => (u.name === 'Notes' ? { ...u, toolbar: undefined } : u)) } : f,
+  );
+  unlisted.model = { ...unlisted.model, forms };
+  const drops = auditApp(withToolbar, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Notes property toolbar'],
+  );
+});
+
+test('a trailing empty bracket on a rich-text field is a parse artifact, not a silent drop', () => {
+  const source = dsApp(`
+	form Orders
+	{
+		Notes
+		(
+			type = richtext
+			toolbar = enable
+			[
+			]
+		)
+	}
+`);
+  // GREEN: the empty `[ ]` carries no properties, items, or blocks -- nothing
+  // for the generated field to lose -- so the parser does not record it as a
+  // field annotation that needs its own generated-field proof.
+  const notes = source.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.deepEqual(notes.annotations, []);
+  assert.deepEqual(auditApp(source), []);
+
+  // Mutation: an empty annotation surviving into the IR (as it did before the
+  // parse-time fix) is a real silent drop again -- annotationProved has no
+  // shortcut for a contentless block, so the field-property audit flags it.
+  const mutated = structuredClone(source);
+  const mutatedField = mutated.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  mutatedField.annotations.push({ name: '', properties: [], blocks: [], items: [], span: Z });
+  const drops = auditApp(mutated);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Notes annotation '],
+  );
+});
+
+test('a parseable defaultrow field property is proved by the generated field setting, not a todo', () => {
+  const withDefaultRow = appWithField({
+    ...field('Lines', 'subform'),
+    properties: [{ key: 'defaultrow', value: '1', span: Z }],
+    subfields: [field('Qty', 'number')],
+  });
+  assert.deepEqual(
+    auditApp(withDefaultRow).filter((d) => d.name.includes('defaultrow')),
+    [],
+  );
+  assert.equal(collectOutputs(withDefaultRow).model.todos.some((t) => /default row/i.test(t.reason)), false);
+  // Without the generated count (and with no field-level todo standing in for it), the same setting is a silent drop.
+  const unlisted = collectOutputs(withDefaultRow);
+  const forms = unlisted.model.forms.map((f) =>
+    f.name === 'Orders' ? { ...f, fields: f.fields.map((u) => (u.name === 'Lines' ? { ...u, defaultRowCount: undefined } : u)) } : f,
+  );
+  unlisted.model = { ...unlisted.model, forms, todos: [] };
+  const drops = auditApp(withDefaultRow, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Lines property defaultrow'],
+  );
+});
+
+test('an unparseable defaultrow field property is listed through the generated field todo', () => {
+  const withDefaultRow = appWithField({
+    ...field('Lines', 'subform'),
+    properties: [{ key: 'defaultrow', value: 'none', span: Z }],
+    subfields: [field('Qty', 'number')],
+  });
+  assert.deepEqual(
+    auditApp(withDefaultRow).filter((d) => d.name.includes('defaultrow')),
+    [],
+  );
+  const unlisted = collectOutputs(withDefaultRow);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withDefaultRow, unlisted);
+  assert.ok(drops.some((d) => d.name === 'Orders.Lines property defaultrow'));
+});
+
+test('a parseable decimalplace = 0 field property is proved by the generated field setting, not a todo', () => {
+  const withDecimal = appWithField({
+    ...field('Amount', 'currency'),
+    properties: [{ key: 'decimalplace', value: '0', span: Z }],
+  });
+  assert.deepEqual(
+    auditApp(withDecimal).filter((d) => d.name.includes('decimalplace')),
+    [],
+  );
+  const out = collectOutputs(withDecimal);
+  assert.equal(out.model.forms[0].fields[0].decimalPlaces, 0);
+  assert.equal(out.model.todos.some((t) => /decimal/i.test(t.reason)), false);
+
+  // Without the generated setting (and with no schema precision standing in for it), the same setting is a silent drop.
+  const unlisted = cloneOutputs(out);
+  const forms = unlisted.model.forms.map((f) =>
+    f.name === 'Orders'
+      ? { ...f, fields: f.fields.map((u) => (u.name === 'Amount' ? { ...u, decimalPlaces: undefined } : u)) }
+      : f,
+  );
+  const tables = unlisted.schema.tables.map((t) =>
+    t.name === 'Orders'
+      ? { ...t, columns: t.columns.map((c) => (c.name.startsWith('Amount') ? { ...c, precision: undefined } : c)) }
+      : t,
+  );
+  unlisted.model = { ...unlisted.model, forms, todos: [] };
+  unlisted.schema = { ...unlisted.schema, tables };
+  const drops = auditApp(withDecimal, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Amount property decimalplace'],
+  );
+});
+
+test('an unparseable decimalplace field property is listed through the generated field todo', () => {
+  const withDecimal = appWithField({
+    ...field('Amount', 'currency'),
+    properties: [{ key: 'decimalplace', value: 'none', span: Z }],
+  });
+  assert.deepEqual(
+    auditApp(withDecimal).filter((d) => d.name.includes('decimalplace')),
+    [],
+  );
+  const out = collectOutputs(withDecimal);
+  assert.ok(out.model.todos.some((t) => t.name === 'Orders.Amount property decimalplace'));
+
+  const unlisted = cloneOutputs(out);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withDecimal, unlisted);
+  assert.ok(drops.some((d) => d.name === 'Orders.Amount property decimalplace'));
+});
+
+test('an unparseable decimalplace field with another unprovable property still reports that property as dropped', () => {
+  const withSibling = appWithField({
+    ...field('Amount', 'currency'),
+    properties: [
+      { key: 'decimalplace', value: 'none', span: Z },
+      { key: 'bogus-prop', value: 'true', span: Z },
+    ],
+  });
+  const drops = auditApp(withSibling);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Amount property bogus-prop'],
+  );
+});
+
+test('manual input = true on scan fields is the generated free-text input and not a silent drop or todo', () => {
+  const withManualInputs = app({
+    forms: [
+      {
+        name: 'Orders',
+        properties: [],
+        fields: [
+          { ...field('Code', 'text'), flags: ['qr scan'], properties: [{ key: 'manual input', value: 'true', span: Z }] },
+          { ...field('Serial', 'text'), flags: ['barcode scan'], properties: [{ key: 'manual input', value: 'true', span: Z }] },
+          { ...field('Amount', 'number'), properties: [{ key: 'qrcode', value: 'true', span: Z }, { key: 'manual input', value: 'true', span: Z }] },
+          { ...field('Sku', 'text'), properties: [{ key: 'qrcode', value: 'true', span: Z }, { key: 'manual input', value: 'true', span: Z }] },
+        ],
+        actions: [],
+        blocks: [],
+        span: Z,
+      },
+    ],
+  });
+  assert.deepEqual(
+    auditApp(withManualInputs).filter((d) => d.name.includes('manual input')),
+    [],
+  );
+  assert.equal(
+    collectOutputs(withManualInputs).model.todos.some((t) => t.name.includes('manual input')),
+    false,
+  );
+
+  // Without the note, the audit would still list manual input as a silent drop
+  // if it were not already carried by the generated scan input.
+  const unlisted = collectOutputs(withManualInputs);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  assert.deepEqual(
+    auditApp(withManualInputs, unlisted).filter((d) => d.name.includes('manual input')),
+    [],
+  );
+});
+
+test('a manual input field property stays a silent drop on a non-scan field', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'manual input', value: 'true', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('manual input')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('manual input'))
+      .map((d) => d.name),
+    ['Orders.Notes property manual input'],
+  );
+});
+
+test('a duration field property on a video field is listed through a dedicated UI todo', () => {
+  const withDuration = appWithField({ ...field('Demo_Video', 'video'), properties: [{ key: 'duration', value: '30', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withDuration).filter((d) => d.name.includes('property duration')),
+    [],
+  );
+  const todo = collectOutputs(withDuration).model.todos.find((t) => t.name === 'Orders.Demo_Video property duration');
+  assert.ok(todo, 'a UI todo names the duration setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withDuration);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withDuration, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Demo_Video property duration'],
+  );
+});
+
+test('a duration field property stays a silent drop on a non-video, non-audio field', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'duration', value: '30', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property duration')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('property duration'))
+      .map((d) => d.name),
+    ['Orders.Notes property duration'],
+  );
+});
+
+test('a show onload field property on a scan field is listed through a dedicated UI todo', () => {
+  const withShowOnload = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'show onload', value: 'true', span: Z }],
+  });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withShowOnload).filter((d) => d.name.includes('show onload')),
+    [],
+  );
+  const todo = collectOutputs(withShowOnload).model.todos.find((t) => t.name === 'Orders.Code property show onload');
+  assert.ok(todo, 'a UI todo names the show onload setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withShowOnload);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withShowOnload, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Code property show onload'],
+  );
+});
+
+test('a show onload field property on an image field is listed through a dedicated UI todo', () => {
+  const withShowOnload = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show onload', value: 'true', span: Z }] });
+  assert.deepEqual(
+    auditApp(withShowOnload).filter((d) => d.name.includes('show onload')),
+    [],
+  );
+  const todo = collectOutputs(withShowOnload).model.todos.find((t) => t.name === 'Orders.Photo property show onload');
+  assert.ok(todo, 'a UI todo names the show onload setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+});
+
+test('a show onload field property stays a silent drop on a field that is neither scan nor image', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'show onload', value: 'true', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('show onload')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('show onload'))
+      .map((d) => d.name),
+    ['Orders.Notes property show onload'],
+  );
+});
+
+test('a show onload field property set to false is not flagged', () => {
+  const falseValue = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show onload', value: 'false', span: Z }] });
+  assert.equal(collectOutputs(falseValue).model.todos.some((t) => t.name.includes('show onload')), false);
+  assert.deepEqual(
+    auditApp(falseValue).filter((d) => d.name.includes('show onload')),
+    [],
+  );
+});
+
+test('an annotation field property on an image field is listed through a dedicated UI todo', () => {
+  const withAnnotation = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
+  assert.deepEqual(
+    auditApp(withAnnotation).filter((d) => d.name.includes('property annotation')),
+    [],
+  );
+  const todo = collectOutputs(withAnnotation).model.todos.find((t) => t.name === 'Orders.Photo property annotation');
+  assert.ok(todo, 'a UI todo names the annotation setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withAnnotation);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withAnnotation, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Photo property annotation'],
+  );
+});
+
+test('an annotation field property stays a silent drop on a non-image field', () => {
+  const plain = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property annotation')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('property annotation'))
+      .map((d) => d.name),
+    ['Orders.Notes property annotation'],
+  );
+});
+
+test('an annotation field property set to false is not flagged', () => {
+  const falseValue = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'annotation', value: 'false', span: Z }] });
+  assert.equal(collectOutputs(falseValue).model.todos.some((t) => t.name.includes('property annotation')), false);
+  assert.deepEqual(
+    auditApp(falseValue).filter((d) => d.name.includes('property annotation')),
+    [],
+  );
+});
+
+test('a duration field property on an audio field is listed through a dedicated UI todo', () => {
+  const withDuration = appWithField({ ...field('Voice_Note', 'audio'), properties: [{ key: 'duration', value: '60', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withDuration).filter((d) => d.name.includes('property duration')),
+    [],
+  );
+  const todo = collectOutputs(withDuration).model.todos.find((t) => t.name === 'Orders.Voice_Note property duration');
+  assert.ok(todo, 'a UI todo names the duration setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop (RED).
+  const unlisted = collectOutputs(withDuration);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withDuration, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Voice_Note property duration'],
+  );
+});
+
+test('an enable linkname flag is listed only when the generated field carries no link name', () => {
+  const withFlag = appWithField({ ...field('Website', 'url'), flags: ['enable linkname'] });
+  assert.deepEqual(
+    auditApp(withFlag).filter((d) => d.name.includes('linkname')),
+    [],
+  );
+  // Without the generated flag, the same declaration is a silent drop.
+  const unlisted = collectOutputs(withFlag);
+  const forms = unlisted.model.forms.map((f) => (f.name === 'Orders' ? { ...f, fields: f.fields.map((u) => (u.name === 'Website' ? { ...u, linkName: undefined } : u)) } : f));
+  unlisted.model = { ...unlisted.model, forms };
+  const drops = auditApp(withFlag, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Website flag enable linkname'],
+  );
+});
+
+test('a field with none of the toolbar/defaultrow/enable-linkname markers is never flagged by the field-property audit', () => {
+  const plain = appWithField(field('Title', 'text'));
+  assert.deepEqual(auditApp(plain), []);
+});
+
+test('charcount todo is scoped and does not mask sibling properties', () => {
+  const source = appWithField({ ...field('Notes', 'textarea'), properties: [
+    { key: 'charcount', value: 'true', span: Z },
+    { key: 'completely_unknown_property', value: 'true', span: Z },
+  ] });
+  const outputs = collectOutputs(source);
+  assert.ok(outputs.model.todos.some((todo) => todo.name === 'Orders.Notes property charcount'));
+  assert.deepEqual(auditApp(source, outputs).map((drop) => drop.name), ['Orders.Notes property completely_unknown_property']);
+});
+
+test('charcount false matches the generated no-counter behavior', () => {
+  const source = appWithField({ ...field('Notes', 'textarea'), properties: [{ key: 'charcount', value: 'false', span: Z }] });
+  assert.deepEqual(auditApp(source), []);
+  assert.equal(collectOutputs(source).model.todos.some((todo) => todo.name.includes('charcount')), false);
+});
+
+test('numeric format is listed as a guided UI TODO instead of a silent drop', () => {
+  const source = appWithField({
+    ...field('Amount', 'currency'),
+    properties: [{ key: 'format', value: '###,##0.00', span: Z }],
+  });
+  const outputs = collectOutputs(source);
+  assert.deepEqual(auditApp(source, outputs), []);
+  const todo = outputs.model.todos.find((item) => item.name === 'Orders.Amount property format');
+  assert.ok(todo);
+  assert.match(todo.reason, /not carried/);
+  assert.match(todo.manualStep ?? '', /display format/);
+});
+
+test('bare charcount flag is recognized by the quality audit', () => {
+  const source = appWithField({ ...field('Notes', 'textarea'), flags: ['charcount'] });
+  assert.deepEqual(auditApp(source), []);
+  assert.ok(collectOutputs(source).model.todos.some((todo) => todo.name === 'Orders.Notes flag charcount'));
+});
+
+test('a target field property on an image field is listed through a dedicated UI todo', () => {
+  const withTarget = appWithField({ ...field('Logo', 'image'), properties: [{ key: 'target', value: 'same window', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withTarget).filter((d) => d.name.includes('property target')),
+    [],
+  );
+  const todo = collectOutputs(withTarget).model.todos.find((t) => t.name === 'Orders.Logo property target');
+  assert.ok(todo, 'a UI todo names the target setting');
+  assert.ok(todo.manualStep, 'the todo names a manual step');
+
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withTarget);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withTarget, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Logo property target'],
+  );
+
+  // When the image field also enables a link, target = same window is carried as linkTarget.
+  const linkedWithTarget = appWithField({
+    ...field('Logo', 'image'),
+    properties: [
+      { key: 'enable', value: 'link', span: Z },
+      { key: 'target', value: 'same window', span: Z },
+    ],
+  });
+  const linkedOut = collectOutputs(linkedWithTarget);
+  assert.equal(rowStatus(linkedWithTarget, linkedOut, 'Orders.Logo property target'), 'emitted');
+  assert.equal(linkedOut.model.todos.some((t) => t.name === 'Orders.Logo property target'), false);
+});
+
+test('a target field property stays a silent drop on a non-image field', () => {
+  const plain = appWithField({ ...field('Website', 'url'), properties: [{ key: 'target', value: 'same window', span: Z }] });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('property target')), false);
+  assert.deepEqual(
+    auditApp(plain)
+      .filter((d) => d.name.includes('property target'))
+      .map((d) => d.name),
+    ['Orders.Website property target'],
+  );
+});
+
+test('camera and show gallery on a scan field are counted; switch camera is generated', () => {
+  const scanned = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [
+      { key: 'camera', value: 'primary', span: Z },
+      { key: 'switch camera', value: 'true', span: Z },
+      { key: 'show gallery', value: 'true', span: Z },
+    ],
+  });
+  assert.deepEqual(
+    auditApp(scanned).filter((d) => /camera|gallery/.test(d.name)),
+    [],
+  );
+  const todos = collectOutputs(scanned).model.todos.filter((t) => /camera|gallery/.test(t.name));
+  assert.deepEqual(
+    todos.map((t) => t.name).sort(),
+    ['Orders.Code property camera', 'Orders.Code property show gallery'],
+  );
+  assert.ok(todos.every((t) => t.manualStep), 'each scan camera setting names a manual step');
+
+  const unlisted = collectOutputs(scanned);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  assert.deepEqual(
+    auditApp(scanned, unlisted).filter((d) => /camera|gallery/.test(d.name)).map((d) => d.name).sort(),
+    ['Orders.Code property camera', 'Orders.Code property show gallery'],
+  );
+});
+
+test('camera settings on a field that does not scan stay silent drops', () => {
+  const plain = appWithField({
+    ...field('Notes', 'text'),
+    properties: [
+      { key: 'camera', value: 'primary', span: Z },
+      { key: 'switch camera', value: 'true', span: Z },
+      { key: 'show gallery', value: 'true', span: Z },
+    ],
+  });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => /camera|gallery/.test(t.name)), false);
+  assert.deepEqual(
+    auditApp(plain).filter((d) => /camera|gallery/.test(d.name)).map((d) => d.name).sort(),
+    ['Orders.Notes property camera', 'Orders.Notes property show gallery', 'Orders.Notes property switch camera'],
+  );
+});
+
+test('switchCamera is serialized only on a scan field', () => {
+  const scanned = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [{ key: 'switch camera', value: 'true', span: Z }],
+  });
+  const scanUi = collectOutputs(scanned).model.forms[0]!.fields.find((f) => f.name === 'Code')!;
+  assert.equal(scanUi.scan, true);
+  assert.equal(scanUi.switchCamera, true);
+
+  // On any non-scan field the flag has no generated consumer, so it must not
+  // enter the model at all — an image field's `switch camera = true` is proved
+  // by DEFAULT_EQUIVALENCE and must stay byte-identical to the property absent.
+  for (const f of [field('Notes', 'text'), field('Photo', 'image')]) {
+    const plain = appWithField({ ...f, properties: [{ key: 'switch camera', value: 'true', span: Z }] });
+    const ui = collectOutputs(plain).model.forms[0]!.fields.find((item) => item.name === f.name)!;
+    assert.equal(ui.scan, false);
+    assert.ok(!('switchCamera' in ui), `${f.name} must not serialize switchCamera`);
+  }
+});
+
+test('switch camera and show gallery set to false on a scan field are proved, and a secondary camera is counted', () => {
+  const off = appWithField({
+    ...field('Code', 'text'),
+    flags: ['qr scan'],
+    properties: [
+      { key: 'switch camera', value: 'false', span: Z },
+      { key: 'show gallery', value: 'false', span: Z },
+    ],
+  });
+  assert.equal(collectOutputs(off).model.todos.some((t) => /camera|gallery/.test(t.name)), false);
+  assert.deepEqual(auditApp(off).filter((d) => /camera|gallery/.test(d.name)), []);
+
+  const secondary = appWithField({
+    ...field('Code', 'number'),
+    properties: [
+      { key: 'qrcode', value: 'true', span: Z },
+      { key: 'camera', value: 'secondary', span: Z },
+    ],
+  });
+  assert.equal(rowStatus(secondary, collectOutputs(secondary), 'Orders.Code property camera'), 'counted');
+  assert.ok(collectOutputs(secondary).model.todos.some((t) => t.name === 'Orders.Code property camera' && t.manualStep));
+});
+
+test('an image field still proves camera = primary and does not gain a camera todo', () => {
+  const photo = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'camera', value: 'primary', span: Z }] });
+  assert.equal(collectOutputs(photo).model.todos.some((t) => t.name.includes('property camera')), false);
+  assert.deepEqual(auditApp(photo).filter((d) => d.name.includes('property camera')), []);
+});
+
+test('format = commadotwestern on a currency field is carried as the generated format', () => {
+  const priced = appWithField({ ...field('Amount', 'currency'), properties: [{ key: 'format', value: 'commadotwestern', span: Z }] });
+  const out = collectOutputs(priced);
+  assert.equal(out.model.forms[0]!.fields.find((item) => item.name === 'Amount')!.format, 'commadotwestern');
+  assert.equal(out.model.todos.some((t) => t.name.includes('property format')), false);
+  assert.equal(rowStatus(priced, out, 'Orders.Amount property format'), 'emitted');
+});
+
+test('a format other than commadotwestern on a number field is a counted manual step; format on a non-number field stays a silent drop', () => {
+  const other = appWithField({ ...field('Amount', 'currency'), properties: [{ key: 'format', value: 'dotcommawestern', span: Z }] });
+  assert.equal(collectOutputs(other).model.forms[0]!.fields.find((item) => item.name === 'Amount')!.format, undefined);
+  // `format` values other than `commadotwestern` are no longer silently dropped on a
+  // numeric widget: model.ts now surfaces them as a guided manual-step TODO, and the
+  // audit ledger recognizes that named todo as the property's coverage (status
+  // 'counted'), so it no longer appears in auditApp's dropped-item list.
+  assert.equal(collectOutputs(other).model.todos.some((t) => t.name === 'Orders.Amount property format'), true);
+  assert.deepEqual(
+    auditApp(other).filter((d) => d.name.includes('property format')).map((d) => d.name),
+    [],
+  );
+
+  const text = appWithField({ ...field('Notes', 'text'), properties: [{ key: 'format', value: 'commadotwestern', span: Z }] });
+  assert.equal(collectOutputs(text).model.todos.some((t) => t.name.includes('property format')), false);
+  assert.deepEqual(
+    auditApp(text).filter((d) => d.name.includes('property format')).map((d) => d.name),
+    ['Orders.Notes property format'],
+  );
+});
+
+test('a number field with no format property is neither a counted manual step nor a silent drop', () => {
+  const none = appWithField({ ...field('Amount', 'currency'), properties: [] });
+  assert.equal(collectOutputs(none).model.todos.some((t) => t.name.includes('property format')), false);
+  assert.deepEqual(
+    auditApp(none).filter((d) => d.name.includes('property format')).map((d) => d.name),
+    [],
+  );
+});
+
+test('advanced field search is carried by generated lookup search', () => {
+  const source = dsApp(`
+	form Asset
+	{
+		Order_Number
+		(
+			type = text
+		)
+	}
+	form Request
+	{
+		For_Request
+		(
+			type = picklist
+			values = Asset.ID
+			displayformat = [Order_Number]
+			advanced field search = true
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Request.For_Request property advanced field search'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name.includes('advanced field search')), false);
+
+  const off = dsApp(`
+	form Asset
+	{
+		Order_Number
+		(
+			type = text
+		)
+	}
+	form Request
+	{
+		For_Request
+		(
+			type = picklist
+			values = Asset.ID
+			displayformat = [Order_Number]
+			advanced field search = false
+		)
+	}
+`);
+  const offOut = collectOutputs(off);
+  assert.equal(offOut.model.todos.some((t) => t.name.includes('advanced field search')), false);
+  assert.equal(rowStatus(off, offOut, 'Request.For_Request property advanced field search'), 'emitted');
+
+  const plain = appWithField({
+    ...field('Status', 'picklist'),
+    choices: ['Open', 'Closed'],
+    properties: [{ key: 'advanced field search', value: 'true', span: Z }],
+  });
+  assert.equal(collectOutputs(plain).model.todos.some((t) => t.name.includes('advanced field search')), false);
+  assert.deepEqual(
+    auditApp(plain).filter((d) => d.name.includes('advanced field search')).map((d) => d.name),
+    ['Orders.Status property advanced field search'],
+  );
+});
+
+test('a subform field is proved against its own generated widget, not a same-named top-level field', () => {
+  // The coverage ledger names a field property `${form}.${field} ${setting}` with
+  // no subform path, so a subform field can share that name with a top-level
+  // field the audit must not confuse it with.
+  const app = appWithField({ ...field('Gender', 'picklist'), choices: ['Male', 'Female'] });
+  app.forms[0]!.fields.push({
+    ...field('Occupants', 'grid'),
+    subfields: [{ ...field('Gender', 'picklist'), choices: ['Male', 'Female', 'Third Gender'] }],
+  });
+  assert.deepEqual(auditApp(app), []);
+});
+
+test('collectOutputs bundles uiFiles by default so lookup sortorder is proved in auditApp(app)', () => {
+  const source = dsApp(`
+	form Room
+	{
+		Room_Number
+		(
+			type = text
+		)
+	}
+	form Booking
+	{
+		Room_Ref
+		(
+			type = picklist
+			values = Room.ID
+			displayformat = [Room_Number]
+			sortorder = ascending
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.ok(out.uiFiles?.some((file) => file.path === 'functions/lookups/lookup.mjs'), 'default collectOutputs must include the generated lookup stub');
+  assert.equal(rowStatus(source, out, 'Booking.Room_Ref property sortorder'), 'emitted');
+  assert.deepEqual(auditApp(source), []);
+});
+
+test(
+  'gallery apps: Time Tracker has no silent drop, including its server-side page snippets',
+  { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false },
+  () => {
+    const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+    const timeTracker = parseProject(join(gallery, 'time-tracker')).ir;
+    const out = collectOutputs(timeTracker);
+    assert.deepEqual(auditApp(timeTracker, out), []);
+    // Every manual-step page todo this app needs stays a counted UI todo, not
+    // a silent drop: Member_View, DayChart, CalendarPage, Timer, and
+    // Dashboard each keep a server-side snippet no safe translation covers.
+    for (const name of ['Member_View.dsp', 'DayChart.dsp', 'CalendarPage.dsp', 'Timer.dsp', 'Dashboard.dsp']) {
+      assert.ok(
+        out.model.todos.some((t) => t.area === 'zml' && t.name === name),
+        `Time Tracker page ${name} should carry a counted UI todo for its uncovered server snippet`,
+      );
+    }
+  },
+);
+
+test(
+  'gallery apps: Event Management has no silent drop, including its server-side page snippets',
+  { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false },
+  () => {
+    const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+    const eventManagement = parseProject(join(gallery, 'event-management')).ir;
+    const out = collectOutputs(eventManagement);
+    assert.deepEqual(auditApp(eventManagement, out), []);
+    // book_event, Admin_Dashboard, Event_Search_Result, and Map_View each
+    // keep a server-side snippet no safe translation covers; each stays a
+    // counted UI todo, never a silent drop.
+    for (const name of ['book_event.dsp', 'Admin_Dashboard.dsp', 'Event_Search_Result.dsp', 'Map_View.dsp']) {
+      assert.ok(
+        out.model.todos.some((t) => t.area === 'zml' && t.name === name),
+        `Event Management page ${name} should carry a counted UI todo for its uncovered server snippet`,
+      );
+    }
+  },
+);
+
+test(
+  'gallery apps: Human Resource Management has no silent drop, including its server-side page snippets and dropped static style',
+  { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false },
+  () => {
+    const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+    const hrm = parseProject(join(gallery, 'human-resource-management')).ir;
+    const out = collectOutputs(hrm);
+    assert.deepEqual(auditApp(hrm, out), []);
+    // Profile_Page, SearchPage, and Buttons each keep a server-side snippet no
+    // safe translation covers; Buttons also drops static <style> rules the
+    // sanitizer strips. Every one stays a counted UI todo, never a silent drop.
+    for (const name of ['Profile_Page.dsp', 'SearchPage.dsp', 'Buttons.dsp', 'Buttons.style']) {
+      assert.ok(
+        out.model.todos.some((t) => t.area === 'zml' && t.name === name),
+        `Human Resource Management page ${name} should carry a counted UI todo for its uncovered server snippet`,
+      );
+    }
+  },
+);
+
+
+test(
+  'gallery apps: TaskzDone has no silent drop across the whole app, not only its counted browse option',
+  { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false },
+  () => {
+    const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+    const taskzdone = parseProject(join(gallery, 'taskzdone')).ir;
+    assert.deepEqual(auditApp(taskzdone, collectOutputs(taskzdone)), []);
+  },
+);

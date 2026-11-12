@@ -1,0 +1,680 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { test } from 'node:test';
+import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { generateUi } from '../../ui/src/index.js';
+import { compileCriteria, decodeEntities } from '../src/charts.js';
+import { TEMPLATE_DIR, generateReactApp, reactAppSpec, writeReactApp } from '../src/index.js';
+import { aggregateFallback, bucketsToSeries, chartSeries, dayOf, matches, metricValue, textOf, todayIn, valueAt, type Day } from '../template/lib/c2c-ui/charts/data.js';
+import type { ChartSpec, MetricSpec, PageElement } from '../template/lib/c2c-ui/types.js';
+
+/** ZML inside a page `Content="..."` literal: attribute quotes are single quotes, criteria quotes are entities. */
+const ZML = [
+  "<zml><layout><row>",
+  "<column width='50%'><panel elementName='Panel'><pr><pc>",
+  "<image type='icon' value='business-money-coins' width='52px'/>",
+  "<text type='Form Data' value='thisapp.Add_Order.Amount.sum' criteria='Status != &quot;Cancelled&quot; &amp;&amp; Order_Date is today'></text>",
+  "<text type='Text' value='Today&apos;s Sales'></text>",
+  "</pc></pr></panel></column>",
+  "<column width='50%'><chart elementName='Chart' title='Orders By Status' type='Pie' formLinkName='Add_Order' xfield='Status' yfields='count:Order_No' DelugeCriteria='Owner == zoho.loginuserid'/></column>",
+  "</row><row><column width='100%'><panel elementName='Panel 2'><pr><pc>",
+  "<text type='Text' value='Open orders'></text><text type='Form Data' value='thisapp.Add_Order.Order_No.count' criteria='Status == &quot;Open&quot;'></text>",
+  "<text type='Text' value='-'></text>",
+  "<text type='Text' value='All orders'></text><text type='Form Data' value='thisapp.Add_Order.Order_No.count'></text>",
+  "</pc></pr></panel>",
+  "<report elementName='Report' linkName='Orders_Chart'/>",
+  "<report elementName='Report 1' title='Latest orders' linkName='All_Orders'/>",
+  "<button action='OpenForm' componentLinkName='Add_Order' text='Add Order'/>",
+  "<dspZml elementName='ZML Snippet'><![CDATA[htmlpage x()\ncontent\n<%{ }%>]]></dspZml>",
+  "</column></row></layout></zml>",
+].join('');
+
+function source(zml: string = ZML): string {
+  return `application "Shop"
+{
+\tform Add_Order
+\t{
+\t\tdisplayname = "Add Order"
+\t\tOrder_No
+\t\t(
+\t\t\ttype = autonumber
+\t\t)
+\t\tStatus
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = {"Open","Cancelled"}
+\t\t)
+\t\tAmount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t\tOrder_Date
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t}
+\tlist All_Orders
+\t{
+\t\tdisplayname = "All Orders"
+\t\tshow all rows from Add_Order
+\t\t(
+\t\t\tOrder_No
+\t\t\tStatus
+\t\t\tAmount
+\t\t\tOrder_Date
+\t\t)
+\t}
+\tpivotchart Orders_Chart
+\t{
+\t\tdisplayname = "Amount By Status"
+\t\tbased on Autoview_1_Add_Order
+\t\tshow all rows from Add_Order
+\t\t(
+\t\t\tOrder_No
+\t\t\tStatus
+\t\t\tAmount
+\t\t)
+\t}
+\tpages
+\t{
+\t\tpage Dashboard
+\t\t{
+\t\t\tdisplayname = "Dashboard"
+\t\t\tContent="${zml.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+\t\t}
+\t}
+}
+`;
+}
+
+function appOf(zml: string = ZML): App {
+  return deriveIr(parse(source(zml)));
+}
+
+function leaves(elements: PageElement[]): PageElement[] {
+  return elements.flatMap((el) => (el.kind === 'box' ? leaves(el.children) : [el]));
+}
+
+const TODAY: Day = { y: 2026, m: 10, d: 10 };
+
+test('Creator criteria translate to browser filters; what does not translate is a listed TODO', () => {
+  assert.deepEqual(compileCriteria('Status != &quot;Cancelled&quot; &amp;&amp; Order_Date is today'), {
+    filter: [
+      { field: 'Status', op: 'ne', value: 'Cancelled' },
+      { field: 'Order_Date', op: 'period', when: 'this', unit: 'day' },
+    ],
+    todos: [],
+  });
+  assert.deepEqual(compileCriteria('Status == "A" || Status == "B"').filter, [
+    { op: 'any', of: [{ field: 'Status', op: 'eq', value: 'A' }, { field: 'Status', op: 'eq', value: 'B' }] },
+  ]);
+  assert.deepEqual(compileCriteria('Added_Time in last 7 days && In_Stock <= Reorder_Level').filter, [
+    { field: 'Added_Time', op: 'period', when: 'last', unit: 'day', count: 7 },
+    { field: 'In_Stock', op: 'le', ref: 'Reorder_Level' },
+  ]);
+  assert.deepEqual(compileCriteria('Due_Date < zoho.currentdate').filter, [{ field: 'Due_Date', op: 'lt', today: true }]);
+  // The signed-in user and form inputs are not known to the browser: the clause is a TODO, the rest applies.
+  assert.deepEqual(compileCriteria('Status == "Open" && Owner == zoho.loginuserid'), {
+    filter: [{ field: 'Status', op: 'eq', value: 'Open' }],
+    todos: ['filter not applied: Owner == zoho.loginuserid'],
+  });
+  // A disjunction with an untranslatable branch is not applied at all.
+  assert.deepEqual(compileCriteria('A == "x" || B == input.y'), { filter: [], todos: ['filter not applied: A == "x" || B == input.y'] });
+});
+
+test('metrics and chart series fold the filtered rows', () => {
+  const rows = [
+    { Status: 'Open', Amount: '120.50', Order_Date: '2026-10-10' },
+    { Status: 'Cancelled', Amount: 99, Order_Date: '10-Oct-2026' },
+    { Status: 'Open', Amount: '1,000', Order_Date: '2026-10-09 08:00:00' },
+    { Status: '', Amount: 'n/a', Order_Date: '' },
+  ];
+  const sum: MetricSpec = { report: 'All_Orders', fn: 'sum', field: 'Amount', filter: compileCriteria('Status != "Cancelled" && Order_Date is today').filter, todos: [] };
+  assert.equal(metricValue(rows, sum, TODAY), 120.5);
+  assert.equal(metricValue(rows, { ...sum, fn: 'count', field: 'ID', filter: [] }, TODAY), 4);
+  assert.equal(matches(rows[2]!, { field: 'Order_Date', op: 'period', when: 'this', unit: 'week' }, TODAY), true);
+  assert.equal(matches(rows[2]!, { field: 'Order_Date', op: 'period', when: 'last', unit: 'month' }, TODAY), false);
+  assert.equal(matches(rows[2]!, { field: 'Order_Date', op: 'lt', today: true }, TODAY), true);
+  assert.equal(matches(rows[0]!, { field: 'Order_Date', op: 'lt', today: true }, TODAY), false);
+
+  const chart: ChartSpec = { kind: 'donut', title: 'T', x: 'Status', xLabel: 'Status', measures: [{ fn: 'sum', field: 'Amount', label: 'Sum' }, { fn: 'count', field: 'Status', label: 'Count' }], filter: [], notes: [], todos: [] };
+  const series = chartSeries(rows, chart, TODAY);
+  assert.deepEqual(series.categories.map((c) => c.key), ['Open', 'Cancelled', '(blank)']);
+  assert.deepEqual(series.values, [[1120.5, 99, 0], [2, 1, 0]]);
+  // Dates group by calendar day and draw in date order.
+  const byDay = chartSeries(rows.slice(0, 3), { ...chart, kind: 'auto', x: 'Order_Date', measures: [{ fn: 'count', field: '', label: 'Records' }] }, TODAY);
+  assert.equal(byDay.dated, true);
+  assert.deepEqual(byDay.categories.map((c) => c.key), ['2026-10-09', '2026-10-10']);
+  assert.deepEqual(byDay.values, [[1, 2]]);
+});
+
+test('bucketsToSeries maps values by the measures the server kept, not position', () => {
+  const chart: ChartSpec = {
+    kind: 'bar',
+    title: 'T',
+    x: 'Status',
+    xLabel: 'Status',
+    measures: [
+      { fn: 'sum', field: 'Amount', label: 'Sum' },
+      { fn: 'sum', field: 'Secret', label: 'Secret' },
+      { fn: 'count', field: 'Status', label: 'Count' },
+    ],
+    filter: [],
+    notes: [],
+    todos: [],
+  };
+  // The server dropped the hidden Secret measure and says so in `measures`.
+  const series = bucketsToSeries(
+    {
+      buckets: [
+        { key: 'Open', values: [10, 3] },
+        { key: 'Shut', values: [4, 1] },
+      ],
+      measures: [
+        { fn: 'sum', field: 'Amount' },
+        { fn: 'count', field: 'Status' },
+      ],
+    },
+    chart,
+  );
+  assert.deepEqual(series.values, [[10, 4], [0, 0], [3, 1]], 'a dropped measure leaves zeros, never another measure’s values');
+  // Every measure dropped: the server's substitute count matches no requested
+  // measure, so nothing is drawn under a wrong label.
+  const allDropped = bucketsToSeries({ buckets: [{ key: 'Open', values: [5] }], measures: [{ fn: 'count', field: '' }] }, chart);
+  assert.deepEqual(allDropped.values, [[0], [0], [0]]);
+  // An endpoint that does not echo `measures` keeps the positional mapping.
+  const positional = bucketsToSeries({ buckets: [{ key: 'Open', values: [7, 8, 9] }] }, chart);
+  assert.deepEqual(positional.values, [[7], [8], [9]]);
+});
+
+test('a Creator page becomes a page spec: metric panels, charts, embeds, buttons, and every TODO listed', () => {
+  const spec = reactAppSpec(appOf());
+  const page = spec.pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  const metric = all.find((el) => el.kind === 'metric');
+  assert.ok(metric && metric.kind === 'metric');
+  assert.equal(metric.label, "Today's Sales");
+  assert.equal(metric.icon, 'business-money-coins');
+  assert.equal(metric.value.report, 'All_Orders');
+  assert.deepEqual(metric.value.filter.map((c) => ('field' in c ? c.field : c.op)), ['Status', 'Order_Date']);
+
+  // A panel of several caption/value pairs: one card per value, each labelled by its own caption.
+  const pairs = all.filter((el): el is Extract<PageElement, { kind: 'metric' }> => el.kind === 'metric' && el.value.fn === 'count');
+  assert.deepEqual(pairs.map((m) => [m.label, m.value.filter.length]), [['Open orders', 1], ['All orders', 0]]);
+  assert.deepEqual(
+    all.filter((el) => el.kind === 'text').map((el) => (el.kind === 'text' ? el.text : '')),
+    ['-'],
+    'every caption labels a value; the separator stays as text',
+  );
+
+  const charts = all.filter((el): el is Extract<PageElement, { kind: 'chart' }> => el.kind === 'chart');
+  assert.deepEqual(charts.map((c) => [c.chart.title, c.chart.kind, c.chart.report]), [
+    ['Orders By Status', 'donut', 'All_Orders'],
+    ['Amount By Status', 'auto', 'Orders_Chart'],
+  ]);
+  assert.deepEqual(charts[0]!.chart.measures, [{ fn: 'count', field: 'Order_No', label: 'Count of Order No' }]);
+  // The pivotchart keeps no settings in the export: Status (named in the title) by the summed Amount, and it says so.
+  assert.equal(charts[1]!.chart.x, 'Status');
+  assert.deepEqual(charts[1]!.chart.measures, [{ fn: 'sum', field: 'Amount', label: 'Sum of Amount' }]);
+  assert.match(charts[1]!.chart.notes[0]!, /keeps no chart settings: drawn as the sum of Amount by Status/);
+  assert.equal(spec.reports.Orders_Chart?.chart?.x, 'Status');
+
+  assert.ok(all.some((el) => el.kind === 'report' && el.report === 'All_Orders' && el.label === 'Latest orders'));
+  assert.ok(all.some((el) => el.kind === 'button' && el.href === '#/form/Add_Order' && el.label === 'Add Order'));
+  assert.deepEqual(page.todos, [
+    'chart "Orders By Status": filter not applied: Owner == zoho.loginuserid',
+    '<dspZml>: the HTML snippet is built by a server-side script; it is not generated yet',
+  ]);
+});
+
+test('generated page and chart report modules render the page and the chart, not a placeholder', () => {
+  const files = generateReactApp(appOf());
+  const text = (path: string) => String(files.find((f) => f.path === path)?.data ?? '');
+  const page = text('src/generated/pages/Dashboard.tsx');
+  assert.match(page, /<PageView page=\{page\} \/>/);
+  assert.doesNotMatch(page, /not generated yet/);
+  const chart = text('src/generated/reports/Orders_Chart.tsx');
+  assert.match(chart, /<ChartReport report=\{report\} \/>/);
+  assert.doesNotMatch(chart, /className="todo"/);
+  for (const name of ['metric-card', 'animated-counter', 'bar-chart', 'line-chart', 'donut-chart']) {
+    assert.ok(existsSync(join(TEMPLATE_DIR, `lib/c2c-ui/arc/components/${name}/${name}.tsx`)), name);
+    assert.match(readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/ARC-UPSTREAM.md'), 'utf8'), new RegExp(`\`${name}\``), `${name} listed in ARC-UPSTREAM.md`);
+  }
+});
+
+const modules = join(TEMPLATE_DIR, 'node_modules');
+const haveBuild = existsSync(join(modules, '.bin', 'vite'));
+
+test('the built app draws the dashboard from the report rows', { skip: haveBuild ? false : 'template dependencies are not installed (npm ci --prefix packages/ui-react/template)' }, async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-r5-'));
+  try {
+    writeReactApp(out, generateReactApp(appOf(), { auth: false }));
+    symlinkSync(modules, join(out, 'node_modules'), 'dir');
+    const build = spawnSync(join(modules, '.bin', 'vite'), ['build', '--logLevel', 'error'], { cwd: out, encoding: 'utf8' });
+    assert.equal(build.status, 0, `${build.stdout}${build.stderr}`);
+    const require = createRequire(import.meta.url);
+    const { JSDOM } = require('jsdom') as { JSDOM: new (html: string, opts: object) => { window: Window & typeof globalThis } };
+    const html = readFileSync(join(out, 'dist/index.html'), 'utf8').replace(/<script[^>]*src="[^"]*"[^>]*><\/script>/g, '');
+    const dom = new JSDOM(html, { url: 'https://app.example/#/page/Dashboard', pretendToBeVisual: true });
+    const day = (offset: number) => {
+      const d = new Date(Date.now() + offset * 86400000);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const rows = [
+      { ROWID: '1', Order_No: '1', Status: 'Open', Amount: '120.50', Order_Date: day(0) },
+      { ROWID: '2', Order_No: '2', Status: 'Cancelled', Amount: '99', Order_Date: day(0) },
+      { ROWID: '3', Order_No: '3', Status: 'Open', Amount: '10', Order_Date: day(-40) },
+    ];
+    const calls: string[] = [];
+    (dom.window as unknown as { fetch: unknown }).fetch = async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { op?: string; page?: number; group?: string; measures?: { fn: string; field: string }[] };
+      calls.push(`${url} ${body.op === 'aggregate' ? 'aggregate' : body.page}`);
+      if (body.op === 'aggregate') {
+        // The same fold the report endpoint does: group, then count/sum per bucket.
+        const groups = new Map<string, { key: string; values: number[] }>();
+        for (const row of rows as Record<string, unknown>[]) {
+          const key = String(row[body.group ?? ''] ?? '');
+          const bucket = groups.get(key) ?? { key, values: (body.measures ?? []).map(() => 0) };
+          for (const [i, m] of (body.measures ?? []).entries()) bucket.values[i]! += m.fn === 'count' ? 1 : Number(row[m.field]) || 0;
+          groups.set(key, bucket);
+        }
+        return new Response(JSON.stringify({ op: 'aggregate', buckets: [...groups.values()], scanned: rows.length, truncated: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ rows }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const runtime = readdirSync(join(out, 'dist/assets')).find((name) => name.startsWith('runtime.'))!;
+    const mod = (await import(pathToFileURL(join(out, 'dist/assets', runtime)).href)) as { boot: (spec: undefined, doc: Document) => void };
+    mod.boot(undefined, dom.window.document);
+    const doc = dom.window.document;
+    for (let i = 0; i < 100 && doc.querySelectorAll('[data-state="loading"]').length; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    const page = doc.querySelector('[data-page="Dashboard"]');
+    assert.ok(page, 'the page renders');
+    assert.equal(page.querySelector('h1')?.textContent, 'Dashboard');
+    assert.equal(doc.querySelectorAll('[data-state="loading"]').length, 0);
+    assert.equal(doc.querySelectorAll('[data-state="error"]').length, 0);
+    // Today's open orders only: 120.50, not the cancelled one or last month's.
+    assert.equal(page.querySelector('[data-metric="sum"]')?.getAttribute('data-value'), '120.5');
+    assert.match(page.querySelector('[data-metric="sum"]')?.textContent ?? '', /Today's Sales/);
+    assert.equal(page.querySelectorAll('.c2c-chart figure').length, 2, 'the donut and the chart report draw');
+    assert.equal(page.querySelector('[data-todo-count]'), null, 'page TODOs are not drawn for end users');
+    assert.doesNotMatch(page.textContent ?? '', /not generated|ZML/);
+    assert.ok(page.querySelector('[data-embed="report"] [data-report="All_Orders"]'), 'the report embed shows the records');
+    assert.equal(page.querySelector('a.c2c-page-button')?.getAttribute('href'), '#/form/Add_Order');
+    // The metric and the embedded list read All_Orders rows; the donut and the
+    // chart report fold server-side through the aggregate op instead.
+    assert.equal(calls.filter((call) => call === '/reports/All_Orders 0').length, 2);
+    assert.equal(calls.filter((call) => call === '/reports/All_Orders aggregate').length, 1);
+    assert.equal(calls.filter((call) => call === '/reports/Orders_Chart aggregate').length, 1);
+    assert.equal(calls.filter((call) => call === '/reports/Orders_Chart 0').length, 0);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+// --- Review nits: one-caption extras, reportless metrics, panel order, popups ---
+
+const NIT_ZML = [
+  "<zml><layout><row><column width='100%'><panel elementName='PanelA'><pr><pc>",
+  "<text type='Text' value='Sales'></text>",
+  "<text type='Form Data' value='thisapp.Sales.Amount.sum'></text>",
+  "<text type='Form Data' value='thisapp.Sales.Amount.count'></text>",
+  "</pc></pr></panel>",
+  "<panel elementName='PanelB'><pr><pc>",
+  "<text type='Text' value='Lonely metric'></text>",
+  "<text type='Form Data' value='thisapp.Lonely.Amount.sum'></text>",
+  "</pc></pr></panel>",
+  "<panel elementName='PanelC'><pr><pc>",
+  "<text type='Text' value='Open sales'></text>",
+  "<text type='Form Data' value='thisapp.Sales.Amount.sum' criteria='Amount &gt; 10'></text>",
+  "<text type='Text' value='-'></text>",
+  "<text type='Text' value='All sales'></text>",
+  "<text type='Form Data' value='thisapp.Sales.Amount.count'></text>",
+  "<text type='Text' value='Trailing note'></text>",
+  "</pc></pr></panel>",
+  "<dsp elementName='Snippet'><![CDATA[firm = Add_Firm[ID != 0]; if(firm.count() == 0) { openUrl(&quot;#Form:Add_Firm&quot;,&quot;popup window&quot;); } openUrl(&quot;#Report:Sales_List&quot;,&quot;popup window&quot;);]]></dsp>",
+  "</column></row></layout></zml>",
+].join('');
+
+function nitApp(zml = NIT_ZML): App {
+  return deriveIr(parse(`application "Shop"
+{
+\tform Sales
+\t{
+\t\tdisplayname = "Sales"
+\t\tAmount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tform Lonely
+\t{
+\t\tdisplayname = "Lonely"
+\t\tAmount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tlist Sales_List
+\t{
+\t\tdisplayname = "Sales List"
+\t\tshow all rows from Sales
+\t\t(
+\t\t\tAmount
+\t\t)
+\t}
+\tpages
+\t{
+\t\tpage Dashboard
+\t\t{
+\t\t\tdisplayname = "Dashboard"
+\t\t\tContent="${zml.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+\t\t}
+\t}
+}
+`));
+}
+
+function panelsOf(page: { elements: PageElement[] }): Extract<PageElement, { kind: 'box' }>[] {
+  const out: Extract<PageElement, { kind: 'box' }>[] = [];
+  const walk = (el: PageElement) => {
+    if (el.kind !== 'box') return;
+    if (el.tag === 'panel') out.push(el);
+    el.children.forEach(walk);
+  };
+  page.elements.forEach(walk);
+  return out;
+}
+
+test('a metric with no report to read is a visible TODO, never a 0', () => {
+  const page = reactAppSpec(nitApp()).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  assert.ok(!all.some((el) => el.kind === 'metric' && !el.value.report), 'no metric card reads from nothing');
+  assert.ok(
+    all.some((el) => el.kind === 'todo' && /no report to read/.test(el.reason)),
+    'the reportless metric is a visible TODO where it stood',
+  );
+  assert.ok(page.todos.some((todo) => /no report to read/.test(todo)), 'the missing source is listed with the page TODOs');
+});
+
+test('metricPanel keeps Creator order: unclaimed captions stay in place, separators kept', () => {
+  const page = reactAppSpec(nitApp()).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const panel = panelsOf(page).find((box) => JSON.stringify(box).includes('Trailing note'));
+  assert.ok(panel, 'the pairs panel is in the spec');
+  const shape = panel.children.map((el) => (el.kind === 'box' ? 'box' : el.kind === 'text' ? `text:${el.text}` : el.kind));
+  assert.deepEqual(shape, ['box', 'text:-', 'text:Trailing note'], 'the grid sits where the first value stood; the rest stays in place');
+  const grid = panel.children[0]!;
+  assert.ok(grid.kind === 'box' && grid.tag === 'metrics');
+  assert.deepEqual(
+    grid.children.map((el) => (el.kind === 'metric' ? el.label : el.kind)),
+    ['Open sales', 'All sales'],
+    'each card keeps the caption beside its own value',
+  );
+});
+
+test('a snippet popup keeps its trigger words: a link plus a TODO, never a silent link', () => {
+  const page = reactAppSpec(nitApp()).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  const snippet = all.find((el): el is Extract<PageElement, { kind: 'html' }> => el.kind === 'html');
+  assert.ok(snippet, 'the snippet is in the spec');
+  assert.deepEqual(snippet.links.map((link) => link.label), ['Open Add Firm', 'Open Sales List']);
+  const reasons = all.filter((el) => el.kind === 'todo').map((el) => (el.kind === 'todo' ? el.reason : ''));
+  assert.ok(reasons.some((reason) => /Add Firm.*opened on its own.*no records/.test(reason)), 'the guarded popup names its empty-form trigger');
+  assert.ok(reasons.some((reason) => /Sales List.*opened on its own/.test(reason)), 'the unguarded popup names its lost auto-open');
+  assert.ok(page.todos.some((todo) => /opened on its own/.test(todo)), 'the lost triggers are listed with the page TODOs');
+});
+
+test('a <% tag mixed into literal markup keeps its surrounding HTML and still flags the lost script', () => {
+  const app = deriveIr(parse(`application "Shop"
+{
+\tpage Dashboard
+\t{
+\t\tContent="<zml><layout><row><column width='100%'><dsp elementName='Snippet'><![CDATA[<b>Welcome</b><% response.write(&quot;dynamic&quot;); %><i>Thanks</i>]]></dsp></column></row></layout></zml>"
+\t}
+}`));
+  const page = reactAppSpec(app).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  const snippet = all.find((el): el is Extract<PageElement, { kind: 'html' }> => el.kind === 'html');
+  assert.ok(snippet, 'the snippet is in the spec');
+  assert.equal(snippet.html, '<b>Welcome</b><i>Thanks</i>');
+  assert.ok(
+    page.todos.some((todo) => /the HTML snippet is built by a server-side script/.test(todo)),
+    'the dropped script still gets a TODO even though its literal markup rendered',
+  );
+});
+
+test('the React page spec lists distinct dropped snippet tags and carries safe page CSS', () => {
+  const zml = `<zml><dsp id='snippet'><![CDATA[<script>bad()</script><svg><script>nested()</script></svg><style>.x{}</style><template><b>hidden</b></template>]]></dsp></zml>`;
+  const page = reactAppSpec(nitApp(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  assert.deepEqual(page.todos, [
+    '<dsp>: The <script> element is removed from this page snippet by the sanitizer',
+    '<dsp>: The <svg> element is removed from this page snippet by the sanitizer',
+    '<dsp>: The <template> element is removed from this page snippet by the sanitizer',
+  ]);
+  assert.match(page.scopedCss ?? '', /\[data-page="Dashboard"\] \.x\{\}/);
+});
+
+test('React and vanilla carry the same safe static style rules', () => {
+  const zml = `<zml><dsp id='snippet'><![CDATA[<style>.x{color:red}</style><p>Kept</p>]]></dsp></zml>`;
+  const app = nitApp(zml);
+  const reactPage = reactAppSpec(app).pages?.Dashboard;
+  const vanilla = generateUi(app).model.pages[0]?.scopedCss;
+  assert.match(reactPage?.scopedCss ?? '', /\[data-page="Dashboard"\] \.x\{color:red\}/);
+  assert.equal(reactPage?.scopedCss, vanilla);
+});
+
+test('React retains identical ExecuteFunction button sites separately', () => {
+  const button = `<button action='ExecuteFunction' functionName='save' elementName='Save'>`;
+  const zml = `<zml><dsp id='snippet'><![CDATA[${button}${button}]]></dsp></zml>`;
+  const page = reactAppSpec(nitApp(zml)).pages?.Dashboard;
+  assert.ok(page);
+  const todos = leaves(page.elements).filter((element): element is Extract<PageElement, { kind: 'todo' }> => element.kind === 'todo' && element.reason.includes('ExecuteFunction'));
+  assert.equal(todos.length, 2);
+  assert.deepEqual(todos.map((todo) => todo.siteId), ['button-0', `button-${button.length}`]);
+});
+
+test('the React page spec keeps one TODO when a server-side snippet fails to compile', () => {
+  const source = `htmlpage hp1()\ncontent\n<script>bad()</script>\n<%\nrow = insert into Orders [ Status : "open" ];\n%>`;
+  const zml = `<zml><dsp id='snippet'><![CDATA[${source}]]></dsp></zml>`;
+  const page = reactAppSpec(nitApp(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  assert.equal(page.todos.length, 1, JSON.stringify(page.todos));
+  assert.match(page.todos[0]!, /server-side script; it is not generated yet/);
+});
+
+
+test('further values of a one-caption panel carry their own labels', () => {
+  const page = reactAppSpec(nitApp()).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const panel = panelsOf(page).find((box) => box.children.some((el) => el.kind === 'metric' && el.label === 'Sales'));
+  assert.ok(panel, 'the one-caption panel is in the spec');
+  const metric = panel.children.find((el) => el.kind === 'metric');
+  assert.ok(metric && metric.kind === 'metric');
+  assert.equal(metric.extra.length, 1);
+  const second = metric.extra[0] as MetricSpec & { label?: string };
+  assert.equal(second.label, 'Count of records', 'the second value explains itself');
+});
+
+test('a page button or embed runs only an in-app route or an http(s) address; anything else is a TODO', () => {
+  const zml = [
+    "<zml><layout><row><column width='100%'>",
+    "<button text='Pay' url='javascript:alert(document.cookie)'/>",
+    "<button text='Help' url='https://help.example.test/orders'/>",
+    "<button action='OpenForm' componentLinkName='No_Such_Form' text='Ghost'/>",
+    "<embed title='Map' url='javascript:alert(1)'/>",
+    "<embed title='Docs' url='https://docs.example.test/'/>",
+    "<report elementName='Gone' linkName='No_Such_Report'/>",
+    "</column></row></layout></zml>",
+  ].join('');
+  const page = reactAppSpec(appOf(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  const hrefs = all.flatMap((el) => ('href' in el && typeof el.href === 'string' ? [el.href] : []));
+  assert.ok(hrefs.every((href) => !/^javascript:/i.test(href)), `no script address is drawn: ${hrefs.join(', ')}`);
+  assert.ok(all.some((el) => el.kind === 'button' && el.label === 'Help' && el.href === 'https://help.example.test/orders'));
+  const reasons = all.flatMap((el) => (el.kind === 'todo' ? [el.reason] : []));
+  assert.ok(reasons.includes('the Pay button has no action the app can run'), reasons.join(' | '));
+  assert.ok(reasons.includes('the Ghost button has no action the app can run'), 'a button to a form outside the app is a TODO');
+  assert.ok(reasons.includes('the No_Such_Report report is not part of the app'));
+  assert.ok(!all.some((el) => el.kind === 'link' && /^javascript:/i.test(el.href)), 'a script embed is never a link');
+});
+
+test('a free-text # href is a route only to a form or report the app has', () => {
+  const zml = [
+    "<zml><layout><row><column width='100%'>",
+    "<button text='Hash' url='#javascript:alert(1)'/>",
+    "<button text='Slash' url='#//evil.com'/>",
+    "<button text='Stray' url='#/form/No_Such_Form'/>",
+    "<button action='Form' componentLinkName='Add_Order' text='New'/>",
+    "<embed title='Frag' url='#c2c_auth=tok'/>",
+    "</column></row></layout></zml>",
+  ].join('');
+  const page = reactAppSpec(appOf(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  const hrefs = all.flatMap((el) => ('href' in el && typeof el.href === 'string' ? [el.href] : []));
+  assert.deepEqual(hrefs, ['#/form/Add_Order'], `only the generated route to an app form survives: ${hrefs.join(', ')}`);
+  const reasons = all.flatMap((el) => (el.kind === 'todo' ? [el.reason] : []));
+  for (const label of ['Hash', 'Slash', 'Stray']) assert.ok(reasons.includes(`the ${label} button has no action the app can run`), reasons.join(' | '));
+  assert.ok(reasons.includes('the embed has no web address'));
+});
+
+test('entity decoding keeps an out-of-range or zero code point as written', () => {
+  assert.equal(decodeEntities('&#65;&#x42;&lt;&AMP;'), 'AB<&');
+  assert.equal(decodeEntities('&#0;&#x110000;&bogus;'), '&#0;&#x110000;&bogus;');
+});
+
+test('chart data reads lookup paths, display values and the app time zone', () => {
+  const row = { Customer: { display_value: 'Acme', Region: 'North' }, Tags: ['a', { label: 'b' }], Flag: true, Note: { x: 'one', y: 2 } };
+  assert.equal(valueAt(row, 'Customer.Region'), 'North');
+  assert.deepEqual(valueAt(row, 'Customer.Missing'), row.Customer, 'a lookup without the sub-field falls back to the lookup');
+  assert.equal(valueAt(row, 'Missing'), undefined);
+  assert.equal(valueAt(row, ''), undefined);
+  assert.equal(textOf(row.Customer), 'Acme');
+  assert.equal(textOf(row.Tags), 'a, b');
+  assert.equal(textOf(row.Flag), 'true');
+  assert.equal(textOf(row.Note), 'one 2');
+  assert.equal(dayOf('31-Foo-2026'), null, 'an unknown month name is no day');
+  assert.equal(dayOf('2026-13-01'), null, 'month 13 is no day');
+  const now = new Date(Date.UTC(2026, 9, 10, 23, 30));
+  assert.deepEqual(todayIn('Asia/Kolkata', now), { y: 2026, m: 10, d: 11 });
+  const local = { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+  assert.deepEqual(todayIn('Not/AZone', now), local, 'an unknown zone falls back to the browser day');
+  assert.deepEqual(todayIn(undefined, now), local);
+});
+
+test('a field-to-field clause compares numbers, then dates, then text', () => {
+  const today = TODAY;
+  assert.equal(matches({ A: '1,000', B: 999 }, { field: 'A', op: 'gt', ref: 'B' }, today), true);
+  assert.equal(matches({ A: '10-Oct-2026', B: '2026-10-09' }, { field: 'A', op: 'gt', ref: 'B' }, today), true, 'dates compare by day, not text');
+  assert.equal(matches({ A: 'pear', B: 'apple' }, { field: 'A', op: 'gt', ref: 'B' }, today), true);
+  assert.equal(matches({ A: 'pear', B: 'pear' }, { field: 'A', op: 'ne', ref: 'B' }, today), false);
+  assert.equal(matches({ D: '2026-01-05' }, { field: 'D', op: 'period', when: 'this', unit: 'year' }, today), true);
+  assert.equal(matches({ D: '2025-01-05' }, { field: 'D', op: 'period', when: 'last', unit: 'year' }, today), true);
+  assert.equal(matches({ D: 'soon' }, { field: 'D', op: 'period', when: 'this', unit: 'year' }, today), false);
+});
+
+const UNFILTERED_TIMELINE_ZML = [
+  "<zml><layout><row><column width='100%'><panel elementName='Panel'><pr><pc>",
+  "<text type='Form Data' value='thisapp.Visit.Priority.count'></text>",
+  "<text type='Text' value='Total Visits'></text>",
+  "</pc></pr></panel></column></row></layout></zml>",
+].join('');
+
+function visitApp(zml = UNFILTERED_TIMELINE_ZML): App {
+  return deriveIr(parse(`application "Desk"
+{
+\tform Visit
+\t{
+\t\tdisplayname = "Visit"
+\t\tStatus
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = {"Open","Closed"}
+\t\t)
+\t\tPriority
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t\tCreated_On
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t}
+\treports
+\t{
+\t\ttimeline All_Visits_Timeline
+\t\t{
+\t\t\tdisplayName = "All Visits Timeline"
+\t\t\tshow all rows from Visit
+\t\t\t(
+\t\t\t\tStatus
+\t\t\t\tPriority
+\t\t\t)
+\t\t\toptions
+\t\t\t(
+\t\t\t\tstart date = Created_On
+\t\t\t)
+\t\t}
+\t\tlist Closed_Visits
+\t\t{
+\t\t\tdisplayname = "Closed Visits"
+\t\t\tshow all rows from Visit  [Status == "Closed"]
+\t\t\t(
+\t\t\t\tStatus
+\t\t\t\tPriority
+\t\t\t)
+\t\t}
+\t}
+\tpages
+\t{
+\t\tpage Dashboard
+\t\t{
+\t\t\tdisplayname = "Dashboard"
+\t\t\tContent="${zml.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+\t\t}
+\t}
+}
+`));
+}
+
+test('a dashboard metric with no named report reads the unfiltered report, not a filtered list view', () => {
+  // Conference Room Booking: every Booking_Form dashboard metric and chart
+  // picked up "History" (a filtered `list` report) as its data source purely
+  // because it was the only `list`-view report on the form, even though the
+  // unfiltered `Booking_Schedule_In_Timeline` report also reads the form.
+  // The generated dashboard numbers were then scoped by History's own filter
+  // (Status == "Checked Out" || ...) on top of the metric's own criteria,
+  // which a customer would see as a wrong (often zero) count.
+  const page = reactAppSpec(visitApp()).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const metric = leaves(page.elements).find((el): el is Extract<PageElement, { kind: 'metric' }> => el.kind === 'metric');
+  assert.ok(metric, 'the metric card is in the spec');
+  assert.equal(metric.value.report, 'All_Visits_Timeline', 'the unfiltered report wins over a filtered list view');
+  assert.deepEqual(page.todos, [], 'no "applies its own filter" TODO when the chosen report has no filter of its own');
+});
+
+test('a failed aggregate is an error state; only a missing op falls back to the row read', () => {
+  // The React reader throws on a refused group field or a server error, so the
+  // chart shows its error state instead of an empty drawing. It falls back to
+  // the row query only when the endpoint has no aggregate op at all (a 2xx
+  // without buckets, or a static host's 404/405/501).
+  assert.equal(aggregateFallback({ ok: false, status: 400 }), false, 'a refused group field is an error, not empty data');
+  assert.equal(aggregateFallback({ ok: false, status: 500 }), false, 'a server error is an error state');
+  assert.equal(aggregateFallback({ ok: false, status: 403 }), false);
+  for (const status of [404, 405, 501]) assert.equal(aggregateFallback({ ok: false, status }), true);
+  assert.equal(aggregateFallback({ ok: true, status: 200 }), true, 'a 2xx without buckets means an endpoint without the op');
+});

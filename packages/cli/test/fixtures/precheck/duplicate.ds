@@ -1,0 +1,36 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Duplicate"
+{
+	forms
+	{
+		form Item
+		{
+			Title_A
+			(
+				type = text
+				displayname = "Title"
+			)
+			Title_B
+			(
+				type = text
+				displayname = "Title"
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Title_A as "Title A"
+				Title_B as "Title B"
+			)
+		}
+	}
+}

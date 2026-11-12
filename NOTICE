@@ -1,0 +1,18 @@
+creator-to-catalyst
+Copyright (c) Sam Ellis. Licensed under the MIT License (see LICENSE).
+
+This repository includes third-party test fixtures under fixtures/redistributable/.
+They are NOT covered by the MIT License; each keeps its original license, a copy
+of which sits next to the file. They are used unmodified, as parser test input only.
+
+1. fixtures/redistributable/library-application-system/library_application.ds
+   Source:  https://github.com/Naveenk069/Library_Application_System (library_application.ds)
+   Author:  Naveenk069
+   License: GNU Lesser General Public License v2.1
+            (fixtures/redistributable/library-application-system/LICENSE)
+
+2. fixtures/redistributable/freight-forwarding/Creator_app_source_code.ds
+   Source:  https://github.com/MdAshifMallick/Repo_Public (Zoho/Creator_app_source_code.ds)
+   Author:  MdAshifMallick
+   License: Apache License 2.0
+            (fixtures/redistributable/freight-forwarding/LICENSE)

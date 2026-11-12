@@ -1,0 +1,121 @@
+/*
+ * Author       : synthetic
+ * Generated on : 13-Oct-2026 09:00:00
+ * Version      : 1.0
+ */
+application "Archive_Intake_Gaps"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+
+	forms
+	{
+		form Artifact_Intake
+		{
+			displayname = "Artifact Intake"
+			Intake_Title
+			(
+				type = text
+				displayname = "Intake title"
+				maxchar = 120
+			)
+			External_Record
+			(
+				type = integration
+				displayname = "External record"
+			)
+			Forecast
+			(
+				type = prediction
+				displayname = "Forecast"
+				AI_Properties
+				(
+					fieldtype = Prediction
+				)
+			)
+			Extracted_Terms
+			(
+				type = keyword
+				displayname = "Extracted terms"
+				AI_Properties
+				(
+					fieldtype = KeywordExtraction
+				)
+			)
+			Tone_Result
+			(
+				type = sentiment
+				displayname = "Tone result"
+				AI_Properties
+				(
+					fieldtype = SentimentAnalysis
+				)
+			)
+			Text_From_Image
+			(
+				type = ocr
+				displayname = "Text from image"
+				AI_Properties
+				(
+					fieldtype = OCR
+				)
+			)
+			Detected_Objects
+			(
+				type = object-detection
+				displayname = "Detected objects"
+				AI_Properties
+				(
+					fieldtype = ObjectDetection
+				)
+			)
+			Shelf_Code
+			(
+				type = qrcode
+				displayname = "Shelf code"
+			)
+			Site_Location
+			(
+				type = geolocation
+				displayname = "Site location"
+			)
+			Old_Crm_Reference
+			(
+				type = crm
+				displayname = "Old CRM reference"
+			)
+			Old_Crm_Record
+			(
+				type = "crm link"
+				displayname = "Old CRM record"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Artifact_Intake_Validate as "Artifact intake validation"
+			{
+				type = form
+				form = Artifact_Intake
+				on validate
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(input.Intake_Title == "")
+							{
+								alert "Enter an intake title.";
+								cancel submit;
+							}
+						)
+					}
+				}
+			}
+		}
+	}
+}

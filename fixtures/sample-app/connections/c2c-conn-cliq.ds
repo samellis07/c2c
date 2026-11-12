@@ -1,0 +1,209 @@
+application "c2c-conn-cliq"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Cliq_Post
+		{
+			displayname = "Conn Cliq Post"
+			must have Cliq_Target
+			(
+				type = picklist
+				displayname = "Target"
+				values = {"channel"}
+				row = 1
+				column = 1
+				width = medium
+			)
+			must have Cliq_Text
+			(
+				type = text
+				displayname = "Message"
+				row = 2
+				column = 1
+				width = medium
+			)
+			Cliq_Response
+			(
+				type = textarea
+				displayname = "Cliq response"
+				row = 3
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Cliq_Posts
+		{
+			displayName = "All Conn Cliq Posts"
+			show all rows from Conn_Cliq_Post
+			(
+				Cliq_Target as "Target"
+				Cliq_Text as "Message"
+				Cliq_Response as "Cliq response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Cliq_Post_Check as "Conn Cliq Post Check"
+			{
+				type = form
+				form = Conn_Cliq_Post
+				record event = on add or edit
+				on validate
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(input.Cliq_Target == "channel")
+							{
+								if(thisapp.c2c_cliq_channel() == "FILL_CLIQ_CHANNEL_UNIQUE_NAME")
+								{
+									alert "Set c2c_cliq_channel to your Cliq channel unique name first.";
+									cancel submit;
+								}
+							}
+						)
+					}
+				}
+			}
+			Conn_Cliq_Post_Send as "Conn Cliq Post Send"
+			{
+				type = form
+				form = Conn_Cliq_Post
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							msg = "c2c synthetic: " + input.Cliq_Text;
+							if(input.Cliq_Target == "channel")
+							{
+								sent = zoho.cliq.postToChannel(thisapp.c2c_cliq_channel(), msg, "c2c_cliq");
+								input.Cliq_Response = sent.toString();
+							}
+							success message "c2c-cliq-posted";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	functions
+	{
+		Deluge
+		{
+			string c2c_cliq_channel()
+			{
+				return "FILL_CLIQ_CHANNEL_UNIQUE_NAME";
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Cliq_Post}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Cliq_Post
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Cliq_Post
+				{
+					displayname = "c2c-conn-cliq"
+					icon = "design-todo"
+					form Conn_Cliq_Post
+					{
+					}
+					report All_Conn_Cliq_Posts
+					{
+					}
+				}
+			}
+		}
+	}
+}

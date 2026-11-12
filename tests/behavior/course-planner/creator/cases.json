@@ -1,0 +1,141 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Course Planner",
+  "source": {
+    "file": "Course_Planner.ds",
+    "origin": "Creator gallery app course-planner, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-course-categories",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Course_Categories",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-course-category-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Course_Category",
+          "record": {
+            "Category_Name": "Category_Name alpha 601"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "New Category Added Successfully!"
+          },
+          "bind": {
+            "r_add_course_category_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Course_Category": [
+            {
+              "Category_Name": "Category_Name alpha 601"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-course-category-invalid-duplicate-category-name",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Course_Category",
+          "record": {
+            "Category_Name": "Category_Name alpha 601"
+          },
+          "bind": {
+            "r_add_course_category_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Course_Category",
+          "record": {
+            "Category_Name": "Category_Name alpha 601"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Category_Name": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Course_Category": [
+            {
+              "Category_Name": "Category_Name alpha 601"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-course-categories",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Course_Category",
+          "record": {
+            "Category_Name": "Category_Name alpha 601"
+          },
+          "bind": {
+            "r_add_course_category_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Course_Categories",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Course_Category": [
+            {
+              "Category_Name": "Category_Name alpha 601"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

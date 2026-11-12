@@ -1,0 +1,241 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Facilities Management",
+  "source": {
+    "file": "Facilities_Management.ds",
+    "origin": "Creator gallery app facilities-management, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-all-employees",
+      "steps": [
+        {
+          "op": "report",
+          "report": "All_Employees",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-employee-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Employee_Name": {
+              "first_name": "Grain",
+              "last_name": "Sable"
+            },
+            "Contact_Number": "+1555019816",
+            "Contact_Email": "contact-email.681@example.com",
+            "Gender": "Male",
+            "Marital_Status": "Married",
+            "Contact_Address": {
+              "address_line_1": "766 Maple Way",
+              "district_city": "North",
+              "state_province": "Onyx",
+              "postal_Code": "59610",
+              "country": "United States"
+            },
+            "Give_Access_To_Application": true
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Create / Edit - On Success script User Limit Reached Line:(4)"
+            ],
+            "message": "Employee Added Successfully"
+          },
+          "bind": {
+            "r_add_employee_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Employee": [
+            {
+              "Contact_Email": "contact-email.681@example.com",
+              "Marital_Status": "Married",
+              "Contact_Address_address_line_1": "766 Maple Way",
+              "Contact_Address_district_city": "North",
+              "Contact_Address_state_province": "Onyx",
+              "Contact_Address_postal_Code": "59610",
+              "Contact_Address_country": "United States",
+              "Give_Access_To_Application": "true",
+              "Employee_Name_first_name": "Grain",
+              "Employee_Name_last_name": "Sable",
+              "Contact_Number": "+1555019816",
+              "Gender": "Male"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "add-employee-invalid-duplicate-contact-number",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Employee_Name": {
+              "first_name": "Grain",
+              "last_name": "Sable"
+            },
+            "Contact_Number": "+1555019816",
+            "Contact_Email": "contact-email.681@example.com",
+            "Gender": "Male",
+            "Marital_Status": "Married",
+            "Contact_Address": {
+              "address_line_1": "766 Maple Way",
+              "district_city": "North",
+              "state_province": "Onyx",
+              "postal_Code": "59610",
+              "country": "United States"
+            },
+            "Give_Access_To_Application": true
+          },
+          "bind": {
+            "r_add_employee_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Employee_Name": {
+              "first_name": "Harbor",
+              "last_name": "Bravo"
+            },
+            "Contact_Number": "+1555019816",
+            "Contact_Email": "contact-email.232@example.com",
+            "Gender": "Male",
+            "Marital_Status": "Married",
+            "Contact_Address": {
+              "address_line_1": "583 Alpha Way",
+              "district_city": "Grain",
+              "state_province": "Lumen",
+              "postal_Code": "30095",
+              "country": "United States"
+            },
+            "Give_Access_To_Application": true
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Contact_Number": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Employee": [
+            {
+              "Contact_Email": "contact-email.681@example.com",
+              "Marital_Status": "Married",
+              "Contact_Address_address_line_1": "766 Maple Way",
+              "Contact_Address_district_city": "North",
+              "Contact_Address_state_province": "Onyx",
+              "Contact_Address_postal_Code": "59610",
+              "Contact_Address_country": "United States",
+              "Give_Access_To_Application": "true",
+              "Employee_Name_first_name": "Grain",
+              "Employee_Name_last_name": "Sable",
+              "Contact_Number": "+1555019816",
+              "Gender": "Male"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-all-employees",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Employee_Name": {
+              "first_name": "Grain",
+              "last_name": "Sable"
+            },
+            "Contact_Number": "+1555019816",
+            "Contact_Email": "contact-email.681@example.com",
+            "Gender": "Male",
+            "Marital_Status": "Married",
+            "Contact_Address": {
+              "address_line_1": "766 Maple Way",
+              "district_city": "North",
+              "state_province": "Onyx",
+              "postal_Code": "59610",
+              "country": "United States"
+            },
+            "Give_Access_To_Application": true
+          },
+          "bind": {
+            "r_add_employee_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Employees",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Employee": [
+            {
+              "Contact_Email": "contact-email.681@example.com",
+              "Contact_Address_country": "United States",
+              "Contact_Address_district_city": "North",
+              "Contact_Address_address_line_1": "766 Maple Way",
+              "Contact_Address_state_province": "Onyx",
+              "Contact_Address_postal_Code": "59610",
+              "Employee_Name_last_name": "Sable",
+              "Employee_Name_first_name": "Grain",
+              "Contact_Number": "+1555019816",
+              "Gender": "Male"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

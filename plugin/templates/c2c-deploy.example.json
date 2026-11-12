@@ -1,0 +1,11 @@
+{
+  "$comment": "Customer-owned config. Supplements the --dc/--org/--project flags; no registry is bundled. Field names follow c2c-deploy.json (dc or zohoDc). No secrets here.",
+  "dc": "<dc>",
+  "org": "<your Catalyst org id: console URL /baas/<org id>/>",
+  "env": "Development",
+  "creatorDc": "<dc>",
+  "apps": {
+    "<creator-app-link-name>": { "project": "<Catalyst project id of c2c-<app-link-name>>" }
+  },
+  "never_touch": ["<project ids c2c must never write to>"]
+}

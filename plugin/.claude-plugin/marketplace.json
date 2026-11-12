@@ -1,0 +1,23 @@
+{
+  "name": "creator-to-catalyst",
+  "owner": {
+    "name": "Sam Ellis"
+  },
+  "description": "Marketplace for c2c, the Zoho Creator to Zoho Catalyst migration plugin.",
+  "plugins": [
+    {
+      "name": "c2c",
+      "description": "Migrate a Zoho Creator app to Zoho Catalyst, gated by a prerequisite doctor (Catalyst plugin skills + MCP + CLI).",
+      "category": "development",
+      "tags": [
+        "zoho",
+        "creator",
+        "catalyst",
+        "migration",
+        "c2c"
+      ],
+      "source": "./",
+      "version": "0.2.0"
+    }
+  ]
+}

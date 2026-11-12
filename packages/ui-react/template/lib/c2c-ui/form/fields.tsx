@@ -1,0 +1,1117 @@
+/**
+ * Default field widgets. Each renders one Creator field inside a
+ * [data-field] box with a visible label, a named record control and its
+ * error. A custom Arc widget never gets `name`; its wrapper mirrors the
+ * answer into named hidden inputs in the shape record.ts reads at submit.
+ * The heavier widgets load lazily so a form only pays for the widgets it
+ * draws; record.ts reads the hidden inputs, which exist either way.
+ * Replace any of them per widget kind or per field through the
+ * customization (runtime/extend.tsx); the generated forms only ever render
+ * <Field name="..." />.
+ */
+import { lazy, Suspense, useContext, useEffect, useId, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
+import { Input } from '../arc/components/input/input';
+import { Textarea } from '../arc/components/textarea/textarea';
+import { Button } from '../arc/components/button/button';
+import inputStyles from '../arc/components/input/input.module.css';
+import { canonicalNumber, fractionDigits, localDay, multiValueItems, parseLocalDay, toCanonicalDecimal, toMinorUnits } from './value';
+import type { FieldSpec, FormSpec } from '../types';
+import { useCustomization, type FieldProps } from '../runtime/extend';
+import { useEnv } from '../runtime/env';
+import { failureText } from '../runtime/StatusScreens';
+import type { InkStroke } from '../arc/components/signature-pad/signature-pad';
+import type { RichTextValue } from '../arc/components/rich-text-editor/rich-text-editor';
+import { FormContext } from './context';
+
+export { FormContext, type FormState } from './context';
+
+const NumberField = lazy(() => import('../arc/components/number-field/number-field').then((m) => ({ default: m.NumberField })));
+const MoneyInput = lazy(() => import('../arc/components/money-input/money-input').then((m) => ({ default: m.MoneyInput })));
+const PhoneInput = lazy(() => import('../arc/components/phone-input/phone-input').then((m) => ({ default: m.PhoneInput })));
+const DatePicker = lazy(() => import('../arc/components/date-picker/date-picker').then((m) => ({ default: m.DatePicker })));
+const TimePicker = lazy(() => import('../arc/components/time-picker/time-picker').then((m) => ({ default: m.TimePicker })));
+const RadioCards = lazy(() => import('../arc/components/radio-cards/radio-cards').then((m) => ({ default: m.RadioCards })));
+const FileDropzone = lazy(() => import('../arc/components/file-dropzone/file-dropzone').then((m) => ({ default: m.FileDropzone })));
+const SignaturePad = lazy(() => import('../arc/components/signature-pad/signature-pad').then((m) => ({ default: m.SignaturePad })));
+const RichTextEditor = lazy(() => import('../arc/components/rich-text-editor/rich-text-editor').then((m) => ({ default: m.RichTextEditor })));
+const LookupField = lazy(() => import('../lookup/LookupField').then((m) => ({ default: m.LookupField })));
+const LookupMultiField = lazy(() => import('../lookup/LookupField').then((m) => ({ default: m.LookupMultiField })));
+const SubformGrid = lazy(() => import('../subform/SubformGrid').then((m) => ({ default: m.SubformGrid })));
+
+/** Native input types for the widgets with no custom control and for subform cells. */
+const INPUT_TYPE: Record<string, string> = {
+  text: 'text', email: 'email', phone: 'tel', url: 'url', number: 'number', decimal: 'number', percent: 'number', currency: 'number',
+  date: 'date', datetime: 'datetime-local', time: 'time', users: 'email', richtext: 'text',
+};
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
+}
+
+/** Signed download route for a stored file, image, audio, video or signature. The stored key is not a URL. */
+function signedFilePath(form: FormSpec, field: FieldSpec): string {
+  return `/files/${encodeURIComponent(form.name)}/${encodeURIComponent(field.name)}`;
+}
+
+function num(value: unknown): number | undefined {
+  if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function optionsOf(field: FieldSpec): { value: string; label: string }[] {
+  return (field.choices ?? []).map((choice) => ({ value: choice, label: choice }));
+}
+
+/**
+ * The choice list of a select: grouped `values` headers draw as native
+ * `<optgroup>`s in declared order, and member options outside any group
+ * (a mixed literal) list after them. Ungrouped fields render flat.
+ */
+function GroupedOptions({ field }: { field: FieldSpec }) {
+  if (!field.optionGroups?.length) {
+    return (
+      <>
+        {optionsOf(field).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </>
+    );
+  }
+  const grouped = new Set(field.optionGroups.flatMap((group) => group.choices));
+  return (
+    <>
+      {field.optionGroups.map((group) => (
+        <optgroup key={group.label} label={group.label}>
+          {group.choices.map((choice) => (
+            <option key={choice} value={choice}>
+              {choice}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+      {(field.choices ?? [])
+        .filter((choice) => !grouped.has(choice))
+        .map((choice) => (
+          <option key={choice} value={choice}>
+            {choice}
+          </option>
+        ))}
+    </>
+  );
+}
+
+/**
+ * The option value the "Others" entry of an `others option` field carries.
+ * It is never posted: while it is the chosen entry the control gives up the
+ * field name to a shown text box, so the record carries the typed text. A real
+ * choice could itself be named "Others", so the marker is an out-of-band token.
+ */
+const OTHERS_VALUE = '__c2c_others__';
+
+/** True when the stored value is the free text a previous "Others" entry saved. */
+function othersPicked(field: FieldSpec, value: string): boolean {
+  return !!field.othersOption && value !== '' && !(field.choices ?? []).includes(value);
+}
+
+/** The free-text box an `others option` field opens while Others is chosen. It carries the field name, so it is the posted value. */
+function OthersText({ field, name, value, onChange }: { field: FieldSpec; name: string; value: string; onChange: (next: string) => void }) {
+  return (
+    <input
+      type="text"
+      className={inputStyles.input}
+      name={name}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      maxLength={field.maxLength ?? 255}
+      required={field.required || undefined}
+      aria-required={field.required || undefined}
+      aria-label={`${field.label} (other)`}
+    />
+  );
+}
+
+function Box({ field, children, className }: { field: FieldSpec; children: ReactNode; className?: string }) {
+  return (
+    <div className={['c2c-field', className].filter(Boolean).join(' ')} data-field={field.name} data-widget={field.widget} data-required={field.required || undefined}>
+      {children}
+    </div>
+  );
+}
+
+/** `on user input` for widgets whose answer mirrors into a hidden input: no DOM change event reaches the form. */
+function useNotify(name: string): () => void {
+  const state = useContext(FormContext);
+  return () => state?.notify?.(name);
+}
+
+function FieldError({ name, error, id }: { name: string; error?: string; id?: string }) {
+  return error ? (
+    <p id={id} className="c2c-error" data-error-for={name} role="alert">
+      {error}
+    </p>
+  ) : null;
+}
+
+/**
+ * The resting state a lazy widget grows out of. It is a real field box, not
+ * just a shell: the label and a disabled control in the field's own shape, so
+ * the layout, the label and the mandatory marker are final while the enhanced
+ * widget loads, and a host that never resolves the lazy chunks still shows a
+ * complete (if not editable) form.
+ */
+const LOADING_WIDGET = new Set(['file', 'image', 'audio', 'video', 'signature']);
+function LoadingControl({ field, id }: { field: FieldSpec; id: string }) {
+  const common = {
+    id,
+    disabled: true,
+    required: field.required || undefined,
+    'aria-required': field.required || undefined,
+    'aria-label': field.label,
+    className: inputStyles.input,
+  };
+  if (LOADING_WIDGET.has(field.widget)) return <input type="file" accept={field.accept} {...common} />;
+  if (field.widget === 'decision') return <input type="checkbox" {...common} />;
+  if (field.widget === 'multiselect' || field.widget === 'lookup-multi') {
+    return (
+      <select multiple size={Math.min(Math.max(field.choices?.length ?? 2, 2), 6)} {...common}>
+        {optionsOf(field).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  if (field.widget === 'select' || field.widget === 'radio' || field.widget === 'lookup') {
+    return (
+      <select {...common}>
+        <option value="" />
+        <GroupedOptions field={field} />
+      </select>
+    );
+  }
+  if (field.widget === 'textarea' || field.widget === 'richtext' || field.widget === 'notes') return <textarea {...common} />;
+  if (field.widget === 'subform') {
+    return (
+      <fieldset data-subform={field.name} disabled>
+        <input type="text" {...common} />
+      </fieldset>
+    );
+  }
+  return <input type={INPUT_TYPE[field.widget] ?? 'text'} {...common} />;
+}
+
+function FieldLoading({ field, bare }: { field: FieldSpec; bare?: boolean }) {
+  const id = useId();
+  return (
+    <Box field={field} className="c2c-loading">
+      <div className={inputStyles.field} aria-busy="true">
+        {bare ? null : (
+          <label className={`${inputStyles.label} c2c-label`} htmlFor={id}>
+            {field.label}
+          </label>
+        )}
+        <LoadingControl field={field} id={id} />
+      </div>
+    </Box>
+  );
+}
+
+/** A widget whose record control is the hidden input `hidden` renders. */
+function WidgetBox({ field, children, hidden }: { field: FieldSpec; children: ReactNode; hidden: ReactNode }) {
+  return (
+    <Box field={field}>
+      <Suspense fallback={<FieldLoading field={field} />}>{children}</Suspense>
+      {hidden}
+    </Box>
+  );
+}
+
+export function TextField({ field, error, value, path }: FieldProps) {
+  const name = path ?? field.name;
+  const type = INPUT_TYPE[field.widget] ?? 'text';
+  return (
+    <Box field={field}>
+      <Input
+        label={field.label}
+        name={name}
+        type={type}
+        required={field.required}
+        maxLength={field.maxLength}
+        pattern={field.pattern}
+        step={type === 'number' ? 'any' : undefined}
+        defaultValue={text(value)}
+        error={error}
+      />
+      <FieldError name={name} error={error} />
+    </Box>
+  );
+}
+
+export function TextAreaField({ field, error, value }: FieldProps) {
+  return (
+    <Box field={field}>
+      <Textarea
+        label={field.label}
+        name={field.name}
+        required={field.required}
+        maxLength={field.maxLength}
+        defaultValue={text(value)}
+        error={error}
+      />
+      <FieldError name={field.name} error={error} />
+    </Box>
+  );
+}
+
+/** A number as its full digit string; String() would switch to exponent form at 1e21. */
+function digitsOf(n: number, scale: number | null): string {
+  if (scale !== null) return toCanonicalDecimal(n, scale);
+  return Number.isInteger(n) ? BigInt(n).toString() : String(n);
+}
+
+/** A stored number as the text to post: exact digits, decimal and percent at their scale; blank or unreadable is ''. */
+function storedNumber(value: unknown, scale: number | null): string {
+  if (typeof value === 'number') return Number.isFinite(value) ? digitsOf(value, scale) : '';
+  return typeof value === 'string' ? canonicalNumber(value, scale) ?? '' : '';
+}
+
+export function NumberFieldWrapper({ field, error, value, path }: FieldProps) {
+  const name = path ?? field.name;
+  // A whole-number field keeps its digits as given and steps in ones;
+  // decimal and percent post and step at their stored scale.
+  const scale = field.widget === 'number' ? null : field.decimalPlaces ?? 2;
+  const digits = scale ?? 0;
+  // The posted text, '' when empty. It is kept as text so a stored or typed
+  // value posts exactly, however many digits it has.
+  const [posted, setPosted] = useState<string>(() => storedNumber(value, scale));
+  const typed = useRef('');
+  const notify = useNotify(name);
+  const change = (next: number) => {
+    const exact = canonicalNumber(typed.current, scale);
+    setPosted(exact !== null && Number(exact) === next ? exact : digitsOf(next, scale));
+    notify();
+  };
+  return (
+    <WidgetBox
+      field={field}
+      hidden={<input type="hidden" name={name} value={posted} />}
+    >
+      <div style={{ display: 'contents' }} onInputCapture={(event) => { typed.current = (event.target as HTMLInputElement).value ?? ''; }}>
+        <NumberField
+          label={field.label}
+          defaultValue={num(value)}
+          empty={posted === ''}
+          onValueChange={change}
+          onClear={() => setPosted('')}
+          min={-Infinity}
+          max={Infinity}
+          step={10 ** -digits}
+          formatOptions={{ minimumFractionDigits: digits, maximumFractionDigits: digits }}
+          suffix={field.widget === 'percent' ? '%' : undefined}
+          required={field.required}
+        />
+      </div>
+      <FieldError name={name} error={error} />
+    </WidgetBox>
+  );
+}
+
+export function MoneyFieldWrapper({ field, error, value, path }: FieldProps) {
+  const name = path ?? field.name;
+  const scale = field.decimalPlaces ?? 2;
+  const [code, setCode] = useState<string | undefined>(field.currencyCode);
+  const digits = fractionDigits(code);
+  const [minor, setMinor] = useState<number | null>(() => {
+    const stored = text(value);
+    return stored === undefined ? null : toMinorUnits(stored, digits);
+  });
+  const posted = minor === null ? '' : toCanonicalDecimal(minor / 10 ** digits, scale);
+  const notify = useNotify(name);
+  return (
+    <WidgetBox
+      field={field}
+      hidden={<input type="hidden" name={name} value={posted} />}
+    >
+      <MoneyInput
+        label={field.label}
+        defaultValue={minor}
+        onValueChange={(next) => { setMinor(next); notify(); }}
+        currency={code}
+        currencies={code ? [code] : undefined}
+        onCurrencyChange={setCode}
+        required={field.required}
+      />
+      <FieldError name={name} error={error} />
+    </WidgetBox>
+  );
+}
+
+export function PhoneFieldWrapper({ field, error, value, path }: FieldProps) {
+  const name = path ?? field.name;
+  const [current, setCurrent] = useState<string>(text(value) ?? '');
+  const notify = useNotify(name);
+  return (
+    <WidgetBox field={field} hidden={<input type="hidden" name={name} value={current} />}>
+      <PhoneInput
+        label={field.label}
+        defaultValue={current}
+        onValueChange={(next) => { setCurrent(next); notify(); }}
+        required={field.required}
+      />
+      <FieldError name={name} error={error} />
+    </WidgetBox>
+  );
+}
+
+export function DateFieldWrapper({ field, error, value, path }: FieldProps) {
+  const name = path ?? field.name;
+  const [current, setCurrent] = useState<Date | undefined>(() => parseLocalDay(text(value)));
+  const notify = useNotify(name);
+  return (
+    <WidgetBox
+      field={field}
+      hidden={
+        <input
+          className={inputStyles.input}
+          name={name}
+          readOnly
+          value={current ? localDay(current) : ''}
+          aria-label={`${field.label} value`}
+          required={field.required || undefined}
+          aria-required={field.required || undefined}
+        />
+      }
+    >
+      <DatePicker
+        label={field.label}
+        value={current}
+        onChange={(next) => { setCurrent(next); notify(); }}
+      />
+      <FieldError name={name} error={error} />
+    </WidgetBox>
+  );
+}
+
+export function TimeFieldWrapper({ field, error, value, path }: FieldProps) {
+  const name = path ?? field.name;
+  const [current, setCurrent] = useState<string>(text(value) ?? '');
+  const notify = useNotify(name);
+  return (
+    <WidgetBox
+      field={field}
+      hidden={
+        <input
+          className={inputStyles.input}
+          name={name}
+          readOnly
+          value={current}
+          aria-label={`${field.label} value`}
+          required={field.required || undefined}
+          aria-required={field.required || undefined}
+        />
+      }
+    >
+      <TimePicker
+        label={field.label}
+        defaultValue={current}
+        onChange={(next) => { setCurrent(next); notify(); }}
+      />
+      <FieldError name={name} error={error} />
+    </WidgetBox>
+  );
+}
+
+export function SelectField({ field, error, value }: FieldProps) {
+  const id = useId();
+  const stored = text(value) ?? '';
+  const [current, setCurrent] = useState<string>(othersPicked(field, stored) ? OTHERS_VALUE : stored);
+  const [otherText, setOtherText] = useState<string>(othersPicked(field, stored) ? stored : '');
+  const otherOpen = !!field.othersOption && current === OTHERS_VALUE;
+  // A native select: the control the user sees is the one that posts. While
+  // "Others" is chosen the select gives the field name to the free-text box.
+  return (
+    <Box field={field}>
+      <div className={inputStyles.field}>
+        <label className={`${inputStyles.label} c2c-label`} htmlFor={id}>
+          {field.label}
+        </label>
+        <select
+          id={id}
+          className={inputStyles.input}
+          name={otherOpen ? undefined : field.name}
+          value={current}
+          onChange={(event) => setCurrent(event.target.value)}
+          required={field.required || undefined}
+          aria-required={field.required || undefined}
+          aria-invalid={error ? true : undefined}
+        >
+          <option value="" />
+          <GroupedOptions field={field} />
+          {field.othersOption ? <option value={OTHERS_VALUE}>Others</option> : null}
+        </select>
+        {otherOpen ? <OthersText field={field} name={field.name} value={otherText} onChange={setOtherText} /> : null}
+      </div>
+      <FieldError name={field.name} error={error} />
+    </Box>
+  );
+}
+
+export function MultiSelectField({ field, error, value }: FieldProps) {
+  const id = useId();
+  // The stored cell is list text (["No"]); each choice it holds starts selected.
+  const [current, setCurrent] = useState<string[]>(multiValueItems(value));
+  const all = optionsOf(field);
+  // The record reader takes the select's selectedOptions in document order,
+  // so the chosen options lead in the order they were picked and a
+  // load→save round trip posts the stored order back unchanged.
+  const options = [...current.map((v) => all.find((option) => option.value === v)).filter((o): o is { value: string; label: string } => !!o), ...all.filter((option) => !current.includes(option.value))];
+  return (
+    <Box field={field}>
+      <div className={inputStyles.field}>
+        <label className={`${inputStyles.label} c2c-label`} htmlFor={id}>
+          {field.label}
+        </label>
+        <select
+          id={id}
+          className={inputStyles.input}
+          name={field.name}
+          multiple
+          size={Math.min(Math.max(options.length, 2), 8)}
+          value={current}
+          onChange={(event) => setCurrent(Array.from(event.target.selectedOptions, (option) => option.value))}
+          required={field.required || undefined}
+          aria-required={field.required || undefined}
+          aria-invalid={error ? true : undefined}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {current.length ? (
+          <button type="button" className="c2c-clear" aria-label="Clear selections" onClick={() => setCurrent([])}>
+            Clear
+          </button>
+        ) : null}
+      </div>
+      <FieldError name={field.name} error={error} />
+    </Box>
+  );
+}
+
+export function CheckboxField({ field, error, value, path }: FieldProps) {
+  const name = path ?? field.name;
+  const id = useId();
+  const [checked, setChecked] = useState<boolean>(value === true || value === 'true');
+  return (
+    <Box field={field}>
+      <div className={inputStyles.field}>
+        <label className={`${inputStyles.label} c2c-label`} htmlFor={id}>
+          <input
+            id={id}
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => setChecked(event.target.checked)}
+            required={field.required || undefined}
+            aria-required={field.required || undefined}
+            aria-invalid={error ? true : undefined}
+          />{' '}
+          {field.label}
+        </label>
+      </div>
+      <input type="hidden" name={name} value={checked ? 'true' : 'false'} />
+      <FieldError name={name} error={error} />
+    </Box>
+  );
+}
+
+export function RadioCardsField({ field, error, value }: FieldProps) {
+  const stored = text(value) ?? '';
+  const [current, setCurrent] = useState<string>(othersPicked(field, stored) ? OTHERS_VALUE : stored);
+  const [otherText, setOtherText] = useState<string>(othersPicked(field, stored) ? stored : '');
+  const otherOpen = !!field.othersOption && current === OTHERS_VALUE;
+  const options = field.othersOption ? [...optionsOf(field), { value: OTHERS_VALUE, label: 'Others' }] : optionsOf(field);
+  // The field `layout` from the export sets the option columns; onecolumncard
+  // keeps one column of cards, a column count picks a fixed grid.
+  const columns = field.optionColumns;
+  const listLayout = field.optionCard || columns === 1 ? 'list' : 'grid';
+  const gridStyle = columns && columns > 1 ? ({ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } as CSSProperties) : undefined;
+  return (
+    <Box field={field}>
+      <Suspense fallback={<FieldLoading field={field} />}>
+        <fieldset className="c2c-choices" data-option-columns={columns} data-option-style={field.optionCard ? 'card' : undefined} aria-invalid={error ? true : undefined}>
+          <legend className={`${inputStyles.label} c2c-label`}>{field.label}</legend>
+          <RadioCards
+            name={otherOpen ? undefined : field.name}
+            options={options}
+            defaultValue={current}
+            onValueChange={setCurrent}
+            required={field.required}
+            layout={listLayout}
+            style={gridStyle}
+          />
+          {otherOpen ? <OthersText field={field} name={field.name} value={otherText} onChange={setOtherText} /> : null}
+        </fieldset>
+        <FieldError name={field.name} error={error} />
+      </Suspense>
+    </Box>
+  );
+}
+
+/**
+ * Why a stored file could not be opened, for the inline error under the view
+ * link. A refusal, an ended session, an outage or a dropped network gets the
+ * app's own line; the server's text is never shown for those.
+ */
+function downloadError(reply: { ok: boolean; status: number; body: unknown }, label: string): string {
+  if (reply.status === 403) return `You do not have access to this ${label}.`;
+  if (failureText(reply.status)) return failureText(reply.status);
+  const body = reply.body as { error?: unknown; url?: unknown } | undefined;
+  if (body && typeof body.error === 'string' && body.error) return body.error;
+  if (!reply.ok) {
+    if (reply.status === 404) return `This ${label} was not found or its link has expired.`;
+    return `The ${label} could not be opened${reply.status ? ` (error ${reply.status})` : ''}.`;
+  }
+  return `No ${label} download is available.`;
+}
+
+function StoredFileLink({ form, field, rowId }: { form: FormSpec; field: FieldSpec; rowId?: string }) {
+  const { api, view } = useEnv();
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!rowId) return null;
+  const label = field.label.toLowerCase();
+  const show = (message: string, win: Window | null) => {
+    setError(message);
+    if (win) {
+      try {
+        win.document.body.textContent = message;
+      } catch {
+        win.close();
+      }
+    }
+  };
+  const download = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (downloading) return;
+    setDownloading(true);
+    setError(null);
+    let win: Window | null = null;
+    try {
+      win = view.open('', '_blank');
+      if (win) win.document.write('Loading...');
+    } catch {
+      // ignore
+    }
+    try {
+      const reply = await api.post<{ url?: string | null }>(signedFilePath(form, field), { rowId });
+      const url = reply.ok ? reply.body?.url : undefined;
+      if (typeof url === 'string' && url && win) {
+        win.location.href = url;
+      } else {
+        show(downloadError(reply, label), win);
+      }
+    } catch {
+      show(`The ${label} could not be opened.`, win);
+    } finally {
+      setDownloading(false);
+    }
+  };
+  return (
+    <span>
+      <a href="#" onClick={download} className="c2c-link" style={{ fontSize: '14px', pointerEvents: downloading ? 'none' : 'auto', opacity: downloading ? 0.7 : 1 }}>
+        {downloading ? 'Loading...' : `View ${field.label}`}
+      </a>
+      {error ? (
+        <p className="c2c-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * A stored signature drawn on the form as an image. The stored value is an
+ * object key, not a URL, so the image source is the same short-lived signed
+ * URL the view link fetches.
+ */
+function StoredSignature({ form, field, rowId }: { form: FormSpec; field: FieldSpec; rowId?: string }) {
+  const { api } = useEnv();
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (rowId) {
+      api
+        .post<{ url?: string | null }>(signedFilePath(form, field), { rowId })
+        .then((reply) => {
+          const url = reply.ok ? reply.body?.url : undefined;
+          if (live && typeof url === 'string' && url) setSrc(url);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      live = false;
+    };
+  }, [api, form.name, field.name, rowId]);
+  if (!rowId) return null;
+  return (
+    <span>
+      {src ? <img src={src} alt="Signature" height="60" style={{ border: '1px solid var(--border)' }} /> : null}
+      <StoredFileLink form={form} field={field} rowId={rowId} />
+    </span>
+  );
+}
+
+function storedImageValue(
+  value: unknown,
+  record?: Record<string, unknown>,
+  fieldName?: string,
+  field?: FieldSpec,
+): { stored?: string; link?: string; title?: string } {
+  const recLink = fieldName && record ? text(record[field?.imageLinkColumn ?? `${fieldName}__link`]) : undefined;
+  const recTitle = fieldName && record ? text(record[field?.imageTitleColumn ?? `${fieldName}__title`]) : undefined;
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return {
+      stored: text(obj.key ?? obj.url ?? obj.src ?? obj.value),
+      link: text(obj.link ?? obj.href ?? obj.linkName) ?? recLink,
+      title: text(obj.title) ?? recTitle,
+    };
+  }
+  const raw = text(value);
+  if (raw && /<(?:a|img)\b/i.test(raw)) {
+    const srcMatch = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i.exec(raw);
+    const hrefMatch = /<a\b[^>]*\bhref\s*=\s*["']([^"']+)["']/i.exec(raw);
+    const titleMatch = /\btitle\s*=\s*["']([^"']+)["']/i.exec(raw);
+    return {
+      stored: srcMatch?.[1] ?? raw,
+      link: hrefMatch?.[1] ?? recLink,
+      title: titleMatch?.[1] ?? recTitle,
+    };
+  }
+  return { stored: raw, link: recLink, title: recTitle };
+}
+
+function StoredImage({
+  form,
+  field,
+  rowId,
+  stored,
+  linkUrl,
+  imageTitle,
+}: {
+  form: FormSpec;
+  field: FieldSpec;
+  rowId?: string;
+  stored: string;
+  linkUrl?: string;
+  imageTitle?: string;
+}) {
+  const { api } = useEnv();
+  const [signedSrc, setSignedSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (rowId) {
+      api
+        .post<{ url?: string | null }>(signedFilePath(form, field), { rowId })
+        .then((reply) => {
+          const url = reply.ok ? reply.body?.url : undefined;
+          if (live && typeof url === 'string' && url) setSignedSrc(url);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      live = false;
+    };
+  }, [api, form.name, field.name, rowId]);
+  const src = signedSrc ?? stored;
+  const trimmedTitle = field.imageTitle && imageTitle?.trim() ? imageTitle.trim() : undefined;
+  const trimmedLink = field.imageLink && linkUrl?.trim() ? safeLinkHref(linkUrl.trim()) : undefined;
+  const img = <img src={src} alt={trimmedTitle ?? field.label} title={trimmedTitle} style={{ maxHeight: '60px' }} />;
+  const target = field.linkTarget ?? '_blank';
+  return (
+    <span>
+      {trimmedLink ? (
+        <a
+          href={trimmedLink}
+          target={target}
+          rel={target === '_blank' ? 'noopener noreferrer' : undefined}
+          title={trimmedTitle}
+        >
+          {img}
+        </a>
+      ) : (
+        img
+      )}
+      <StoredFileLink form={form} field={field} rowId={rowId} />
+    </span>
+  );
+}
+
+/**
+ * The image link is typed text. It reaches an anchor only as an http(s) URL, a mailto: address or a
+ * same-site path with no whitespace, quotes, angle brackets, backticks or backslashes, so no other
+ * scheme (javascript:, data:, vbscript:, ...) and no markup can ever become an href.
+ */
+function safeLinkHref(value: string): string | undefined {
+  const unsafe = /[\s<>"'`\\]/;
+  if (unsafe.test(value)) return undefined;
+  // Scheme names are case-insensitive (HTTPS://example.com is a legitimate link).
+  if (/^https?:\/\//i.test(value) || /^mailto:/i.test(value)) return encodeURI(value);
+  if (value.startsWith('#') || (value.startsWith('/') && !value.startsWith('//'))) return encodeURI(value);
+  return undefined;
+}
+
+export function FileDropzoneField({ form, field, error, value, rowId }: FieldProps) {
+  const state = useContext(FormContext);
+  const mirror = useRef<HTMLInputElement>(null);
+  const notify = useNotify(field.name);
+  const mirrorId = useId();
+  const sync = (files: File[]) => {
+    notify();
+    const input = mirror.current;
+    if (!input || typeof DataTransfer === 'undefined') return;
+    try {
+      const data = new DataTransfer();
+      for (const file of files) data.items.add(file);
+      input.files = data.files;
+    } catch {
+      // An engine without DataTransfer keeps the dropzone's own list; the named input stays empty.
+    }
+  };
+  const [cleared, setCleared] = useState(false);
+  const initialMeta = storedImageValue(value, state?.record, field.name, field);
+  const stored = field.widget === 'image' ? initialMeta.stored : text(value);
+  const [linkUrl, setLinkUrl] = useState<string>(initialMeta.link ?? '');
+  const [imageTitle, setImageTitle] = useState<string>(initialMeta.title ?? '');
+  // The export's `source` lists the acquisition choices Creator offers; an
+  // unlisted source gets no control and an unknown token keeps the file default.
+  const declared = (field.uploadSources ?? []).filter((s) => s === 'file' || s === 'camera' || s === 'public_url');
+  const offers = new Set(declared.length ? declared : ['file']);
+  const singleSource = offers.size === 1;
+  return (
+    <Box field={field}>
+      {stored && !cleared ? (
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {field.widget === 'image' ? (
+            <StoredImage form={form} field={field} rowId={rowId} stored={stored} linkUrl={linkUrl} imageTitle={imageTitle} />
+          ) : (
+            <StoredFileLink form={form} field={field} rowId={rowId} />
+          )}
+          <Button type="button" variant="secondary" size="sm" onClick={() => setCleared(true)}>Remove file</Button>
+        </div>
+      ) : (
+        <>
+          <label className={`${inputStyles.label} c2c-label`} htmlFor={mirrorId}>
+            {field.label}
+            {field.required ? <span aria-hidden="true"> *</span> : null}
+          </label>
+          <Suspense fallback={<FieldLoading field={field} bare />}>
+            {offers.has('file') ? (
+              <FileDropzone
+                label="Choose a file or drop it here"
+                accept={field.accept}
+                onFilesChange={sync}
+              />
+            ) : null}
+          </Suspense>
+          {offers.has('camera') ? (
+            <input type="file" name={`${field.name}__camera`} accept={field.accept} capture onChange={(e) => sync([...(e.target.files ?? [])])} />
+          ) : null}
+          {offers.has('public_url') ? (
+            <input type="url" name={`${field.name}__url`} placeholder="Paste a public URL" className={inputStyles.input} onChange={notify} aria-label={`${field.label} URL`} />
+          ) : null}
+          <input ref={mirror} id={mirrorId} type="file" name={field.name} accept={field.accept} hidden aria-hidden="true" tabIndex={-1} required={(field.required && singleSource) || undefined} />
+        </>
+      )}
+      {field.widget === 'image' && field.imageLink ? (
+        <input
+          type="url"
+          name={field.imageLinkColumn ?? `${field.name}__link`}
+          placeholder="Link URL"
+          value={linkUrl}
+          onChange={(e) => {
+            setLinkUrl(e.target.value);
+            notify();
+          }}
+          className={inputStyles.input}
+          aria-label={`${field.label} link`}
+        />
+      ) : null}
+      {field.widget === 'image' && field.imageTitle ? (
+        <input
+          type="text"
+          name={field.imageTitleColumn ?? `${field.name}__title`}
+          placeholder="Title"
+          value={imageTitle}
+          onChange={(e) => {
+            setImageTitle(e.target.value);
+            notify();
+          }}
+          className={inputStyles.input}
+          aria-label={`${field.label} title`}
+        />
+      ) : null}
+      {cleared && <input type="hidden" name={`${field.name}_cleared`} value="true" />}
+      <FieldError name={field.name} error={error} />
+    </Box>
+  );
+}
+
+export function SignaturePadField({ form, field, error, value, rowId }: FieldProps) {
+  const [strokes, setStrokes] = useState<InkStroke[]>([]);
+  const [cleared, setCleared] = useState(false);
+  const notify = useNotify(field.name);
+  const stored = text(value);
+  return (
+    <Box field={field}>
+      <label id={`${field.name}-label`} className={`${inputStyles.label} c2c-label field-title`}>
+        {field.label}
+        {field.required ? <span aria-hidden="true"> *</span> : null}
+      </label>
+      {stored && !cleared ? (
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <StoredSignature form={form} field={field} rowId={rowId} />
+          <Button type="button" variant="secondary" size="sm" onClick={() => setCleared(true)}>Remove signature</Button>
+        </div>
+      ) : (
+        <>
+          <Suspense fallback={<FieldLoading field={field} bare />}>
+            <SignaturePad label={field.label} required={field.required} labelledBy={`${field.name}-label`} onChange={(next) => { setStrokes(next); notify(); }} />
+          </Suspense>
+          <input type="hidden" name={field.name} value={strokes.length ? JSON.stringify(strokes) : ''} />
+        </>
+      )}
+      {cleared && <input type="hidden" name={`${field.name}_cleared`} value="true" />}
+      <FieldError name={field.name} error={error} />
+    </Box>
+  );
+}
+
+export function RichTextField({ field, error, value }: FieldProps) {
+  const [current, setCurrent] = useState<string>(text(value) ?? '');
+  const notify = useNotify(field.name);
+  return (
+    <Box field={field}>
+      <label id={`${field.name}-label`} className={`${inputStyles.label} c2c-label field-title`}>
+        {field.label}
+        {field.required ? <span aria-hidden="true"> *</span> : null}
+      </label>
+      <Suspense fallback={<FieldLoading field={field} bare />}>
+        <RichTextEditor
+          defaultValue={current}
+          onChange={(next: RichTextValue) => { setCurrent(next.html); notify(); }}
+          aria-label={field.label}
+          aria-labelledby={`${field.name}-label`}
+          aria-required={field.required || undefined}
+        />
+      </Suspense>
+      <input type="hidden" name={field.name} value={current} />
+      <FieldError name={field.name} error={error} />
+    </Box>
+  );
+}
+
+export function CompositeField({ form, field, error, value }: FieldProps) {
+  const parts = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const capture = field.widget === 'address' && field.captureCoordinates;
+  const adjustMap = field.widget === 'address' && field.adjustUsingMap;
+  const [coords, setCoords] = useState({ latitude: String(parts.latitude ?? ''), longitude: String(parts.longitude ?? '') });
+  const writeCoordinates = (latitude: number, longitude: number) => {
+    const next = { latitude: String(latitude), longitude: String(longitude) };
+    setCoords(next);
+    for (const [part, coord] of [['latitude', next.latitude], ['longitude', next.longitude]] as const) {
+      const input = document.querySelector<HTMLInputElement>(`[name="${CSS.escape(`${field.name}.${part}`)}"]`);
+      if (!input) continue;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, coord);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+  const trackCoords = (event: React.FormEvent<HTMLFieldSetElement>) => {
+    const input = event.target as HTMLInputElement;
+    for (const part of ['latitude', 'longitude'] as const) {
+      if (input.name === `${field.name}.${part}`) setCoords((prev) => ({ ...prev, [part]: input.value }));
+    }
+  };
+  const captureCoordinates = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(({ coords: geo }) => {
+      writeCoordinates(geo.latitude, geo.longitude);
+    });
+  };
+  const lat = Number(coords.latitude);
+  const lon = Number(coords.longitude);
+  const hasPin = coords.latitude.trim() !== '' && coords.longitude.trim() !== '' && Number.isFinite(lat) && Number.isFinite(lon);
+  const clampedLat = hasPin ? Math.max(-90, Math.min(90, lat)) : 0;
+  const clampedLon = hasPin ? Math.max(-180, Math.min(180, lon)) : 0;
+  const adjustPinOnMap = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const width = rect.width || 360;
+    const height = rect.height || 180;
+    const nextLon = Number(Math.max(-180, Math.min(180, ((event.clientX - rect.left) / width) * 360 - 180)).toFixed(6));
+    const nextLat = Number(Math.max(-90, Math.min(90, 90 - ((event.clientY - rect.top) / height) * 180)).toFixed(6));
+    writeCoordinates(nextLat, nextLon);
+  };
+  return (
+    <Box field={field}>
+      <fieldset className="c2c-composite" aria-invalid={error ? true : undefined} onInput={trackCoords}>
+        <legend className={inputStyles.label}>{field.label}</legend>
+        <div className="c2c-composite-grid">
+          {(field.subfields ?? []).map((part, index) => (
+            <TextField key={part.name} form={form} field={{ ...part, required: field.required && index === 0 }} path={`${field.name}.${part.name}`} value={parts[part.name]} />
+          ))}
+        </div>
+        {capture ? <button type="button" className="c2c-button" onClick={captureCoordinates} aria-label={`Capture coordinates for ${field.label}`}>📍 Capture location</button> : null}
+        {adjustMap ? (
+          <>
+            <svg
+              className="c2c-map"
+              role="application"
+              aria-label={`Adjust map pin for ${field.label}`}
+              viewBox="-180 -90 360 180"
+              onClick={adjustPinOnMap}
+              style={{ width: '100%', height: 180, display: 'block', cursor: 'crosshair' }}
+            >
+              <rect x={-180} y={-90} width={360} height={180} fill="currentColor" fillOpacity={0.06} />
+              <line x1={-180} y1={0} x2={180} y2={0} stroke="currentColor" strokeOpacity={0.2} strokeWidth={0.5} />
+              <line x1={0} y1={-90} x2={0} y2={90} stroke="currentColor" strokeOpacity={0.2} strokeWidth={0.5} />
+              {hasPin ? (
+                <circle
+                  className="c2c-map-pin"
+                  cx={clampedLon}
+                  cy={-clampedLat}
+                  r={4}
+                  data-latitude={String(lat)}
+                  data-longitude={String(lon)}
+                />
+              ) : null}
+            </svg>
+            {!hasPin ? <p className="c2c-hint">Click the map or enter latitude and longitude to place and adjust the pin.</p> : null}
+          </>
+        ) : null}
+      </fieldset>
+      <FieldError name={field.name} error={error} />
+    </Box>
+  );
+}
+
+/** A Creator subform: an editable grid (see subform/SubformGrid.tsx). */
+export const SubformField = SubformGrid;
+
+export function SectionField({ field }: FieldProps) {
+  return field.titled === false ? null : <h2 className="c2c-section" data-section={field.name}>{field.label}</h2>;
+}
+
+export function NotesField({ field }: FieldProps) {
+  return field.note ? <p className="c2c-note">{field.note}</p> : null;
+}
+
+export function ComputedField({ field, value }: FieldProps) {
+  return (
+    <Box field={field}>
+      <span className={`${inputStyles.label} field-title`}>{field.label}</span>
+      <output className="c2c-computed">{text(value) ?? 'Calculated when the record is saved'}</output>
+    </Box>
+  );
+}
+
+/**
+ * A field the generator cannot draw yet: its label stays so the form still
+ * reads as the user knows it, with a neutral line in place of the control.
+ * The reason is a migration note, listed in `c2c analyze` and the migration
+ * report, never on the form.
+ */
+export function TodoField({ field }: FieldProps) {
+  return (
+    <Box field={field} className="c2c-unavailable">
+      <span className={`${inputStyles.label} field-title`}>{field.label}</span>
+      <p className="c2c-unavailable-note">This field is not available yet.</p>
+    </Box>
+  );
+}
+
+export function defaultWidget(field: FieldSpec): ComponentType<FieldProps> {
+  if (!field.generated) return TodoField;
+  switch (field.widget) {
+    case 'section': return SectionField;
+    case 'notes': return NotesField;
+    case 'textarea': return TextAreaField;
+    case 'select': return SelectField;
+    case 'radio': return RadioCardsField;
+    case 'multiselect': return MultiSelectField;
+    case 'decision': return CheckboxField;
+    case 'name':
+    case 'address': return CompositeField;
+    case 'file':
+    case 'image':
+    case 'audio':
+    case 'video': return FileDropzoneField;
+    case 'signature': return SignaturePadField;
+    case 'richtext': return RichTextField;
+    case 'number':
+    case 'decimal':
+    case 'percent': return NumberFieldWrapper;
+    case 'currency': return MoneyFieldWrapper;
+    case 'phone': return PhoneFieldWrapper;
+    case 'date': return DateFieldWrapper;
+    case 'time': return TimeFieldWrapper;
+    case 'datetime': return TextField; // A native datetime-local input: it already posts the contract value.
+    case 'subform': return SubformGrid;
+    case 'lookup':
+    case 'users': return LookupField;
+    case 'lookup-multi': return LookupMultiField;
+    case 'formula':
+    case 'autonumber':
+    case 'zia':
+    case 'barcode':
+    case 'integration': return ComputedField;
+    default: return TextField;
+  }
+}
+
+/** One Creator field, by name. Overrides: forms[form].fields[name], then components.fields[widget], then the default. */
+export function Field({ name }: { name: string }) {
+  const state = useContext(FormContext);
+  const custom = useCustomization();
+  if (!state) throw new Error('@c2c/ui: <Field> outside <FormView>');
+  const field = state.form.fields.find((item) => item.name === name);
+  if (!field) return null;
+  // A `visibility = false` field is never drawn, like the vanilla runtime: no
+  // control mounts, so readRecord never has a value to post for it.
+  if (field.visibility === false) return null;
+  const Widget = custom.forms?.[state.form.name]?.fields?.[name] ?? custom.components?.fields?.[field.widget] ?? defaultWidget(field);
+  const version = state.versions?.[name] ?? 0;
+  // The boundary also covers customizations that render a lazily-imported widget.
+  const widget = (
+    <Suspense fallback={<FieldLoading field={field} />}>
+      <Widget key={version} form={state.form} field={field} error={state.errors[name]} value={state.record[name]} rowId={state.rowId} />
+    </Suspense>
+  );
+  // A `hide` rule marks the field box hidden, like the vanilla runtime: the
+  // control stays mounted, so a stored or scripted value still posts.
+  if (state.hidden?.has(name)) {
+    return (
+      <div className="c2c-field" data-field={name} hidden>
+        {widget}
+      </div>
+    );
+  }
+  // A `disable` rule wraps the control in a disabled fieldset: the inputs inside
+  // are disabled without poking their DOM nodes.
+  if (state.disabled?.has(name)) {
+    return (
+      <fieldset className="c2c-field-disabled" disabled data-field-disabled={name} style={{ display: 'contents' }}>
+        {widget}
+      </fieldset>
+    );
+  }
+  return widget;
+}

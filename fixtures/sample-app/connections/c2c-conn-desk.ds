@@ -1,0 +1,233 @@
+application "c2c-conn-desk"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Helpdesk_Case
+		{
+			displayname = "Conn Zoho Desk Record"
+			Contact_First_Name
+			(
+				type = text
+				displayname = "First name"
+				row = 1
+				column = 1
+				width = medium
+			)
+			must have Contact_Last_Name
+			(
+				type = text
+				displayname = "Contact last name"
+				row = 2
+				column = 1
+				width = medium
+			)
+			must have Contact_Email
+			(
+				type = email
+				displayname = "Contact email"
+				row = 3
+				column = 1
+				width = medium
+			)
+			Contact_Description
+			(
+				type = textarea
+				displayname = "Description"
+				row = 4
+				column = 1
+				width = medium
+			)
+			Helpdesk_Response
+			(
+				type = textarea
+				displayname = "Desk response"
+				row = 5
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Helpdesk_Cases
+		{
+			displayName = "All Conn Helpdesk Cases"
+			show all rows from Conn_Helpdesk_Case
+			(
+				Contact_First_Name as "First name"
+				Contact_Last_Name as "Contact last name"
+				Contact_Email as "Contact email"
+				Contact_Description as "Description"
+				Helpdesk_Response as "Desk response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Helpdesk_Case_Check as "Conn Helpdesk Case Check"
+			{
+				type = form
+				form = Conn_Helpdesk_Case
+				record event = on add or edit
+				on validate
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(thisapp.c2c_desk_org_id() == "FILL_DESK_ORG_ID")
+							{
+								alert "Set c2c_desk_org_id to the Zoho Desk organization ID first.";
+								cancel submit;
+							}
+							if(thisapp.c2c_desk_department_id() == "FILL_DESK_DEPARTMENT_ID")
+							{
+								alert "Set c2c_desk_department_id to a Zoho Desk department ID first.";
+								cancel submit;
+							}
+						)
+					}
+				}
+			}
+			Conn_Helpdesk_Case_Create as "Conn Helpdesk Case Create"
+			{
+				type = form
+				form = Conn_Helpdesk_Case
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							contactMap = Map();
+							contactMap.put("firstName", input.Contact_First_Name);
+							contactMap.put("lastName", input.Contact_Last_Name);
+							contactMap.put("email", input.Contact_Email);
+							contactMap.put("description", input.Contact_Description);
+							resp = zoho.desk.create(thisapp.c2c_desk_org_id().toLong(), "contacts", contactMap, "c2c_desk");
+							input.Helpdesk_Response = resp.toString();
+							success message "c2c-desk-contact-sent";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	functions
+	{
+		Deluge
+		{
+			string c2c_desk_org_id()
+			{
+				return "FILL_DESK_ORG_ID";
+			}
+			string c2c_desk_department_id()
+			{
+				return "FILL_DESK_DEPARTMENT_ID";
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Helpdesk_Case}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Helpdesk_Case
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Helpdesk_Case
+				{
+					displayname = "c2c-conn-desk"
+					icon = "design-todo"
+					form Conn_Helpdesk_Case
+					{
+					}
+					report All_Conn_Helpdesk_Cases
+					{
+					}
+				}
+			}
+		}
+	}
+}

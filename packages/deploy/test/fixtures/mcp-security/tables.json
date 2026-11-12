@@ -1,0 +1,18 @@
+{
+ "status": "success",
+ "data": {
+  "status": "success",
+  "data": [
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "table_name": "Book",
+    "table_id": "10000000000013003"
+   }
+  ],
+  "total_size": 1
+ }
+}

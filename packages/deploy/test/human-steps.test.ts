@@ -1,0 +1,168 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { deriveIr, parse } from '../../core/src/index.js';
+import { buildDeploy, checkGuards, formatHumanChecklist, humanChecklist } from '../src/index.js';
+
+const MAIL_DS = `/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Mailer"
+{
+	forms
+	{
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Title as "Title"
+			)
+		}
+	}
+	workflow
+	{
+		form
+		{
+			On_Add as "On add"
+			{
+				type = form
+				form = Item
+				on add
+				{
+					actions
+					{
+						on success
+						(
+							sendmail
+							[
+								from: zoho.adminuserid
+								to: "owner@example.com"
+								subject: "c2c-mail"
+								message: "hello"
+							];
+						)
+					}
+				}
+			}
+		}
+	}
+}
+`;
+
+const PLAIN_DS = MAIL_DS.replace(/sendmail[\s\S]*?\];/, 'info "no mail";').replace('"Mailer"', '"Quiet"');
+
+const PUSH_DS = MAIL_DS.replace('"Mailer"', '"Notifier"').replace(
+  /sendmail[\s\S]*?\];/,
+  `pushnotification
+							(
+								to : "admin@example.test"
+								title : "New"
+								message : "hello"
+								view : "All_Items"
+							)`,
+);
+
+function guardFor(name: string, projectId: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-human-steps-'));
+  try {
+    const path = join(dir, 'projects.json');
+    writeFileSync(path, JSON.stringify({ org: '10000000000', dc: 'in', env: 'Development', projects: { 'c2c-mailer': '1001', 'c2c-quiet': '1002', 'c2c-notifier': '1003' } }));
+    return checkGuards({
+      org: '10000000000',
+      projectId,
+      appLink: name,
+      credentialPath: join(dir, 'cred'),
+      registry: JSON.parse(readFileSync(path, 'utf8')),
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('the checklist is one numbered list: admin invite, sign in, sender verify', () => {
+  const items = humanChecklist({ slate: true, sendsMail: true });
+  assert.equal(items.length, 3);
+  assert.match(items[0]!, /invite/i);
+  assert.match(items[1]!, /[Ss]ign in/);
+  assert.match(items[2]!, /sender/i);
+  assert.match(items[2]!, /mail.from/);
+  assert.match(items[2]!, /verification code|code sent/);
+  const printed = formatHumanChecklist({ slate: true, sendsMail: true });
+  assert.match(printed, /^human checklist:\n1\. .*invite[\s\S]*2\. .*[Ss]ign in[\s\S]*3\. .*sender/);
+  assert.doesNotMatch(printed, /Start Exploring|Slate —/);
+});
+
+test('Slate never contributes a start-services item', () => {
+  const INVITE = 'Accept the admin invite: open the invite mail sent to the admin address and set the password.';
+  const SIGN_IN = 'Sign in to the app once at the Slate app URL — the first sign-in finishes activating the login.';
+  assert.equal(formatHumanChecklist({ slate: true, sendsMail: false }), `human checklist:\n1. ${INVITE}\n2. ${SIGN_IN}\n`);
+  assert.equal(formatHumanChecklist({ slate: false, files: true, pdf: true, sendsMail: false }), `human checklist:\n1. ${INVITE}\n`);
+  assert.equal(humanChecklist({ slate: true, files: true, pdf: true, sendsMail: true, connectionSecretKeys: ['A_SECRET'] }).length, 4);
+});
+
+test('the sender step appears only when the app sends mail', () => {
+  const without = humanChecklist({ slate: true, sendsMail: false });
+  assert.equal(without.length, 2);
+  assert.ok(!without.some((item) => /sender/i.test(item)));
+});
+
+test('an app with no Slate client and no mail lists only the admin invite', () => {
+  assert.deepEqual(humanChecklist({ slate: false, sendsMail: false }).map((item) => /invite/i.test(item)), [true]);
+});
+
+test('the connection-secret item fills ~/.c2c/<app>-function-env.json, copied from the autofilled <out>/function-env.json', () => {
+  const one = humanChecklist({ slate: false, sendsMail: false, connectionSecretKeys: ['MY_STRIPE_CLIENT_SECRET'] });
+  const item = one.find((i) => /function-env/i.test(i))!;
+  assert.match(item, /~\/\.c2c\/<app>-function-env\.json/, 'item must point at the file deploy --function-env reads');
+  assert.match(item, /<out>\/function-env\.json/, 'item must name the autofilled source file');
+  assert.match(item, /MY_STRIPE_CLIENT_SECRET/, 'item must name the key');
+  const many = humanChecklist({ slate: false, sendsMail: false, connectionSecretKeys: ['A_SECRET', 'B_TOKEN'] });
+  const manyItem = many.find((i) => /function-env/i.test(i))!;
+  assert.match(manyItem, /secrets \(A_SECRET, B_TOKEN\)/);
+});
+
+test('sendsMail is detected from the plan: a sendmail workflow flags true, a plain app false', () => {
+  const mailer = buildDeploy(deriveIr(parse(MAIL_DS)), guardFor('Mailer', '1001'), true);
+  const quiet = buildDeploy(deriveIr(parse(PLAIN_DS)), guardFor('Quiet', '1002'), true);
+  assert.equal(mailer.sendsMail, true);
+  assert.equal(quiet.sendsMail, false);
+});
+
+test('sendsPush is detected from the plan: a pushnotification workflow flags true, a plain app false', () => {
+  const notifier = buildDeploy(deriveIr(parse(PUSH_DS)), guardFor('Notifier', '1003'), true);
+  const quiet = buildDeploy(deriveIr(parse(PLAIN_DS)), guardFor('Quiet', '1002'), true);
+  assert.equal(notifier.sendsPush, true);
+  assert.equal(quiet.sendsPush, false);
+  assert.ok(notifier.files.some((file) => file.path === 'functions/c2c_api/c2c-notification.mjs'));
+  assert.ok(notifier.files.some((file) => typeof file.data === 'string' && file.data.includes('c2cGuardedNotification')));
+  assert.equal(quiet.files.some((file) => file.path.endsWith('/c2c-notification.mjs')), false);
+  const configPath = (file: { path: string }) => file.path === 'web/public/c2c-config.js' || file.path === 'slate/c2c-config.js';
+  const notifierConfig = notifier.files.find(configPath);
+  assert.ok(typeof notifierConfig?.data === 'string' && notifierConfig.data.includes('C2C_SENDS_PUSH = true'));
+  const quietConfig = quiet.files.find(configPath);
+  assert.ok(typeof quietConfig?.data === 'string' && !quietConfig.data.includes('C2C_SENDS_PUSH'));
+});
+
+test('the push-notifications step appears only when the app sends a push', () => {
+  const without = humanChecklist({ slate: true, sendsMail: false });
+  assert.ok(!without.some((item) => /Push Notifications/i.test(item)));
+  const withPush = humanChecklist({ slate: true, sendsMail: false, sendsPush: true });
+  assert.ok(withPush.some((item) => /Push Notifications/i.test(item)));
+  assert.match(withPush.find((item) => /Push Notifications/i.test(item))!, /enrolls each signed-in user/);
+});

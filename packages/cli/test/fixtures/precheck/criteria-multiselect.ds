@@ -1,0 +1,55 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Criteria_Multiselect"
+{
+	forms
+	{
+		form Parent
+		{
+			Name
+			(
+				type = text
+				displayname = "Name"
+			)
+			PTags
+			(
+				type = checkboxes
+				displayname = "PTags"
+				values = {"a","b"}
+			)
+		}
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+			Parents
+			(
+				type = list
+				displayname = "Parents"
+				values = Parent.Name
+				displayformat = [Name]
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Title as "Title"
+			)
+			filters
+			(
+				"Has a" : Parents.PTags == "a"
+			)
+		}
+	}
+}

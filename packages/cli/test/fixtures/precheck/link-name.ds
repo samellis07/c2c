@@ -1,0 +1,35 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Link"
+{
+	forms
+	{
+		form Item
+		{
+			Code
+			(
+				type = text
+				displayname = "Code"
+			)
+			1Title
+			(
+				type = text
+				displayname = "Title"
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Code as "Code"
+			)
+		}
+	}
+}

@@ -1,0 +1,8134 @@
+/**
+ * Function generators (dry run).
+ *
+ * - form validate / success / load / submit → Advanced I/O handlers
+ * - on user input, show/hide, alert, openUrl, cancel submit → client handler module
+ * - schedules → Catalyst Job function modules plus job-scheduling.json (schedules.ts): a custom
+ *   schedule is one pre-defined cron, form schedules share one sweeper Job (pool names cannot contain "_").
+ *   A schedule runs as the application, not as a signed-in user, and is not an HTTP route.
+ * - approvals / blueprints → status column + approve / reject / transition endpoints.
+ *   Gate order is hidden form, then auth, then approver and status. The record is re-read.
+ *   (Circuits is not available in IN; no US data centre)
+ * - payments → not-supported stub, no gateway calls
+ *
+ * Nothing here deploys or contacts Catalyst.
+ */
+
+import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, staticDefault, translationLeftovers, translationStrings, unquote, type App, type Device, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
+import { compareEnUs } from '../../core/src/order.js';
+import { toolchainBannerLines } from '../../core/src/toolchain.js';
+import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
+import { parse, parseExpression } from './parser.js';
+import type { Expr, Script, Stmt } from './ast.js';
+import type { AccessPolicy, FieldRuleDenial, FormGrant, WriteField, WriteOp, WriteScalar } from '../../shims/src/access.js';
+import { criteriaHasRelative, criteriaHasTodo, type Criteria, type DecimalColumn, type DecimalColumns } from '../../shims/src/criteria.js';
+import { integrityColumns, type IntegrityColumn } from '../../data/src/integrity.js';
+import { flowHistoryTable, generateSchema, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
+import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
+import { LIMITS, jobPoolName } from '../../shims/src/index.js';
+import { multiValueDefault } from '../../shims/src/multi-value.js';
+import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerKey, isStageFieldProperty, phaseFieldKind, transitionOwnerProperties, type BlueprintFieldSpec } from './blueprint-rules.js';
+import { analyzeConnections, connectionsChecklist, declaredConnections } from './connections.js';
+import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, linkedGridForm, writeLiveSource, type FieldStoreShape } from './field-store.js';
+import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill-todos.js';
+import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
+import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
+import { unsupportedClientShims } from './client-shim.js';
+import { conditionalFormatCriteria, emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type ClientGap, type CriteriaFunction, type ServerConditionDef, type StatementCover, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
+import { normType } from './types.js';
+import { mutatesParameters } from './param-mutation.js';
+import { withoutDecimalAudit } from './audit.js';
+import { resolveOwnAppFetches } from './own-app-fetch.js';
+import { resolveAppCalls } from './resolve-app-calls.js';
+import { recognisedBuiltinNames } from './dispatch.js';
+import { parse as parseDeluge } from './parser.js';
+
+export interface GeneratedFile {
+  path: string;
+  source: string;
+}
+
+export interface GenerateResult {
+  files: GeneratedFile[];
+  stats: TranslateStats;
+  todos: TodoItem[];
+  /** construct → count, untranslated only */
+  constructs: Map<string, number>;
+  /**
+   * Form workflows whose script landed in a generated module. A merged route
+   * (`input-handlers`, `handler-handlers`) is one file for several events, so
+   * the per-event slug is not the file name. The no-silent-drop audit reads
+   * this instead of guessing the path. A workflow whose server body nothing
+   * invokes is not credited: `serverInvoked` is false and the report counts
+   * `form-event-server-uninvoked`.
+   */
+  coverage: WorkflowCoverage[];
+  /**
+   * Statement coverage ledger: one row per script statement the generators
+   * visited, absolute `.ds` spans. The no-silent-drop audit reconciles every
+   * declared statement against these rows; a statement with no row, or a row
+   * counted 'skipped', is a silent drop.
+   */
+  statementCoverage: CoverageEntry[];
+}
+
+/**
+ * A form-event server body was emitted, but the generated client never posts
+ * that route and the submit/delete runtime does not call it either. Counted,
+ * not credited. Prefetch (`<route>/prefetch`) is not this route.
+ */
+export const FORM_EVENT_SERVER_UNINVOKED = 'form-event-server-uninvoked';
+
+/**
+ * An `on start` presuccess body whose side effects cannot be held until the
+ * row write commits keeps running them up front (today's order). Counted, so
+ * the fallback is never silent.
+ */
+export const PRESUCCESS_EFFECT_UNBUFFERED = 'presuccess-effect-unbuffered';
+
+/**
+ * The guided step every `form-event-server-uninvoked` todo carries: what is
+ * not run (the generated route body for this workflow event) and the manual
+ * step. A submit body the on-success routes own merges into the matching
+ * on-success module; any other kind needs a caller wired to its route.
+ */
+function formEventUninvokedStep(form: string, event: string, kind: string): string {
+  const route = formEventServerPath(form, kind);
+  const label = event || kind;
+  if (kind === 'submit') {
+    return `The generated ${route} body for '${label}' never runs — the on-success routes own its posts. Merge that body into the matching on-success module under functions/aio/${slug(form)}/, or move it into a function the app calls, then verify it once.`;
+  }
+  return `The generated ${route} body for '${label}' is never invoked — no generated caller posts that route and the submit/delete pipeline does not call it. Post ${route} from a Catalyst client or function, or move the '${label}' workflow's server logic into an invoked module, then verify it once.`;
+}
+
+const CLIENT_RUN_GUARD = 'if (!shim.client || typeof shim.client.run !== "function") throw Object.assign(new Error("client.run unavailable; server half not run"), { c2cElementBlocked: true });\nawait shim.client.run(ctx);';
+
+/** One form workflow that emitFormHandler actually wrote into a module. */
+export interface WorkflowCoverage {
+  form: string;
+  event: string;
+  name: string;
+  start: number;
+  end: number;
+  file?: string;
+  /**
+   * Paths `put` returned for parts that run. A sibling's file is not listed.
+   * The server file is omitted when `serverInvoked` is false.
+   */
+  paths: string[];
+  /**
+   * False when this workflow wrote a server body and neither the generated
+   * client nor the submit/delete runtime runs that route. Omitted when the
+   * workflow wrote no server body.
+   */
+  serverInvoked?: boolean;
+}
+
+/**
+ * True when `source` refers to `serverPath` itself. A prefetch URL
+ * (`serverPath + '/prefetch'`) and a longer route do not count.
+ */
+export function clientPostsServerPath(source: string, serverPath: string): boolean {
+  if (!serverPath) return false;
+  const prefetch = `${serverPath}/prefetch`;
+  let from = 0;
+  while (from <= source.length) {
+    const at = source.indexOf(serverPath, from);
+    if (at < 0) return false;
+    const rest = source.slice(at + serverPath.length);
+    if (rest.startsWith('/prefetch')) {
+      from = at + prefetch.length;
+      continue;
+    }
+    const next = rest[0] ?? '';
+    if (next === '/' || next === '-' || next === '%' || /[A-Za-z0-9]/.test(next)) {
+      from = at + serverPath.length;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** The Advanced I/O route whose `handle` runs this form-event kind. */
+export function formEventServerPath(form: string, kind: string): string {
+  const leaf = kind === 'delete' ? 'delete-script' : kind;
+  return `/forms/${encodeURIComponent(form)}/${leaf}`;
+}
+
+/**
+ * Submit posts the success route (the UI model promotes it to submitEndpoint).
+ * That module and the submit stub both call validate `handle`. The delete
+ * button posts `/forms/<form>/delete`, and the delete stub calls the
+ * delete-script module. Other kinds run only when a generated client posts
+ * the route; prefetch does not.
+ */
+/** The submit scopes a form's success handlers take over from `/forms/<form>/submit`. */
+interface SubmitOwnership {
+  add: boolean;
+  edit: boolean;
+}
+
+interface SubmitFixup {
+  entry: WorkflowCoverage;
+  clientPosted: boolean;
+  serverFile?: string;
+  form: string;
+  event: string;
+  w: Workflow;
+}
+
+/**
+ * True when no post the generated UI makes reaches the `/submit` body of a
+ * submit-kind `event`: every scope the event covers (`on add`, `on edit`, or
+ * both) is owned by a success route. With no edit-scoped success an edit post
+ * goes to the plain `/submit`, so only an edit-scoped success owns edits.
+ */
+function submitBodyUnposted(owned: SubmitOwnership | undefined, event: string): boolean {
+  if (!owned) return false;
+  const e = event.toLowerCase();
+  const add = /\badd\b|\bcreate\b/.test(e);
+  const edit = /\bedit\b|\bupdate\b/.test(e);
+  const addOwned = owned.add;
+  const editOwned = owned.edit;
+  if (add && !edit) return addOwned;
+  if (edit && !add) return editOwned;
+  return addOwned && editOwned;
+}
+
+function runtimeReachesFormEvent(kind: string): boolean {
+  return kind === 'success' || kind === 'validate' || kind === 'delete';
+}
+
+/** The submit scopes an event covers, parsed the same way submitBodyUnposted reads ownership. */
+function submitEventScopes(event: string): { add: boolean; edit: boolean } {
+  const e = event.toLowerCase();
+  const add = /\badd\b|\bcreate\b/.test(e);
+  const edit = /\bedit\b|\bupdate\b/.test(e);
+  if (add && !edit) return { add: true, edit: false };
+  if (edit && !add) return { add: false, edit: true };
+  return { add: true, edit: true };
+}
+
+/**
+ * Request state only a generated client posts (prefetch slots, a subform row
+ * loop element, the clicked element). A body reading it cannot run inside the
+ * on-success module: a form submit never carries that state, so the merge
+ * would silently change what the script sees. It stays an uninvoked TODO.
+ */
+const CLIENT_ONLY_REQUEST_STATE = /\bctx\.(?:subformRow|element|slots|rangeSlot|rangeFrom|rangeTo|rangeEmpty|prefetchPath|formNonce|onlyScript|args)\b|\bshim\.client\./;
+
+/** True when an emitted server body reads request state only a generated client posts. */
+export function submitBodyReadsClientState(body: string): boolean {
+  return CLIENT_ONLY_REQUEST_STATE.test(body);
+}
+
+/** One `on add`/`on edit`/`on add or edit` server body merged into the on-success module. */
+export interface MergedSubmitPart {
+  w: Workflow;
+  /** Scope-guarded body text appended after the success module's own scripts. */
+  text: string;
+}
+
+/**
+ * How a form's submit-kind server bodies merge into its on-success module.
+ * `moved` bodies run only inside the success module (every scope they cover
+ * is owned); `copied` bodies also stay in `/submit` for the posts a scope the
+ * success module does not own still sends there. `successPath` is the merged
+ * module's generated path, for coverage credit.
+ */
+export interface SubmitMergePlan {
+  parts: MergedSubmitPart[];
+  moved: Set<Workflow>;
+  copied: Set<Workflow>;
+  /** Bodies that may not move, keyed to the {@link submitMergeBlockers} reasons. */
+  blocked: Map<Workflow, string[]>;
+  successPath: string;
+}
+
+const NO_SUBMIT_MERGE: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), blocked: new Map(), successPath: '' };
+
+/**
+ * A bare `actions` script under `on add` / `on edit` / `on add or edit` is
+ * Creator's on-success action for that record event: the pre-save scripts in
+ * an export are always phase-qualified (`on load`, `on validate`), and the
+ * generated `/submit` route already runs such a body after `writeLive`.
+ * Anything else — a phase-qualified event that reached the submit group, or
+ * an event this table does not name — is not provably post-save and fails
+ * closed.
+ */
+const POST_SAVE_SUBMIT_EVENT = /^\s*on\s+(?:add|edit|add\s+or\s+edit)\s*$/i;
+
+/** `cancel submit` — only valid before the row commits. */
+const SUBMIT_CANCELS = /\bcancel\s+submit\b|\bshim\.validate\.cancelSubmit\b/;
+/** `input.X = ...` or `input.X:ui.add(...)` — values the row must save. */
+const SUBMIT_WRITES_INPUT = /\binput\.[A-Za-z_][\w.$]*\s*=(?!=)|\binput\.[A-Za-z_][\w.$]*\s*:\s*ui\.|\bshim\.input\.(?:set|insert)\b/;
+/** `alert` / `info` to the submitter — a response the success route no longer serves. */
+const SUBMIT_ALERTS = /\b(?:alert|info)\s+(?![=;:])/;
+
+/**
+ * Why a submit-kind server body may not move into the on-success module: the
+ * merged body runs after `writeLive` commits the row, so a body that is not
+ * provably a post-save script — its phase is not the bare record `on add` /
+ * `on edit` / `on add or edit` success slot, or it cancels the submit,
+ * writes `input` fields the saved row depends on, or alerts the submitter —
+ * would silently change behavior (and what gets persisted) if it ran there.
+ * The list is fail-closed: an unrecognized phase or statement shape returns
+ * a reason, never an empty list by default. `submitBodyReadsClientState`
+ * stays a blocker here so every merge decision goes through one predicate.
+ */
+export function submitMergeBlockers(w: Workflow, serverBody: string): string[] {
+  const source = w.deluge?.text ?? '';
+  const reasons: string[] = [];
+  if (!POST_SAVE_SUBMIT_EVENT.test(w.event ?? '')) reasons.push('pre-save-phase');
+  if (SUBMIT_CANCELS.test(source) || SUBMIT_CANCELS.test(serverBody)) reasons.push('cancels-submit');
+  if (SUBMIT_WRITES_INPUT.test(source) || SUBMIT_WRITES_INPUT.test(serverBody)) reasons.push('writes-input');
+  if (SUBMIT_ALERTS.test(source)) reasons.push('alerts');
+  if (submitBodyReadsClientState(serverBody)) reasons.push('reads-client-state');
+  return reasons;
+}
+
+/** One visited statement and the stats bucket it counted into (translate.ts records rows; emitters shift them). */
+export interface CoverageEntry {
+  /** The unit the statement belongs to: `workflow <name>`, `function <name>`, `blueprint <transition> / <phase>`, ... */
+  unit: string;
+  /** The parsed statement kind. */
+  kind: string;
+  /** Absolute `.ds` span. */
+  start: number;
+  end: number;
+  bucket: 'translated' | 'shimmed' | 'todo' | 'skipped';
+}
+
+/** A Creator form-properties action: `type = presuccess` with an `on start` body. */
+function isPresuccessWorkflow(w: Workflow): boolean {
+  return (w.type ?? '').trim().toLowerCase() === 'presuccess';
+}
+
+/**
+ * True when a presuccess body's side effects may be buffered until the row
+ * write commits. Unsafe bodies, which keep pre-commit effects:
+ * - one that reads a stored `insert` id (`x = insert into …` — the deferred
+ *   write has no id to return),
+ * - one that reads (fetch criteria, `Form.count()`-style aggregate, or zcql)
+ *   a form it also writes (the read could not see the buffered write),
+ * - one that writes its own form (a same-form write is never deferred, so a
+ *   body that depends on it staying early keeps today's order),
+ * - one that uses a buffered call's result: the deferred `invokeurl`/
+ *   `sendmail` returns a `{deferred:true}` marker, so any later read of the
+ *   bound variable (a condition, a field set, a cancel, a return) decides on
+ *   the marker, not the response, and the real call's result is discarded,
+ * - one that calls a `thisapp.*` function or an unrecognised bare function:
+ *   the callee is opaque to this analysis and runs under the same buffer, so
+ *   its own writes would be deferred and its return could be a marker.
+ */
+function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
+  let script;
+  try {
+    script = parseDeluge(text);
+  } catch {
+    return false;
+  }
+  const writes = new Set<string>();
+  const reads = new Set<string>();
+  let unsafe = false;
+  let zcqlRead = false;
+  const effectBound = new Set<string>();
+  const readNames = new Set<string>();
+  // `x = <expr>` propagates the marker: a name whose value mentions a bound or
+  // already-tainted name holds the marker too. bindings records, per named
+  // target, every name its value reads; the fixpoint below grows the tainted
+  // set through the chain (`other = resp`, `m = {"k": resp}`, `x = f(resp)`).
+  const bindings: { target: string; names: Set<string> }[] = [];
+  let nameSink: Set<string> | null = null;
+  const KNOWN_BARE_CALLS = new Set(recognisedBuiltinNames().map((n) => n.toLowerCase()));
+  const unparen = (e: Expr): Expr => (e.kind === 'paren' ? unparen(e.expr) : e);
+  const rootName = (e: Expr | undefined): string | null => {
+    let cur = e;
+    while (cur && (cur.kind === 'member' || cur.kind === 'index' || cur.kind === 'paren')) {
+      cur = cur.kind === 'paren' ? cur.expr : cur.object;
+    }
+    return cur?.kind === 'name' ? cur.name : null;
+  };
+  const nameOf = (e: Expr | undefined): string | null => {
+    const props: string[] = [];
+    let cur = e;
+    while (cur && cur.kind === 'member') {
+      props.push(cur.property);
+      cur = cur.object;
+    }
+    if (!cur || cur.kind !== 'name') return null;
+    return [cur.name, ...props.reverse()].join('.');
+  };
+  const AGGREGATES = new Set(['count', 'sum', 'avg', 'min', 'max', 'distinct', 'median']);
+  const writeTarget = (t: Expr): void => {
+    // update/delete targets the form its criteria sits on; the criteria's own
+    // expressions may still read other forms.
+    const form = t.kind === 'criteria' ? nameOf(t.object) : nameOf(t);
+    if (form) writes.add(form);
+    else unsafe = true;
+    if (t.kind === 'criteria') {
+      visitExpr(t.criteria);
+      if (t.range) {
+        visitExpr(t.range.from);
+        visitExpr(t.range.to);
+      }
+    }
+  };
+  function visitExpr(e: Expr | undefined, valuePosition = false): void {
+    if (!e) return;
+    switch (e.kind) {
+      case 'insert': {
+        const form = nameOf(e.form);
+        if (form) writes.add(form);
+        else unsafe = true;
+        if (valuePosition) unsafe = true;
+        for (const p of e.entries) visitExpr(p.value, true);
+        return;
+      }
+      case 'criteria': {
+        const form = nameOf(e.object);
+        if (form) reads.add(form);
+        visitExpr(e.criteria);
+        if (e.range) {
+          visitExpr(e.range.from);
+          visitExpr(e.range.to);
+        }
+        return;
+      }
+      case 'colonCall': {
+        const object = nameOf(e.object);
+        const leaf = e.path[e.path.length - 1]?.toLowerCase() ?? '';
+        if (object?.toLowerCase() === 'zcql') zcqlRead = true;
+        else if (object?.toLowerCase() === 'thisapp') unsafe = true;
+        else if (object && AGGREGATES.has(leaf)) reads.add(object);
+        visitExpr(e.object, valuePosition);
+        for (const a of e.args) visitExpr(a, true);
+        return;
+      }
+      case 'call': {
+        if (e.callee.kind === 'member') {
+          const object = nameOf(e.callee.object);
+          if (object && AGGREGATES.has(e.callee.property.toLowerCase())) reads.add(object);
+        }
+        const root = rootName(e.callee);
+        if (root?.toLowerCase() === 'thisapp') unsafe = true;
+        else if (e.callee.kind === 'name' && !KNOWN_BARE_CALLS.has(e.callee.name.toLowerCase())) unsafe = true;
+        visitExpr(e.callee, true);
+        for (const a of e.args) visitExpr(a, true);
+        return;
+      }
+      case 'sendmail':
+      case 'invokeurl':
+      case 'pushnotification':
+        if (valuePosition) unsafe = true;
+        for (const p of e.entries) visitExpr(p.value, true);
+        return;
+      case 'name':
+        readNames.add(e.name);
+        if (nameSink) nameSink.add(e.name);
+        return;
+      case 'mailAttachments':
+        for (const item of e.items) {
+          if (item.value) visitExpr(item.value, true);
+          if (item.record) visitExpr(item.record, true);
+          if (item.criteria) visitExpr(item.criteria, true);
+        }
+        return;
+      case 'list':
+        for (const el of e.elements) visitExpr(el, true);
+        return;
+      case 'map':
+        for (const en of e.entries) {
+          visitExpr(en.key, true);
+          visitExpr(en.value, true);
+        }
+        return;
+      case 'unary':
+        visitExpr(e.expr, true);
+        return;
+      case 'binary':
+        visitExpr(e.left, true);
+        visitExpr(e.right, true);
+        return;
+      case 'member':
+        visitExpr(e.object, valuePosition);
+        return;
+      case 'index':
+        visitExpr(e.object, valuePosition);
+        visitExpr(e.index, true);
+        return;
+      case 'paren':
+        visitExpr(e.expr, valuePosition);
+        return;
+      case 'ifExpr':
+        visitExpr(e.test, true);
+        visitExpr(e.then, true);
+        if (e.else) visitExpr(e.else, true);
+        return;
+      default:
+        return;
+    }
+  }
+  const visitStmt = (s: Stmt): void => {
+    switch (s.kind) {
+      case 'block':
+        for (const inner of s.body) visitStmt(inner);
+        return;
+      case 'if':
+        visitExpr(s.test, true);
+        visitStmt(s.then);
+        for (const el of s.elifs) {
+          visitExpr(el.test, true);
+          visitStmt(el.body);
+        }
+        if (s.else) visitStmt(s.else);
+        return;
+      case 'forEach': {
+        // `for each x in <tainted>` taints the element variable; `for each
+        // index i` iterates positions, not values.
+        const collectionReads = new Set<string>();
+        const prevSink = nameSink;
+        nameSink = collectionReads;
+        visitExpr(s.collection, true);
+        nameSink = prevSink;
+        if (!s.iteratesIndex) bindings.push({ target: s.name, names: collectionReads });
+        visitStmt(s.body);
+        return;
+      }
+      case 'while':
+        visitExpr(s.test, true);
+        visitStmt(s.body);
+        return;
+      case 'try':
+        visitStmt(s.body);
+        if (s.catchBody) visitStmt(s.catchBody);
+        return;
+      case 'fn':
+        visitStmt(s.body);
+        return;
+      case 'deleteFrom':
+        writeTarget(s.target);
+        return;
+      case 'update':
+        writeTarget(s.target);
+        for (const p of s.entries) visitExpr(p.value, true);
+        return;
+      case 'assign': {
+        // `x = invokeurl[…]` stores the marker, not the response: record the
+        // binding and stay deferrable only while nothing reads `x`. Any other
+        // value-position use (a condition, an argument, `input.F = invokeurl`)
+        // decides on the marker, so it is unsafe by the valuePosition rule.
+        const v = unparen(s.value);
+        const valueReads = new Set<string>();
+        const prevSink = nameSink;
+        nameSink = valueReads;
+        if (s.op === '=' && s.target.kind === 'name' && (v.kind === 'invokeurl' || v.kind === 'sendmail' || v.kind === 'pushnotification')) {
+          effectBound.add(s.target.name);
+          visitExpr(s.value, false);
+        } else {
+          visitExpr(s.value, true);
+        }
+        nameSink = prevSink;
+        if (s.target.kind === 'name') {
+          // A compound `x op= value` also reads `x` itself.
+          if (s.op !== '=') readNames.add(s.target.name);
+          bindings.push({ target: s.target.name, names: valueReads });
+        } else {
+          // A member/index target the analysis cannot follow: visit it so a
+          // name read in the target itself (a[i] = …) is still counted.
+          visitExpr(s.target, true);
+        }
+        return;
+      }
+      case 'expr':
+        visitExpr(s.expr, false);
+        return;
+      case 'return':
+      case 'info':
+      case 'alert':
+      case 'successMessage':
+        if (s.value) visitExpr(s.value, true);
+        return;
+      case 'openUrl':
+        for (const a of s.args) visitExpr(a, true);
+        return;
+      case 'ui':
+        for (const t of s.targets) visitExpr(t, true);
+        return;
+      case 'unknown':
+        unsafe = true;
+        return;
+      default:
+        return;
+    }
+  };
+  for (const s of script.body) visitStmt(s);
+  // Grow the taint transitively: a name assigned (or looped) from an expression
+  // that mentions a tainted name holds the marker too, at any chain depth.
+  const tainted = new Set(effectBound);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const b of bindings) {
+      if (tainted.has(b.target)) continue;
+      for (const n of b.names) {
+        if (tainted.has(n)) {
+          tainted.add(b.target);
+          grew = true;
+          break;
+        }
+      }
+    }
+  }
+  // determinism-allow: order-independent OR over a boolean flag
+  for (const name of readNames) if (tainted.has(name)) unsafe = true;
+  if (unsafe || writes.has(ownForm)) return false;
+  if (zcqlRead && writes.size > 0) return false;
+  // determinism-allow: early return is the same regardless of which member triggers it
+  for (const read of reads) if (writes.has(read)) return false;
+  return true;
+}
+
+/**
+ * A generated construct that fell back to a safe default because the .ds did
+ * not declare enough to reproduce the Creator permission — or an explicit
+ * manual step for a declared construct the generator does not migrate (a
+ * translation block). Reported in migration-report.json (`warnings`); the
+ * generated behaviour, or what the user must do instead, is stated in `note`.
+ */
+export interface GenerateWarning {
+  construct: string;
+  /** The construct the warning is about (a function name). */
+  name: string;
+  note: string;
+}
+
+/** A source `alert` whose placement Creator may not execute. */
+export interface AlertDiagnostic {
+  form: string | null;
+  event: string | null;
+  name: string | null;
+  /**
+   * `disallowed` — proven rejected (form-workflow on success).
+   * `unverified` — placement Creator has not been observed to run (schedules,
+   *   approvals, blueprint phases, record events, functions).
+   */
+  verdict: 'disallowed' | 'unverified';
+  /**
+   * `follows-comment-line` — the alert sits directly under a `//` comment-only
+   * line, which is also where a wrapped comment tail lands. Adjacency alone
+   * never changes the verdict; review whether the line is really a tail.
+   */
+  note?: string;
+  start: number;
+  end: number;
+}
+
+/** Lock replay is opt-in. Omitting `lock` leaves every byte unchanged. */
+export interface GenerateOptions {
+  /** Accepted fills. A stale or tampered entry is reported and not applied. */
+  lock?: FillLock;
+  /** Receives stale and integrity failures from this run. */
+  stale?: StaleFill[];
+  /**
+   * The schema plan the deploy provisions, when the caller measured source
+   * data. app-layer unique and write rules then match the provisioned
+   * Data Store constraints; without it the plan is derived from Creator alone.
+   */
+  schema?: SchemaPlan;
+  /**
+   * The generated UI stubs, supplied by the caller that builds the UI (the UI
+   * package depends on this one, so its stub list arrives through the
+   * options). Each stub is one residual hole in migration-report.json. A
+   * function receives the generated files, for stubs that depend on them.
+   */
+  uiTodos?: readonly UiStubTodo[] | ((files: readonly GeneratedFile[]) => readonly UiStubTodo[]);
+  /**
+   * Opt-in async on-success lane: emit the after-commit event-function module,
+   * the dead-letter store and its sweep Job, and defer the live post-write
+   * script run to the record trigger (docs/event-deadletter.md). Default off —
+   * without it no `functions/events/` file exists and the output is
+   * byte-identical.
+   */
+  asyncOnSuccess?: boolean;
+}
+
+/** One generated UI stub, as the UI builder reports it. */
+export interface UiStubTodo {
+  area: string;
+  name: string;
+  reason: string;
+}
+
+/**
+ * The one residual-TODO accounting shared by analyze, the migration reports
+ * and the deterministic flag: every Deluge hole plus every generated UI stub.
+ * An app is deterministic only when the total is zero and no lock fill
+ * applies to it.
+ */
+export interface ResidualDeterminism {
+  deterministic: boolean;
+  todoCount: number;
+  uiTodoCount: number;
+  fillLockEntries: number;
+}
+
+export function residualDeterminism(delugeTodoCount: number, uiTodoCount: number, fillLockEntries: number): ResidualDeterminism {
+  const todoCount = delugeTodoCount + uiTodoCount;
+  return { deterministic: todoCount === 0 && fillLockEntries === 0, todoCount, uiTodoCount, fillLockEntries };
+}
+
+/** One row per construct at one source span. A second copy of the same span is the same hole. */
+export function dedupeTodos(todos: readonly TodoItem[]): TodoItem[] {
+  const seen = new Set<string>();
+  const out: TodoItem[] = [];
+  for (const todo of todos) {
+    const key = `${todo.construct}\0${todo.start}\0${todo.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(todo);
+  }
+  return out;
+}
+
+const EMPTY_STATS = (): TranslateStats => ({ statements: 0, translated: 0, shimmed: 0, todo: 0 });
+
+function addStats(a: TranslateStats, b: TranslateStats): void {
+  a.statements += b.statements;
+  a.translated += b.translated;
+  a.shimmed += b.shimmed;
+  a.todo += b.todo;
+}
+
+export function generate(app: App, options?: GenerateOptions): GenerateResult {
+  const files: GeneratedFile[] = [];
+  const used = new Set<string>();
+  const stats = EMPTY_STATS();
+  const todos: TodoItem[] = [];
+  const statementCoverage: CoverageEntry[] = [];
+  const alertDiagnostics: AlertDiagnostic[] = [];
+  const put = (path: string, source: string): string => {
+    let p = path;
+    let n = 2;
+    while (used.has(p)) {
+      const dot = path.lastIndexOf('.');
+      p = `${path.slice(0, dot)}-${n}${path.slice(dot)}`;
+      n++;
+    }
+    used.add(p);
+    files.push({ path: p, source });
+    return p;
+  };
+  const coverage: WorkflowCoverage[] = [];
+  // Per form, the submit scopes a success handler owns. The UI model promotes
+  // `submitEndpoint` (add posts) and `editSubmitEndpoint` (edit posts) to the
+  // success route only when a success workflow with a server module also
+  // emitted a client handler whose record event covers that scope. A
+  // server-only success registers no client handler and owns nothing.
+  const successServerForms = new Map<string, SubmitOwnership>();
+  const submitFixups: SubmitFixup[] = [];
+  // Submit bodies a form's on-success module absorbs, computed once per form
+  // by whichever of the submit or success group emits first.
+  const submitMerges = new Map<string, SubmitMergePlan>();
+
+  put('runtime/limits.mjs', limitsModule());
+
+  const specOf = workflowFlowSpecs(app);
+  // Every level and action of one approval is a separate IR workflow with the
+  // same name. They emit one machine module per machine, not one per event.
+  const approvalGroups = new Map<string, Workflow[]>();
+  for (const w of app.workflows) {
+    if (!isApproval(w)) continue;
+    const key = w.name || `approval:${w.form ?? ''}`;
+    const group = approvalGroups.get(key) ?? [];
+    group.push(w);
+    approvalGroups.set(key, group);
+  }
+  const schedulePlans = schedulePlansFor(app);
+  // Every workflow whose script serves /forms/<form>/<kind> is grouped: one
+  // module carries all of a form event's scripts (deploy keeps one module per
+  // route, so sibling modules would silently never run).
+  const handlerGroups = new Map<string, Workflow[]>();
+  for (const w of app.workflows) {
+    if (!isHandlerWorkflow(w)) continue;
+    const key = `${w.form || 'form'}${eventKind(w.event)}`;
+    const group = handlerGroups.get(key) ?? [];
+    group.push(w);
+    handlerGroups.set(key, group);
+  }
+  const serverConditions: ServerConditionDef[] = [];
+  const emitHandlers = (w: Workflow): void => {
+    const group = handlerGroups.get(`${w.form || 'form'}${eventKind(w.event)}`);
+    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, statementCoverage, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups, serverConditions, submitMerges);
+  };
+  const thisappEntries: ThisappEntry[] = [];
+  const warnings: GenerateWarning[] = [];
+  const clientCalls = clientCallFunctions(app);
+  const calledFunctions = new Set<string>();
+  const emittedHandlers: { path: string; kind: string; candidate: AsyncCandidate }[] = [];
+  const recordHandler = (entry: { path: string; kind: string; candidate: AsyncCandidate }): void => {
+    emittedHandlers.push(entry);
+  };
+  for (const w of app.workflows) {
+    if (workflowKind(w) === 'payment') {
+      put(`not-supported/payments-${slug(w.name || w.form || 'workflow')}.mjs`, paymentStub(w));
+      continue;
+    }
+    if (workflowKind(w) === 'blueprint') {
+      emitBlueprint(app, w, specOf.get(w), put, stats, todos, statementCoverage, alertDiagnostics, options?.schema);
+      emitHandlers(w);
+    } else if (workflowKind(w) === 'approval') {
+      const key = w.name || `approval:${w.form ?? ''}`;
+      const group = approvalGroups.get(key)!;
+      if (group[0] === w) emitApproval(app, group, specOf.get(w)!, put, stats, todos, statementCoverage, alertDiagnostics, options?.schema);
+    } else if (workflowKind(w) === 'schedule') emitSchedule(app, w, schedulePlans.get(w)!, put, stats, todos, statementCoverage, alertDiagnostics, options?.schema);
+    else emitHandlers(w);
+  }
+  // A submit-kind module emitted before its form's success module looked
+  // reachable. Once every handler exists, success owns that submit URL.
+  for (const fix of submitFixups) {
+    if (fix.clientPosted || fix.entry.serverInvoked === false) continue;
+    if (!submitBodyUnposted(successServerForms.get(fix.form), fix.event)) continue;
+    fix.entry.serverInvoked = false;
+    if (fix.serverFile) fix.entry.paths = fix.entry.paths.filter((p) => p !== fix.serverFile);
+    const fixReasons = submitMerges.get(fix.form)?.blocked.get(fix.w);
+    todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: fix.entry.start, end: fix.entry.end, manualStep: formEventUninvokedStep(fix.form, fix.event, 'submit'), ...(fixReasons?.length ? { manualReasons: fixReasons } : {}) });
+  }
+  // Every Advanced I/O form handler imports the shared request helpers from
+  // one app-local module. Emit it only when this app has at least one AIO file.
+  if (files.some((file) => file.path.startsWith('functions/aio/'))) {
+    put('functions/aio/_lib.mjs', aioLibraryModule());
+  }
+  // Response-sensitive on-success work never defers: it stays synchronous by
+  // refusing the flag with a named error, before the lane is emitted.
+  if (options?.asyncOnSuccess) {
+    assertAsyncSuccessDeferrable(
+      emittedHandlers.filter((entry) => entry.kind === 'success').map((entry) => entry.candidate),
+    );
+  }
+  // The async on-success lane exists only when an add/edit on-success module
+  // does; the event function re-runs exactly those sibling modules. Deletes
+  // stay synchronous in the delete endpoint, so delete-only specs never open
+  // the lane.
+  const asyncSuccess = !!options?.asyncOnSuccess && successSpecs(files).some((spec) => spec.add.length + spec.edit.length > 0);
+  emitScheduling(app, schedulePlans, put, options?.schema, asyncSuccess);
+  const publishers = apiPublishers(app);
+  const admins = administratorProfiles(app);
+  for (const fn of app.functions) emitFunction(app, fn, put, stats, todos, statementCoverage, alertDiagnostics, thisappEntries, publishers.get(fn.name), admins, warnings, options?.schema);
+  const callAccess = app.profiles.length ? accessPolicyFor(app) : undefined;
+  for (const fn of app.functions) {
+    const body = clientCalls.bodies.get(fn.name);
+    if (!calledFunctions.has(fn.name.toLowerCase()) || body === undefined) continue;
+    const name = slug(fn.name || 'function');
+    const readForms = [...clientCalls.reads.get(fn.name)!];
+    // A caller-scoped read sees only the rows the caller's profile grant
+    // allows. When a grant is owner- or criteria-scoped the callee's counts
+    // and lookups cover fewer rows than Creator's, so a condition can decide
+    // on a partial result (an availability check that misses another user's
+    // booking). The report names it; the endpoint stays caller-scoped.
+    const grants = callAccess?.profiles ?? {};
+    const partial = [...new Set(readForms)]
+      .sort(compareEnUs)
+      .filter((form) =>
+        Object.keys(grants)
+          .sort(compareEnUs)
+          .some((profile) => {
+            const grant = grants[profile][form];
+            return !!grant && grant.read !== false && (grant.ownerScope === 'view' || !!grant.recordFilter);
+          }),
+      );
+    if (partial.length) {
+      warnings.push({
+        construct: 'client-call-caller-scoped-read',
+        name: fn.name,
+        note: `The ${name}-call endpoint reads ${partial.join(', ')} as the caller. A profile whose grant on those forms is owner- or criteria-scoped gets counts and lookups over only the rows it can see, so the function's result can differ from Creator (an availability check can report free on a booking the caller cannot see). Re-check the same rule server-side at submit.`,
+      });
+    }
+    put(
+      `functions/custom/${name}-call.mjs`,
+      functionCallModule({ app, name: fn.name, signature: fn.signature, params: fnParams(fn.signature), reads: readForms, schema: options?.schema }),
+    );
+  }
+  // Server conditions a client handler was compiled into: read-only
+  // `c2cCond_*` functions reached through the same client-call route as a
+  // read-only `thisapp` callee — the catalog's dispatch and authorization are
+  // reused, and the runtime's caller-scoped datastore applies as usual.
+  const emittedCondition = new Set<string>();
+  for (const cond of serverConditions) {
+    // `Set#add` always returns the set itself, never whether the value was
+    // new, so the dedupe must check membership first -- otherwise every
+    // repeat condition (the same server condition replayed from more than
+    // one call site) is emitted again and collides with its own route.
+    if (emittedCondition.has(cond.name)) continue;
+    emittedCondition.add(cond.name);
+    const condReads = emittedReadForms(cond.body);
+    if (condReads === null) continue;
+    // A replayed binding may call a proved read-only `thisapp` function: the
+    // endpoint authorizes the callee's transitive form reads too, exactly like
+    // the catalog's own fixpoint.
+    const readSet = new Set(condReads);
+    let unscoped = false;
+    for (const path of emittedThisappCalls(cond.body) ?? []) {
+      const resolved = clientCalls.resolve(path);
+      const calleeReads = resolved !== undefined ? clientCalls.reads.get(resolved) : undefined;
+      if (!calleeReads) {
+        unscoped = true;
+        break;
+      }
+      for (const f of calleeReads) readSet.add(f);
+    }
+    if (unscoped) continue;
+    const name = slug(cond.name);
+    const readForms = [...readSet].sort(compareEnUs);
+    const grants = callAccess?.profiles ?? {};
+    const partial = readForms
+      .filter((form) =>
+        Object.keys(grants)
+          .sort(compareEnUs)
+          .some((profile) => {
+            const grant = grants[profile][form];
+            return !!grant && grant.read !== false && (grant.ownerScope === 'view' || !!grant.recordFilter);
+          }),
+      );
+    if (partial.length) {
+      warnings.push({
+        construct: 'client-call-caller-scoped-read',
+        name: cond.name,
+        note: `The ${name}-call endpoint reads ${partial.join(', ')} as the caller. A profile whose grant on those forms is owner- or criteria-scoped gets counts and lookups over only the rows it can see, so the condition's result can differ from Creator. Re-check the same rule server-side at submit.`,
+      });
+    }
+    put(`functions/custom/${name}.mjs`, conditionFunctionModule({ def: cond }));
+    put(
+      `functions/custom/${name}-call.mjs`,
+      functionCallModule({ app, name: cond.name, params: cond.params.map((p) => p.field), reads: readForms, schema: options?.schema, condition: true }),
+    );
+    thisappEntries.push({ name: cond.name, spec: `./custom/${name}.mjs`, exported: 'call', params: cond.params.map((p) => p.field), recordParams: {}, rowForm: '' });
+  }
+  if (asyncSuccess) {
+    put('functions/c2c-deadletter.mjs', deadLetterModule());
+    put(
+      `functions/${EVENT_FUNCTION_MODULE}`,
+      afterCommitModule({ app, banner, specs: successSpecs(files), schema: options?.schema ?? schemaOf(app), runtimeOptions: schemaRuntimeOptions(app, options?.schema) }),
+    );
+    put(`functions/job/${EVENT_SWEEPER_MODULE}.mjs`, eventSweeperModule({ app, banner }));
+    warnings.push({ ...ASYNC_ON_SUCCESS_WARNING });
+  }
+  // A translation block's string labels ship in the generated client's i18n
+  // table (buildModel → slate/assets/model.js) and its `Language_Settings`
+  // land on the model for the client's language pick. Only a block whose
+  // remaining pieces have no generated equivalent — unrecognized entries or
+  // machine translation — stays an explicit manual step: a todo inside its
+  // span plus the migration-report warning.
+  for (const t of app.translations) {
+    if (Object.keys(translationStrings(t)).length) continue;
+    const leftovers = translationLeftovers(t);
+    if (!leftovers.length) continue;
+    const warning = translationWarning(t, leftovers);
+    warnings.push(warning);
+    todos.push({ construct: 'translation', start: t.span.start, end: t.span.end, manualStep: warning.note });
+  }
+
+  // A phone/tablet device's per-form settings (sync scope, quickview, ...)
+  // have no Catalyst analog and are not read by the schema, UI, or Deluge
+  // generators: only the web device's `label placement` is consumed
+  // (packages/ui/src/decorations/layout.ts). Every other device-form
+  // property is named here so it is not absent from both the tree and the
+  // report.
+  for (const device of app.devices) {
+    if (device.device === 'web') continue;
+    for (const form of device.forms) {
+      if (form.properties.length) warnings.push(deviceFormWarning(device, form));
+    }
+  }
+
+  // functions/thisapp.mjs is emitted whenever a module can call `thisapp.<fn>`
+  // (its own body uses the shim) or the app declared functions at all, so an
+  // importing module never resolves a missing file.
+  const thisappUsed = files.some((f) => f.path.endsWith('.mjs') && usesThisapp(f.source));
+  if (thisappEntries.length || thisappUsed) {
+    put('functions/thisapp.mjs', thisappModule(thisappEntries));
+  }
+  // A report criteria or named filter that does not translate is a residual
+  // hole: the generated report fails closed, so the app is not deterministic.
+  for (const item of unmigratedReportCriteria(app)) {
+    todos.push({ construct: 'report-criteria', start: item.start, end: item.end });
+  }
+  for (const report of app.reports) {
+    for (const format of report.conditionalFormats) {
+      if (format.condition?.trim() && criteriaHasTodo(conditionalFormatCriteria(format.condition, app.functions))) {
+        todos.push({ construct: 'report-conditional-format', start: format.span.start, end: format.span.end });
+      }
+    }
+  }
+
+  const constructs = new Map<string, number>();
+  for (const t of todos) constructs.set(t.construct, (constructs.get(t.construct) ?? 0) + 1);
+  const connections = analyzeConnections(app);
+  // Only apps that call another Zoho service get the section, so other reports stay byte-identical.
+  if (connections.entries.length || connections.unsupported.length) {
+    put('CONNECTIONS.md', connectionsChecklist(app.name || 'app', connections));
+  }
+  // Deterministic only with zero residual TODOs and no fill-todos lock entry
+  // applied: a lock fill is host-authored, so it disqualifies the app. The
+  // residual is every distinct Deluge hole plus each generated UI stub the
+  // caller supplies, the same accounting analyze and the migration report use.
+  const fillLockEntries = options?.lock ? reportLock(app, options.lock).matched.length : 0;
+  const determinism = residualDeterminism(dedupeTodos(todos).length, uiStubCount(options?.uiTodos, files), fillLockEntries);
+  put(
+    'migration-report.json',
+    JSON.stringify(
+      {
+        dryRun: true,
+        deterministic: determinism.deterministic,
+        todoCount: determinism.todoCount,
+        uiTodoCount: determinism.uiTodoCount,
+        fillLockEntries,
+        statements: stats,
+        untranslated: [...constructs.entries()]
+          .sort((a, b) => b[1] - a[1] || compareEnUs(a[0], b[0]))
+          .map(([construct, count]) => ({ construct, count })),
+        alertDiagnostics,
+        ...(app.profiles.length ? { security: securityFidelity(app) } : {}),
+        ...(warnings.length ? { warnings } : {}),
+        ...(connections.entries.length || connections.unsupported.length ? { connections } : {}),
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  // translate.ts stays untouched. Fills are spliced
+  // only when the caller passes a lock, after the tree is otherwise finished.
+  if (options?.lock) {
+    const stale = applyFillLock(app, files, options.lock);
+    if (options.stale) {
+      for (const item of stale) options.stale.push(item);
+    }
+  }
+  assertNoSkippedStatements(statementCoverage);
+  return { files, stats, todos, constructs, coverage, statementCoverage };
+}
+
+/**
+ * The C3 generation gate: a statement the translator visited but accounted
+ * into no bucket — not translated, not shimmed, not a counted TODO — is a
+ * silent drop, a generator bug rather than a declared fidelity gap.
+ * Generation refuses to ship it. A `block` only recurses into its children,
+ * so 'skipped' is its resting bucket; its children carry the real rows.
+ */
+export function assertNoSkippedStatements(coverage: readonly CoverageEntry[]): void {
+  const row = coverage.find((c) => c.bucket === 'skipped' && c.kind !== 'block');
+  if (row) {
+    throw new Error(
+      `silent drop: a ${row.kind} statement in ${row.unit} was visited but emitted nothing — generation fails on it instead of shipping a module that quietly skips it`,
+    );
+  }
+}
+
+/**
+ * Classify the innermost event header an `alert` sits under. Live-tested on
+ * Creator: `alert` runs in on load, on validate, on change / on user input,
+ * and on click (custom action / button) actions; a form-workflow on success
+ * rejects it at import. The Creator alert reference also lists Subform on add
+ * row and on delete row as supported; other events are 'unverified', not
+ * proven disallowed. The event string is a ` / `-joined header path (`on add
+ * / on success`), so the leaf segment is the innermost header.
+ * https://www.zoho.com/deluge/help/client-functions/alert.html
+ * https://www.zoho.com/deluge/help/misc-tasks/alert-task.html
+ */
+export function alertEventClass(event: string): AlertEventClass {
+  const leaf = event.split(' / ').pop()?.trim().toLowerCase() ?? '';
+  if (/^on (load|validate|user input|change|click)\b/.test(leaf) || /^on (add|delete) row of\s+[a-z_]\w*$/i.test(leaf)) return 'allowed';
+  // Only the form-workflow `on success` is live-tested as rejected; even
+  // `on delete success` is unverified, not proven disallowed.
+  if (/^on success\b/.test(leaf)) return 'disallowed';
+  return 'unverified';
+}
+
+const ALERT_VERDICTS: Record<string, AlertDiagnostic['verdict']> = {
+  'alert-outside-allowed-event': 'disallowed',
+  'alert-in-unverified-event': 'unverified',
+};
+
+function recordAlertDiags(
+  items: TodoItem[],
+  raw: RawDeluge | null,
+  context: { form?: string; event?: string; name?: string },
+  sink: AlertDiagnostic[],
+): void {
+  for (const t of shift(items, raw)) {
+    const verdict = ALERT_VERDICTS[t.construct];
+    if (verdict) {
+      sink.push({
+        form: context.form ?? null,
+        event: context.event ?? null,
+        name: context.name ?? null,
+        verdict,
+        note: t.note,
+        start: t.start,
+        end: t.end,
+      });
+    }
+  }
+}
+
+/**
+ * The record-event scope a form-handler script runs under: `on add`, `on
+ * edit`, `on delete`, or both writes. A merged module guards each script by
+ * its scope only when the group mixes scopes.
+ */
+function recordScope(w: Workflow): 'add' | 'edit' | 'del' | 'both' {
+  const rec = (w.recordEvent ?? '').trim().toLowerCase();
+  if (rec === 'on add' || rec === 'create') return 'add';
+  if (rec === 'on edit' || rec === 'update') return 'edit';
+  if (rec === 'on delete') return 'del';
+  return 'both';
+}
+
+/** A workflow whose script lands in a form-handler module (one per form event kind). */
+function isHandlerWorkflow(w: Workflow): boolean {
+  const kind = workflowKind(w);
+  return kind === 'form' || (kind === 'blueprint' && !!(w.deluge || w.fieldRules?.length));
+}
+
+/**
+ * The module leaf for a form event group: the shared event slug, or the kind
+ * when the merged events differ. The group's `put` path is
+ * `functions/aio/<form>/<leaf>.mjs`.
+ */
+function handlerLeaf(group: readonly Workflow[]): string {
+  const labels = new Set(group.map((w) => w.event || w.name || 'handler'));
+  return labels.size === 1 ? slug([...labels].sort(compareEnUs)[0]!) : `${eventKind(group[0]!.event)}-handlers`;
+}
+
+/** Workflows of one app that share the /forms/<form>/<kind> route, in export order. */
+function handlerGroup(app: App, form: string, kind: string): Workflow[] {
+  return app.workflows.filter((w) => isHandlerWorkflow(w) && (w.form || 'form') === form && eventKind(w.event) === kind);
+}
+
+const TAIL_EVENT_KINDS = new Set(['load', 'input', 'addrow', 'deleterow', 'click']);
+
+/**
+ * The submit scopes a form's on-success module owns, computed the way the
+ * emission fills `successServerForms`: the success group must write a server
+ * module (no module, no route, no ownership) and each client part's record
+ * event claims its scope. The scan translates without recording — the success
+ * emission re-runs the same pipeline and pushes the real stats and todos.
+ */
+function successOwnershipFor(app: App, group: readonly Workflow[], clientCallFunctions: ReadonlySet<string>): SubmitOwnership {
+  const owned: SubmitOwnership = { add: false, edit: false };
+  let hasServer = false;
+  for (const w of group) {
+    const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions] }) : emptyTranslate();
+    const guarded = gateAction(app, w, translated, []);
+    if (guarded.server.trim()) hasServer = true;
+    const subform = subformEventField(w.event);
+    const clientBody = [subformRowSource(subform, guarded.client), fieldRuleSource(app, w, []), guarded.client].filter((part) => part.trim()).join('\n');
+    if (!clientBody.trim()) continue;
+    const rec = (w.recordEvent ?? '').toLowerCase();
+    if (rec === 'on delete') continue;
+    if (rec !== 'on edit') owned.add = true;
+    if (rec !== 'on add') owned.edit = true;
+  }
+  return hasServer ? owned : { add: false, edit: false };
+}
+
+/**
+ * The server body one submit-kind workflow contributes, before the group's
+ * scope wrapping: system stamp, subform row binding, and the guarded script.
+ * The merge re-runs the pipeline because the owning success module may emit
+ * before the submit group is reached; the submit emission repeats it and
+ * pushes the stats and todos then.
+ */
+function submitServerBody(app: App, w: Workflow, clientCallFunctions: ReadonlySet<string>): string {
+  const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions] }) : emptyTranslate();
+  const guarded = gateAction(app, w, translated, [], true);
+  if (!guarded.server.trim()) return '';
+  return [systemStampSource(systemWriteKind(w)), subformRowSource(subformEventField(w.event), guarded.server), guarded.server].filter((part) => part.trim()).join('\n');
+}
+
+/**
+ * The submit bodies a form's on-success module absorbs. A submit post reaches
+ * `/forms/<form>/submit` only for a scope no success module owns, so an
+ * `on add`/`on edit` body whose every scope is owned moves into the success
+ * module; a partially covered body is copied under a scope guard for the
+ * owned posts and stays for the rest. A body {@link submitMergeBlockers}
+ * flags — a non-post-save phase, `cancel submit`, an `input` write the row
+ * saves, an alert to the submitter, or client-only request state — cannot
+ * move and stays a counted form-event-server-uninvoked todo naming why.
+ * The plan is computed once per form, by whichever of the submit or success
+ * group emits first, and shared through `mergePlans`.
+ */
+function submitMergePlanFor(
+  app: App,
+  form: string,
+  successServerForms: Map<string, SubmitOwnership> | undefined,
+  mergePlans: Map<string, SubmitMergePlan> | undefined,
+  clientCallFunctions: ReadonlySet<string>,
+): SubmitMergePlan {
+  const cached = mergePlans?.get(form);
+  if (cached) return cached;
+  let plan = NO_SUBMIT_MERGE;
+  const successGroup = handlerGroup(app, form, 'success');
+  const submitGroup = handlerGroup(app, form, 'submit');
+  if (successGroup.length && submitGroup.length) {
+    let owned = successServerForms?.get(form);
+    if (!owned) {
+      owned = successOwnershipFor(app, successGroup, clientCallFunctions);
+      if (successServerForms && (owned.add || owned.edit)) successServerForms.set(form, owned);
+    }
+    if (owned.add || owned.edit) {
+      const next: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), blocked: new Map(), successPath: `functions/aio/${slug(form)}/${handlerLeaf(successGroup)}.mjs` };
+      for (const w of submitGroup) {
+        const body = submitServerBody(app, w, clientCallFunctions);
+        if (!body.trim()) continue;
+        const blockers = submitMergeBlockers(w, body);
+        if (blockers.length) {
+          next.blocked.set(w, blockers);
+          continue;
+        }
+        const covered = submitEventScopes(w.event || '');
+        const ownedAdd = covered.add && owned.add;
+        const ownedEdit = covered.edit && owned.edit;
+        if (!ownedAdd && !ownedEdit) continue;
+        const cond = ownedAdd && !ownedEdit ? 'if (!ctx.rowId)' : ownedEdit && !ownedAdd ? 'if (ctx.rowId)' : '';
+        next.parts.push({ w, text: cond ? `${cond} {\n${indent(body)}\n}` : body });
+        (ownedAdd === covered.add && ownedEdit === covered.edit ? next.moved : next.copied).add(w);
+      }
+      // Keep the plan when it carries only blocked bodies too: nothing
+      // merges, but their reasons still reach the counted todo.
+      if (next.parts.length || next.blocked.size) plan = next;
+    }
+  }
+  mergePlans?.set(form, plan);
+  return plan;
+}
+
+function workflowButtonName(w: Workflow): string {
+  const text = w.event ?? '';
+  const match = text.match(/button\s*=\s*([A-Za-z_][A-Za-z0-9_]*)/i);
+  return match?.[1] ?? '';
+}
+
+/**
+ * The `functions/aio/...` module a form-event workflow's script lands in. The
+ * leaf is the group's shared event slug or `<kind>-handlers`, never the
+ * workflow name, so same-named siblings share one module. A submit-kind
+ * workflow the on-success module absorbs (`submitMergePlanFor`) lands in
+ * that module instead of its own, so this mirrors that merge decision.
+ * Exported so the no-silent-drop audit derives the same path the generator
+ * puts; returns null for workflows the form-handler route does not cover.
+ */
+export function aioHandlerPath(app: App, w: Workflow): string | null {
+  if (!isHandlerWorkflow(w)) return null;
+  const form = w.form || 'form';
+  const kind = eventKind(w.event);
+  if (kind === 'submit') {
+    const merge = submitMergePlanFor(app, form, undefined, undefined, new Set());
+    // successPath carries its own .mjs extension; strip it to match this
+    // function's no-extension convention.
+    if (merge.moved.has(w) || merge.copied.has(w)) return merge.successPath.replace(/\.mjs$/, '');
+  }
+  return `functions/aio/${slug(form)}/${handlerLeaf(handlerGroup(app, form, kind))}`;
+}
+
+function emitFormHandler(
+  app: App,
+  group: readonly Workflow[],
+  put: (path: string, source: string) => string,
+  stats: TranslateStats,
+  todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
+  alertDiagnostics: AlertDiagnostic[],
+  warnings: GenerateWarning[],
+  clientCallFunctions: ReadonlySet<string>,
+  calledFunctions: Set<string>,
+  schema?: SchemaPlan,
+  asyncOnSuccess = false,
+  recordHandler?: (entry: { path: string; kind: string; candidate: AsyncCandidate }) => void,
+  coverage?: WorkflowCoverage[],
+  files: readonly GeneratedFile[] = [],
+  successServerForms?: Map<string, SubmitOwnership>,
+  submitFixups?: SubmitFixup[],
+  serverConditions?: ServerConditionDef[],
+  submitMerges?: Map<string, SubmitMergePlan>,
+): void {
+  const first = group[0]!;
+  const form = first.form || 'form';
+  const kind = eventKind(first.event);
+  const base = `${slug(form)}/${handlerLeaf(group)}`;
+  // An `on add`/`on edit`/`on add or edit` server body a success module owns
+  // merges into that module instead of emitting a `/submit` route nothing
+  // posts. Whichever group emits first computes the plan; the other reuses it.
+  const merge = kind === 'submit' || kind === 'success' ? submitMergePlanFor(app, form, successServerForms, submitMerges, clientCallFunctions) : NO_SUBMIT_MERGE;
+  // The route is one per form event kind, so every script of the group lands
+  // in this module in export order. Each script keeps its own prefetch slot
+  // namespace (slotStart chains) — the bodies cannot be concatenated raw.
+  const scopes = new Set(group.map(recordScope));
+  const mixedScopes = scopes.size > 1;
+  const hasDelScope = scopes.has('del');
+  const subformFields = new Set(group.map((w) => subformEventField(w.event)).filter((f): f is string => !!f));
+  const multiSubform = subformFields.size > 1;
+  let slot = 0;
+  const serverParts: string[] = [];
+  const prefetchParts: string[] = [];
+  const clientParts: { w: Workflow; body: string; prefetchPath: string; index: number; server: boolean }[] = [];
+  const serverScriptIndex = new Map<number, number>();
+  let prefetchElement = false;
+  let hasPrefetch = false;
+  const writeKinds = new Set<'insert' | 'update' | 'add-or-edit'>();
+  const contributed: { w: Workflow; server: boolean; prefetch: boolean; client: boolean }[] = [];
+  for (const w of group) {
+    const subform = subformEventField(w.event);
+    const todosBefore = todos.length;
+    const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions], slotStart: slot }) : emptyTranslate();
+    slot = translated.nextSlot || slot;
+    if (translated.serverConditions?.length) serverConditions?.push(...translated.serverConditions);
+    addStats(stats, translated.stats);
+    todos.push(...shift(translated.todos, w.deluge));
+    statementCoverage.push(...coverShift(translated.coverage, w.deluge, `workflow ${w.name || w.form || 'workflow'} (${w.event})`));
+    recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
+    countClientGaps(stats, todos, translated, w.deluge);
+    const guarded = gateAction(app, w, translated, todos, true);
+    const rules = fieldRuleSource(app, w, todos);
+    const systemWrite = systemWriteKind(w);
+    // The stamp and row binding join only a real script: a workflow with no
+    // server body contributes nothing and is named `workflow-empty` below.
+    const server = guarded.server.trim()
+      ? [systemStampSource(systemWrite), subformRowSource(subform, guarded.server), guarded.server].filter((part) => part.trim()).join('\n')
+      : '';
+    // A body the success module absorbed keeps out of the `/submit` module:
+    // it runs there once, after the row write, on the posts the success route
+    // owns. A partially owned body stays for the posts `/submit` still gets.
+    const movedToSuccess = merge.moved.has(w);
+    if (server && !movedToSuccess) writeKinds.add(systemWrite!);
+    const clientBody = [subformRowSource(subform, guarded.client), rules, guarded.client].filter((part) => part.trim()).join('\n');
+    const prefetch = [subformRowSource(subform, translated.prefetch), translated.prefetch, zohoSlotLines(clientBody)].filter((part) => part.trim()).join('\n');
+    if (!server.trim() && !prefetch.trim() && !clientBody.trim() && todos.length === todosBefore) {
+      warnings.push({
+        construct: 'workflow-empty',
+        name: w.name || w.form || 'workflow',
+        note: 'This workflow has no script and no field rules, so no handler is generated.',
+      });
+    }
+    // Record-event scope and subform guards apply only when the merged module
+    // mixes them; a uniform group runs the bodies exactly as one script.
+    const conds: string[] = [];
+    if (mixedScopes) {
+      const scope = recordScope(w);
+      if (scope === 'add') conds.push('!ctx.rowId');
+      else if (scope === 'edit') conds.push(hasDelScope ? 'ctx.rowId && !ctx.deleting' : 'ctx.rowId');
+      else if (scope === 'del') conds.push('ctx.deleting');
+      else if (hasDelScope) conds.push('!ctx.deleting');
+    }
+    const subformConds = multiSubform && subform ? [`ctx.subformRow && ctx.subformRow.field === ${JSON.stringify(subform)}`] : [];
+    conds.push(...subformConds);
+    const wrap = (part: string): string => (part.trim() && conds.length ? `if (${conds.join(' && ')}) {\n${indent(part)}\n}` : part);
+    // The prefetch request carries no ROWID and never runs for a delete, so a
+    // record-scope guard there would skip every edit-scoped read. Prefetch is
+    // read-only: it loads every script's slots and keeps only the subform guard.
+    const wrapPrefetch = (part: string): string => (part.trim() && subformConds.length ? `if (${subformConds.join(' && ')}) {\n${indent(part)}\n}` : part);
+    if (server.trim() && !movedToSuccess) {
+      serverScriptIndex.set(group.indexOf(w), serverParts.length);
+      serverParts.push(wrap(server));
+    }
+    if (prefetch.trim()) {
+      hasPrefetch = true;
+      prefetchParts.push(wrapPrefetch(prefetch));
+      if (translated.usesElement) prefetchElement = true;
+    }
+    const prefetchPath = prefetch.trim() ? `/forms/${encodeURIComponent(form)}/${kind}/prefetch` : '';
+    if (clientBody.trim()) clientParts.push({ w, body: clientBody, prefetchPath, index: group.indexOf(w), server: serverScriptIndex.has(group.indexOf(w)) });
+    if (server.trim() && !movedToSuccess) {
+      recordHandler?.({
+        path: `functions/aio/${base}.mjs`,
+        kind,
+        candidate: {
+          name: w.name || `${form} ${w.event || 'handler'}`,
+          server: guarded.server,
+          client: guarded.client,
+          deluge: w.deluge?.text ?? '',
+        },
+      });
+    }
+    contributed.push({ w, server: !!server.trim(), prefetch: !!prefetch.trim(), client: !!clientBody.trim() });
+  }
+  // A server script the group never posts gets the guarded client run as its
+  // whole client half: one script routes need no scriptEvents map — a null
+  // ctx.onlyScript runs the module's single body.
+  if (TAIL_EVENT_KINDS.has(kind) && serverParts.length > 0) {
+    for (const [index, w] of [...group.entries()].sort((a, b) => a[0] - b[0])) {
+      if (!serverScriptIndex.has(index) || clientParts.some((part) => part.index === index)) continue;
+      clientParts.push({ w, body: CLIENT_RUN_GUARD, prefetchPath: '', index, server: true });
+      const entry = contributed.find((item) => item.w === w);
+      if (entry) entry.client = true;
+    }
+    clientParts.sort((a, b) => a.index - b.index);
+  }
+  // A merged route can contain several independently failing scripts. Keep
+  // their boundaries so the event replay ledger can resume after a completed
+  // script without repeating its side effects.
+  const runEventTokens = new Map<number, string>();
+  const seenEvents = new Map<string, number>();
+  for (const [index, w] of [...group.entries()].sort((a, b) => a[0] - b[0])) {
+    const button = workflowButtonName(w);
+    const token = button ? `${w.event} [${button}]` : w.event || w.name || 'handler';
+    const ordinal = (seenEvents.get(token) ?? 0) + 1;
+    seenEvents.set(token, ordinal);
+    runEventTokens.set(index, ordinal === 1 ? token : `${token} #${ordinal}`);
+  }
+  const scriptEvents = group.length > 1 && serverParts.length > 1 && TAIL_EVENT_KINDS.has(kind)
+    ? Object.fromEntries([...serverScriptIndex].sort((a, b) => a[1] - b[1]).map(([index, i]) => [runEventTokens.get(index)!, i]))
+    : undefined;
+  // Orphaned `on add`/`on edit`/`on add or edit` bodies whose posts this
+  // success module owns run here, after its own on-success scripts, in the
+  // workflow order they were declared. Each keeps the scope guard for the
+  // posts it covers, so a merged body runs exactly once per successful
+  // add/edit the route serves. They are not named in scriptEvents: the
+  // submit pipeline calls the module, never one script of it.
+  if (kind === 'success') for (const part of merge.parts) serverParts.push(part.text);
+  const serverBody = group.length > 1 && serverParts.length > 1
+    ? serverParts.map((part, i) => `if (ctx.onlyScript == null || ctx.onlyScript === ${i}) await shim.__c2cScript(${i}, async () => {\n${indent(part)}\n});`).join('\n')
+    : serverParts.join('\n');
+  // An `on start` presuccess module is run by the submit pipeline (the submit
+  // stub and every live submit-owning module) before the on-validate
+  // siblings. Only a route whose every server script is presuccess is marked:
+  // the pipeline runs the whole module, never one script of a merged route.
+  const presuccessModule =
+    kind === 'handler' && contributed.some((item) => item.server) && contributed.every((item) => !item.server || isPresuccessWorkflow(item.w));
+  // A buffer-safe presuccess body marks the module `deferEffects`: the submit
+  // pipeline holds its mail, invokeurl and other-form writes until the row is
+  // stored. A body the buffer cannot represent keeps today's pre-commit
+  // order and is counted (presuccess-effect-unbuffered), never silent.
+  const presuccessBodies = contributed.filter((item) => item.server && isPresuccessWorkflow(item.w));
+  const unsafePresuccess = presuccessModule
+    ? presuccessBodies.filter((item) => !item.w.deluge?.text || !presuccessBodyDeferrable(item.w.deluge.text, form))
+    : [];
+  const presuccessDeferrable = presuccessModule && unsafePresuccess.length === 0;
+  if (presuccessModule) {
+    for (const item of unsafePresuccess) {
+      todos.push({ construct: PRESUCCESS_EFFECT_UNBUFFERED, start: item.w.span.start, end: item.w.span.end });
+    }
+  }
+  let serverFile: string | undefined;
+  if (serverBody.trim()) {
+    const systemWrite =
+      writeKinds.size === 0 ? null : writeKinds.size === 1 ? [...writeKinds].sort(compareEnUs)[0]! : 'add-or-edit';
+    const recordEvents = new Set(group.map((w) => (w.recordEvent ?? '').trim().toLowerCase()));
+    const recordEvent =
+      recordEvents.size === 1
+        ? first.recordEvent
+        : scopes.has('both') || (scopes.has('add') && scopes.has('edit'))
+          ? 'on add or edit'
+          : scopes.has('edit')
+            ? 'on edit'
+            : 'on add';
+    const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))].sort(compareEnUs) } : {};
+
+    // Mirror the UI model's successAt: a success client handler scoped `on add`
+    // takes add posts, `on edit` edit posts, unscoped or `on add or edit` both;
+    // `on delete` never submits. A server-only success emits no client handler.
+    if (kind === 'success' && successServerForms) {
+      const owned = successServerForms.get(form) ?? { add: false, edit: false };
+      for (const part of clientParts) {
+        const rec = (part.w.recordEvent ?? '').toLowerCase();
+        if (rec === 'on delete') continue;
+        if (rec !== 'on edit') owned.add = true;
+        if (rec !== 'on add') owned.edit = true;
+      }
+      if (owned.add || owned.edit) successServerForms.set(form, owned);
+    }
+    serverFile = put(
+      `functions/aio/${base}.mjs`,
+      aioModule({
+        presuccess: presuccessModule,
+        deferEffects: presuccessDeferrable,
+        app,
+        form,
+        title: `Form handler ${first.event || first.name}`,
+        // The on-delete script is a post-delete script, not the delete
+        // endpoint itself: `/forms/<form>/delete` is owned by the generated
+        // delete stub, which imports this module after the row is removed.
+        path: `/forms/${encodeURIComponent(form)}/${kind === 'delete' ? 'delete-script' : kind}`,
+        recordEvent,
+        ...extraRecordEvents,
+        systemWrite,
+        validateSpecs: systemWrite ? validateSiblingSpecs(app, form) : undefined,
+        // Only the modules that can own the submit URL run the presuccess
+        // actions; a field-change route that writes is not a form submit.
+        presuccessSpecs: systemWrite && (kind === 'success' || kind === 'submit') ? presuccessSiblingSpecs(app, form) : undefined,
+        body: serverBody,
+        schema,
+        scriptEvents,
+        deferSuccess: asyncOnSuccess && kind === 'success',
+      }),
+    );
+  }
+  let prefetchFile: string | undefined;
+  if (hasPrefetch) {
+    prefetchFile = put(
+      `functions/aio/${base}-prefetch.mjs`,
+      prefetchModule({
+        app,
+        title: `Prefetch for ${first.event || first.name}`,
+        path: `/forms/${encodeURIComponent(form)}/${kind}/prefetch`,
+        dir: '../../',
+        // Each script's prefetch keeps its own block: two scripts on one route
+        // can bind the same name (`const d_row` for one subform).
+        body: prefetchParts.length > 1 ? prefetchParts.map((part) => `{\n${indent(part)}\n}`).join('\n') : prefetchParts.join('\n'),
+        form,
+        formGrant: 'write',
+        schema,
+        element: prefetchElement,
+      }),
+    );
+  }
+  const clientFile = new Map<Workflow, string>();
+  for (const part of clientParts) {
+    collectClientCalls(part.body, calledFunctions);
+    clientFile.set(
+      part.w,
+      put(
+        `client/handlers/${slug(form)}/${slug(part.w.event || part.w.name || 'handler')}.mjs`,
+        clientModule(part.body + (part.server && TAIL_EVENT_KINDS.has(kind) && !part.body.includes('shim.client.run(') ? `\n${CLIENT_RUN_GUARD}` : ''), part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent, runPath: part.server && TAIL_EVENT_KINDS.has(kind) ? `/forms/${encodeURIComponent(form)}/${kind}` : undefined, runEvent: part.server && TAIL_EVENT_KINDS.has(kind) && scriptEvents ? runEventTokens.get(part.index) : undefined, button: kind === 'click' ? workflowButtonName(part.w) : undefined }),
+      ),
+    );
+  }
+  // A merged route is one file for several events. Credit only the workflows
+  // that wrote a non-empty part, and only the files that part landed in.
+  // An empty sibling shares the route and is not listed. A server body is
+  // credited only when the generated client posts its route, or the
+  // submit/delete runtime calls it. Prefetch is not that call. An uninvoked
+  // server body is a counted TODO, never a silent drop and never a credit.
+  if (coverage) {
+    const serverPath = formEventServerPath(form, kind);
+    const clientSources = [...clientFile.values()]
+      .sort(compareEnUs)
+      .map((p) => files.find((f) => f.path === p)?.source ?? '');
+    const clientPosted = clientSources.some((source) => clientPostsServerPath(source, serverPath));
+    for (const item of contributed) {
+      // A submit body the success module absorbed is invoked there on the
+      // posts the success route owns; a partially owned body also keeps its
+      // `/submit` copy for the posts the success route does not own.
+      const mergedInto = merge.moved.has(item.w) || merge.copied.has(item.w);
+      let serverInvoked: boolean | undefined;
+      if (item.server && mergedInto) serverInvoked = true;
+      else if (item.server && serverFile) {
+        if (kind === 'submit' && !clientPosted) serverInvoked = !submitBodyUnposted(successServerForms?.get(form), item.w.event || '');
+        else serverInvoked = clientPosted || runtimeReachesFormEvent(kind) || presuccessModule;
+        if (!serverInvoked) {
+          const reasons = kind === 'submit' ? merge.blocked.get(item.w) : undefined;
+          todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end, manualStep: formEventUninvokedStep(form, item.w.event || '', kind), ...(reasons?.length ? { manualReasons: reasons } : {}) });
+        }
+      }
+      const paths: string[] = [];
+      if (item.server && mergedInto && merge.successPath) paths.push(merge.successPath);
+      if (item.server && serverFile && serverInvoked !== false && !merge.moved.has(item.w)) paths.push(serverFile);
+      if (item.prefetch && prefetchFile) paths.push(prefetchFile);
+      const clientPath = clientFile.get(item.w);
+      if (item.client && clientPath) paths.push(clientPath);
+      if (!paths.length && serverInvoked !== false) continue;
+      const entry: WorkflowCoverage = {
+        form: item.w.form || 'form',
+        event: item.w.event || '',
+        name: item.w.name || '',
+        start: item.w.span.start,
+        end: item.w.span.end,
+        ...(item.w.span.file ? { file: item.w.span.file } : {}),
+        paths,
+        ...(serverInvoked !== undefined ? { serverInvoked } : {}),
+      };
+      coverage.push(entry);
+      if (item.server && serverFile && kind === 'submit' && !mergedInto) submitFixups?.push({ entry, clientPosted, serverFile, form, event: item.w.event || '', w: item.w });
+    }
+  }
+}
+
+function emitSchedule(
+  app: App,
+  w: Workflow,
+  plan: SchedulePlan,
+  put: (path: string, source: string) => void,
+  stats: TranslateStats,
+  todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
+  alertDiagnostics: AlertDiagnostic[],
+  schema?: SchemaPlan,
+): void {
+  const translated = w.deluge ? translateInApp(app, w.deluge.text, scheduleScriptOptions(app, w.form)) : emptyTranslate();
+  addStats(stats, translated.stats);
+  todos.push(...shift(translated.todos, w.deluge));
+  statementCoverage.push(...coverShift(translated.coverage, w.deluge, `schedule ${w.name || w.form || 'workflow'}`));
+  recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
+  const guarded = gateAction(app, w, translated, todos);
+  // scheduleBody reports an untranslated selector criteria itself.
+  if (plan.gap && plan.gap !== 'workflow-action-condition') todos.push({ construct: plan.gap, start: w.span.start, end: w.span.end });
+  // A swept form schedule gets its rows from the sweeper, filtered by the criteria there.
+  const swept = plan.kind === 'form' && !!plan.sweep;
+  put(
+    `functions/job/${plan.module}.mjs`,
+    jobModule({
+      app,
+      name: w.name,
+      pool: jobPoolName(app.name || w.name || 'schedule'),
+      properties: w.properties,
+      body: swept ? guarded.server : scheduleBody(app, w, guarded.server, todos),
+      plan,
+      schema,
+    }),
+  );
+}
+
+/** One sweeper Job when any form schedule is swept, and job-scheduling.json when the app has schedules. */
+function emitScheduling(app: App, plans: Map<Workflow, SchedulePlan>, put: (path: string, source: string) => void, schema?: SchemaPlan, eventSweep = false): void {
+  if (!plans.size && !eventSweep) return;
+  const entries: { module: string; spec: NonNullable<Extract<SchedulePlan, { kind: 'form' }>['sweep']> }[] = [];
+  const ordered = app.workflows.filter(isScheduleBranch).map((w) => plans.get(w)!);
+  for (const plan of ordered) if (plan.kind === 'form' && plan.sweep) entries.push({ module: plan.module, spec: plan.sweep });
+  if (entries.length) {
+    put(
+      `functions/job/${SWEEPER_MODULE}.mjs`,
+      sweeperModule({ app, banner, runtimeOptions: `${timeZoneFields(app) || ', settingsTimeZone: spec.timeZone'}${schemaRuntimeOptions(app, schema)}`, entries }),
+    );
+  }
+  put('job-scheduling.json', schedulingConfig(app, ordered, eventSweep));
+}
+
+/** The same branch order as generate(): blueprints and approvals win over the schedule container. */
+function isScheduleBranch(w: Workflow): boolean {
+  return isScheduleBranchWorkflow(w);
+}
+
+/** The schedule plans generate() emits from. Shared with fill-todos. */
+export function schedulePlansFor(app: App): Map<Workflow, SchedulePlan> {
+  return planSchedules(app, app.workflows.filter(isScheduleBranch), formLink, (src) => {
+    const criteria = reportCriteria(src, app.functions);
+    return criteriaHasTodo(criteria) ? null : criteria;
+  });
+}
+
+/** The emitted placeholder for a `workflow-action-condition` gap. Shared with fill-todos. */
+export const ACTION_CONDITION_GAP = 'await shim.todo(ctx, "workflow-action-condition");';
+/**
+ * True when a form handler's `actions (criteria)` guard would gate client code
+ * the browser cannot evaluate (client-shim.ts). Shared with fill-todos.
+ */
+export function clientGuardGap(client: string, guard: string): boolean {
+  return client.trim() !== '' && unsupportedClientShims(guard).length > 0;
+}
+
+/**
+ * A schedule `form = Name[criteria]` whose criteria does not translate is a
+ * `workflow-action-condition` gap: scheduleBody emits the gap call even on an
+ * empty body. Shared with fill-todos.
+ */
+export function scheduleCriteriaGap(w: Workflow, fns?: readonly CriteriaFunction[]): boolean {
+  const link = formLink(w.form);
+  return !!link.criteria && criteriaHasTodo(reportCriteria(link.criteria, fns));
+}
+
+/**
+ * The generate() branch a workflow takes, in the same order generate() tests
+ * them. Exported so the no-silent-drop audit classifies a workflow exactly
+ * the way the generator emits it.
+ */
+export function workflowKind(w: Workflow): 'payment' | 'blueprint' | 'approval' | 'schedule' | 'form' {
+  if (isPayment(w)) return 'payment';
+  if (w.blueprint && (w.blueprint.stages.length || w.blueprint.transitions.length || w.blueprint.start)) return 'blueprint';
+  if (isApproval(w)) return 'approval';
+  if (isSchedule(w)) return 'schedule';
+  return 'form';
+}
+
+/**
+ * A schedule `form = Name[criteria]` selects rows through the datastore shim.
+ * A criteria that does not translate omits the handler instead of running unfiltered.
+ */
+function scheduleBody(app: App, w: Workflow, body: string, todos: TodoItem[]): string {
+  const link = formLink(w.form);
+  if (!link.criteria) return body;
+  if (scheduleCriteriaGap(w, app.functions)) {
+    if (!body.includes('workflow-action-condition')) {
+      todos.push({ construct: 'workflow-action-condition', start: w.span.start, end: w.span.end });
+    }
+    return ACTION_CONDITION_GAP;
+  }
+  const criteria = reportCriteria(link.criteria, app.functions);
+  const staged = stagedFullRead(schemaOf(app), link.name);
+  const zcql = staged ? `, { zcql: ${JSON.stringify(staged)} }` : '';
+  const query = `await shim.datastore.rows(ctx, shim.datastore.query(ctx, ${JSON.stringify(link.name)}, ${JSON.stringify(criteria)}${zcql}));`;
+  return body.trim() ? `${query}\n${body}` : query;
+}
+
+/** One generated approval or blueprint state machine. */
+export interface FlowSpec {
+  kind: 'approval' | 'blueprint';
+  /** Workflow name from the .ds; the machine identity and the history `Machine` value. */
+  name: string;
+  /** Unique module and route slug. */
+  slug: string;
+  /** The governed form name (`Form[criteria]` link minus the criteria). */
+  form: string;
+  /**
+   * The `Form[criteria]` record selector as a Criteria tree, or null. A machine
+   * with a criteria governs only records that match: submit starts the first
+   * matching machine, and a transition re-checks the stored row against it.
+   */
+  criteria: Criteria | null;
+  /** The form link had a criteria that does not translate; counted as a TODO. */
+  criteriaUnmigrated: boolean;
+  /** Collision-safe status column name (`Status`, else `Flow_Status`, …). */
+  statusColumn: string;
+  /** The stage a new record enters (`Pending` for approvals, the blueprint start stage). */
+  start: string;
+  /** The generated transition-history table, when the app has machines. */
+  historyTable?: string;
+}
+
+/**
+ * The machines an app declares, in `.ds` order — one entry per logical
+ * approval (all `on level N / on <action>` workflows of one name collapse to a
+ * single machine) and one per blueprint. The UI submit path imports this list
+ * so a live insert can stamp the start stage and write the history row.
+ */
+export function flowSpecs(app: App): FlowSpec[] {
+  const historyTable = flowHistoryTable(app);
+  const specs: FlowSpec[] = [];
+  const used = new Set<string>();
+  const uniqueSlug = (name: string): string => {
+    const base = slug(name);
+    let s = base;
+    let n = 2;
+    while (used.has(s)) s = `${base}-${n++}`;
+    used.add(s);
+    return s;
+  };
+  const linkOf = (w: Workflow) => {
+    const link = formLink(w.form);
+    let criteria: Criteria | null = null;
+    let criteriaUnmigrated = false;
+    if (link.criteria) {
+      const parsed = reportCriteria(link.criteria, app.functions);
+      if (criteriaHasTodo(parsed)) criteriaUnmigrated = true;
+      else criteria = parsed;
+    }
+    const form = app.forms.find((item) => item.name === link.name);
+    return { link, criteria, criteriaUnmigrated, form };
+  };
+  const approvalDone = new Set<string>();
+  for (const w of app.workflows) {
+    if (isBlueprintWorkflow(w) && w.blueprint) {
+      const { link, criteria, criteriaUnmigrated, form } = linkOf(w);
+      specs.push({
+        kind: 'blueprint',
+        name: w.name,
+        slug: uniqueSlug(w.name || 'blueprint'),
+        form: link.name,
+        criteria,
+        criteriaUnmigrated,
+        statusColumn: flowStatusColumn(form?.fields ?? []),
+        start: blueprintStart(w),
+        historyTable,
+      });
+    } else if (isApproval(w)) {
+      const key = w.name || `approval:${w.form ?? ''}`;
+      if (approvalDone.has(key)) continue;
+      approvalDone.add(key);
+      const { link, criteria, criteriaUnmigrated, form } = linkOf(w);
+      specs.push({
+        kind: 'approval',
+        name: w.name,
+        slug: uniqueSlug(w.name || link.name || 'approval'),
+        form: link.name,
+        criteria,
+        criteriaUnmigrated,
+        statusColumn: flowStatusColumn(form?.fields ?? []),
+        start: 'Pending',
+        historyTable,
+      });
+    }
+  }
+  return specs;
+}
+
+/**
+ * The machine spec each blueprint or approval workflow's scripts emit under:
+ * blueprints by `.ds` order, approvals by group name (every workflow of one
+ * approval maps to its group's spec). Shared with fill-todos.
+ */
+export function workflowFlowSpecs(app: App): Map<Workflow, FlowSpec> {
+  const specs = flowSpecs(app);
+  const blueprint = specs.filter((s) => s.kind === 'blueprint');
+  const approval = new Map<string, FlowSpec>();
+  for (const spec of specs) if (spec.kind === 'approval') approval.set(spec.name, spec);
+  const out = new Map<Workflow, FlowSpec>();
+  let blueprintIndex = 0;
+  for (const w of app.workflows) {
+    if (isBlueprintWorkflow(w) && w.blueprint) out.set(w, blueprint[blueprintIndex++]!);
+    else if (isApproval(w)) {
+      const spec = approval.get(w.name || `approval:${w.form ?? ''}`);
+      if (spec) out.set(w, spec);
+    }
+  }
+  return out;
+}
+
+/**
+ * The blueprints governing `formName` that declare stage or `during` field
+ * settings, with their machine slug. The record read and edit submit import
+ * those machines; the UI model carries the same spec to hide and disable fields.
+ */
+export function blueprintFieldSpecs(app: App, formName: string): { slug: string; spec: BlueprintFieldSpec }[] {
+  const out: { slug: string; spec: BlueprintFieldSpec }[] = [];
+  const form = app.forms.find((item) => item.name === formName);
+  for (const [w, spec] of workflowFlowSpecs(app)) {
+    if (spec.kind !== 'blueprint' || spec.form !== formName) continue;
+    const fields = blueprintFieldSpec(w, form, spec.statusColumn, machineTransitionName);
+    if (fields) out.push({ slug: spec.slug, spec: fields });
+  }
+  return out;
+}
+
+/** Resolved approver rows for a level or transition. */
+interface MachineApprover {
+  key: string;
+  value: string;
+  kind: 'role' | 'profile' | 'user' | 'field' | 'unsupported';
+  reason?: string;
+}
+
+/**
+ * The todo one approver property raises, or null when it resolves. `level = N`
+ * is always unsupported; `field = X` is a todo only when X is not a users
+ * field of the machine's form: X that is not a users field cannot name a
+ * person, so it stays an explicit TODO and denies at run time. Shared with
+ * fill-todos so the walk counts the same approver gaps resolveApprovers
+ * reports.
+ */
+export function approverGap(key: string, value: string, form: Form | undefined, owner = false): 'approver-field' | 'approver-reporting-level' | 'blueprint-transition-owner' | null {
+  const kind = approverKindName(key);
+  // A transition-owner setting that names no supported kind is not guessed.
+  if (owner && !kind) return 'blueprint-transition-owner';
+  if (kind === 'level') return 'approver-reporting-level';
+  if (kind !== 'field') return null;
+  const field = form?.fields.find((item) => item.name === value);
+  return field && isUsersField(field) ? null : 'approver-field';
+}
+
+function resolveApprovers(properties: readonly Property[] | undefined, form: Form | undefined, todos: TodoItem[], owner = false): MachineApprover[] {
+  const out: MachineApprover[] = [];
+  for (const p of properties ?? []) {
+    const kind = approverKindName(p.key);
+    const gap = approverGap(p.key, p.value, form, owner);
+    if (gap === 'blueprint-transition-owner') {
+      todos.push({ construct: gap, start: p.span.start, end: p.span.end });
+      out.push({ key: p.key, value: p.value, kind: 'unsupported', reason: 'unsupported: transition owner kind' });
+      continue;
+    }
+    if (gap === 'approver-reporting-level') {
+      todos.push({ construct: gap, start: p.span.start, end: p.span.end });
+      out.push({ key: p.key, value: p.value, kind: 'unsupported', reason: 'unsupported: reporting-level approver' });
+      continue;
+    }
+    if (gap === 'approver-field') {
+      todos.push({ construct: gap, start: p.span.start, end: p.span.end });
+      out.push({
+        key: p.key,
+        value: p.value,
+        kind: 'unsupported',
+        reason: 'unsupported: form-field approver',
+      });
+      continue;
+    }
+    if (!kind || kind === 'level') continue;
+    out.push({ key: p.key, value: p.value, kind });
+  }
+  return out;
+}
+
+/** The level and action of `on level N / on approve`, or level 1 for a bare `on approve`. */
+export function approvalEvent(event: string): { level: number; action: 'approve' | 'reject' } | null {
+  const cleaned = event.trim().replace(/\s*\/\s*on load\s*$/i, '');
+  const leveled = /^on level (\d+)\s*\/\s*on (approve|reject)\s*$/i.exec(cleaned);
+  if (leveled) return { level: Number(leveled[1]), action: leveled[2]!.toLowerCase() as 'approve' | 'reject' };
+  const bare = /^on (approve|reject)\s*$/i.exec(cleaned);
+  if (bare) return { level: 1, action: bare[1]!.toLowerCase() as 'approve' | 'reject' };
+  return null;
+}
+
+/**
+ * The todo an approval event line raises when it is neither `on start` nor a
+ * parseable level/action: `approval-on-load` when the line ends in `on load`,
+ * else `approval-event`. Its deluge is not emitted. Shared with fill-todos.
+ */
+export function approvalEventGap(w: Workflow): { construct: 'approval-on-load' | 'approval-event'; start: number; end: number } | null {
+  if (/^on start\s*$/i.test(w.event)) return null;
+  if (approvalEvent(w.event)) return null;
+  if (/\/\s*on load\s*$/i.test(w.event)) {
+    const span = w.deluge?.span ?? w.span;
+    return { construct: 'approval-on-load', start: span.start, end: span.end };
+  }
+  return { construct: 'approval-event', start: w.span.start, end: w.span.end };
+}
+
+function emitApproval(
+  app: App,
+  group: Workflow[],
+  spec: FlowSpec,
+  put: (path: string, source: string) => void,
+  stats: TranslateStats,
+  todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
+  alertDiagnostics: AlertDiagnostic[],
+  schema?: SchemaPlan,
+): void {
+  const first = group[0]!;
+  const form = app.forms.find((item) => item.name === spec.form);
+  if (spec.criteriaUnmigrated) todos.push({ construct: 'workflow-action-condition', start: first.span.start, end: first.span.end });
+  const start: RawDeluge[] = [];
+  const levels = new Map<number, { actions: Map<string, RawDeluge[]>; approvers: Property[] }>();
+  for (const w of group) {
+    if (/^on start\s*$/i.test(w.event)) {
+      if (w.deluge) start.push(w.deluge);
+      continue;
+    }
+    const parsed = approvalEvent(w.event);
+    if (!parsed) {
+      const gap = approvalEventGap(w);
+      if (gap) todos.push({ construct: gap.construct, start: gap.start, end: gap.end });
+      continue;
+    }
+    const level = levels.get(parsed.level) ?? { actions: new Map<string, RawDeluge[]>(), approvers: [] };
+    levels.set(parsed.level, level);
+    // Declared actions come from the workflow existing; an empty script still
+    // declares the transition even though nothing runs for it.
+    const list = level.actions.get(parsed.action) ?? [];
+    if (w.deluge) list.push(w.deluge);
+    level.actions.set(parsed.action, list);
+    for (const p of w.approvers ?? []) {
+      if (!level.approvers.some((item) => item.key === p.key && item.value === p.value)) level.approvers.push(p);
+    }
+  }
+  const translate = (deluge: RawDeluge, w: Workflow, _name: string): string => {
+    const translated = translateInApp(app, deluge.text, approvalScriptOptions());
+    addStats(stats, translated.stats);
+    todos.push(...shift(translated.todos, deluge));
+    statementCoverage.push(...coverShift(translated.coverage, deluge, `approval ${spec.name}`));
+    recordAlertDiags(translated.todos, deluge, { form: spec.form, event: w.event, name: spec.name }, alertDiagnostics);
+    return gateAction(app, w, translated, todos).server;
+  };
+  const scripts: { name: string; body: string }[] = [];
+  const ordered = [...levels.keys()].sort((a, b) => a - b);
+  const stageAt = (index: number, level: number): string => (index === 0 ? 'Pending' : `Pending level ${level}`);
+  const transitions: Record<string, unknown>[] = [];
+  const levelRows: { level: number; approvers: MachineApprover[] }[] = [];
+  for (let index = 0; index < ordered.length; index++) {
+    const level = ordered[index]!;
+    const entry = levels.get(level)!;
+    const approvers = resolveApprovers(entry.approvers, form, todos);
+    levelRows.push({ level, approvers });
+    const next = ordered[index + 1];
+    for (const action of ['approve', 'reject'] as const) {
+      // A level declares the actions it offers; an undeclared action is not a
+      // transition, so a caller cannot reach it.
+      if (!entry.actions.has(action)) continue;
+      const delugeList = entry.actions.get(action)!;
+      const script = `${action}_${level}`;
+      const body = delugeList.map((deluge) => translate(deluge, first, `${spec.name} level ${level} ${action}`)).filter((s) => s.trim()).join('\n');
+      if (body.trim()) scripts.push({ name: script, body });
+      transitions.push({
+        action,
+        name: `level ${level}`,
+        from: stageAt(index, level),
+        to: action === 'approve' ? (next === undefined ? 'Approved' : stageAt(index + 1, next)) : 'Rejected',
+        level,
+        script,
+        approvers,
+      });
+    }
+  }
+  const startBody = start.map((deluge) => translate(deluge, first, `${spec.name} on start`)).filter((s) => s.trim()).join('\n');
+  if (startBody.trim()) scripts.unshift({ name: 'on_start', body: startBody });
+  put(
+    `functions/flow/${spec.slug}.mjs`,
+    machineModule({
+      app,
+      name: spec.name,
+      form: spec.form,
+      event: 'approval',
+      scripts,
+      schema,
+      machine: {
+        kind: 'approval',
+        name: spec.name,
+        slug: spec.slug,
+        statusColumn: spec.statusColumn,
+        currentStatus: spec.start,
+        start: spec.start,
+        formCriteria: spec.criteria,
+        historyTable: spec.historyTable ?? null,
+        submitHistory: true,
+        levels: levelRows,
+        transitions,
+      },
+    }),
+  );
+}
+
+function emitBlueprint(
+  app: App,
+  w: Workflow,
+  spec: FlowSpec | undefined,
+  put: (path: string, source: string) => void,
+  stats: TranslateStats,
+  todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
+  alertDiagnostics: AlertDiagnostic[],
+  schema?: SchemaPlan,
+): void {
+  const resolved = spec ?? flowSpecs(app).find((item) => item.kind === 'blueprint' && item.name === w.name);
+  if (!resolved) return;
+  const form = app.forms.find((item) => item.name === resolved.form);
+  if (resolved.criteriaUnmigrated) todos.push({ construct: 'workflow-action-condition', start: w.span.start, end: w.span.end });
+  const scripts: { name: string; body: string }[] = [];
+  const transitions: Record<string, unknown>[] = [];
+  const transitionList = w.blueprint?.transitions ?? [];
+  const inputFields = bodyInputFields(app, w.form);
+  const lookupFields = lookupFieldNames(app, w.form);
+  // `input.X`/`old.X` member roots a criterion may read: the form's fields,
+  // the machine's status column, and the stored row's id and system columns,
+  // which are always present. Bare `Status`/`ROWID` read the same record, so a
+  // criterion may name them without the `input.` prefix too.
+  const recordRoots = new Set([...inputFields, resolved.statusColumn, 'ROWID', 'Added_User', 'Added_Time', 'Modified_User', 'Modified_Time']);
+  const criteriaFields = [...inputFields];
+  for (const name of [resolved.statusColumn, 'ROWID']) if (!criteriaFields.includes(name)) criteriaFields.push(name);
+  // Stage and `during` field settings: which fields show and which a caller
+  // may change in each stage and transition. Null keeps bytes unchanged.
+  const fieldSpec = blueprintFieldSpec(w, form, resolved.statusColumn, machineTransitionName, todos);
+  for (let index = 0; index < transitionList.length; index++) {
+    const t = transitionList[index]!;
+    const parts: string[] = [];
+    const afterParts: string[] = [];
+    // Every `transition criteria` property gates the transition, wherever it
+    // sits — on the transition itself or inside any phase, in any letter case.
+    // Each occurrence gets its own script; the runtime ANDs them, so duplicated
+    // keys can never collide on one generated function name.
+    const conditionScripts: string[] = [];
+    const condition = (prop: Property, place: string): void => {
+      const tr = translateInApp(app, `return ${prop.value};`, { alertEvent: 'unverified', inputFields: criteriaFields, lookupFields });
+      addStats(stats, tr.stats);
+      todos.push(...shift(tr.todos, { text: prop.value, span: prop.span }));
+      recordAlertDiags(tr.todos, { text: prop.value, span: prop.span }, { form: w.form, event: w.event, name: `${t.name} / ${place} condition` }, alertDiagnostics);
+      const scriptName = conditionScripts.length ? `transition_${index}_condition_${conditionScripts.length + 1}` : `transition_${index}_condition`;
+      let body = tr.server;
+      const code = codeSansCommentsAndStrings(body);
+      if (!/\breturn\b/.test(code)) {
+        // A criterion that produced no verdict stays a closed gate — never a
+        // free pass — and the report lists it for manual remediation.
+        if (!tr.todos.length) todos.push({ construct: 'blueprint-transition-criteria', start: prop.span.start, end: prop.span.end });
+        body = `${body.trim() ? `${body}\n` : ''}return false;`;
+      } else {
+        // A criterion that names something not on the form can never be
+        // evaluated: a bare identifier throws when the gate runs, and an
+        // `input.`/`old.` record read of a removed field — member, subscript,
+        // `.get`, or `.toMap().get` — yields undefined. An untranslated call
+        // yields undefined too, and nested in `== null` or `!` that would be a
+        // passing verdict, so any `shim.todo(` in the criterion denies as
+        // well. Each case stays a closed gate with its own deny reason, and
+        // the report lists it.
+        const criterion = unwrapReturnBody(body);
+        if (
+          /\bshim\.todo\(/.test(code) ||
+          unboundGuardIdentifiers(criterion).length > 0 ||
+          recordFieldRoots(criterion).some((name) => name === null || !recordRoots.has(name))
+        ) {
+          todos.push({ construct: 'blueprint-transition-criteria', start: prop.span.start, end: prop.span.end });
+          body = 'deny("transition criteria reference an unknown field or function");';
+        }
+      }
+      scripts.push({ name: scriptName, body: `// ${machineTransitionName(t.name)} condition\n${body}` });
+      conditionScripts.push(scriptName);
+    };
+    for (const prop of t.properties) {
+      if (isTransitionCriteria(prop.key)) condition(prop, 'transition');
+      else if (!TRANSITION_HEADER_PROPS.has(prop.key.trim().toLowerCase()) && !approverKindName(prop.key) && !isOwnerKey(prop.key)) {
+        todos.push({ construct: `blueprint-transition-property-${prop.key}`, start: prop.span.start, end: prop.span.end });
+      }
+    }
+    // `action = update_fields` makes a during phase an update-fields action:
+    // the visible/updatable lists are migrated by `blueprintFieldSpec`, and
+    // `workflow status` says whether the update fires the form's on-edit
+    // workflows (Creator runs them by default; the "skip" choice serializes
+    // as `workflow status = false`).
+    let updateFields = false;
+    let workflowStatus = true;
+    for (const p of t.phases) {
+      const during = p.phase.trim().toLowerCase() === 'during';
+      // A transition's own `chart data` sits beside its `before`/`after`
+      // phases (not nested in one), so the parser carries it as a phase of
+      // its own. It is diagram-designer layout data only (from/to port,
+      // position, path), the exact counterpart of the stage- and start-level
+      // chart data blocks, so it gets one manual-step note per occurrence
+      // too, not one per coordinate property.
+      if (p.phase.trim().toLowerCase() === 'chart data') {
+        if (p.properties.length) todos.push({ construct: 'blueprint-transition-block-chart data', start: p.span.start, end: p.span.end });
+      } else {
+        for (const prop of p.properties) {
+          if (isTransitionCriteria(prop.key)) {
+            condition(prop, p.phase);
+            continue;
+          }
+          const key = prop.key.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+          if (during && key === 'action') {
+            const action = unquote(prop.value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+            if (action === 'update_fields') updateFields = true;
+            else todos.push({ construct: `blueprint-phase-property-${prop.key}`, start: prop.span.start, end: prop.span.end });
+          } else if (during && key === 'workflow status') {
+            const value = unquote(prop.value).trim().toLowerCase();
+            if (value === 'true' || value === 'false') workflowStatus = value === 'true';
+            else todos.push({ construct: `blueprint-phase-property-${prop.key}`, start: prop.span.start, end: prop.span.end });
+          } else if (!isConsumedPhaseProperty(p.phase, prop.key)) {
+            todos.push({ construct: `blueprint-phase-property-${prop.key}`, start: prop.span.start, end: prop.span.end });
+          }
+        }
+      }
+      for (const block of p.blocks) {
+        if (p.phase.trim().toLowerCase() === 'during' && phaseFieldKind(block.name)) continue;
+        if (isOwnerBlockName(block.name)) continue;
+        todos.push({ construct: `blueprint-phase-block-${block.name}`, start: block.span?.start ?? p.span.start, end: block.span?.end ?? p.span.end });
+      }
+      const texts = p.deluge.map((d) => {
+        const tr = translateInApp(app, d.text, serverScriptOptions(app, w.form));
+        addStats(stats, tr.stats);
+        todos.push(...shift(tr.todos, d));
+        statementCoverage.push(...coverShift(tr.coverage, d, `blueprint ${t.name} / ${p.phase}`));
+        recordAlertDiags(tr.todos, d, { form: w.form, event: w.event, name: `${t.name} / ${p.phase}` }, alertDiagnostics);
+        return tr.server;
+      });
+      const server = texts.filter((s) => s.trim()).join('\n');
+      if (server.trim()) (p.phase.trim().toLowerCase() === 'after' ? afterParts : parts).push(`// ${machineTransitionName(t.name)} / ${p.phase}\n${server}`);
+    }
+    const script = `transition_${index}`;
+    if (parts.length) scripts.push({ name: script, body: parts.join('\n') });
+    // After actions run only once the record has moved stage (Creator), so the
+    // after phase is its own script, run after the stage write.
+    const afterScript = `transition_${index}_after`;
+    if (afterParts.length) scripts.push({ name: afterScript, body: afterParts.join('\n') });
+    transitions.push({
+      action: 'transition',
+      name: machineTransitionName(t.name),
+      from: t.fromStage ?? resolved.start,
+      to: t.toStage ?? null,
+      script,
+      conditionScripts,
+      ...(afterParts.length ? { afterScript } : {}),
+      phases: t.phases.map((p) => p.phase),
+      approvers: resolveApprovers(transitionOwnerProperties(t, app), form, todos, true),
+      ...(fieldSpec?.transitions[machineTransitionName(t.name)] ? { fields: fieldSpec.transitions[machineTransitionName(t.name)] } : {}),
+      ...(updateFields ? { workflowStatus } : {}),
+    });
+  }
+  // Stage and `start` settings blocks (chart data and the like) are source-UI
+  // layout metadata: not translated, but never silently dropped.
+  for (const stage of w.blueprint?.stages ?? []) {
+    for (const prop of stage.properties) if (!isStageFieldProperty(prop.key)) todos.push({ construct: `blueprint-stage-property-${prop.key}`, start: prop.span.start, end: prop.span.end });
+    for (const block of stage.blocks) if (!isStageFieldProperty(block.name)) todos.push({ construct: `blueprint-stage-block-${block.name}`, start: block.span.start, end: block.span.end });
+  }
+  const start = w.blueprint?.start;
+  if (start) {
+    for (const prop of start.properties) {
+      if (prop.key.trim().toLowerCase() === 'start stage') continue;
+      todos.push({ construct: `blueprint-start-property-${prop.key}`, start: prop.span.start, end: prop.span.end });
+    }
+    for (const block of start.blocks) todos.push({ construct: `blueprint-start-block-${block.name}`, start: block.span.start, end: block.span.end });
+  }
+  put(
+    `functions/flow/${resolved.slug}.mjs`,
+    machineModule({
+      app,
+      name: resolved.name,
+      form: resolved.form,
+      event: w.event || 'blueprint',
+      scripts,
+      schema,
+      editWorkflows: onEditWorkflowSpecs(app, resolved.form),
+      machine: {
+        kind: 'blueprint',
+        name: resolved.name,
+        slug: resolved.slug,
+        statusColumn: resolved.statusColumn,
+        currentStatus: resolved.start,
+        start: resolved.start,
+        formCriteria: resolved.criteria,
+        historyTable: resolved.historyTable ?? null,
+        stages: (w.blueprint?.stages ?? []).map((s) => s.name),
+        ...(fieldSpec ? { stageFields: fieldSpec.stages, formFields: (form?.fields ?? []).map((f) => f.name) } : {}),
+        transitions,
+      },
+    }),
+  );
+}
+
+/**
+ * The aio module specs of the governed form's on-edit workflows: a
+ * `workflow status = true` transition fires them on its update-fields save —
+ * On Validate before the field write, On Success after it. Scoping matches
+ * `validateSiblingSpecs`: `on edit`, `on add or edit`, and unscoped events
+ * run on an edit; `on add` and `on delete` never do. A workflow with no
+ * server actions emits no module, and the runtime import treats a missing
+ * file as nothing to run.
+ */
+function onEditWorkflowSpecs(app: App, form: string): { validate: string[]; success: string[] } {
+  const out: { validate: string[]; success: string[] } = { validate: [], success: [] };
+  for (const kind of ['validate', 'success'] as const) {
+    const group = handlerGroup(app, form, kind).filter((other) => workflowKind(other) === 'form');
+    const record = (o: Workflow) => (o.recordEvent ?? '').toLowerCase();
+    if (!group.some((o) => !record(o) || record(o).includes('edit'))) continue;
+    out[kind].push(`../aio/${slug(form)}/${handlerLeaf(group)}.mjs`);
+  }
+  return out;
+}
+
+/** `Send as "Send"` is an internal name plus a display label; the label wins. */
+function machineTransitionName(name: string): string {
+  const match = /\s+as\s+("[^"]*")\s*$/i.exec(name ?? '');
+  return match ? unquote(match[1]!) : name;
+}
+
+/** `transition criteria` in any letter case — the source format does not fix key casing. */
+function isTransitionCriteria(key: string): boolean {
+  return key.trim().toLowerCase() === 'transition criteria';
+}
+
+/** Transition header properties the generator already reads (`from stage`, `to stage`) or deliberately ignores (`type`). */
+const TRANSITION_HEADER_PROPS = new Set(['type', 'from stage', 'to stage']);
+
+/**
+ * An `api <name> { ... }` custom-API block that publishes a function over HTTP.
+ * `scope`/`method` are the block's properties, unquoted, when declared.
+ */
+export interface ApiPublish {
+  api: string;
+  method?: string;
+  scope?: string;
+}
+
+/** Top-level `api` block property, unquoted (`scope`, `method`). */
+function apiProp(api: PropertyBlock, key: string): string | undefined {
+  const p = api.properties.find((x) => x.key.toLowerCase() === key);
+  if (!p) return undefined;
+  return unquote(p.value).trim() || undefined;
+}
+
+/** Every string an `api` block preserves: property values, flags, and the actions Deluge, at any depth. */
+function apiDelugeText(block: PropertyBlock, out: string[] = []): string[] {
+  for (const p of block.properties) out.push(p.value);
+  out.push(...block.items);
+  for (const d of block.deluge ?? []) out.push(d.text);
+  for (const child of block.blocks) apiDelugeText(child, out);
+  return out;
+}
+
+/** `name` used as a call target: preceded by `.`, `thisapp.`, an app link name, or a boundary — never mid-identifier. */
+function callsFunction(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[^\\w$])${escaped}\\s*\\(`, 'i').test(text);
+}
+
+/**
+ * Which custom functions an `api <name> { ... }` block publishes over HTTP.
+ * A custom API's actions script calls `thisapp.<fn>(args)` or
+ * `<applink>.<fn>(args)` — the only Deluge syntax that invokes an in-app
+ * function (deluge-docs/pages/deluge/help/misc-statements/call-function-in-creator.html).
+ * A function with no publisher is in-process only: workflow actions and
+ * `thisapp` dispatch call it, but it is not an HTTP route.
+ */
+export function apiPublishers(app: App): Map<string, ApiPublish[]> {
+  const out = new Map<string, ApiPublish[]>();
+  for (const api of app.apis) {
+    const texts = apiDelugeText(api);
+    const publish: ApiPublish = {
+      api: api.name,
+      ...(apiProp(api, 'method') ? { method: apiProp(api, 'method') } : {}),
+      ...(apiProp(api, 'scope') ? { scope: apiProp(api, 'scope') } : {}),
+    };
+    for (const fn of app.functions) {
+      if (!texts.some((text) => callsFunction(text, fn.name))) continue;
+      const list = out.get(fn.name) ?? [];
+      if (!list.some((p) => p.api === api.name)) list.push(publish);
+      out.set(fn.name, list);
+    }
+  }
+  return out;
+}
+
+/** Verbs an Advanced I/O route may declare. Same set as the function security rule. */
+const ADVANCED_IO_METHODS = new Set(['GET', 'POST', 'DELETE', 'PUT', 'PATCH']);
+
+/**
+ * Endpoint verb for a function an `api` block publishes.
+ * A declared `method` is kept, in any case. When every publisher omits
+ * `method`, the endpoint stays POST — the verb routes.json uses when an
+ * endpoint line names no method. Two declared verbs, or a verb outside
+ * that set, is not a route. When some publishers declare a verb and others
+ * omit it, the omitted ones adopt the declared verb rather than disagreeing
+ * with their own default.
+ */
+function resolveApiMethod(publishers: readonly ApiPublish[]): { method: string } | { note: string } {
+  const declared: string[] = [];
+  for (const publisher of publishers) {
+    const raw = publisher.method?.trim();
+    if (!raw) continue;
+    const method = raw.toUpperCase();
+    if (!ADVANCED_IO_METHODS.has(method)) {
+      return {
+        note: `api ${publisher.api} method ${JSON.stringify(raw)} is not an Advanced I/O method; no route is written`,
+      };
+    }
+    if (!declared.includes(method)) declared.push(method);
+  }
+  if (declared.length > 1) {
+    return { note: `published methods ${[...declared].sort().join(', ')} disagree; no route is written` };
+  }
+  return { method: declared[0] ?? 'POST' };
+}
+
+/**
+ * The translated body can change state: a Data Store write, mail, an outbound
+ * call (invokeurl may POST, an integration task writes), an in-app function
+ * call (it may write), or an untranslated hole (unknown, so not safe).
+ */
+const STATE_CHANGING_SHIMS =
+  /\bshim\.(?:datastore\.(?:insert|insertRow|update|delete|flush|setField|writeRow)|mail\.send|http\.invokeurl|zoho\.task|thisapp\.call|todo)\(/;
+
+function changesState(body: string): boolean {
+  return STATE_CHANGING_SHIMS.test(body);
+}
+
+/** Profiles Creator would call Administrator: the administrator preset with no module list. */
+export function administratorProfiles(app: App): string[] {
+  const seen = new Set<string>();
+  return app.profiles
+    .filter((p) => profilePreset(p) === 'administrator')
+    .map((p) => p.name)
+    .filter((name) => {
+      const key = name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+const OWN_APP_HOST = /^https:\/\/(?:app\.)?zohocreator\.[a-z]{2,3}(?:\.[a-z]{2})?\/?$/;
+const isAppUri = (expr: Expr | undefined) => expr?.kind === 'member' && expr.object.kind === 'name' && expr.object.name === 'zoho' && expr.property === 'appuri';
+const isAdminUser = (expr: Expr | undefined) =>
+  expr?.kind === 'member' && expr.object.kind === 'name' && expr.object.name === 'zoho' && (expr.property === 'adminuser' || expr.property === 'adminuserid');
+
+function isOwnAppSlug(app: App, candidate: string): boolean {
+  const lower = candidate.toLowerCase();
+  const raw = (app.name ?? '').trim().toLowerCase();
+  if (!raw) return false;
+  const words = raw.split(/[^a-z0-9]+/).filter(Boolean);
+  const hyphenSlug = words.join('-');
+  const underSlug = words.join('_');
+  return lower === raw || lower === hyphenSlug || lower === underSlug;
+}
+
+function expandInterpolatedParts(rawParts: Expr[], substituteArg: (expr: Expr) => Expr): Expr[] {
+  const out: Expr[] = [];
+  for (const raw of rawParts) {
+    const part = substituteArg(raw);
+    if (part.kind !== 'string' || !part.value.includes('${')) {
+      out.push(part);
+      continue;
+    }
+    const str = part.value;
+    let cursor = 0;
+    let failed = false;
+    while (cursor < str.length) {
+      const open = str.indexOf('${', cursor);
+      if (open < 0) {
+        if (cursor < str.length) out.push({ kind: 'string', value: str.slice(cursor), span: part.span });
+        break;
+      }
+      if (open > cursor) {
+        out.push({ kind: 'string', value: str.slice(cursor, open), span: part.span });
+      }
+      const close = str.indexOf('}', open + 2);
+      const inner = close > open + 2 ? str.slice(open + 2, close).trim() : '';
+      if (close < 0 || !inner) {
+        out.push({ kind: 'unknown', text: str, reason: 'expr', span: part.span });
+        failed = true;
+        break;
+      }
+      out.push(substituteArg(parseExpression(inner)));
+      cursor = close + 1;
+    }
+    if (failed) break;
+  }
+  return out;
+}
+
+function concatParts(expr: Expr): Expr[] {
+  const parts: Expr[] = [];
+  const walk = (node: Expr) => {
+    if (node.kind === 'binary' && node.op === '+') {
+      walk(node.left);
+      walk(node.right);
+      return;
+    }
+    parts.push(node);
+  };
+  walk(expr);
+  return parts;
+}
+
+function formField(form: Form | undefined, fieldName: string): Field | undefined {
+  return form?.fields.find((item) => item.name.toLowerCase() === fieldName.toLowerCase());
+}
+
+interface ClientOpenUrlResult {
+  kind: 'supported' | 'unsupported';
+  target?: string;
+  reason?: string;
+}
+
+/** The form a function's row reads come from: `form =` or the first form-typed parameter. */
+function recordSourceForm(app: App, fn: FunctionDef): Form | undefined {
+  if (fn.form) {
+    const named = app.forms.find((item) => item.name.toLowerCase() === fn.form!.toLowerCase());
+    if (named) return named;
+  }
+  for (const param of fnSignatureParams(fn.signature)) {
+    const form = app.forms.find((item) => item.name.toLowerCase() === param.type.toLowerCase());
+    if (form) return form;
+  }
+  return undefined;
+}
+
+function calleePathName(expr: Expr): string | undefined {
+  const parts: string[] = [];
+  let curr: Expr | undefined = expr;
+  while (curr) {
+    if (curr.kind === 'name') {
+      parts.unshift(curr.name);
+      break;
+    }
+    if (curr.kind === 'member') {
+      parts.unshift(curr.property);
+      curr = curr.object;
+    } else {
+      return undefined;
+    }
+  }
+  if (parts.length > 1 && parts[0]?.toLowerCase() === 'thisapp') parts.shift();
+  return parts.length ? parts.join('.') : undefined;
+}
+
+function unparenExpr(e: Expr): Expr {
+  while (e.kind === 'paren') e = e.expr;
+  return e;
+}
+
+/**
+ * Substitutes a plain local variable read with its assigned value, so
+ * `url = "..." + x; openUrl(url, ...)` is seen as `openUrl("..." + x, ...)`.
+ * Recurses into the expression shapes `openUrl` arguments actually take
+ * (string concatenation, member/call chains, grouping); any other shape is
+ * left as-is, which only means that branch stays unresolved, not unsafe.
+ */
+function substituteLocalReads(expr: Expr, locals: ReadonlyMap<string, Expr>): Expr {
+  const e = unparenExpr(expr);
+  switch (e.kind) {
+    case 'name': {
+      const sub = locals.get(e.name.toLowerCase());
+      return sub ?? e;
+    }
+    case 'binary': {
+      const left = substituteLocalReads(e.left, locals);
+      const right = substituteLocalReads(e.right, locals);
+      return left === e.left && right === e.right ? e : { ...e, left, right };
+    }
+    case 'member': {
+      const object = substituteLocalReads(e.object, locals);
+      return object === e.object ? e : { ...e, object };
+    }
+    case 'call': {
+      const callee = substituteLocalReads(e.callee, locals);
+      const args = e.args.map((a) => substituteLocalReads(a, locals));
+      return callee === e.callee && args.every((a, i) => a === e.args[i]) ? e : { ...e, callee, args };
+    }
+    default:
+      return e;
+  }
+}
+
+/**
+ * A block of only-local assignments (`name = expr;`, no datastore or shim
+ * reads among them — those are not analysable as client expressions) ending
+ * in one `openUrl`, with the assigned names (including any from an
+ * enclosing scope) substituted into its arguments.
+ */
+function openUrlAfterLocals(body: readonly Stmt[], outerLocals?: ReadonlyMap<string, Expr>): Stmt | undefined {
+  if (!body.length) return undefined;
+  const locals = new Map<string, Expr>(outerLocals);
+  for (let i = 0; i < body.length - 1; i++) {
+    const s = body[i]!;
+    if (s.kind !== 'assign' || s.op !== '=' || s.target.kind !== 'name') return undefined;
+    locals.set(s.target.name.toLowerCase(), substituteLocalReads(s.value, locals));
+  }
+  const last = body[body.length - 1]!;
+  if (last.kind !== 'openUrl') return undefined;
+  if (!locals.size) return last;
+  return { ...last, args: last.args.map((a) => substituteLocalReads(a, locals)) };
+}
+
+/** A `{ openUrl(...) }` block (optionally preceded by plain local assigns) or a bare `openUrl` statement. */
+function soleOpenUrl(stmt: Stmt, outerLocals?: ReadonlyMap<string, Expr>): Stmt | undefined {
+  if (stmt.kind === 'openUrl') {
+    if (!outerLocals?.size) return stmt;
+    return { ...stmt, args: stmt.args.map((a) => substituteLocalReads(a, outerLocals)) };
+  }
+  if (stmt.kind === 'block') return openUrlAfterLocals(stmt.body, outerLocals);
+  return undefined;
+}
+
+/**
+ * The openUrl statements a client-navigation function is allowed to hold: one
+ * `openUrl`, or an if / else-if / else whose every branch is one `openUrl`,
+ * each optionally preceded by plain local assigns (e.g. `url = "..." + id;`
+ * ahead of the branch, or ahead of the whole `if`) that flow into the call.
+ */
+function openUrlStmtsOf(body: readonly Stmt[]): Stmt[] | undefined {
+  const locals = new Map<string, Expr>();
+  let i = 0;
+  for (; i < body.length - 1; i++) {
+    const s = body[i]!;
+    if (s.kind !== 'assign' || s.op !== '=' || s.target.kind !== 'name') break;
+    locals.set(s.target.name.toLowerCase(), substituteLocalReads(s.value, locals));
+  }
+  const rest = body.slice(i);
+  if (rest.length === 1 && rest[0]?.kind === 'openUrl') {
+    const stmt = soleOpenUrl(rest[0], locals);
+    return stmt ? [stmt] : undefined;
+  }
+  if (rest.length !== 1 || rest[0]?.kind !== 'if') return undefined;
+  const iff = rest[0];
+  const thenUrl = soleOpenUrl(iff.then, locals);
+  if (!thenUrl) return undefined;
+  const out: Stmt[] = [thenUrl];
+  for (const branch of iff.elifs) {
+    const url = soleOpenUrl(branch.body, locals);
+    if (!url) return undefined;
+    out.push(url);
+  }
+  if (iff.else) {
+    const url = soleOpenUrl(iff.else, locals);
+    if (!url) return undefined;
+    out.push(url);
+  }
+  return out;
+}
+
+/** A name that stands for the clicked / selected record in this function. */
+function isRecordName(name: string, app: App, fn: FunctionDef, argByParam: Map<string, Expr>): boolean {
+  const lower = name.toLowerCase();
+  if (lower === 'input') return false;
+  for (const param of fnSignatureParams(fn.signature)) {
+    if (param.name.toLowerCase() !== lower) continue;
+    if (app.forms.some((form) => form.name.toLowerCase() === param.type.toLowerCase())) return true;
+  }
+  const mapped = argByParam.get(lower);
+  if (mapped?.kind === 'name') {
+    const mappedName = mapped.name.toLowerCase();
+    if (app.forms.some((form) => form.name.toLowerCase() === mappedName)) return true;
+    if (fn.form && mappedName === fn.form.toLowerCase()) return true;
+  }
+  return false;
+}
+
+function classifyClientOpenUrl(app: App, fn: FunctionDef): ClientOpenUrlResult | undefined {
+  if (!fn.deluge?.length) return undefined;
+  let body: Stmt[];
+  try {
+    body = parse(fn.deluge.map((d) => d.text).join('\n')).body;
+  } catch {
+    return undefined;
+  }
+  const argByParam = new Map<string, Expr>();
+  let targetFn = fn;
+  let units = openUrlStmtsOf(body);
+  if (!units && body.length === 1 && body[0]?.kind === 'expr' && body[0].expr.kind === 'call') {
+    const calleeName = calleePathName(body[0].expr.callee);
+    if (!calleeName) return undefined;
+    const calleeFn = app.functions.find((item) => item.name.toLowerCase() === calleeName.toLowerCase());
+    if (!calleeFn) return undefined;
+    let calleeBody: Stmt[];
+    try {
+      calleeBody = parse(calleeFn.deluge.map((part) => part.text).join('\n')).body;
+    } catch {
+      return undefined;
+    }
+    units = openUrlStmtsOf(calleeBody);
+    if (!units) return undefined;
+    targetFn = calleeFn;
+    const params = fnSignatureParams(calleeFn.signature);
+    const callArgs = body[0].expr.args;
+    for (let i = 0; i < params.length; i++) {
+      if (callArgs[i]) argByParam.set(params[i]!.name.toLowerCase(), callArgs[i]!);
+    }
+  }
+  if (!units?.length) return undefined;
+  let unsupported: ClientOpenUrlResult | undefined;
+  let supported: ClientOpenUrlResult | undefined;
+  for (const openUrlStmt of units) {
+    const result = classifyOpenUrlStmt(app, targetFn, openUrlStmt, argByParam);
+    if (result.kind === 'unsupported') unsupported = result;
+    else supported = result;
+  }
+  return unsupported ?? supported;
+}
+
+function classifyOpenUrlStmt(
+  app: App,
+  fn: FunctionDef,
+  openUrlStmt: Stmt,
+  argByParam: Map<string, Expr>,
+): ClientOpenUrlResult {
+  if (openUrlStmt.kind !== 'openUrl') return { kind: 'unsupported', reason: 'not an openUrl statement' };
+  if (!openUrlStmt.args.length || openUrlStmt.args.length > 3) {
+    return { kind: 'unsupported', reason: 'openUrl invalid arguments count' };
+  }
+  const substituteArg = (expr: Expr): Expr => {
+    if (expr.kind === 'call' && expr.args.length === 0 && expr.callee.kind === 'member' && expr.callee.property.toLowerCase() === 'getall') {
+      return substituteArg(expr.callee.object);
+    }
+    if (expr.kind === 'name' && argByParam.has(expr.name.toLowerCase())) {
+      return argByParam.get(expr.name.toLowerCase())!;
+    }
+    if (expr.kind === 'member') {
+      const obj = substituteArg(expr.object);
+      return obj === expr.object ? expr : { ...expr, object: obj };
+    }
+    return expr;
+  };
+  const rawParts = concatParts(openUrlStmt.args[0]!);
+  const parts: Expr[] = expandInterpolatedParts(rawParts, substituteArg);
+
+  if (parts[0]?.kind === 'string' && OWN_APP_HOST.test(parts[0].value) && isAppUri(parts[1])) {
+    parts.splice(0, 2);
+  } else if (parts[0]?.kind === 'string' && OWN_APP_HOST.test(parts[0].value) && isAdminUser(parts[1]) && parts[2]?.kind === 'string') {
+    const slugMatch = /^\/?([A-Za-z0-9_-]+)\/(.*)$/s.exec(parts[2].value);
+    if (!slugMatch || !isOwnAppSlug(app, slugMatch[1]!)) {
+      return { kind: 'unsupported', reason: 'target is not an own-app #Form, #Report, or #Page route' };
+    }
+    const rest = slugMatch[2]!;
+    if (rest) parts.splice(0, 3, { kind: 'string', value: rest, span: parts[2].span });
+    else parts.splice(0, 3);
+  } else if (isAppUri(parts[0])) {
+    parts.splice(0, 1);
+  }
+
+  if (parts[0]?.kind === 'string' && /^\s*javascript:/i.test(parts[0].value)) {
+    return { kind: 'unsupported', reason: 'javascript script URLs are not supported' };
+  }
+
+  const parsedSigParams = fnSignatureParams(fn.signature);
+  const sigParams = new Set(parsedSigParams.map((p) => p.name.toLowerCase()));
+  const sigParamForms = new Map<string, Form>();
+  for (const param of parsedSigParams) {
+    const pf = app.forms.find((f) => f.name.toLowerCase() === param.type.toLowerCase());
+    if (pf) sigParamForms.set(param.name.toLowerCase(), pf);
+  }
+  const sourceForm = recordSourceForm(app, fn);
+  const rowBind = functionRowBinding(fn);
+  const rootFormOf = (expr: Expr): Form | undefined => {
+    if (expr.kind !== 'name') return undefined;
+    const key = expr.name.toLowerCase();
+    if (key === 'input') return sourceForm;
+    if (rowBind && key === rowBind) return sourceForm;
+    if (sourceForm && key === sourceForm.name.toLowerCase()) return sourceForm;
+    return sigParamForms.get(key);
+  };
+
+  const reads: string[] = [];
+  let text = '';
+  for (const part of parts) {
+    if (part.kind === 'string') {
+      if (part.value.includes('\u0000')) return { kind: 'unsupported', reason: 'null byte in url' };
+      text += part.value;
+    } else if (part.kind === 'name') {
+      if (sigParams.has(part.name.toLowerCase()) || part.name === 'ID' || (sourceForm && formField(sourceForm, part.name))) {
+        text += `\u0000${reads.length}\u0000`;
+        reads.push(part.name);
+      } else {
+        return { kind: 'unsupported', reason: `unknown identifier ${part.name}` };
+      }
+    } else if (part.kind === 'member' && part.object.kind === 'name' && /^[A-Za-z_]\w*$/.test(part.property)) {
+      const rForm = rootFormOf(part.object);
+      if (part.object.name === 'input' || (rForm && (part.property === 'ID' || formField(rForm, part.property)))) {
+        text += `\u0000${reads.length}\u0000`;
+        reads.push(part.property);
+      } else {
+        return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
+      }
+    } else if (
+      part.kind === 'member' &&
+      /^[A-Za-z_]\w*$/.test(part.property) &&
+      part.object.kind === 'member' &&
+      part.object.object.kind === 'name' &&
+      /^[A-Za-z_]\w*$/.test(part.object.property)
+    ) {
+      const rForm = rootFormOf(part.object.object);
+      const lookupField = rForm ? formField(rForm, part.object.property) : undefined;
+      if (part.property === 'ID' && lookupField?.lookup) {
+        text += `\u0000${reads.length}\u0000`;
+        reads.push(lookupField.name);
+      } else if (lookupField?.lookup) {
+        const target = app.forms.find((f) => f.name.toLowerCase() === lookupField.lookup!.form.toLowerCase());
+        const leaf = target ? formField(target, part.property) : undefined;
+        if (!target || !leaf || leaf.subfields.length > 0) {
+          return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
+        }
+        text += `\u0000${reads.length}\u0000`;
+        reads.push(`${lookupField.name}.${leaf.name}`);
+      } else {
+        return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
+      }
+    } else {
+      return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
+    }
+  }
+
+  if (/^(?:mailto:|tel:)/i.test(text)) {
+    return { kind: 'supported', target: text };
+  }
+  const origText = text;
+  const pageRoute = /^\/?(?:print|page-embed|page-perma)\/([A-Za-z_]\w*)\/?(\?.*)?$/.exec(text);
+  if (pageRoute) text = `#Page:${pageRoute[1]}${pageRoute[2] ?? ''}`;
+  const viewRoute = /^\/?(?:view-embed|view-perma)\/([A-Za-z_]\w*)\/?(\?.*)?$/.exec(text);
+  if (viewRoute) text = `#View:${viewRoute[1]}${viewRoute[2] ?? ''}`;
+  const reportRoute = /^\/?(?:report-embed|report-perma)\/([A-Za-z_]\w*)\/?(\?.*)?$/.exec(text);
+  if (reportRoute) text = `#Report:${reportRoute[1]}${reportRoute[2] ?? ''}`;
+  const formRoute = /^\/?(?:form-embed|form-perma)\/([A-Za-z_]\w*)\/?(\?.*)?$/.exec(text);
+  if (formRoute) text = `#Form:${formRoute[1]}${formRoute[2] ?? ''}`;
+  if (/^#?Scripts?[:.]/i.test(text)) {
+    return { kind: 'unsupported', target: text, reason: 'Creator #Script pseudo-URLs are not client navigation routes' };
+  }
+  const clean = text.startsWith('/#') ? text.slice(1) : text;
+
+  const m = /^#(Form|Report|Page|View):([A-Za-z_][\w ]*)(?:\?(.*))?$/.exec(clean);
+  const editLink = !m ? /^\/?([A-Za-z_]\w*)\/record-edit\/([A-Za-z_]\w*)\/([^?\s\\]+)(?:\?(.*))?$/.exec(clean) : null;
+  const shortEditLink = !m && !editLink ? /^\/?record-edit\/([A-Za-z_]\w*)\/([^?\s\\]+)(?:\?(.*))?$/.exec(clean) : null;
+  const summaryLink = !m && !editLink && !shortEditLink ? /^\/?record-summary\/([A-Za-z_]\w*)\/([^?\s\\]+)(?:\?(.*))?$/.exec(clean) : null;
+  if (!m && !editLink && !shortEditLink && !summaryLink) {
+    if (/^#([A-Za-z_][\w-]*)$/.test(origText)) {
+      return { kind: 'supported', target: origText };
+    }
+    if (
+      !/^\/(?:[A-Za-z_]\w*\/record-edit(?:\/|$)|record-edit(?:\/|$)|record-summary(?:\/|$)|print(?:\/|$)|#)/i.test(origText) &&
+      /^\/(?!\/)[^\s"'<>`\\\u0000]*$/.test(origText)
+    ) {
+      return { kind: 'supported', target: origText };
+    }
+    const winArg = openUrlStmt.args[1];
+    const iframe = winArg?.kind === 'string' && winArg.value.trim().toLowerCase() === 'iframe';
+    return { kind: 'unsupported', target: text, reason: iframe ? 'iframe target is not an own-app #Form, #Report, or #Page route' : 'target is not an own-app #Form, #Report, or #Page route' };
+  }
+
+  const validSingleValue = (raw: string): boolean => raw.length > 0 && (!raw.includes('\u0000') || /^\u0000\d+\u0000$/.test(raw));
+  let targetKind: 'form' | 'report' | 'page';
+  let targetName: string;
+  let query = '';
+  let hasRecord = false;
+  if (m) {
+    const rawKind = m[1]!.toLowerCase() as 'form' | 'report' | 'page' | 'view';
+    targetName = m[2]!.trim();
+    query = m[3] ?? '';
+    if (rawKind === 'view') {
+      // Pre-rename Creator syntax: reports were called "Views" and the alias
+      // was never dropped for pages either, so a real app's openUrl still
+      // carries #View: for both. Resolve it exactly like #Report: or #Page:,
+      // whichever this app actually has by that name.
+      const named = (item: { name: string; displayName?: string }) => item.name.toLowerCase() === targetName.toLowerCase() || (targetName.includes(' ') && item.displayName?.toLowerCase() === targetName.toLowerCase());
+      if (app.reports.some(named)) targetKind = 'report';
+      else if (app.pages.some(named)) targetKind = 'page';
+      else return { kind: 'unsupported', target: text, reason: `target view ${targetName} does not exist` };
+    } else {
+      targetKind = rawKind;
+    }
+  } else if (editLink) {
+    const form = app.forms.find((f) => f.name.toLowerCase() === editLink[1]!.toLowerCase());
+    const linkReport = app.reports.find((r) => r.name.toLowerCase() === editLink[2]!.toLowerCase());
+    if (!form || !linkReport || linkReport.form?.toLowerCase() !== form.name.toLowerCase() || !validSingleValue(editLink[3]!)) {
+      return { kind: 'unsupported', target: text, reason: 'invalid record-edit link' };
+    }
+    targetKind = 'form';
+    targetName = form.name;
+    query = editLink[4] ?? '';
+    hasRecord = true;
+  } else if (shortEditLink) {
+    const linkReport = app.reports.find((r) => r.name.toLowerCase() === shortEditLink[1]!.toLowerCase());
+    const form = linkReport?.form
+      ? app.forms.find((f) => f.name.toLowerCase() === linkReport.form!.toLowerCase())
+      : app.forms.find((f) => f.name.toLowerCase() === shortEditLink[1]!.toLowerCase());
+    if (!form || !validSingleValue(shortEditLink[2]!)) {
+      return { kind: 'unsupported', target: text, reason: 'invalid record-edit link' };
+    }
+    targetKind = 'form';
+    targetName = form.name;
+    query = shortEditLink[3] ?? '';
+    hasRecord = true;
+  } else {
+    const linkReport = app.reports.find((r) => r.name.toLowerCase() === summaryLink![1]!.toLowerCase());
+    const form = linkReport ? undefined : app.forms.find((f) => f.name.toLowerCase() === summaryLink![1]!.toLowerCase());
+    if ((!linkReport && !form) || !validSingleValue(summaryLink![2]!)) {
+      return { kind: 'unsupported', target: text, reason: 'invalid record-summary link' };
+    }
+    targetKind = 'report';
+    targetName = linkReport ? linkReport.name : form!.name;
+    query = summaryLink![3] ?? '';
+    hasRecord = true;
+    for (const pair of query.split('&').filter(Boolean)) {
+      const eq = pair.indexOf('=');
+      const paramName = eq < 0 ? pair : pair.slice(0, eq);
+      const paramValue = eq < 0 ? '' : pair.slice(eq + 1);
+      if (/^zc_/i.test(paramName) && !paramValue.includes('\u0000')) continue;
+      return { kind: 'unsupported', target: text, reason: 'query parameters on record-summary links are not supported' };
+    }
+    return { kind: 'supported', target: text };
+  }
+
+  if (targetKind === 'form') {
+    const targetForm = app.forms.find((f) => f.name.toLowerCase() === targetName.toLowerCase() || (targetName.includes(' ') && f.displayName?.toLowerCase() === targetName.toLowerCase()));
+    if (!targetForm) {
+      return { kind: 'unsupported', target: text, reason: `target form ${targetName} does not exist` };
+    }
+    for (const pair of query.split('&').filter(Boolean)) {
+      const eq = pair.indexOf('=');
+      const paramName = eq < 0 ? pair : pair.slice(0, eq);
+      const paramValue = eq < 0 ? '' : pair.slice(eq + 1);
+      if (/^zc_/i.test(paramName)) {
+        if (paramValue.includes('\u0000')) {
+          return { kind: 'unsupported', target: text, reason: 'a zc_ display parameter reads the clicked row' };
+        }
+        continue;
+      }
+      if (/^reclinkid$/i.test(paramName)) {
+        if (hasRecord || !validSingleValue(paramValue)) {
+          return { kind: 'unsupported', target: text, reason: 'invalid recLinkID parameter' };
+        }
+        hasRecord = true;
+        continue;
+      }
+      if (/^viewlinkname$/i.test(paramName)) {
+        if (paramValue.includes('\u0000')) {
+          return { kind: 'unsupported', target: text, reason: 'viewLinkName reads the clicked row' };
+        }
+        continue;
+      }
+      if (!formField(targetForm, paramName)) {
+        return { kind: 'unsupported', target: text, reason: `target form ${targetName} has no field ${paramName}` };
+      }
+      if (paramValue.includes('\u0000') && !/^\u0000\d+\u0000$/.test(paramValue)) {
+        return { kind: 'unsupported', target: text, reason: `parameter ${paramName} is part literal, part row read` };
+      }
+    }
+  } else if (targetKind === 'report') {
+    const targetReport = app.reports.find(
+      (r) => r.name.toLowerCase() === targetName.toLowerCase() || (targetName.includes(' ') && r.displayName?.toLowerCase() === targetName.toLowerCase()),
+    );
+    if (!targetReport) {
+      return { kind: 'unsupported', target: text, reason: `target report ${targetName} does not exist` };
+    }
+    const reportForm = targetReport.form ? app.forms.find((f) => f.name.toLowerCase() === targetReport.form!.toLowerCase()) : undefined;
+    let filterCount = 0;
+    for (const pair of query.split('&').filter(Boolean)) {
+      const eq = pair.indexOf('=');
+      const paramName = eq < 0 ? pair : pair.slice(0, eq);
+      const paramValue = eq < 0 ? '' : pair.slice(eq + 1);
+      if (/^zc_/i.test(paramName)) {
+        if (paramValue.includes('\u0000')) {
+          return { kind: 'unsupported', target: text, reason: 'a zc_ display parameter reads the clicked row' };
+        }
+        continue;
+      }
+      if (eq <= 0 || !paramValue) {
+        return { kind: 'unsupported', target: text, reason: `report filter parameter ${paramName} has no value` };
+      }
+      if (/_op$/i.test(paramName) || /^filter$/i.test(paramName)) {
+        return { kind: 'unsupported', target: text, reason: `report filter operator parameter ${paramName} is not supported` };
+      }
+      const field = reportForm ? formField(reportForm, paramName) : undefined;
+      if (
+        !field ||
+        field.subfields.length > 0 ||
+        field.type?.toLowerCase() === 'subform' ||
+        field.type?.toLowerCase() === 'section' ||
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(field.name)
+      ) {
+        return { kind: 'unsupported', target: text, reason: `target report ${targetName} has no filterable field ${paramName}` };
+      }
+      if (paramValue.includes('\u0000') && !/^\u0000\d+\u0000$/.test(paramValue)) {
+        return { kind: 'unsupported', target: text, reason: `parameter ${paramName} is part literal, part row read` };
+      }
+      filterCount += 1;
+      if (filterCount > 1) {
+        return { kind: 'unsupported', target: text, reason: 'multiple filter parameters on report links are not supported' };
+      }
+    }
+  } else if (targetKind === 'page') {
+    const targetPage = app.pages.find((p) => p.name.toLowerCase() === targetName.toLowerCase());
+    if (!targetPage) {
+      return { kind: 'unsupported', target: text, reason: `target page ${targetName} does not exist` };
+    }
+    for (const pair of query.split('&').filter(Boolean)) {
+      const eq = pair.indexOf('=');
+      const paramName = eq < 0 ? pair : pair.slice(0, eq);
+      const paramValue = eq < 0 ? '' : pair.slice(eq + 1);
+      if (/^zc_/i.test(paramName)) {
+        // A row read inside a zc_ display parameter is no navigation, exactly
+        // like the UI's actionNavigation rules it out.
+        if (paramValue.includes('\u0000')) {
+          return { kind: 'unsupported', target: text, reason: 'a zc_ display parameter reads the clicked row' };
+        }
+        continue;
+      }
+      // Creator pages declare input parameters (`page Detail(param1, …)`);
+      // the generated client navigation carries only those names on the
+      // page route, exactly like actionNavigation. Anything else — an
+      // undeclared name, or a value that is part literal and part row read —
+      // stays an unsupported target.
+      if (!(targetPage.params ?? []).includes(paramName)) {
+        return { kind: 'unsupported', target: text, reason: `target page ${targetName} has no parameter ${paramName}` };
+      }
+      if (paramValue.includes('\u0000') && !/^\u0000\d+\u0000$/.test(paramValue)) {
+        return { kind: 'unsupported', target: text, reason: `parameter ${paramName} is part literal, part row read` };
+      }
+    }
+  }
+
+  return { kind: 'supported', target: text };
+}
+
+function emitFunction(
+  app: App,
+  fn: FunctionDef,
+  put: (path: string, source: string) => string,
+  stats: TranslateStats,
+  todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
+  alertDiagnostics: AlertDiagnostic[],
+  thisappEntries: ThisappEntry[],
+  api: ApiPublish[] | undefined,
+  admins: string[],
+  warnings: GenerateWarning[],
+  schema?: SchemaPlan,
+): void {
+  const binding = functionRowBinding(fn);
+  let slot = 0;
+  const parts = fn.deluge.map((d) => {
+    const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
+    slot = tr.nextSlot;
+    addStats(stats, tr.stats);
+    todos.push(...shift(tr.todos, d));
+    statementCoverage.push(...coverShift(tr.coverage, d, `function ${fn.name}`));
+    countClientGaps(stats, todos, tr, d);
+    recordAlertDiags(tr.todos, d, { form: fn.form, event: fn.name, name: fn.name }, alertDiagnostics);
+    return tr;
+  });
+  // functionScriptOptions is serverOnly: a function has no client half, so
+  // there is no client module, prefetch module, or client-call endpoint.
+  let server = parts.map((p) => p.server).filter((s) => s.trim()).join('\n');
+  const name = slug(fn.name || 'function');
+  // A declared function with an empty body is still a function. Skipping it
+  // leaves the declaration out of the tree and out of the readiness report.
+  const declaredEmpty = !fn.deluge.some((d) => d.text.trim());
+  if (!server.trim() && !declaredEmpty) {
+    const clientNav = classifyClientOpenUrl(app, fn);
+    if (clientNav?.kind === 'supported') {
+      server = '  // Client action openUrl: executed in client navigation.';
+    } else if (clientNav?.kind === 'unsupported') {
+      todos.push({
+        construct: 'openurl-unsupported-target',
+        start: fn.span.start,
+        end: fn.span.end,
+        manualStep: `Reconfigure function ${fn.name}: its openUrl target is not a supported own-app form, report, or page link${clientNav.reason ? ` (${clientNav.reason})` : ''}.`,
+      });
+      return;
+    } else {
+      if (!parts.some((p) => p.todos.length)) {
+        warnings.push({
+          construct: 'function-untranslated',
+          name: fn.name || name,
+          note: 'The function body produced no server, client, or prefetch code.',
+        });
+        // A warning alone is never a counted manual item (no-silent-drop.ts
+        // auditFunction only looks for a todo inside the function's span), so
+        // without this the function is a silent drop: no module and nothing
+        // telling the operator it needs attention.
+        todos.push({
+          construct: 'function-untranslated',
+          start: fn.span.start,
+          end: fn.span.end,
+          manualStep: `Function ${fn.name} translated to no server, client, or prefetch code. Migrate it by hand or confirm it is intentionally a no-op.`,
+        });
+      }
+      return;
+    }
+  } else if (server.trim() && /\bopenurl\s*\(/i.test(fn.deluge.map((d) => d.text).join('\n'))) {
+    // The function also produced real server code (e.g. a guard read before
+    // the navigation), so classifyClientOpenUrl's whole-function shape still
+    // matches but the earlier branch above never runs. Keep the server code
+    // as generated — converting it into a static link would skip the guard
+    // — and name the dropped navigation as a manual item instead of letting
+    // it vanish with no record (see `case 'openUrl'` in translate.ts, which
+    // drops a noClient openUrl statement without raising a todo).
+    const clientNav = classifyClientOpenUrl(app, fn);
+    if (clientNav) {
+      todos.push({
+        construct: 'openurl-dropped-with-server-logic',
+        start: fn.span.start,
+        end: fn.span.end,
+        manualStep:
+          clientNav.kind === 'supported'
+            ? `Function ${fn.name} runs its server logic, but the openUrl navigation to ${clientNav.target} that follows it is not carried over (a function that also does server work cannot return client navigation). Wire that navigation by hand in the generated UI.`
+            : `Function ${fn.name} runs its server logic, but the openUrl call that follows it is dropped${clientNav.reason ? ` (${clientNav.reason})` : ''}. Wire that navigation by hand in the generated UI.`,
+      });
+    }
+  }
+  const params = fnParams(fn.signature);
+  if (server.trim() || declaredEmpty) {
+    let httpApi: { publishers: ApiPublish[]; admins: string[]; method?: string; methodNote?: string } | undefined;
+    if (api?.length) {
+      const resolved = resolveApiMethod(api);
+      if ('note' in resolved) {
+        // The publishers do not name one Advanced I/O verb. A POST route here
+        // would hide the declared method, so no endpoint is written and the
+        // report names the gap.
+        warnings.push({
+          construct: 'custom-function-api-method',
+          name: fn.name,
+          note: resolved.note,
+        });
+        httpApi = { publishers: api, admins, methodNote: resolved.note };
+      } else {
+        // Creator custom APIs declare the callers an `api` block admits. Only an
+        // admin-scoped api maps onto the Administrator profile preset; anything
+        // else (no scope, or a scope we cannot map to a profile) still routes —
+        // the .ds asked for HTTP exposure — but restricted to Administrator with
+        // a migration-report warning instead of invented permissions.
+        for (const pub of api) {
+          if (pub.scope && /admin/i.test(pub.scope)) continue;
+          warnings.push({
+            construct: 'custom-function-api-scope',
+            name: fn.name,
+            note: `api ${pub.api} ${pub.scope ? `scope ${JSON.stringify(pub.scope)} is not a determinable profile permission` : 'declares no scope'}; the generated route requires an Administrator-preset profile`,
+          });
+        }
+        if (!admins.length) {
+          warnings.push({
+            construct: 'custom-function-api-scope',
+            name: fn.name,
+            note: `no Administrator-preset profile is declared in share_settings; the generated route denies every caller`,
+          });
+        }
+        let method = resolved.method;
+        if (method === 'GET' && changesState(server)) {
+          // A GET is a safe method: browsers send it cross-site with cookies
+          // and skip the CORS preflight, so a state change behind it is a CSRF
+          // hole. The route is written as POST and the report names the change.
+          method = 'POST';
+          warnings.push({
+            construct: 'custom-function-api-method',
+            name: fn.name,
+            note: `api ${api.map((p) => p.api).join(', ')} method GET is routed as POST: the function writes data, sends mail, or calls out, and a state change is never a GET`,
+          });
+        }
+        httpApi = { publishers: api, admins, method };
+      }
+    }
+    const path = put(
+      `functions/custom/${name}.mjs`,
+      customModule({ app, name: fn.name, signature: fn.signature, params, form: fn.form, body: server, row: binding, api: httpApi, schema }),
+    );
+    // thisapp.<fn> resolves this name in the generated registry
+    // (functions/thisapp.mjs). A parameter typed by a form link name is a
+    // record parameter: a `__row` argument contributes its live values.
+    const recordParams: Record<string, string> = {};
+    for (const p of fnSignatureParams(fn.signature)) {
+      const form = app.forms.find((f) => f.name.toLowerCase() === p.type.toLowerCase());
+      if (form) recordParams[p.name] = form.name;
+    }
+    thisappEntries.push({
+      name: fn.name,
+      spec: `./${path.slice('functions/'.length)}`,
+      exported: safeFn(fn.name),
+      params,
+      recordParams,
+      rowForm: binding && fn.form ? fn.form : '',
+    });
+  }
+}
+
+function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[]; clientGaps: ClientGap[]; coverage: StatementCover[]; serverConditions?: ServerConditionDef[] } {
+  return { server: '', client: '', prefetch: '', nextSlot: 0, stats: EMPTY_STATS(), todos: [], clientGaps: [], coverage: [] };
+}
+
+/** Client statements the browser cannot run, counted where the client part ships (translate.ts gateClientShims). */
+function countClientGaps(stats: TranslateStats, todos: TodoItem[], tr: { clientGaps: readonly ClientGap[] }, raw: RawDeluge | null): void {
+  for (const gap of tr.clientGaps) {
+    if (gap.bucket !== 'todo') {
+      stats[gap.bucket]--;
+      stats.todo++;
+    }
+  }
+  todos.push(...shift(tr.clientGaps.map((gap) => gap.todo), raw));
+}
+
+/**
+ * `zoho.<env>` constants in shipped client code are server-evaluated reads:
+ * the browser shim answers `shim.zoho.<env>(ctx)` from `ctx.slots["zoho.<env>"]`,
+ * so every client body that references one needs the matching line in its
+ * prefetch. `zoho.currentdate`/`currenttime` are computed on the client and
+ * take no slot.
+ */
+export const ZOHO_SLOT_ENVS = ['adminUser', 'adminUserId', 'appName', 'appUri', 'loginUser', 'loginUserId', 'loginUserProfile'] as const;
+
+export function zohoSlotLines(client: string): string {
+  const lines: string[] = [];
+  for (const env of ZOHO_SLOT_ENVS) {
+    if (new RegExp(`\\bshim\\.zoho\\.${env}\\s*\\(`).test(client)) {
+      lines.push(`slots["zoho.${env}"] = shim.zoho.${env}(ctx);`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function shift(items: TodoItem[], raw: RawDeluge | null): TodoItem[] {
+  if (!raw) return items;
+  return items.map((t) => ({ ...t, start: t.start + raw.span.start, end: t.end + raw.span.start }));
+}
+
+/** Shift script-relative coverage rows to absolute `.ds` spans, labelled with the unit. */
+function coverShift(items: readonly StatementCover[], raw: RawDeluge | null, unit: string): CoverageEntry[] {
+  if (!raw) return [];
+  return items.map((c) => ({ unit, kind: c.kind, start: c.start + raw.span.start, end: c.end + raw.span.start, bucket: c.bucket }));
+}
+
+function fieldRuleSource(app: App, w: Workflow, todos: TodoItem[]): string {
+  const rules = w.fieldRules;
+  if (!rules?.length) return '';
+  return rules
+    .map((rule) => {
+      const lines = rule.actions
+        .map((a) => `actions.push({ op: ${JSON.stringify(a.action)}, targets: ${JSON.stringify(a.fields)} });`)
+        .join('\n');
+      if (!rule.condition) return lines;
+      const guard = emittedFieldRuleConditionFor(app, w.form, rule.condition);
+      if (guard.startsWith('await shim.todo(')) {
+        todos.push({ construct: 'field-rule-condition', start: rule.span.start, end: rule.span.end });
+        return guard;
+      }
+      // Field rules run only in the browser: a condition it cannot evaluate is a counted gap.
+      if (unsupportedClientShims(guard).length) {
+        todos.push({ construct: `client-shim-unsupported: ${unsupportedClientShims(guard).join(', ')}`, start: rule.span.start, end: rule.span.end });
+        return '';
+      }
+      return `if (${guard}) {\n${indent(lines)}\n}`;
+    })
+    .join('\n');
+}
+
+/**
+ * `actions (criteria)` runs only when the criteria is true.
+ * A criteria that does not translate to a value is a coverage gap, not `if (todo())`.
+ * Shared with fill-todos.
+ */
+export function actionGuardFor(app: App, w: Workflow): { code: string; todo: boolean } {
+  const condition = w.actionCondition?.trim();
+  if (!condition) return { code: '', todo: false };
+  return actionGuard(condition, fieldNamesOf(app, w.form), decimalFieldNames(app));
+}
+
+function gateAction(
+  app: App,
+  w: Workflow,
+  translated: { server: string; client: string },
+  todos: TodoItem[],
+  shipsClient = false,
+): { server: string; client: string } {
+  const condition = w.actionCondition?.trim();
+  if (!condition) return { server: translated.server, client: translated.client };
+  const guard = actionGuardFor(app, w);
+  if (guard.todo) {
+    todos.push({ construct: 'workflow-action-condition', start: w.span.start, end: w.span.end });
+    const gap = ACTION_CONDITION_GAP;
+    return {
+      server: translated.server.trim() ? gap : '',
+      client: translated.client.trim() ? gap : '',
+    };
+  }
+  if (shipsClient && clientGuardGap(translated.client, guard.code)) {
+    // The server keeps the guard; the browser cannot evaluate it, so the client part is a counted gap.
+    todos.push({ construct: `client-shim-unsupported: ${unsupportedClientShims(translated.client).join(', ')}`, start: w.span.start, end: w.span.end });
+    return { server: gate(translated.server, guard.code), client: '' };
+  }
+  return { server: gate(translated.server, guard.code), client: gate(translated.client, guard.code) };
+}
+
+/**
+ * Translate options for a function body. Shared with fill-todos so both walks
+ * emit the same calls.
+ *
+ * A `type = functions` action with `execution type = for each record` runs on
+ * each selected record: `rec` is that row, and a bare field link name of the
+ * function's form (or `ID`) reads it, and the form's link name names it
+ * (gallery shape: `thisapp.Application.Cancel(Fill_New_Application);`).
+ *
+ * With `execution type = collection of records` it runs once for all the
+ * selected records: `recs` is that collection, and the form's link name names
+ * it (gallery shape: `thisapp.CustomAction.approveVisa(Add_Visa_Details);`).
+ * A bare field name or `ID` reads the first record of the collection, as
+ * `<collection_variable>.<field_link_name>` does
+ * (deluge-docs/pages/data-access__update-records.html,
+ * https://www.zoho.com/deluge/help/data-access/update-records.html).
+ *
+ * A parameter whose type is a form of the app is a record collection: its
+ * field reads and writes go through shim.record, which reads the first record
+ * and reads null from a null or empty collection (same page).
+ */
+export function functionRowOptions(app: App, fn: FunctionDef): Pick<TranslateOptions, 'rowNames' | 'rowFields' | 'rowAlias'> {
+  const params = formParams(app, fn.signature);
+  const row = functionRowBinding(fn);
+  if (!row) return { rowNames: params, rowFields: [] };
+  const rowFields = fieldNamesOf(app, fn.form);
+  if (!rowFields.includes('ID')) rowFields.push('ID');
+  const form = formLink(fn.form).name;
+  return { rowNames: [row, ...params.filter((n) => n !== row)], rowFields, ...(form ? { rowAlias: { name: form, row } } : {}) };
+}
+
+/** The UI stub count: a list as given, or resolved from the generated files. */
+function uiStubCount(uiTodos: GenerateOptions['uiTodos'], files: readonly GeneratedFile[]): number {
+  if (!uiTodos) return 0;
+  return (typeof uiTodos === 'function' ? uiTodos(files) : uiTodos).length;
+}
+
+/** How the function's rows are bound: none, `rec` (for each record) or `recs` (collection of records). */
+export function functionRowBinding(fn: FunctionDef): '' | 'rec' | 'recs' {
+  const blob = fn.properties.map((p) => `${p.key} ${p.value}`).join('\n');
+  if (/for each record/i.test(blob)) return 'rec';
+  if (/collection of records/i.test(blob)) return 'recs';
+  return '';
+}
+
+/** Parameter names whose declared type is a form of the app (`Add_Visa_Details visaDetails`). */
+function formParams(app: App, signature: string | undefined): string[] {
+  const m = signature?.match(/\(([^)]*)\)/);
+  if (!m || !m[1]?.trim()) return [];
+  const forms = new Set(app.forms.map((f) => f.name.toLowerCase()));
+  const out: string[] = [];
+  for (const part of m[1].split(',')) {
+    const words = part.trim().split(/\s+/);
+    if (words.length < 2) continue;
+    const name = words[words.length - 1]!;
+    if (forms.has(words[words.length - 2]!.toLowerCase()) && /^[$A-Za-z_][\w$]*$/.test(name)) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * The subform field whose row event this is: `on user input of Sub.Field`,
+ * `on add row of Sub`, `on delete row of Sub`. Only those events have an
+ * implicit `row`, the subform row the event fired on
+ * (deluge-docs/pages/miscellaneous__access-subform-fields.html,
+ * https://www.zoho.com/deluge/help/miscellaneous/access-subform-fields.html).
+ */
+export function subformEventField(event: string | undefined): string | null {
+  const leaf = (event ?? '').split(' / ').pop()!.trim();
+  const rowEvent = /^on (?:add|delete) row of\s+([A-Za-z_][\w]*)\s*$/i.exec(leaf);
+  if (rowEvent) return rowEvent[1]!;
+  const input = /^on user input of\s+([A-Za-z_][\w]*)\.[A-Za-z_][\w]*\s*$/i.exec(leaf);
+  return input ? input[1]! : null;
+}
+
+/**
+ * Field link names a bare name in a body reads through `input` — the record
+ * the handler runs on — plus `ID`, the record's own id. Locals still win.
+ */
+export function bodyInputFields(app: App, formName: string | undefined): string[] {
+  const names = fieldNamesOf(app, formName);
+  if (!names.includes('ID')) names.push('ID');
+  return names;
+}
+
+/**
+ * Translate options for a form workflow. A subform row event binds `row`; an
+ * approval script marks `approver.<x>`; bare field link names read `input`.
+ * Shared with fill-todos.
+ */
+export function workflowRowOptions(app: App, w: Workflow): Pick<TranslateOptions, 'rowNames' | 'approval' | 'inputFields'> {
+  return {
+    inputFields: bodyInputFields(app, w.form),
+    ...(subformEventField(w.event) ? { rowNames: ['row'] } : {}),
+    ...(isApproval(w) ? { approval: true } : {}),
+  };
+}
+
+/**
+ * The subform row the event fired on: body.subformRow { field, index }. Only
+ * this event's subform, and only an index that is a row of that subform in
+ * \`record\` (the record the handler runs on, after the write screen).
+ */
+const SUBFORM_ROW_HELPER = `/** body.subformRow, when it names a row of this event's subform in record. Anything else is no row. */
+function requestSubformRow(req, subform, record) {
+  const fields = Array.isArray(subform) ? subform : [subform];
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+  const at = body && body.subformRow;
+  if (!at || typeof at !== "object" || !fields.includes(at.field) || !Number.isInteger(at.index) || at.index < 0) return undefined;
+  const rows = record && typeof record === "object" ? record[subform] : undefined;
+  if (!Array.isArray(rows) || at.index >= rows.length) return undefined;
+  const row = rows[at.index];
+  if (!row || typeof row !== "object" || Array.isArray(row)) return undefined;
+  return { field: subform, index: at.index };
+}
+`;
+
+/**
+ * The function arguments the client sent: body.args, at most one per declared
+ * parameter. Each argument is plain JSON data. A value with a runtime-branded
+ * key (`__row`, `__query`, `__bind`, `__proto__`: anything starting `__`), a
+ * non-plain object, a non-finite number, or nesting deeper than 16 is null.
+ * The client cannot hand the prefetch a fetched row, a query, or a login-user
+ * binding; server reads still go through the access policy.
+ */
+const REQUEST_ARGS_HELPER = `/** Plain JSON data or an exact identity handle; depth and string limits are enforced. */
+function plainJsonArg(value, depth) {
+  if (value === null || typeof value === "boolean") return true;
+  if (typeof value === "string") { const bytes = Buffer.byteLength(value, "utf8"); return bytes > 0 && bytes <= 256; }
+  if (typeof value === "number") return Number.isFinite(value);
+  if (!value || typeof value !== "object" || depth >= 16) return false;
+  if (Array.isArray(value)) return value.every((item) => plainJsonArg(item, depth + 1));
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Object.keys(value);
+  if (keys.some((key) => key === "__proto__" || key === "constructor" || key.startsWith("__"))) return false;
+  if (value.kind !== undefined) {
+    const required = value.kind === "record" ? ["kind", "form", "recordId"] : value.kind === "element" ? ["kind", "form", "subform", "rowId"] : null;
+    if (!required || keys.length !== required.length || required.some((key) => !keys.includes(key))) return false;
+    return required.slice(1).every((key) => typeof value[key] === "string" && Buffer.byteLength(value[key], "utf8") > 0 && Buffer.byteLength(value[key], "utf8") <= 256);
+  }
+  return keys.every((key) => plainJsonArg(value[key], depth + 1));
+}
+
+function handleStats(value, stats, perHandle) {
+  if (!value || typeof value !== "object") return;
+  if (!Array.isArray(value) && (value.kind === "record" || value.kind === "element")) {
+    stats.handles++;
+    stats.forms.add(value.form);
+    if (value.kind === "element") { stats.rows++; perHandle.set(value.form, (perHandle.get(value.form) || 0) + 1); }
+    return;
+  }
+  for (const item of Array.isArray(value) ? value : Object.values(value)) handleStats(item, stats, perHandle);
+}
+
+/** Legacy argument screening: any plain JSON data, no runtime-branded keys, no
+ *  non-plain objects, no non-finite numbers, depth at most 16. Kept for
+ *  non-identity call paths (api routes, prefetch args, posted elements) whose
+ *  contract predates the identity-handle rules; only the server-read endpoint
+ *  applies the stricter plainJsonArg. */
+function plainJsonData(value, depth) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (!value || typeof value !== "object" || depth > 15) return false;
+  if (Array.isArray(value)) return value.every((item) => plainJsonData(item, depth + 1));
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.keys(value).every((key) => !key.startsWith("__") && plainJsonData(value[key], depth + 1));
+}
+
+/** body.args as plain JSON data, one per declared parameter. Runtime-branded or non-JSON values are null. */
+function requestArgs(req, count) {
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+  const args = body && Array.isArray(body.args) ? body.args : [];
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(i < args.length && plainJsonData(args[i], 0) ? args[i] : null);
+  return out;
+}
+
+/** Query-string arguments on a bodiless verb (GET/DELETE), one query parameter per declared
+ *  parameter, named as the .ds signature names it. Every declared parameter is required: a
+ *  missing one is a 400 naming it. A query key that names no parameter is ignored with a
+ *  warning. The types map carries each parameter's compiler-normalised type (the same
+ *  normalisation the type checker uses, so bool, integer, collection and
+ *  every other accepted spelling coerce exactly as their canonical type would).
+ *  Values coerce to the JSON value the body would carry on a POST: a numeric type
+ *  takes a finite number, a bool takes true/false, a date/datetime takes a parseable
+ *  date string, a list/map takes JSON of that shape, a string stays the raw string.
+ *  A value that cannot carry its declared type is a 400 naming the parameter, and a
+ *  parameter whose declared type has no coercion is a 400 naming the parameter and
+ *  the type — never the raw string passed through silently. Coerced values get the
+ *  same plain-JSON screening body args get. */
+function requestQueryArgs(req, declared, types) {
+  const searchParams = new URL((req && req.url) || "", "http://localhost").searchParams;
+  const known = new Set(declared);
+  for (const key of searchParams.keys()) {
+    if (!known.has(key)) console.warn("Ignoring unknown query parameter: " + key);
+  }
+  const args = [];
+  for (const name of declared) {
+    if (!searchParams.has(name)) return { error: "missing required parameter: " + name };
+    const raw = searchParams.get(name);
+    const type = String((types && types[name]) || "").toLowerCase();
+    let value = raw;
+    if (type === "int" || type === "float") {
+      value = Number(raw);
+      if (!raw.trim() || !Number.isFinite(value)) return { error: "invalid number for parameter " + name };
+    } else if (type === "bool") {
+      if (raw.toLowerCase() === "true") value = true;
+      else if (raw.toLowerCase() === "false") value = false;
+      else return { error: "invalid boolean for parameter " + name };
+    } else if (type === "date" || type === "datetime") {
+      if (!raw || !Number.isFinite(Date.parse(raw))) return { error: "invalid date for parameter " + name };
+    } else if (type === "list" || type === "map") {
+      try {
+        value = JSON.parse(raw);
+      } catch (e) {
+        return { error: "invalid " + type + " JSON for parameter " + name };
+      }
+      if (type === "list" && !Array.isArray(value)) return { error: "invalid list JSON for parameter " + name };
+      if (type === "map" && (!value || typeof value !== "object" || Array.isArray(value))) return { error: "invalid map JSON for parameter " + name };
+    } else if (type !== "string") {
+      return { error: "unsupported type " + (type || "unknown") + " for parameter " + name };
+    }
+    args.push(plainJsonData(value, 0) ? value : null);
+  }
+  return { args };
+}
+`;
+
+/**
+ * One loop element the client POSTs for a per-element slot: body.element is
+ * `{ name, value }`, the name the translated loop variable and the value a
+ * scalar under the same screening as function arguments — a list or map is
+ * never an element. Anything else is no element, so the one-shot prefetch
+ * skips the guarded slot.
+ */
+const REQUEST_ELEMENT_HELPER = `/** body.element: one loop element { name, value } a per-element slot is evaluated for. Scalars only — a posted list or map is never an element. */
+function requestElement(req) {
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+  const el = body && body.element;
+  if (!el || typeof el !== "object" || Array.isArray(el) || typeof el.name !== "string") return undefined;
+  const v = el.value;
+  const scalar = v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+  return scalar && plainJsonData(v, 0) ? { name: el.name, value: v } : undefined;
+}
+`;
+
+/** The subform literal of \`shim.subform.currentRow(ctx, "Sub")\` in a generated body, as JS source. */
+function currentRowField(body: string): string | null {
+  return currentRowFields(body)[0] ?? null;
+}
+
+/** Every distinct subform literal a generated body names, in source order. A merged form module can bind more than one. */
+function currentRowFields(body: string): string[] {
+  const out: string[] = [];
+  for (const m of body.matchAll(/shim\.subform\.currentRow\(ctx, ("(?:[^"\\]|\\.)*")\)/g)) {
+    if (!out.includes(m[1]!)) out.push(m[1]!);
+  }
+  return out;
+}
+
+/** A `var`, `var [...]`, or `function` declaration of `id` in a body suppresses an emitted binding of the same name. */
+function declaresIdent(body: string, id: string): boolean {
+  return new RegExp(`\\bvar\\s+(?:${id}\\b|\\[[^\\]\\n]*\\b${id}\\b)|\\bfunction\\s+${id}\\b`).test(body);
+}
+
+/** `row` for a subform row event, read and written through shim.record. Only when the body uses it. */
+function subformRowSource(subform: string | null, body: string): string {
+  const id = jsIdent('row');
+  if (!subform || !new RegExp(`(^|[^\\w$.])${id}\\b`).test(body) || declaresIdent(body, id)) return '';
+  return `const ${id} = shim.subform.currentRow(ctx, ${JSON.stringify(subform)});`;
+}
+
+function fieldNamesOf(app: App, formName: string | undefined): string[] {
+  const name = formLink(formName).name;
+  if (!name) return [];
+  const form = app.forms.find((item) => item.name === name);
+  return form ? form.fields.map((field) => field.name) : [];
+}
+
+/**
+ * Link names of lookup fields on a form: their record value is a reference
+ * object, so `Field == literal` must compare the id/label, not object identity.
+ */
+function lookupFieldNames(app: App, formName: string | undefined): string[] {
+  const name = formLink(formName).name;
+  const form = name ? app.forms.find((item) => item.name === name) : undefined;
+  const names: string[] = [];
+  const walk = (fields: readonly Field[]): void => {
+    for (const field of fields) {
+      const id = fieldTypeRow(field.type)?.id;
+      if (field.lookup || id === 'lookup-single' || id === 'lookup-multi') names.push(field.name);
+      if (field.subfields.length) walk(field.subfields);
+    }
+  };
+  if (form) walk(form.fields);
+  return names;
+}
+
+const EXACT_DECIMAL_IDS = new Set(['decimal', 'percent', 'currency']);
+
+function decimalFieldNames(app: App): string[] {
+  const names: string[] = [];
+  const walk = (fields: readonly Field[]): void => {
+    for (const field of fields) {
+      const row = fieldTypeRow(field.type);
+      if (row && EXACT_DECIMAL_IDS.has(row.id)) names.push(field.name);
+      if (field.subfields.length) walk(field.subfields);
+    }
+  };
+  for (const form of app.forms) walk(form.fields);
+  return names;
+}
+
+const DATE_IDS = new Set(['date', 'date-time']);
+
+function dateFieldNames(app: App): string[] {
+  const names: string[] = [];
+  const walk = (fields: readonly Field[]): void => {
+    for (const field of fields) {
+      const row = fieldTypeRow(field.type);
+      if (row && DATE_IDS.has(row.id)) names.push(field.name);
+      if (field.subfields.length) walk(field.subfields);
+    }
+  };
+  for (const form of app.forms) walk(form.fields);
+  return names;
+}
+
+/** The app's form link names — a bare one is that form's collection, not a variable. */
+export function appFormNames(app: App): string[] {
+  return app.forms.map((f) => f.name);
+}
+
+const schemaCache = new WeakMap<App, SchemaPlan>();
+
+function schemaOf(app: App): SchemaPlan {
+  const cached = schemaCache.get(app);
+  if (cached) return cached;
+  const plan = generateSchema(app);
+  schemaCache.set(app, plan);
+  return plan;
+}
+
+/** Stages for a form's full-row read when one SELECT cannot cover it. */
+function stagedFullRead(plan: SchemaPlan, form: string): string[] | null {
+  return plainRecordStages(plan, form);
+}
+
+export function appFormFields(app: App): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const form of app.forms) {
+    const fields: string[] = [];
+    const walk = (list: typeof form.fields) => {
+      for (const f of list) {
+        if (f.type === 'subform' || f.type === 'radio' || f.type === 'checkbox' || f.type === 'lookup') {
+          fields.push(f.name);
+        } else if (f.type === 'matrix' || f.type === 'inline') {
+          walk(f.subfields || []);
+        } else if (f.type !== 'notes' && f.type !== 'section' && f.type !== 'integration') {
+          fields.push(f.name);
+        }
+      }
+    };
+    walk(form.fields);
+    map[form.name] = fields;
+  }
+  return map;
+}
+
+
+/**
+ * Translate options every app script shares: the form catalog plus the
+ * exact-decimal field names. fill-todos walks through the same builder so the
+ * two can never drift on which names are forms or decimals.
+ */
+export function appTranslateOptions(app: App): Pick<TranslateOptions, 'formNames' | 'formFields' | 'decimalFields' | 'dateFields'> {
+  return { formNames: appFormNames(app), formFields: appFormFields(app), decimalFields: decimalFieldNames(app), dateFields: dateFieldNames(app) };
+}
+
+/** The one translate entry point for app deluge. fill-todos calls it too. */
+export function translateInApp(app: App, src: string, options: TranslateOptions = {}) {
+  const shared = appTranslateOptions(app);
+  const translateOptions = { ...shared, ...options, decimalFields: shared.decimalFields, schema: schemaOf(app), connections: declaredConnections(app), functions: app.functions.map(fn => fn.name) };
+  // Probe only for unresolved call todos. Sites are counted on the pass below.
+  const baseline = withoutDecimalAudit(() => translate(src, translateOptions));
+  return translate(resolveOwnAppFetches(resolveAppCalls(src, app.functions, baseline.todos), app), translateOptions);
+}
+
+/**
+ * Report criteria and named-filter criteria that do not migrate, in `.ds`
+ * order: one row per un-migrated criteria with its report context.
+ * generate() counts each as a `report-criteria` todo on the report or filter
+ * span; fill-todos lists the same set as note tasks. Shared so both see the
+ * same holes.
+ */
+export function unmigratedReportCriteria(app: App): { report: Report; criteria: string; start: number; end: number }[] {
+  const out: { report: Report; criteria: string; start: number; end: number }[] = [];
+  for (const report of app.reports) {
+    if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria, app.functions))) {
+      out.push({ report, criteria: report.criteria, start: report.span.start, end: report.span.end });
+    }
+    for (const filter of report.filters) {
+      if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria, app.functions))) {
+        out.push({ report, criteria: filter.criteria, start: filter.span.start, end: filter.span.end });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Translate options for a form-workflow script: which events may carry an
+ * `alert`, the `row` binding a subform row event gets, and the row/approval/
+ * input options. Shared with fill-todos.
+ */
+export function workflowScriptOptions(app: App, w: Workflow): TranslateOptions {
+  return {
+    alertEvent: alertEventClass(w.event),
+    prefetchBound: subformEventField(w.event) ? ['row'] : [],
+    // Server-condition functions are named for the workflow they came from:
+    // form link name + script name, with the line number inside the script.
+    conditionContext: { form: w.form ?? '', script: w.name || w.event || '' },
+    ...workflowRowOptions(app, w),
+  };
+}
+
+/**
+ * Translate options for a script Creator runs without a client event — a
+ * schedule or a blueprint transition phase. `alert` is unverified and bare
+ * field link names read the record the script runs on. Shared with fill-todos.
+ */
+export function serverScriptOptions(app: App, form: string | undefined): TranslateOptions {
+  return { alertEvent: 'unverified', inputFields: bodyInputFields(app, form) };
+}
+
+/**
+ * Translate options for a schedule script. The job module is the schedule's
+ * only output: no browser runs a schedule, so it has no client half
+ * (`serverOnly`). Shared with fill-todos.
+ */
+export function scheduleScriptOptions(app: App, form: string | undefined): TranslateOptions {
+  return { ...serverScriptOptions(app, form), serverOnly: true };
+}
+
+/**
+ * Translate options inside an approval machine: `approver.<x>` is an explicit
+ * TODO, `alert` is unverified. Shared with fill-todos.
+ */
+export function approvalScriptOptions(): TranslateOptions {
+  return { alertEvent: 'unverified', approval: true };
+}
+
+/**
+ * Translate options for a `type = functions` script. `slotStart` keeps the
+ * prefetch slot counter unique across the function's deluge blocks. Shared
+ * with fill-todos.
+ */
+export function functionScriptOptions(app: App, fn: FunctionDef, slotStart: number): TranslateOptions {
+  return {
+    ...functionRowOptions(app, fn),
+    slotStart,
+    alertEvent: 'unverified',
+    // Neither UI target loads client/handlers/functions/*: a function runs
+    // only as its server module, so it has no client half.
+    serverOnly: true,
+    decimalVars: fnDecimalParams(fn.signature),
+    prefetchBound: rawFnParams(fn.signature),
+  };
+}
+
+export interface ClientCallCatalog {
+  /** Dotted callee names proved read-only, keyed by the exact declared name. */
+  names: Set<string>;
+  /** Emitted server body for each read-only function, keyed by the exact declared name. */
+  bodies: Map<string, string>;
+  /** Transitive form reads for each read-only function, keyed by the exact declared name. */
+  reads: Map<string, Set<string>>;
+  /**
+   * Resolves a call-site path to the declared name the runtime registry would
+   * dispatch it to (exact match, else the first declaration whose case-folded
+   * name matches), so a case-folded call (`thisapp.podcount` reaching
+   * `PodCount`) looks up the same catalog entry its exact-case sibling does.
+   * Undefined when nothing declared matches, or when the fold is ambiguous
+   * (two declared functions whose names differ only by case are never proved
+   * read-only, so neither has a catalog entry to resolve to).
+   */
+  resolve: (path: readonly string[]) => string | undefined;
+}
+
+/**
+ * Function bodies whose emitted server form is a read/pure call. The scan is
+ * the same emitted-call allowlist the per-element guard uses, with
+ * `shim.thisapp.call` accepted only after its target reaches the read-only
+ * fixed point. A function that never reaches the set keeps today's manual
+ * `client-condition-uses-server` result, and so does one that may mutate a
+ * list or map reachable from its parameters (`mutatesParameters`).
+ */
+export function clientCallFunctions(app: App): ClientCallCatalog {
+  const bodies = new Map<string, string>();
+  const forms = new Map<string, Set<string>>();
+  // The runtime registry (functions/thisapp.mjs) dispatches exact-name-first,
+  // then the first case-folded declaration. A name whose case-folded form is
+  // declared more than once cannot be pinned to one body at a call site, so it
+  // is refused outright: never proved read-only, never given a call endpoint.
+  // The catalog is keyed by the exact declared name so no lookup ever lets a
+  // last-wins overwrite decide which body a call reaches.
+  const foldedCount = new Map<string, number>();
+  for (const fn of app.functions) {
+    const folded = fn.name.toLowerCase();
+    foldedCount.set(folded, (foldedCount.get(folded) ?? 0) + 1);
+  }
+  // Call-path resolution mirroring the generated registry: the first
+  // declaration of each exact name is kept (thisappModule dedupes), then a
+  // lookup hits the exact key or the first declaration folding to it.
+  const seen = new Set<string>();
+  const dispatch = new Map<string, FunctionDef>();
+  for (const fn of app.functions) {
+    if (seen.has(fn.name)) continue;
+    seen.add(fn.name);
+    dispatch.set(fn.name, fn);
+    const folded = fn.name.toLowerCase();
+    if (!dispatch.has(folded)) dispatch.set(folded, fn);
+  }
+  const dispatchTarget = (path: readonly string[]): FunctionDef | undefined =>
+    dispatch.get(path.join('.')) ?? dispatch.get(path.join('.').toLowerCase());
+  for (const fn of app.functions) {
+    let slot = 0;
+    const server = fn.deluge
+      .map((d) => {
+        const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
+        slot = tr.nextSlot;
+        return tr.server;
+      })
+      .filter((s) => s.trim())
+      .join('\n');
+    const declaredEmpty = !fn.deluge.some((d) => d.text.trim());
+    if (!server.trim() && !declaredEmpty) continue;
+    // A write into a parameter list or map is visible to the Deluge caller;
+    // a client call runs on deserialized copies and would hide it.
+    if (mutatesParameters(fn.deluge.map((d) => d.text), fnSignatureParams(fn.signature))) continue;
+    if ((foldedCount.get(fn.name.toLowerCase()) ?? 0) > 1) continue;
+    const key = fn.name;
+    const reads = emittedReadForms(server);
+    if (reads === null) continue;
+    const own = new Set(reads);
+    for (const form of functionReadForms(app, fn)) own.add(form);
+    bodies.set(key, server);
+    forms.set(key, own);
+  }
+  const names = new Set<string>();
+  const reads = new Map<string, Set<string>>();
+  for (;;) {
+    let changed = false;
+    // determinism-allow: fixed-point loop over Map/Set, rerun until `changed` stops, so the result is order-independent
+    for (const [key, body] of bodies) {
+      if (names.has(key)) continue;
+      if (!emittedReadOnly(body, (path) => names.has(dispatchTarget(path)?.name ?? ''))) continue;
+      const all = new Set(forms.get(key));
+      for (const path of emittedThisappCalls(body) ?? []) {
+        for (const form of reads.get(dispatchTarget(path)?.name ?? '') ?? []) all.add(form);
+      }
+      names.add(key);
+      reads.set(key, all);
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  return { names, bodies, reads, resolve: (path) => dispatchTarget(path)?.name };
+}
+
+export interface ButtonFunctionCall {
+  /** Emitted server body for a function whose call endpoint may be generated. */
+  body: string;
+  /** Forms the emitted body reads. */
+  reads: Set<string>;
+  /** Form -> write operation the emitted body performs. */
+  writes: Map<string, 'insert' | 'update' | 'delete'>;
+}
+
+function addWrite(writes: Map<string, 'insert' | 'update' | 'delete'>, form: string | undefined, op: 'insert' | 'update' | 'delete'): void {
+  if (form) writes.set(form, op);
+}
+
+/** Literal form writes in an emitted function body, including writes through a fetched query or subform row. */
+function emittedWriteForms(body: string): Map<string, 'insert' | 'update' | 'delete'> | null {
+  const writes = new Map<string, 'insert' | 'update' | 'delete'>();
+  const queryVars = new Map<string, string>();
+  const queryRe = /\b(?:var\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?shim\.datastore\.query\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g;
+  for (const m of body.matchAll(queryRe)) {
+    try {
+      const form = JSON.parse(m[2]!) as unknown;
+      if (typeof form !== 'string') return null;
+      queryVars.set(m[1]!, form);
+    } catch {
+      return null;
+    }
+  }
+  const direct = (op: 'insert' | 'update' | 'delete', re: RegExp) => {
+    for (const m of body.matchAll(re)) {
+      try {
+        const form = JSON.parse(m[1]!) as unknown;
+        if (typeof form !== 'string') return false;
+        addWrite(writes, form, op);
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (!direct('insert', /\bshim\.datastore\.(?:insert|insertRow)\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g)) return null;
+  if (!direct('update', /\bshim\.datastore\.(?:update|writeRow)\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g)) return null;
+  if (!direct('delete', /\bshim\.datastore\.delete\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g)) return null;
+  const loopRows = new Map<string, string>();
+  const loopRe = /\bfor\s*\(\s*(?:var\s+)?([A-Za-z_$][\w$]*)\s+of\s+shim\.each\s*\(\s*ctx\s*,\s*(?:await\s+)?shim\.datastore\.(?:field|column|rows)\s*\(\s*ctx\s*,\s*([A-Za-z_$][\w$]*)/g;
+  for (const m of body.matchAll(loopRe)) {
+    const form = queryVars.get(m[2]!);
+    if (form) loopRows.set(m[1]!, form);
+  }
+  const setFieldRe = /\bshim\.datastore\.setField\s*\(\s*ctx\s*,\s*([A-Za-z_$][\w$]*)/g;
+  for (const m of body.matchAll(setFieldRe)) {
+    const form = queryVars.get(m[1]!);
+    if (!form) return null;
+    addWrite(writes, form, 'update');
+  }
+  const setRe = /\bshim\.(?:record\.set|set)\s*\(\s*([A-Za-z_$][\w$]*)/g;
+  for (const m of body.matchAll(setRe)) {
+    const form = queryVars.get(m[1]!) ?? loopRows.get(m[1]!);
+    if (!form) return null;
+    addWrite(writes, form, 'update');
+  }
+  return writes;
+}
+
+/**
+ * Functions whose emitted server body a generated ExecuteFunction button may
+ * invoke. The catalog carries reads plus the exact write grants the body can
+ * exercise; bodies with mail, outbound HTTP, tasks, an untranslated hole, or
+ * a nested app-function call stay counted.
+ */
+export function buttonCallFunctions(app: App): Map<string, ButtonFunctionCall> {
+  const out = new Map<string, ButtonFunctionCall>();
+  for (const fn of app.functions) {
+    let slot = 0;
+    const parts = fn.deluge.map((d) => {
+      const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
+      slot = tr.nextSlot;
+      return tr;
+    });
+    const server = parts.map((p) => p.server).filter((part) => part.trim()).join('\n');
+    const declaredEmpty = !fn.deluge.some((d) => d.text.trim());
+    if ((!server.trim() && !declaredEmpty) || parts.some((part) => part.todos.length)) continue;
+    if (mutatesParameters(fn.deluge.map((d) => d.text), fnSignatureParams(fn.signature))) continue;
+    if (/\bshim\.(?:mail\.send|http\.|zoho\.task|thisapp\.call|todo)\s*\(/.test(server)) continue;
+    const reads = emittedReadForms(server);
+    if (reads === null) continue;
+    const allReads = new Set(reads);
+    for (const form of functionReadForms(app, fn)) allReads.add(form);
+    const writes = emittedWriteForms(server);
+    if (writes === null) continue;
+    out.set(fn.name.toLowerCase(), { body: server, reads: allReads, writes });
+  }
+  return out;
+}
+
+/** Literal form names an emitted function body reads through datastore.query. */
+function emittedReadForms(body: string): Set<string> | null {
+  const out = new Set<string>();
+  for (const match of body.matchAll(/\bshim\.datastore\.query\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g)) {
+    try {
+      const form = JSON.parse(match[1]!) as unknown;
+      if (typeof form !== 'string') return null;
+      out.add(form);
+    } catch {
+      return null;
+    }
+  }
+  return out;
+}
+
+/** Forms bound by the function signature itself: the row binding and form-typed params. */
+function functionReadForms(app: App, fn: FunctionDef): Set<string> {
+  const out = new Set<string>();
+  if (functionRowBinding(fn) && fn.form) out.add(fn.form);
+  const formNames = new Set(app.forms.map((f) => f.name.toLowerCase()));
+  for (const param of fnSignatureParams(fn.signature)) {
+    if (formNames.has(param.type.toLowerCase())) out.add(param.type);
+  }
+  return out;
+}
+
+const CLIENT_FUNCTION_CALL = /\bshim\.client\.call\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g;
+
+/** The read-only callees an emitted client body actually calls. */
+function collectClientCalls(body: string, out: Set<string>): void {
+  for (const match of body.matchAll(CLIENT_FUNCTION_CALL)) {
+    try {
+      const name = JSON.parse(match[1]!) as unknown;
+      if (typeof name === 'string') out.add(name.toLowerCase());
+    } catch {
+      // Generated call sites carry a JSON literal; a non-literal shape is not a reference.
+    }
+  }
+}
+
+const GUARD_BOUND = new Set([
+  'shim', 'ctx', 'true', 'false', 'null', 'undefined', 'NaN', 'Infinity',
+  'await', 'typeof', 'void', 'new', 'in', 'instanceof', 'of', 'delete',
+]);
+
+/** `code` with comments blanked and every string's contents collapsed to `""`. */
+function codeSansCommentsAndStrings(code: string): string {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/`(?:\\.|[^`\\])*`/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, '""')
+    .replace(/"(?:\\.|[^"\\])*"/g, '""');
+}
+
+/** Identifiers in a guard expression that are not bound. Property names after `.` are not identifiers. */
+export function unboundGuardIdentifiers(code: string): string[] {
+  const stripped = codeSansCommentsAndStrings(code);
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const match of stripped.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    const name = match[0];
+    let i = match.index - 1;
+    while (i >= 0 && /\s/.test(stripped[i] ?? '')) i--;
+    if (i >= 0 && stripped[i] === '.') continue;
+    if (GUARD_BOUND.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    found.push(name);
+  }
+  found.sort(compareEnUs);
+  return found;
+}
+
+/** How each workflow `actions` criteria would be emitted. Raw blocks never reach this. */
+export function measureActionCriteria(app: App): { guarded: number; gap: number; unbound: string[] } {
+  let guarded = 0;
+  let gap = 0;
+  const unbound: string[] = [];
+  for (const w of app.workflows) {
+    const fields = fieldNamesOf(app, w.form);
+    if (w.actionCondition?.trim()) {
+      const guard = actionGuard(w.actionCondition, fields, decimalFieldNames(app));
+      const link = formLink(w.form);
+      const formGap = !!link.criteria && criteriaHasTodo(reportCriteria(link.criteria, app.functions));
+      if (formGap || guard.todo) gap++;
+      else {
+        guarded++;
+        unbound.push(...unboundGuardIdentifiers(guard.code));
+      }
+    }
+    for (const rule of w.fieldRules ?? []) {
+      if (!rule.condition?.trim()) continue;
+      const code = expressionCode(rule.condition, fields, decimalFieldNames(app));
+      if (!code.startsWith('await shim.todo(')) unbound.push(...unboundGuardIdentifiers(code));
+    }
+  }
+  return { guarded, gap, unbound };
+}
+
+function actionGuard(condition: string, inputFields: string[], decimalFields: string[] = []): { code: string; todo: boolean } {
+  const tr = translate(`return (${condition});`, { inputFields, decimalFields });
+  if (tr.todos.length > 0 || tr.server.includes('shim.todo(')) return { code: '', todo: true };
+  const body = unwrapReturn(returnBodyOf(tr.server));
+  if (!body || unboundGuardIdentifiers(body).length > 0) return { code: '', todo: true };
+  return { code: body, todo: false };
+}
+
+/**
+ * The `<expr>` a translated `return <expr>;` statement yields, or ''. The
+ * statement's `//` provenance comment lines precede it, so a match must skip
+ * leading comment lines rather than anchor on `return` at the head.
+ */
+function returnBodyOf(server: string): string {
+  const match = /^(?:\/\/.*\n)*return\s+([\s\S]*);$/.exec(server.trim());
+  return match?.[1]?.trim() ?? '';
+}
+
+/** The value a `return <expr>;` script yields, without the wrapper. */
+function unwrapReturnBody(body: string): string {
+  const inner = returnBodyOf(body);
+  return inner ? unwrapReturn(inner) : body;
+}
+
+/** The argument texts of the call whose `(` sits at `open`, split at top-level commas. */
+function callArgs(source: string, open: number): string[] {
+  const args: string[] = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i]!;
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')') {
+      if (depth === 0) {
+        const last = source.slice(start, i).trim();
+        if (last || args.length) args.push(last);
+        return args;
+      }
+      depth--;
+    } else if ((ch === ']' || ch === '}') && depth > 0) depth--;
+    else if (ch === ',' && depth === 0) {
+      args.push(source.slice(start, i).trim());
+      start = i + 1;
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      while (++i < source.length && source[i] !== ch) if (source[i] === '\\') i++;
+    }
+  }
+  const rest = source.slice(start).trim();
+  if (rest || args.length) args.push(rest);
+  return args;
+}
+
+/** Drop parentheses when they wrap the whole expression. */
+function unwrapReturn(body: string): string {
+  const s = body.trim();
+  if (!s.startsWith('(') || !s.endsWith(')')) return s;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (depth === 0) return i === s.length - 1 ? unwrapReturn(s.slice(1, -1).trim()) : s;
+  }
+  return s;
+}
+
+/**
+ * `body` is already trimmed. When parentheses wrap the whole expression, `text`
+ * is that expression unwrapped and `offset` is where `text` starts in `body`.
+ */
+function unwrapReturnAt(body: string): { text: string; offset: number } {
+  if (!body.startsWith('(') || !body.endsWith(')')) return { text: body, offset: 0 };
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (depth === 0) {
+      if (i !== body.length - 1) return { text: body, offset: 0 };
+      const innerRaw = body.slice(1, -1);
+      const lead = innerRaw.length - innerRaw.trimStart().length;
+      const nested = unwrapReturnAt(innerRaw.trim());
+      return { text: nested.text, offset: 1 + lead + nested.offset };
+    }
+  }
+  return { text: body, offset: 0 };
+}
+
+/** Argument texts of the call whose `(` sits at `open`, each with the index of its trimmed text in `source`. */
+function callArgSpans(source: string, open: number): { text: string; start: number }[] {
+  const args: { text: string; start: number }[] = [];
+  let depth = 0;
+  let start = open + 1;
+  const push = (end: number): void => {
+    const raw = source.slice(start, end);
+    const lead = raw.length - raw.trimStart().length;
+    const text = raw.trim();
+    if (text || args.length) args.push({ text, start: start + lead });
+  };
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i]!;
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')') {
+      if (depth === 0) {
+        push(i);
+        return args;
+      }
+      depth--;
+    } else if ((ch === ']' || ch === '}') && depth > 0) depth--;
+    else if (ch === ',' && depth === 0) {
+      push(i);
+      start = i + 1;
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      while (++i < source.length && source[i] !== ch) if (source[i] === '\\') i++;
+    }
+  }
+  push(source.length);
+  return args;
+}
+
+type RecordReceiverKind = 'root' | 'mixed' | 'none';
+
+function combineRecordResults(results: RecordReceiverKind[]): RecordReceiverKind {
+  if (results.length === 0) return 'none';
+  if (results.includes('mixed')) return 'mixed';
+  const hasRoot = results.includes('root');
+  const hasNone = results.includes('none');
+  if (hasRoot && hasNone) return 'mixed';
+  if (hasRoot) return 'root';
+  return 'none';
+}
+
+/**
+ * Classify whether `code` evaluates to `shim.input.root(ctx)` or `ctx.old`.
+ * Reduces recursively under `shim.convert.toMap`, `shim.ifnull`, parentheses,
+ * top-level `||`, `&&`, and `if()` / `?:` conditional expressions.
+ * Returns 'root' if all value arms evaluate to the record, 'mixed' if some
+ * evaluate to the record and some do not, and 'none' otherwise.
+ * `base` is the index of `code` in the surrounding text. Each exact record root
+ * that is a value arm is appended to `valueRoots`. A root in an `if()` / `?:`
+ * condition is not a value arm.
+ */
+function classifyRecordReceiver(code: string, base = 0, valueRoots?: number[]): RecordReceiverKind {
+  const lead = code.length - code.trimStart().length;
+  const s = code.trim();
+  const sBase = base + lead;
+  if (s === 'shim.input.root(ctx)' || s === 'ctx.old') {
+    valueRoots?.push(sBase);
+    return 'root';
+  }
+  if (!s) return 'none';
+  const unwrapped = unwrapReturnAt(s);
+  if (unwrapped.text !== s) return classifyRecordReceiver(unwrapped.text, sBase + unwrapped.offset, valueRoots);
+  if (s.startsWith('shim.convert.toMap(') && s.endsWith(')')) {
+    const args = callArgSpans(s, 'shim.convert.toMap'.length);
+    return args.length > 0 ? classifyRecordReceiver(args[0]!.text, sBase + args[0]!.start, valueRoots) : 'none';
+  }
+  if (s.startsWith('shim.ifnull(') && s.endsWith(')')) {
+    const args = callArgSpans(s, 'shim.ifnull'.length);
+    return combineRecordResults(args.map((arg) => classifyRecordReceiver(arg.text, sBase + arg.start, valueRoots)));
+  }
+  const masked = maskCommentsAndStrings(s);
+  let depth = 0;
+  let qIndex = -1;
+  let colonIndex = -1;
+  let ternaryDepth = 0;
+  for (let i = 0; i < masked.length; i++) {
+    const ch = masked[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') depth--;
+    else if (depth === 0) {
+      if (ch === '?' && masked[i + 1] !== '.' && masked[i + 1] !== '?' && (i === 0 || masked[i - 1] !== '?')) {
+        if (ternaryDepth === 0) qIndex = i;
+        ternaryDepth++;
+      } else if (ch === ':' && ternaryDepth > 0) {
+        ternaryDepth--;
+        if (ternaryDepth === 0) {
+          colonIndex = i;
+          break;
+        }
+      }
+    }
+  }
+  if (qIndex >= 0 && colonIndex > qIndex) {
+    return combineRecordResults([
+      classifyRecordReceiver(s.slice(qIndex + 1, colonIndex), sBase + qIndex + 1, valueRoots),
+      classifyRecordReceiver(s.slice(colonIndex + 1), sBase + colonIndex + 1, valueRoots),
+    ]);
+  }
+  depth = 0;
+  const orParts: { text: string; offset: number }[] = [];
+  let lastOr = 0;
+  for (let i = 0; i < masked.length; i++) {
+    const ch = masked[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') depth--;
+    else if (depth === 0 && ch === '|' && masked[i + 1] === '|') {
+      orParts.push({ text: s.slice(lastOr, i), offset: lastOr });
+      lastOr = i + 2;
+      i++;
+    }
+  }
+  if (orParts.length > 0) {
+    orParts.push({ text: s.slice(lastOr), offset: lastOr });
+    return combineRecordResults(orParts.map((part) => classifyRecordReceiver(part.text, sBase + part.offset, valueRoots)));
+  }
+  depth = 0;
+  const andParts: { text: string; offset: number }[] = [];
+  let lastAnd = 0;
+  for (let i = 0; i < masked.length; i++) {
+    const ch = masked[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') depth--;
+    else if (depth === 0 && ch === '&' && masked[i + 1] === '&') {
+      andParts.push({ text: s.slice(lastAnd, i), offset: lastAnd });
+      lastAnd = i + 2;
+      i++;
+    }
+  }
+  if (andParts.length > 0) {
+    andParts.push({ text: s.slice(lastAnd), offset: lastAnd });
+    return combineRecordResults(andParts.map((part) => classifyRecordReceiver(part.text, sBase + part.offset, valueRoots)));
+  }
+  return 'none';
+}
+
+
+/** `code` with comments blanked and every string's contents blanked in place, so offsets still line up. */
+function maskCommentsAndStrings(code: string): string {
+  return code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, (m) =>
+    m[0] === '/' ? ' '.repeat(m.length) : `${m[0]}${' '.repeat(m.length - 2)}${m[0]}`,
+  );
+}
+
+/** Index of the bracket that opens the one closing at `close` in `masked`, or -1. */
+function matchingOpen(masked: string, close: number): number {
+  let depth = 0;
+  for (let i = close; i >= 0; i--) {
+    const ch = masked[i]!;
+    if (ch === ')' || ch === ']' || ch === '}') depth++;
+    else if (ch === '(' || ch === '[' || ch === '{') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Index of the bracket that closes the one opening at `open` in `masked`, or -1. */
+function matchingClose(masked: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < masked.length; i++) {
+    const ch = masked[i]!;
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Start of the member/call chain that ends just before `end` in `masked` (`a.b(c)[d]` → index of `a`). */
+function receiverStart(masked: string, end: number): number {
+  let j = end;
+  for (;;) {
+    while (j > 0 && /\s/.test(masked[j - 1]!)) j--;
+    const ch = masked[j - 1];
+    if (ch === ')' || ch === ']') {
+      const open = matchingOpen(masked, j - 1);
+      if (open < 0) return j;
+      j = open;
+      continue;
+    }
+    if (ch === undefined || !/[\w$]/.test(ch)) return j;
+    while (j > 0 && /[\w$]/.test(masked[j - 1]!)) j--;
+    let k = j;
+    while (k > 0 && /\s/.test(masked[k - 1]!)) k--;
+    if (masked[k - 1] !== '.') return j;
+    j = k - 1;
+    if (masked[j - 1] === '?') j--;
+  }
+}
+
+/**
+ * The field names a criterion reads off the record: `input.X`/`old.X` member
+ * reads (emitted `shim.input.get(ctx, "X")`) and the `input.get("X")`,
+ * `old.get("X")`, `input.toMap().get("X")`, `containsKey`/`getJson` and
+ * `keys().contains("X")` spellings (emitted `shim.list.*` on the record root),
+ * member reads like `.Amount`, and `["X"]` subscripts.
+ * Checked reads support `||`, `&&`, `ifnull(...)`, and `if()`/`?:` receivers, so long as
+ * every value arm evaluates to the record (`ifnull(input, old).get("X")` included).
+ * A root in the condition of an `if()` / `?:` receiver is not a value arm.
+ * A receiver mixing the record with any other value fails closed. The mixed rows are
+ * `ifnull(input, {"a":1}).get("Amount")`, `(input || {"a":1})["Amount"]`,
+ * `if(Amount > 0, input, {"Amount":0}).Amount`, and `(Amount > 0 && input)["Amount"]`.
+ * A record read whose key is not a string literal yields `null` so the caller fails closed
+ * on a key it cannot check. Any other bare occurrence of the record also fails closed.
+ */
+function recordFieldRoots(body: string): (string | null)[] {
+  const roots = new Set<string | null>();
+  const addKey = (text: string | undefined): void => {
+    const lit = /^"(?:[^"\\]|\\.)*"$/.exec((text ?? '').trim());
+    if (!lit) {
+      roots.add(null);
+      return;
+    }
+    try {
+      const name: unknown = JSON.parse(lit[0]);
+      roots.add(typeof name === 'string' ? name : null);
+    } catch {
+      roots.add(null);
+    }
+  };
+
+  const masked = maskCommentsAndStrings(body);
+  const rootInstances = [...masked.matchAll(/(?:shim\.input\.root\(ctx\)|ctx\.old)(?!\w)/g)].map((m) => m.index);
+  const accounted = new Set<number>();
+  // Mark only the roots the classifier matched as value arms. A root in an
+  // if() / ?: condition stays unmarked and denies like any other bare read.
+  const accountReceiver = (code: string, base: number): RecordReceiverKind => {
+    const found: number[] = [];
+    const cls = classifyRecordReceiver(code, base, found);
+    if (cls === 'root' || cls === 'mixed') {
+      for (const idx of found) accounted.add(idx);
+    }
+    return cls;
+  };
+
+  for (const match of body.matchAll(/\bshim\.(?:input|old)\.get\(ctx,\s*("(?:[^"\\]|\\.)*")/g)) addKey(match[1]);
+  // Generated `obj[key]` reads emit `shim.get(<receiver>, <key>)`: the same
+  // classification as a bracket index — a recognised record receiver counts
+  // the key, a mixed or unkeyed one fails closed.
+  for (const match of body.matchAll(/\bshim\.get\(/g)) {
+    const args = callArgs(body, match.index + match[0].length - 1);
+    if (args.length !== 2) continue;
+    const argStart = body.indexOf(args[0]!, match.index);
+    const cls = argStart < 0 ? classifyRecordReceiver(args[0]!) : accountReceiver(args[0]!, argStart);
+    if (cls === 'mixed' || cls === 'root') {
+      if (cls === 'mixed') roots.add(null);
+      else addKey(args[1]);
+    }
+  }
+  for (const match of body.matchAll(/\bshim\.list\.(?:get|containsKey|getJson)\(/g)) {
+    const args = callArgs(body, match.index + match[0].length - 1);
+    if (args.length > 1) {
+      const argStart = body.indexOf(args[0]!, match.index);
+      const cls = argStart < 0 ? classifyRecordReceiver(args[0]!) : accountReceiver(args[0]!, argStart);
+      if (cls === 'mixed' || cls === 'root') {
+        if (cls === 'mixed') roots.add(null);
+        else addKey(args[1]);
+      }
+    }
+  }
+  for (const match of body.matchAll(/\bshim\.list\.contains\(/g)) {
+    const args = callArgs(body, match.index + match[0].length - 1);
+    const first = (args[0] ?? '').trim();
+    if (!first.startsWith('shim.list.keys(')) continue;
+    const inner = callArgs(first, 'shim.list.keys'.length);
+    if (inner.length > 0) {
+      const argStart = body.indexOf(inner[0]!, match.index);
+      const cls = argStart < 0 ? classifyRecordReceiver(inner[0]!) : accountReceiver(inner[0]!, argStart);
+      if (cls === 'mixed' || cls === 'root') {
+        if (cls === 'mixed') roots.add(null);
+        else addKey(args[1]);
+      }
+    }
+  }
+  for (let open = masked.indexOf('['); open >= 0; open = masked.indexOf('[', open + 1)) {
+    const start = receiverStart(masked, open);
+    if (start === open) continue;
+    const cls = accountReceiver(body.slice(start, open), start);
+    if (cls === 'mixed' || cls === 'root') {
+      if (cls === 'mixed') roots.add(null);
+      else {
+        const close = matchingClose(masked, open);
+        addKey(close < 0 ? undefined : body.slice(open + 1, close));
+      }
+    }
+  }
+  for (const match of masked.matchAll(/(?:\.|\?\.)\s*([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
+    const dotIndex = match.index;
+    const propName = match[1];
+    let k = dotIndex + match[0].length;
+    while (k < masked.length && /\s/.test(masked[k]!)) k++;
+    if (masked[k] === '(') continue;
+    const start = receiverStart(masked, dotIndex);
+    if (start === dotIndex) continue;
+    const cls = accountReceiver(body.slice(start, dotIndex), start);
+    if (cls === 'mixed' || cls === 'root') {
+      if (cls === 'mixed') roots.add(null);
+      else addKey(JSON.stringify(propName));
+    }
+  }
+
+  for (const idx of rootInstances) {
+    if (!accounted.has(idx)) {
+      roots.add(null);
+      break;
+    }
+  }
+
+  return [...roots].sort();
+}
+
+function gate(body: string, test: string): string {
+  if (!body.trim()) return body;
+  return `if (${test}) {\n${indent(body)}\n}`;
+}
+
+/**
+ * Field-rule condition text as it is written into the handler.
+ * An untranslated condition is one statement, semicolon included, so a fill
+ * walk sees the same `shim.todo` call `generate` emits.
+ */
+export function emittedFieldRuleCondition(condition: string, inputFields: string[] = [], decimalFields: string[] = []): string {
+  const guard = expressionCode(condition, inputFields, decimalFields);
+  if (guard.startsWith('await shim.todo(')) return `${guard};`;
+  return guard;
+}
+
+/** Field-rule condition text for one workflow form, using the same field list as generate. */
+export function emittedFieldRuleConditionFor(app: App, form: string | undefined, condition: string): string {
+  return emittedFieldRuleCondition(condition, fieldNamesOf(app, form), decimalFieldNames(app));
+}
+
+/** Translate a criteria fragment by wrapping it in `return`. */
+function expressionCode(condition: string, inputFields: string[] = [], decimalFields: string[] = []): string {
+  const tr = translate(`return (${condition});`, { inputFields, decimalFields });
+  const failed = tr.todos.length > 0 || tr.server.includes('shim.todo(');
+  let body = returnBodyOf(tr.server);
+  if (failed || !body) return 'await shim.todo(ctx, "field-rule-condition")';
+  if (body.startsWith('(') && body.endsWith(')')) body = body.slice(1, -1).trim();
+  if (!body || unboundGuardIdentifiers(body).length > 0) return 'await shim.todo(ctx, "field-rule-condition")';
+  return body;
+}
+
+/** Parameter names exactly as the Deluge body writes them (pre-jsIdent). */
+export function rawFnParams(signature: string | undefined): string[] {
+  if (!signature) return [];
+  const m = signature.match(/\(([^)]*)\)/);
+  if (!m || !m[1]?.trim()) return [];
+  return m[1]
+    .split(',')
+    .map((p) => p.trim().split(/\s+/).pop() ?? '')
+    .filter((n) => /^[$A-Za-z_][\w$]*$/.test(n));
+}
+
+function fnParams(signature: string | undefined): string[] {
+  // The body names a parameter through jsIdent (`var` is `d_var`), so the parameter must match.
+  return rawFnParams(signature).map(jsIdent);
+}
+
+/** Parameters declared `decimal` (or legacy `float`): exact decimals inside the function body. */
+function fnDecimalParams(signature: string | undefined): string[] {
+  if (!signature) return [];
+  const m = signature.match(/\(([^)]*)\)/);
+  if (!m || !m[1]?.trim()) return [];
+  return m[1]
+    .split(',')
+    .filter((p) => /^\s*(float|decimal)\s+/i.test(p))
+    .map((p) => p.trim().split(/\s+/).pop() ?? '')
+    .filter((n) => /^[$A-Za-z_][\w$]*$/.test(n));
+}
+
+/** Declared `(type name)` pairs of a `thisapp` signature; the last token is the name. */
+export function fnSignatureParams(signature: string | undefined): { type: string; name: string }[] {
+  if (!signature) return [];
+  const m = signature.match(/\(([^)]*)\)/);
+  if (!m || !m[1]?.trim()) return [];
+  const out: { type: string; name: string }[] = [];
+  for (const part of m[1].split(',')) {
+    const tokens = part.trim().split(/\s+/).filter(Boolean);
+    const name = tokens[tokens.length - 1] ?? '';
+    if (!/^[$A-Za-z_][\w$]*$/.test(name)) continue;
+    out.push({ type: tokens.slice(0, -1).join(' '), name });
+  }
+  return out;
+}
+
+/** The generated body calls `thisapp.<fn>` through the shim. */
+function usesThisapp(body: string): boolean {
+  return body.includes('shim.thisapp.call(');
+}
+
+/** The generated body reads the app's Catalyst user list. */
+function usesAppUsers(body: string): boolean {
+  return body.includes('shim.app.users(') || body.includes('shim.app.userEmailIds(');
+}
+
+function appUsersHelper(admins: string[] = []): string {
+  return `async function appUsers(req) {
+  const adminProfiles = ${JSON.stringify(admins)};
+  const principal = principalFromRequest(req);
+  if (!principal?.profile) {
+    throw new RecordAccessError("record access: user listing denied");
+  }
+  const allowed = adminProfiles.includes(String(principal.profile));
+  if (!allowed) {
+    throw new RecordAccessError(\`record access: profile \${principal.profile} cannot list users\`);
+  }
+  if (Array.isArray(req?.appUsers)) return req.appUsers;
+  try {
+    const sdk = await import("zcatalyst-sdk-node");
+    const catalyst = sdk.initialize(req, { scope: "admin" });
+    const reply = await catalyst.userManagement().getAllUsers();
+    const rows = Array.isArray(reply) ? reply : Array.isArray(reply?.data) ? reply.data : Array.isArray(reply?.users) ? reply.users : [];
+    return rows.filter((user) => user && typeof user === "object");
+  } catch {
+    return [];
+  }
+}
+`;
+}
+
+/** A live run needs the injected datastore when the body reads or writes rows. */
+function needsDatastore(body: string): boolean {
+  return body.includes('shim.datastore.') || body.includes('shim.record.prepare');
+}
+
+function isPayment(w: Workflow): boolean {
+  return isPaymentWorkflow(w);
+}
+
+function isSchedule(w: Workflow): boolean {
+  return isScheduleWorkflow(w);
+}
+
+function isApproval(w: Workflow): boolean {
+  return isApprovalWorkflow(w);
+}
+
+/** Creator `time zone` application setting, embedded so a dry run does not need C2C_APP_TIMEZONE. */
+const decimalColumnCache = new WeakMap<App, Record<string, DecimalColumns>>();
+
+/**
+ * form (or child table) → exact-decimal field → Double shadow column and scale,
+ * from the schema plan. The runtime writes the shadow and uses it for ZCQL criteria
+ * and sort, then re-checks the exact varchar. NoSQL forms have no shadow.
+ */
+export function decimalColumnsOf(app: App): Record<string, DecimalColumns> {
+  const cached = decimalColumnCache.get(app);
+  if (cached) return cached;
+  const out: Record<string, Record<string, DecimalColumn>> = {};
+  for (const table of schemaOf(app).tables) {
+    if (table.nosql || table.role === 'junction') continue;
+    const key = table.role === 'form' ? table.form : table.name;
+    for (const column of table.columns) {
+      if (!column.shadowFor) continue;
+      const exact = table.columns.find((c) => c.name === column.shadowFor);
+      (out[key] ??= {})[exact?.field ?? column.shadowFor] = { shadow: column.name, scale: exact?.precision ?? 2 };
+    }
+  }
+  decimalColumnCache.set(app, out);
+  return out;
+}
+
+/** `, decimalColumns: {…}` for a generated createRuntime call, or nothing. */
+export function decimalColumnsOption(app: App): string {
+  const map = decimalColumnsOf(app);
+  return Object.keys(map).length ? `, decimalColumns: ${JSON.stringify(map)}` : '';
+}
+
+const appUniqueCache = new WeakMap<App, Record<string, string[]>>();
+
+/**
+ * form (or child table) → Creator unique fields the store does not enforce, from the
+ * schema plan (`appUnique`: over Data Store's unique varchar limit per table). The
+ * runtime checks them before a live insert or update.
+ */
+export function appUniqueColumnsOf(app: App, schema?: SchemaPlan): Record<string, string[]> {
+  const from = (plan: SchemaPlan): Record<string, string[]> => {
+    const out: Record<string, string[]> = {};
+    for (const table of plan.tables) {
+      if (table.nosql || table.role === 'junction') continue;
+      const key = table.role === 'form' ? table.form : table.name;
+      const names = table.columns.filter((column) => column.appUnique).map((column) => column.field ?? column.name);
+      if (names.length) out[key] = names;
+    }
+    return out;
+  };
+  if (schema) return from(schema);
+  const cached = appUniqueCache.get(app);
+  if (cached) return cached;
+  const out = from(schemaOf(app));
+  appUniqueCache.set(app, out);
+  return out;
+}
+
+/** `, appUniqueColumns: {…}` for a generated createRuntime call, or nothing. */
+export function appUniqueOption(app: App, schema?: SchemaPlan): string {
+  const map = appUniqueColumnsOf(app, schema);
+  return Object.keys(map).length ? `, appUniqueColumns: ${JSON.stringify(map)}` : '';
+}
+
+/**
+ * `, splits: {…}` for a generated createRuntime call, or nothing.
+ * Only a form that was actually split is listed, so an unsplit app stays byte-identical.
+ * The key is the form link name a handler passes to datastore.insert.
+ * A child or junction table is keyed by its physical name so it cannot replace the parent layout.
+ */
+export function splitsOption(app: App, schema?: SchemaPlan): string {
+  const plan = schema ?? schemaOf(app);
+  if (!plan.splits?.length) return '';
+  const map: Record<string, { base: string; baseColumns: string[]; extensions: { table: string; columns: string[] }[] }> = {};
+  for (const split of plan.splits) {
+    const base = plan.tables.find((table) => table.name === split.base);
+    if (!base) continue;
+    const key = base.role === 'form' ? split.form : split.base;
+    if (Object.hasOwn(map, key)) continue;
+    map[key] = {
+      base: split.base,
+      baseColumns: base.columns.filter((column) => column.name !== EXTENSION_KEY).map((column) => column.name),
+      extensions: split.extensions.map((ext) => ({
+        table: ext.name,
+        columns: ext.columns.filter((name) => name !== EXTENSION_KEY),
+      })),
+    };
+  }
+  return Object.keys(map).length ? `, splits: ${JSON.stringify(map)}` : '';
+}
+
+const writeRulesCache = new WeakMap<App, Record<string, IntegrityColumn[]>>();
+
+/**
+ * form (or child table) -> the write-rule columns of the generated schema:
+ * length, decimal scale, date format, significant digits, and `required` on the
+ * Creator-mandatory fields. Keyed like decimalColumnsOf so `datastore.insert(
+ * "Form", …)` resolves its table's rules; the runtime and the datastore adapter
+ * refuse the same writes the loader does.
+ */
+export function writeRulesOf(app: App, schema?: SchemaPlan): Record<string, IntegrityColumn[]> {
+  const from = (plan: SchemaPlan): Record<string, IntegrityColumn[]> => {
+    const out: Record<string, IntegrityColumn[]> = {};
+    for (const table of plan.tables) {
+      if (table.nosql || table.role === 'junction') continue;
+      out[table.role === 'form' ? table.form : table.name] = integrityColumns(table);
+    }
+    return out;
+  };
+  if (schema) return from(schema);
+  const cached = writeRulesCache.get(app);
+  if (cached) return cached;
+  const out = from(schemaOf(app));
+  writeRulesCache.set(app, out);
+  return out;
+}
+
+/** `, writeRules: {…}` for a generated createRuntime call, or nothing. */
+export function writeRulesOption(app: App, schema?: SchemaPlan): string {
+  const map = writeRulesOf(app, schema);
+  return Object.keys(map).length ? `, writeRules: ${JSON.stringify(map)}` : '';
+}
+
+/** Schema-derived createRuntime fields: decimals, app-unique columns, write rules, and split layouts. */
+export function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
+  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+}
+
+export interface MultiLookupSpec {
+  table: string;
+  parentColumn: string;
+  valueColumn: string;
+  orderColumn: string;
+}
+
+/** form → multi-lookup field → the junction table that holds it (schema-derived, shared by the generated runtime and offline verification). */
+export function multiLookupsOf(app: App, schema?: SchemaPlan): Record<string, Record<string, MultiLookupSpec>> {
+  const map: Record<string, Record<string, MultiLookupSpec>> = {};
+  for (const table of (schema ?? schemaOf(app)).tables) {
+    if (table.role !== 'junction') continue;
+    const parent = table.columns.find((column) => column.name === 'parent_id');
+    const order = table.columns.find((column) => column.name === 'row_order');
+    const value = table.columns.find((column) => column.relation && column.name !== parent?.name);
+    if (!parent || !order || !value) continue;
+    const field = value.field ?? value.name;
+    (map[table.form] ??= {})[field] = { table: table.name, parentColumn: parent.name, valueColumn: value.name, orderColumn: order.name };
+  }
+  return map;
+}
+
+function multiLookupsOption(app: App, schema?: SchemaPlan): string {
+  const map = multiLookupsOf(app, schema);
+  return Object.keys(map).length ? `, multiLookups: ${JSON.stringify(map)}` : '';
+}
+
+function timeZoneFields(app: App): string {
+  const raw = app.settings.find((p) => p.key.toLowerCase() === 'time zone')?.value;
+  if (!raw) return '';
+  const zone = unquote(raw).trim();
+  return zone ? `, settingsTimeZone: ${JSON.stringify(zone)}` : '';
+}
+
+export function eventKind(event: string): string {
+  const e = event.toLowerCase();
+  // A subform row event is a form event on the open page, not a submit or a record delete.
+  const row = SUBFORM_ROW_EVENT.exec(e);
+  if (row) return `${row[1]}row`;
+  if (e.includes('validate')) return 'validate';
+  if (e.includes('success')) return 'success';
+  // `on update of <Field>` is the edit-screen sibling of `on user input of
+  // <Field>`: it fires on a field change, not on a submit.
+  if (e.includes('user input') || /^on update of\b/.test(e)) return 'input';
+  if (e.includes('load')) return 'load';
+  if (e.includes('click')) return 'click';
+  if (e.includes('delete')) return 'delete';
+  if (e.includes('add') || e.includes('edit') || e.includes('submit') || e.includes('update') || e.includes('create')) return 'submit';
+  return 'handler';
+}
+
+/** `on add row of Sub` / `on delete row of Sub`, anywhere in a combined event name. */
+const SUBFORM_ROW_EVENT = /\bon (add|delete) row of\b/;
+
+/**
+ * Persist system columns only once the record is being saved.
+ * On validate / load / user input the row is not stored yet, so Added_User
+ * is not invented there. A subform row event (on add row, on delete row) is a
+ * form event while the record is being entered, listed beside On Load and On
+ * User Input and apart from On Validate / On Success
+ * (deluge-docs/pages/miscellaneous__access-subform-fields.html): it never
+ * persists, so it is not an insert. On add the server sets Added_*. On edit it loads the
+ * stored row and copies Added_*, then sets Modified_*.
+ */
+function systemWriteKind(w: Workflow): 'insert' | 'update' | 'add-or-edit' | null {
+  const event = w.event.toLowerCase();
+  if (SUBFORM_ROW_EVENT.test(event)) return null;
+  if (/\b(validate|load|click|user input|delete)\b/.test(event)) return null;
+  const record = (w.recordEvent ?? '').toLowerCase();
+  const blob = `${record} ${event}`;
+  if (!/\b(success|add|edit|submit|update|create)\b/.test(blob)) return null;
+  if (record === 'on add or edit') return 'add-or-edit';
+  if (record === 'on edit' || (/\bon edit\b/.test(blob) && !/\badd\b/.test(record))) return 'update';
+  if (record === 'on add' || record === 'on create' || /\b(success|add|create|submit)\b/.test(blob)) return 'insert';
+  if (/\b(edit|update)\b/.test(blob)) return 'update';
+  return null;
+}
+
+function systemStampSource(kind: 'insert' | 'update' | 'add-or-edit' | null): string {
+  if (!kind) return '';
+  // writeLive sets ctx.persisted after the row is stored. A second stamp would
+  // replace Added_Time with a later clock than the inserted row. `||` keeps a
+  // gapped handler free of `if`, which is how an omitted action guard is told apart.
+  if (kind === 'insert') return 'ctx.persisted || shim.record.stamp(ctx, "insert");';
+  if (kind === 'update') return 'ctx.persisted || await shim.record.prepare(ctx, formName, "update");';
+  return 'ctx.persisted || await shim.record.prepare(ctx, formName);';
+}
+
+/**
+ * Validate handlers in the same form directory whose server body actually
+ * writes fields, split by the record event they run under. `on delete`
+ * validates belong to the delete path, never to a submit.
+ */
+export function validateSiblingSpecs(app: App, form: string): { add: string[]; edit: string[] } {
+  const group = handlerGroup(app, form, 'validate').filter((other) => !systemWriteKind(other));
+  const add: string[] = [];
+  const edit: string[] = [];
+  if (!group.length) return { add, edit };
+  const spec = `./${handlerLeaf(handlerGroup(app, form, 'validate'))}.mjs`;
+  let hasServer = false;
+  let coversAdd = false;
+  let coversEdit = false;
+  for (const other of group) {
+    const translated = other.deluge ? translateInApp(app, other.deluge.text) : emptyTranslate();
+    const guarded = gateAction(app, other, translated, []);
+    if (guarded.server.trim()) hasServer = true;
+    const scope = recordScope(other);
+    if (scope === 'add' || scope === 'both') coversAdd = true;
+    if (scope === 'edit' || scope === 'both') coversEdit = true;
+  }
+  // Unscoped and `on add or edit` validates run in both contexts.
+  if (hasServer) {
+    if (coversAdd) add.push(spec);
+    if (coversEdit) edit.push(spec);
+  }
+  return { add, edit };
+}
+
+/**
+ * The form's `on start` presuccess module (`./<leaf>.mjs`, path
+ * `/forms/<form>/handler`), split by the record event its presuccess scripts
+ * run under. Empty unless every server script on that route is presuccess —
+ * the same rule that marks the module `presuccess` in emitFormHandler.
+ */
+export function presuccessSiblingSpecs(app: App, form: string): { add: string[]; edit: string[] } {
+  const group = handlerGroup(app, form, 'handler');
+  const add: string[] = [];
+  const edit: string[] = [];
+  let hasServer = false;
+  let coversAdd = false;
+  let coversEdit = false;
+  for (const other of group) {
+    const translated = other.deluge ? translateInApp(app, other.deluge.text) : emptyTranslate();
+    const guarded = gateAction(app, other, translated, []);
+    if (!guarded.server.trim()) continue;
+    if (!isPresuccessWorkflow(other)) return { add, edit };
+    hasServer = true;
+    const scope = recordScope(other);
+    if (scope === 'add' || scope === 'both') coversAdd = true;
+    if (scope === 'edit' || scope === 'both') coversEdit = true;
+  }
+  if (hasServer) {
+    const spec = `./${handlerLeaf(group)}.mjs`;
+    if (coversAdd) add.push(spec);
+    if (coversEdit) edit.push(spec);
+  }
+  return { add, edit };
+}
+
+/**
+ * The deploy-mode helpers shared by every live-capable generated module:
+ * `C2C_DEPLOY_MODE` overrides `c2c-deploy.json`; a live run uses the injected
+ * datastore (request-scoped `c2c-store.mjs`, else the `__c2cDatastore` global
+ * a job or test installs). `dir` is the relative path from the module's own
+ * directory up to the function root (`"../../"` under `functions/aio/<form>`,
+ * `"../"` under `functions/<group>`).
+ */
+function liveHelpers(dir: string): string {
+  return `function modeOverride() {
+  const value = typeof process !== "undefined" && process.env ? process.env.C2C_DEPLOY_MODE : undefined;
+  return value === "live" || value === "dry-run" ? value : "";
+}
+
+function deployConfig() {
+  try {
+    const file = join(dirname(fileURLToPath(import.meta.url)), ${JSON.stringify(`${dir}c2c-deploy.json`)});
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const mode = modeOverride() || (parsed && parsed.mode === "live" ? "live" : "dry-run");
+    const appTimeZone = parsed && typeof parsed.appTimeZone === "string" ? parsed.appTimeZone : "";
+    return { mode, appTimeZone };
+  } catch (err) {
+    return { mode: modeOverride() || "dry-run", appTimeZone: "" };
+  }
+}
+
+async function liveDatastore() {
+  try {
+    const mod = await import(${JSON.stringify(`${dir}c2c-store.mjs`)});
+    if (mod && typeof mod.getDatastore === "function") {
+      const stored = mod.getDatastore();
+      if (stored) return stored;
+    }
+  } catch (err) {
+    /* store module is absent when this file is loaded alone */
+  }
+  try {
+    if (globalThis.__c2cDatastore) return globalThis.__c2cDatastore;
+  } catch (err) {
+    /* no injected global */
+  }
+  return null;
+}`;
+}
+
+/**
+ * Live helpers plus the record-event-scoped validate sibling lists. Creator
+ * runs only the validates whose record event matches the write: `on add` and
+ * unscoped when inserting, `on edit` and unscoped when updating. The request's
+ * ROWID picks the context for every module, including one whose own script is
+ * `on add`: a ROWID makes the write an update, and Creator never runs an
+ * `on add` validate when a stored record is edited.
+ */
+function aioLiveHelpers(validateSpecs: { add: string[]; edit: string[] }, pick: 'add' | 'edit' | 'either', writeLive: string, presuccessSpecs?: { add: string[]; edit: string[] }): string {
+  const pickBody =
+    pick === 'add' ? 'return validateAdd;' : pick === 'edit' ? 'return validateEdit;' : 'return rowId ? validateEdit : validateAdd;';
+  const presuccessPick =
+    pick === 'add' ? 'return presuccessAdd;' : pick === 'edit' ? 'return presuccessEdit;' : 'return rowId ? presuccessEdit : presuccessAdd;';
+  // Emitted only for a form with an `on start` presuccess module, so every
+  // other module stays byte-identical.
+  const presuccessBlock = presuccessSpecs && presuccessSpecs.add.length + presuccessSpecs.edit.length
+    ? `const presuccessAdd = ${JSON.stringify(presuccessSpecs.add)};
+const presuccessEdit = ${JSON.stringify(presuccessSpecs.edit)};
+function presuccessSpecsFor(rowId) {
+  ${presuccessPick}
+}
+`
+    : '';
+  return `${presuccessBlock}const validateAdd = ${JSON.stringify(validateSpecs.add)};
+const validateEdit = ${JSON.stringify(validateSpecs.edit)};
+function validateSpecsFor(rowId) {
+  ${pickBody}
+}
+
+${liveHelpers('../../')}
+
+function insertedRow(result) {
+  if (Array.isArray(result)) {
+    const row = result[0];
+    return row && typeof row === "object" ? row : null;
+  }
+  if (!result || typeof result !== "object") return null;
+  if (Array.isArray(result.rows) && result.rows[0] && typeof result.rows[0] === "object") return result.rows[0];
+  if (Array.isArray(result.data) && result.data[0] && typeof result.data[0] === "object") return result.data[0];
+  if (result.ROWID != null || result.ID != null || result.id != null) return result;
+  return null;
+}
+
+function mergeInserted(record, result) {
+  const row = insertedRow(result);
+  if (!row) return;
+  const raw = row.ROWID != null && row.ROWID !== "" ? row.ROWID : row.ID != null && row.ID !== "" ? row.ID : row.id;
+  if (raw != null && raw !== "") {
+    const id = String(raw);
+    record.ID = id;
+    record.ROWID = id;
+  }
+  const system = ["Added_User", "Added_Time", "Modified_User", "Modified_Time"];
+  for (const key of system) {
+    if (row[key] != null && row[key] !== "") record[key] = row[key];
+  }
+  const keys = Object.keys(row).sort();
+  for (const key of keys) {
+    if (key === "ROWID" || key === "ID" || key === "id") continue;
+    if (!Object.prototype.hasOwnProperty.call(record, key)) record[key] = row[key];
+  }
+}
+
+${writeLive}`;
+}
+
+/**
+ * Write-back of On Success input assignments. The row is committed before the
+ * script runs, so a field it assigns is saved as one update of the fields that
+ * changed. Ids, platform columns, subform tables and file keys are skipped:
+ * they are not plain columns of this row. The update goes through the runtime
+ * like any script write, so the profile grant screens it; a form field rule
+ * hides or disables a field for the client, not for the app's own logic.
+ */
+function successSetsHelper(shape: FieldStoreShape): string {
+  const skip = ['ROWID', 'ID', 'id', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME', 'Added_User', 'Added_Time', 'Modified_User', 'Modified_Time', ...shape.links.map((link) => link.field), ...shape.files];
+  return `const successSkip = new Set(${JSON.stringify(skip)});
+
+// A comparable text per field; a bigint (a Long from toLong()) is kept as digits.
+function successText(value) {
+  return JSON.stringify(value, (key, item) => (typeof item === "bigint" ? \`\${item}n\` : item));
+}
+
+function successSnapshot(record) {
+  const snap = {};
+  for (const key of Object.keys(record)) snap[key] = successText(record[key]);
+  return snap;
+}
+
+async function saveSuccessSets(ctx, targetForm, before) {
+  const changed = {};
+  for (const key of Object.keys(ctx.record).sort()) {
+    if (successSkip.has(key) || ctx.record[key] === undefined) continue;
+    if (Object.prototype.hasOwnProperty.call(before, key) && before[key] === successText(ctx.record[key])) continue;
+    changed[key] = ctx.record[key];
+  }
+  if (!Object.keys(changed).length) return;
+  const rowId = String(ctx.record.ROWID ?? ctx.rowId ?? "").trim();
+  if (!rowId) throw new Error("the committed row has no ROWID; On Success field values were not saved");
+  // The stale-write guard covered the client's edit; this update follows
+  // c2c's own commit of the same row.
+  delete ctx.__c2cModifiedTime;
+  await ctx.shim.datastore.update(ctx, targetForm, { op: "==", field: "ROWID", value: rowId }, changed);
+}`;
+}
+
+const INVOKEURL_CALL = 'shim.http.invokeurl(ctx, {';
+
+/**
+ * For each emitted `shim.http.invokeurl(ctx, { ... })`, whether its request map
+ * has a top-level `"connection":` key. The map is scanned to its closing brace
+ * (nested maps, arrays, calls and string literals skipped), so a key after a
+ * nested `parameters`/`headers` map is still seen.
+ */
+function invokeurlConnections(body: string): boolean[] {
+  const calls: boolean[] = [];
+  for (let at = body.indexOf(INVOKEURL_CALL); at >= 0; at = body.indexOf(INVOKEURL_CALL, at + 1)) {
+    let depth = 0;
+    let connection = false;
+    for (let i = at + INVOKEURL_CALL.length - 1; i < body.length; i += 1) {
+      const ch = body[i]!;
+      if (ch === '"' || ch === "'" || ch === '`') {
+        const start = i;
+        for (i += 1; i < body.length && body[i] !== ch; i += 1) if (body[i] === '\\') i += 1;
+        if (depth === 1 && ch === '"' && body.startsWith('connection":', start + 1)) connection = true;
+      } else if (ch === '{' || ch === '[' || ch === '(') depth += 1;
+      else if (ch === '}' || ch === ']' || ch === ')') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    calls.push(connection);
+  }
+  return calls;
+}
+
+/** The handler calls another Zoho service (`zoho.<svc>.<task>` or invokeurl with `connection:`). */
+function usesZohoConnections(body: string): boolean {
+  return body.includes('shim.zoho.task(') || invokeurlConnections(body).some((c) => c);
+}
+
+/** The handler calls invokeurl without `connection:` (a third-party URL). */
+function usesOutboundInvokeurl(body: string): boolean {
+  return invokeurlConnections(body).some((c) => !c);
+}
+
+/** The handler calls the legacy `getUrl` task (a third-party GET, same allowlist as invokeurl). */
+function usesOutboundGetUrl(body: string): boolean {
+  return body.includes('shim.http.getUrl(');
+}
+
+/**
+ * c2c-deploy.json `outboundHosts`: the only hosts a live invokeurl without
+ * `connection:` or a live `getUrl` may call (shims/outbound.ts; missing means
+ * none). A caller's Idempotency-Key header seeds the keys sent downstream.
+ */
+function outboundLiveHelpers(dir = '../../'): string {
+  return `function outboundConfig(req) {
+  const header = req && req.headers ? req.headers["idempotency-key"] : undefined;
+  const idempotencySeed = typeof header === "string" && header ? header : null;
+  try {
+    const file = join(dirname(fileURLToPath(import.meta.url)), ${JSON.stringify(`${dir}c2c-deploy.json`)});
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const hosts = parsed && Array.isArray(parsed.outboundHosts) ? parsed.outboundHosts.filter((h) => typeof h === "string") : [];
+    return { allowHosts: hosts, idempotencySeed };
+  } catch (err) {
+    return { allowHosts: [], idempotencySeed };
+  }
+}`;
+}
+
+/**
+ * Catalyst Connections for the runtime. c2c-deploy.json `zohoDc` (or
+ * C2C_ZOHO_DC), `connections` (Creator link → Catalyst connection name) and
+ * `orgInternal` (the only live Cliq/mail destinations). The owner approval
+ * token comes from C2C_OWNER_APPROVAL_TOKEN, never a file. Credentials come
+ * from functions/c2c-connections.mjs only in live mode.
+ */
+function connectionsLiveHelpers(dir = '../../'): string {
+  return `function deployConnections() {
+  const fromEnv = process.env.C2C_ZOHO_DC || null;
+  try {
+    const file = join(dirname(fileURLToPath(import.meta.url)), ${JSON.stringify(`${dir}c2c-deploy.json`)});
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const zohoDc = fromEnv || (parsed && typeof parsed.zohoDc === "string" && parsed.zohoDc ? parsed.zohoDc : null);
+    const connections = parsed && parsed.connections && typeof parsed.connections === "object" && !Array.isArray(parsed.connections) ? parsed.connections : {};
+    const orgInternal = parsed && parsed.orgInternal && typeof parsed.orgInternal === "object" && !Array.isArray(parsed.orgInternal) ? parsed.orgInternal : null;
+    return { zohoDc, connections, orgInternal };
+  } catch (err) {
+    return { zohoDc: fromEnv, connections: {}, orgInternal: null };
+  }
+}
+
+async function zohoConnections(req, live) {
+  const config = deployConnections();
+  let credentials = null;
+  if (live) {
+    try {
+      const mod = await import(${JSON.stringify(`${dir}c2c-connections.mjs`)});
+      if (mod && typeof mod.connectionCredentials === "function") credentials = mod.connectionCredentials(req);
+    } catch (err) {
+      /* connections module is absent when this file is loaded alone */
+    }
+  }
+  const ownerApprovalToken = process.env.C2C_OWNER_APPROVAL_TOKEN || null;
+  return { dc: config.zohoDc, connections: config.connections, orgInternal: config.orgInternal, ownerApprovalToken, ...(credentials ? { credentials } : {}) };
+}`;
+}
+
+function signalsFor(recordEvent: string | undefined): string[] {
+  if (!recordEvent) return [];
+  const e = recordEvent.toLowerCase();
+  const out: string[] = [];
+  if (/\b(add|create)\b/.test(e)) out.push('row_inserted');
+  if (/\b(edit|update)\b/.test(e)) out.push('row_updated');
+  if (/\bdelete\b/.test(e)) out.push('row_deleted');
+  return out;
+}
+
+function blueprintStart(w: Workflow): string {
+  const block = w.blueprint?.start;
+  const named = block?.properties.find((p) => p.key.toLowerCase() === 'start stage')?.value;
+  return unquote(named ?? '') || unquote(block?.name ?? '') || w.blueprint?.stages[0]?.name || 'Pending';
+}
+
+function approverKindName(key: string): 'role' | 'profile' | 'user' | 'field' | 'level' | '' {
+  if (/level/i.test(key)) return 'level';
+  if (/field/i.test(key)) return 'field';
+  if (/role/i.test(key) && !/profile/i.test(key)) return 'role';
+  if (/profile/i.test(key)) return 'profile';
+  if (/user|approver/i.test(key)) return 'user';
+  return '';
+}
+
+/**
+ * Module path segment for a workflow or function name. Exported so the
+ * no-silent-drop audit derives the same file paths the generator puts.
+ */
+export function slug(s: string): string {
+  return s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('-') || 'handler';
+}
+
+function indent(body: string): string {
+  return body
+    .split('\n')
+    .map((l) => (l.trim() ? `  ${l}` : l))
+    .join('\n');
+}
+
+function banner(lines: string[]): string {
+  const stamped = [...lines, ...toolchainBannerLines()];
+  return `/**\n${stamped.map((l) => ` * ${l}`).join('\n')}\n */\n`;
+}
+
+function accessLiteral(app: App): string {
+  return JSON.stringify(buildAccessPolicy(app));
+}
+
+function callerGate(error: string): string {
+  return `  const principal = principalFromRequest(req);
+  if (!principal) {
+    res.writeHead(401, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: ${JSON.stringify(error)} }, jsonReplacer));
+    return;
+  }`;
+}
+
+function denyBody(fallback: string): string {
+  return `    const denied = err && err.code === "RECORD_ACCESS_DENIED";
+    res.writeHead(denied ? 403 : 500, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: denied ? err.message : ${JSON.stringify(fallback)}, slots: null }, jsonReplacer));`;
+}
+
+/**
+ * Creator predefined permission set for a profile that has no ModulePermissions.
+ * Profiles that list modules keep those grants. A custom profile with no modules
+ * is not an implicit allow. `App User` and `App Administrator` are Catalyst clone
+ * targets, not profile names invented here.
+ */
+export type ProfilePreset = 'administrator' | 'write' | 'read' | 'add-view' | 'portal-add';
+
+export function profilePreset(profile: Profile): ProfilePreset | undefined {
+  if (profile.modules.length > 0) return undefined;
+  const name = profile.name.trim();
+  const type = profile.type ?? '';
+  const description = profile.description ?? '';
+  if (/^administrator$/i.test(name)) return 'administrator';
+  if (/^write$/i.test(name)) return 'write';
+  if (/^read$/i.test(name)) return 'read';
+  if (/all the permissions/i.test(description)) return 'administrator';
+  if (/write permission for all components/i.test(description)) return 'write';
+  if (/will not have administrative permissions/i.test(description)) return 'write';
+  if (/read permission for all components/i.test(description)) return 'read';
+  if (/customer_portal/i.test(type) && /only add and view/i.test(description)) return 'portal-add';
+  if (/only (?:have )?add and view/i.test(description)) return 'add-view';
+  return undefined;
+}
+
+/** Profile and role policy consumed by shims/access.ts. Same object the handlers embed. */
+export function accessPolicyFor(app: App): AccessPolicy {
+  return buildAccessPolicy(app);
+}
+
+function buildAccessPolicy(app: App): AccessPolicy {
+  const reports = new Map<string, { form: string; criteria?: Criteria }>();
+  for (const report of app.reports) {
+    if (!report.form) continue;
+    const entry: { form: string; criteria?: Criteria } = { form: report.form };
+    if (report.criteria?.trim()) entry.criteria = reportCriteria(report.criteria, app.functions);
+    reports.set(report.name, entry);
+  }
+  const profiles: AccessPolicy['profiles'] = {};
+  const hierarchy = new Set(roleHierarchyForms(app));
+  for (const profile of app.profiles) {
+    const forms: Record<string, FormGrant> = {};
+    const portal = /portal/i.test(profile.type ?? '');
+    for (const mod of profile.modules) {
+      // Owner sharing applies to every form of a portal profile, and to the
+      // forms an internal profile shares through the role hierarchy.
+      const shared = portal || hierarchy.has(mod.component);
+      const grant = grantFor(app, mod, reports, shared);
+      if (grant) forms[mod.component] = grant;
+    }
+    const preset = profilePreset(profile);
+    if (preset) {
+      // Only Administrator may delete.
+      const write = preset !== 'read';
+      const canDelete = preset === 'administrator';
+      for (const form of app.forms) {
+        const grant: FormGrant = {};
+        if (write) grant.write = true;
+        if (preset === 'add-view') grant.edit = false;
+        if (canDelete) grant.delete = true;
+        // The portal default has no View All: a portal user reads and edits
+        // only the records they added.
+        if (preset === 'portal-add') grant.ownerScope = 'view';
+        forms[form.name] = grant;
+      }
+    }
+    profiles[profile.name] = forms;
+  }
+  const policy: AccessPolicy = { profiles, roles: roleNames(app.roles) };
+  const hidden = hiddenComponentNames(app);
+  if (hidden.length) policy.hidden = hidden;
+  const admins = administratorProfiles(app);
+  if (admins.length) policy.admins = admins;
+  return policy;
+}
+
+/** Forms listed in share_settings `role Hierarchy = {...}`: records shared up the role hierarchy. */
+function roleHierarchyForms(app: App): string[] {
+  const forms = new Set<string>();
+  for (const item of app.shareSettings) {
+    if (!/^role\s*hierarchy$/i.test(item.key.trim())) continue;
+    for (const match of item.value.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) forms.add(match[0]);
+  }
+  return [...forms].sort(compareEnUs);
+}
+
+/** Module flags the function layer reads. Every other `enabled` word is reported. */
+const MODELLED_FLAGS = new Set(['create', 'viewall', 'modifyall', 'true', 'false']);
+
+export interface SecurityFidelity {
+  /** Counts of profile form grants by rule the generated c2c_api enforces. */
+  enforced: {
+    profiles: number;
+    formGrants: number;
+    hiddenFields: number;
+    readOnlyFields: number;
+    recordFilters: number;
+    ownRecordsOnly: number;
+    modifyOwnOnly: number;
+    addOnly: number;
+  };
+  /** Rules the export declares that the generated app does not enforce as written. Each starts "not enforced: ". */
+  notEnforced: string[];
+  /** How an enforced rule differs from Creator. */
+  notes: string[];
+}
+
+/**
+ * Per-app statement of what the generated function layer enforces from the
+ * export's profiles, roles and share settings, and what it does not. Nothing
+ * here is silent: a rule the port cannot express is listed.
+ */
+export function securityFidelity(app: App): SecurityFidelity {
+  const policy = buildAccessPolicy(app);
+  const enforced: SecurityFidelity['enforced'] = {
+    profiles: Object.keys(policy.profiles).length,
+    formGrants: 0,
+    hiddenFields: 0,
+    readOnlyFields: 0,
+    recordFilters: 0,
+    ownRecordsOnly: 0,
+    modifyOwnOnly: 0,
+    addOnly: 0,
+  };
+  const restricted: string[] = [];
+  const untranslatedFilters: string[] = [];
+  for (const profile of Object.keys(policy.profiles).sort(compareEnUs)) {
+    const forms = policy.profiles[profile]!;
+    for (const form of Object.keys(forms).sort(compareEnUs)) {
+      const grant = forms[form]!;
+      enforced.formGrants++;
+      const formFields = app.forms.find((item) => item.name === form)?.fields.length ?? 0;
+      if (grant.fields) enforced.hiddenFields += Math.max(0, formFields - grant.fields.length);
+      if (grant.writable) {
+        const readable = grant.fields ?? app.forms.find((item) => item.name === form)?.fields.map((field) => field.name) ?? [];
+        enforced.readOnlyFields += readable.filter((name) => !grant.writable!.includes(name)).length;
+      }
+      if (grant.recordFilter) {
+        if (criteriaHasTodo(grant.recordFilter)) untranslatedFilters.push(`${profile}/${form}`);
+        else enforced.recordFilters++;
+      }
+      if (grant.ownerScope === 'view') enforced.ownRecordsOnly++;
+      if (grant.ownerScope === 'modify') enforced.modifyOwnOnly++;
+      if (grant.read === false) enforced.addOnly++;
+      if (grant.fields || grant.writable || grant.recordFilter || grant.ownerScope || grant.read === false) restricted.push(`${profile}/${form}`);
+    }
+  }
+  const notEnforced: string[] = [];
+  const notes: string[] = [];
+  const hierarchyForms = roleHierarchyForms(app);
+  if (hierarchyForms.length) {
+    notEnforced.push(
+      `not enforced: role-hierarchy record sharing up the hierarchy on ${hierarchyForms.join(', ')}. A Creator role also sees the records of the roles below it; a signed-in user carries a Catalyst role mapped to a profile, never a Creator role, so without View All a user sees only their own records there.`,
+    );
+  } else if (roleNames(app.roles).length) {
+    notEnforced.push(
+      `not enforced: Creator role hierarchy (${roleNames(app.roles).length} roles). Roles become Catalyst roles, but no record is shared up the hierarchy.`,
+    );
+  }
+  if (restricted.length) {
+    notEnforced.push(
+      `not enforced at the Data Store: hidden and read-only fields, record filters, owner scope and add-only grants hold only through c2c_api (${restricted.length} profile/form grants: ${restricted.sort(compareEnUs).join(', ')}). Catalyst table permissions are per table and role with no field or row rule; a role given direct table access from a client reads past them.`,
+    );
+  }
+  if (untranslatedFilters.length) {
+    notEnforced.push(
+      `not enforced as written: the report record filter did not migrate for ${untranslatedFilters.sort(compareEnUs).join(', ')}. Reads of those forms are refused for that profile instead.`,
+    );
+  }
+  const flagUses = new Map<string, Set<string>>();
+  for (const profile of app.profiles) {
+    for (const mod of profile.modules) {
+      for (const flag of enabledFlags(mod)) {
+        if (MODELLED_FLAGS.has(flag)) continue;
+        if (!flagUses.has(flag)) flagUses.set(flag, new Set());
+        flagUses.get(flag)!.add(profile.name);
+      }
+    }
+    const raw = profile.permissions ?? '';
+    for (const key of ['PIIAccess', 'ePHIAccess']) {
+      if (new RegExp(`${key}\\s*:\\s*false`, 'i').test(raw)) {
+        notEnforced.push(`not enforced: ${key} false for profile ${profile.name}. Personal-data fields are not hidden by it.`);
+      }
+    }
+  }
+  if (flagUses.size) {
+    const list = [...flagUses.entries()]
+      .sort((a, b) => compareEnUs(a[0], b[0]))
+      .map(([flag, profiles]) => `${flag} (${[...profiles].sort(compareEnUs).join(', ')})`);
+    notEnforced.push(
+      `not enforced: module permission flags ${list.join('; ')}. Tab is menu placement only; export and import follow the View and Create grants; comment and report-builder flags have no generated endpoint.`,
+    );
+  }
+  // Field rules. An unconditional hide or disable is static — the covered
+  // record event never renders the field writable, so authorizeWrite refuses
+  // it. A conditional rule depends on sibling field values (client state) and
+  // stays client-side; it is counted here, never silently trusted.
+  let staticRuleDenials = 0;
+  let conditionalRules = 0;
+  for (const form of app.forms) {
+    staticRuleDenials += fieldRuleDenials(app, form.name).length;
+    conditionalRules += conditionalFieldRules(app, form.name);
+  }
+  if (staticRuleDenials) {
+    notes.push(
+      `Fields hidden or disabled in forms are enforced on the server: ${staticRuleDenials} field${staticRuleDenials === 1 ? ' is' : 's are'} unconditionally hidden or disabled by field rules, and authorizeWrite refuses a client value for ${staticRuleDenials === 1 ? 'it' : 'them'} (a client in the covered record event could not have posted ${staticRuleDenials === 1 ? 'it' : 'them'}). The Creator REST API accepts such values; the app's own On Validate and On Success scripts still set them. A bulk import post (body.import === true) from an Administrator-profile caller skips the denial for those values, matching the REST API; the flag alone grants nothing — any other signed-in caller gets the same refusal as a plain post.`,
+    );
+  }
+  if (conditionalRules) {
+    notEnforced.push(
+      `not enforced server-side: ${conditionalRules} conditional field rule${conditionalRules === 1 ? '' : 's'} (hide/show/enable/disable gated on a sibling field value). The clients apply them; authorizeWrite cannot evaluate the condition without client state, so those fields stay writable through c2c_api.`,
+    );
+  }
+  if (app.workflows.some((w) => w.blueprint)) {
+    notEnforced.push(
+      'not enforced: per-stage field masking. The export model carries no stage-keyed field visibility, so a field masked at a blueprint stage stays writable.',
+    );
+  }
+  if (enforced.ownRecordsOnly || enforced.modifyOwnOnly) {
+    notes.push(
+      'On a portal profile, and on a form shared through the role hierarchy, a View grant without View All reads, edits and deletes only the rows the caller added; View All without Modify All reads every granted row and edits or deletes only the caller\'s own. The customer-portal default profile ("only add and view") has no View All.',
+    );
+    notes.push(
+      `Record owner is Added_User, set on insert to the signed-in user's login (email). A row imported from Creator keeps its Creator Added_User value, so a user owns an imported row only when that value is their login.`,
+    );
+    notes.push(
+      'Deluge scripts read under the caller\'s scope, including the owner scope; Creator runs scripts without the user\'s record permissions. A script update or delete finds rows under the read scope, not Modify All.',
+    );
+  }
+  return { enforced, notEnforced, notes };
+}
+
+function hiddenComponentNames(app: App): string[] {
+  const visible = new Set<string>();
+  const hidden = new Set<string>();
+  for (const section of app.sections) {
+    for (const component of section.components) {
+      if (!component.name) continue;
+      if (section.hidden) hidden.add(component.name);
+      else visible.add(component.name);
+    }
+  }
+  return [...hidden].filter((name) => !visible.has(name)).sort();
+}
+
+function verbsOf(mod: ModulePermission): Set<string> {
+  const words = new Set<string>();
+  for (const report of mod.reports) {
+    for (const match of report.value.matchAll(/[A-Za-z]+/g)) words.add(match[0].toLowerCase());
+  }
+  return words;
+}
+
+function flagTrue(value: string | undefined): boolean {
+  return /^"?true"?$/i.test((value ?? '').trim());
+}
+
+function writableNames(app: App, mod: ModulePermission, fields: string[] | undefined): string[] | undefined {
+  const readonly = new Set(mod.fields.filter((field) => flagTrue(field.flags.readonly)).map((field) => field.field));
+  if (fields) return fields.filter((name) => !readonly.has(name));
+  if (readonly.size === 0) return undefined;
+  const formFields = app.forms.find((form) => form.name === mod.component)?.fields.map((field) => field.name);
+  if (!formFields) return [];
+  return formFields.filter((name) => !readonly.has(name));
+}
+
+function roleNames(roles: App['roles']): string[] {
+  const names: string[] = [];
+  for (const role of roles) {
+    names.push(role.name);
+    names.push(...roleNames(role.children));
+  }
+  return names;
+}
+
+/**
+ * Words of a module's `enabled` list: Create, Viewall, Modifyall, Import,
+ * Export, Tab, ... lowercased.
+ */
+function enabledFlags(mod: ModulePermission): Set<string> {
+  const value = mod.properties.find((p) => p.key.toLowerCase() === 'enabled')?.value ?? '';
+  return new Set([...value.matchAll(/[A-Za-z_]+/g)].map((match) => match[0].toLowerCase()));
+}
+
+/**
+ * One form grant from a profile's module permission.
+ *
+ * - Create (module flag, or an add/create/import report verb) allows insert.
+ * - Edit (report verb) allows update; Delete (report verb) allows delete.
+ * - Owner sharing (`ownerShared`: a portal profile, or a form the role
+ *   hierarchy shares): without View All a View report reads only the
+ *   caller's own rows (ownerScope "view"); View All without Modify All edits
+ *   and deletes only the caller's own rows (ownerScope "modify"). View All
+ *   shows every record even when the role hierarchy is on. Other forms of
+ *   an internal profile read every row the report filters allow.
+ * - Create with no View and no View All is an add-only grant: read is false.
+ */
+function grantFor(
+  app: App,
+  mod: ModulePermission,
+  reports: Map<string, { form: string; criteria?: Criteria }>,
+  ownerShared: boolean,
+): FormGrant | undefined {
+  const flags = enabledFlags(mod);
+  const viewAll = flags.has('viewall');
+  const modifyAll = flags.has('modifyall');
+  const granted = mod.reports.filter((report) => /(?:^|[^A-Za-z])view(?:[^A-Za-z]|$)/i.test(report.value));
+  const known = granted
+    .map((report) => reports.get(report.key))
+    .filter((report): report is { form: string; criteria?: Criteria } => !!report && report.form === mod.component);
+  const verbs = verbsOf(mod);
+  // Write verbs are edit and update. `delete` is not one of them.
+  const canEdit = ['edit', 'update'].some((verb) => verbs.has(verb));
+  // A boolean `enabled = true` names no Create flag: add follows the write verbs.
+  const booleanForm = flags.size === 1 && flags.has('true');
+  const canCreate = flags.has('create') || ['add', 'create', 'import'].some((verb) => verbs.has(verb)) || (booleanForm && canEdit);
+  const fields = fieldGrant(app, mod);
+  if (!viewAll && known.length === 0) {
+    if (!canCreate) return undefined;
+    const addOnly: FormGrant = { read: false, write: true, edit: false };
+    if (fields !== undefined) addOnly.fields = fields;
+    const writable = writableNames(app, mod, fields);
+    if (writable) addOnly.writable = writable;
+    return addOnly;
+  }
+  const grant: FormGrant = {};
+  if (fields !== undefined) grant.fields = fields;
+  const unfiltered = known.some((report) => !report.criteria);
+  if (!viewAll && !unfiltered) {
+    const filters = known.map((report) => report.criteria).filter((criteria): criteria is Criteria => !!criteria);
+    const combined = combineFilters(filters);
+    if (combined) grant.recordFilter = combined;
+  }
+  if (canCreate || canEdit) {
+    grant.write = true;
+    if (!canCreate) grant.create = false;
+    if (!canEdit) grant.edit = false;
+    const writable = writableNames(app, mod, fields);
+    if (writable) grant.writable = writable;
+  }
+  if (verbs.has('delete')) grant.delete = true;
+  if (ownerShared) {
+    if (!viewAll) grant.ownerScope = 'view';
+    else if (!modifyAll && (canEdit || grant.delete)) grant.ownerScope = 'modify';
+  }
+  return grant;
+}
+
+function fieldGrant(app: App, mod: ModulePermission): string[] | undefined {
+  const flag = (key: string) => mod.properties.find((p) => p.key.toLowerCase() === key)?.value.trim() ?? '';
+  const allVisible = /^"?true"?$/i.test(flag('allfieldsvisible'));
+  const allHidden = /^"?false"?$/i.test(flag('allfieldsvisible'));
+  const hidden = new Set(
+    mod.fields.filter((field) => /^"?false"?$/i.test((field.flags.visibility ?? '').trim())).map((field) => field.field),
+  );
+  const shown = mod.fields.filter((field) => field.flags.visibility !== undefined && !hidden.has(field.field)).map((field) => field.field);
+  if (allVisible && hidden.size === 0) return undefined;
+  const formFields = app.forms.find((form) => form.name === mod.component)?.fields.map((field) => field.name);
+  if (allVisible && formFields) return formFields.filter((name) => !hidden.has(name));
+  if (shown.length > 0) return shown;
+  if (allVisible || allHidden || mod.fields.length > 0) return [];
+  return undefined;
+}
+
+function combineFilters(filters: Criteria[]): Criteria | undefined {
+  if (filters.length === 0) return undefined;
+  if (filters.some((filter) => criteriaHasTodo(filter))) return { op: 'todo', construct: 'report-criteria' };
+  if (filters.length === 1) return filters[0];
+  return { op: 'or', args: filters };
+}
+
+function limitsModule(): string {
+  return `${banner([
+    'Catalyst limits the generated code relies on.',
+    `varchar max ${LIMITS.varcharMaxLength} (Catalyst truncates silently; the shim does not).`,
+    `insertRows / updateRows: ${LIMITS.insertRowsPerCall} per call.`,
+    `ZCQL: ${LIMITS.zcqlRowsPerQuery} rows per query.`,
+    'Encrypted text: equality only. Decimal and the FK enum are not invented here.',
+    'Job pool names reject "_". Record events use Signals (one event per rule).',
+    'Circuits is not available in the IN data centre.',
+  ])}export const LIMITS = ${JSON.stringify(LIMITS, null, 2)};
+`;
+}
+
+/** Matrix ids whose UI widget is read-only. Same set as model.ts READONLY. */
+const READONLY_MATRIX = new Set([
+  'formula',
+  'auto-number',
+  'keyword',
+  'sentiment',
+  'ocr',
+  'object-detection',
+  'barcode',
+  'section',
+  'add-notes',
+  'prediction',
+  'geolocation',
+]);
+
+function isReadonlyMatrix(type: string | undefined): boolean {
+  const row = fieldTypeRow(type);
+  return !!row && READONLY_MATRIX.has(row.id);
+}
+
+const NAME_PARTS = ['prefix', 'first_name', 'last_name', 'suffix'] as const;
+const ADDRESS_PARTS = [
+  'address_line_1',
+  'address_line_2',
+  'district_city',
+  'state_province',
+  'postal_code',
+  'country',
+  'latitude',
+  'longitude',
+] as const;
+
+function formWriteSchema(app: App, formName: string): { names: string[]; readonlyNames: string[]; fields: WriteField[]; ruleDenied: FieldRuleDenial[] } | undefined {
+  const form = app.forms.find((item) => item.name === formName);
+  if (!form) return undefined;
+  const names: string[] = [];
+  const readonlyNames: string[] = [];
+  const walk = (fields: Field[]) => {
+    for (const field of fields) {
+      names.push(field.name);
+      if (isReadonlyMatrix(field.type)) readonlyNames.push(field.name);
+      if (field.subfields.length) walk(field.subfields);
+    }
+  };
+  walk(form.fields);
+  return { names, readonlyNames, fields: form.fields.map((field) => writeField(field, app)), ruleDenied: fieldRuleDenials(app, formName) };
+}
+
+/**
+ * Write ops a workflow's record event covers. `on add` is insert only and
+ * `on edit` update only; no event, `on add or edit`, or a field rule outside
+ * a record context applies to both. A non-write event (`on delete`) covers
+ * neither — its rules never run on a form screen, so they deny nothing.
+ */
+function recordEventOps(recordEvent: string | undefined): readonly WriteOp[] | null {
+  const event = (recordEvent ?? '').trim().toLowerCase();
+  if (!event || event === 'on add or edit') return ['insert', 'update'];
+  if (event === 'on add' || event === 'create') return ['insert'];
+  if (event === 'on edit' || event === 'update') return ['update'];
+  return null;
+}
+
+/**
+ * Raw form events that run in the browser on the open form, before submit:
+ * their writes are posted with the record. Matched on the raw event name, not
+ * eventKind, which folds a schedule's `on start / on load` into `load`.
+ */
+const CLIENT_FORM_EVENT = /^on (?:load|user input of \S.*|update of \S.*|(?:add|delete) row of \S.*)$/;
+
+/**
+ * A form-container workflow whose event runs in the browser. Schedule,
+ * approval and other server-side containers never fill the open form, even
+ * when their actions wrap an `on load` block.
+ */
+function isClientFormScript(w: Workflow): boolean {
+  if ((w.container ?? '').trim().toLowerCase() !== 'form' || (w.type ?? '').trim().toLowerCase() !== 'form') return false;
+  return CLIENT_FORM_EVENT.test(w.event.trim().toLowerCase());
+}
+
+/**
+ * Per field, the write ops in which a client-side form script of `formName`
+ * sets it (`input.F = …`, `F.select(…)`) or shows/enables it. Only form
+ * scripts count: a server-side workflow's write is never posted by the form.
+ */
+function clientWrittenFields(app: App, formName: string | undefined): Map<string, Set<WriteOp>> {
+  const out = new Map<string, Set<WriteOp>>();
+  for (const w of app.workflows) {
+    if ((w.form ?? '') !== (formName ?? '') || !w.deluge || !isClientFormScript(w)) continue;
+    const ops = recordEventOps(w.recordEvent);
+    if (!ops) continue;
+    const add = (field: string | undefined): void => {
+      if (!field) return;
+      const set = out.get(field) ?? new Set<WriteOp>();
+      for (const op of ops) set.add(op);
+      out.set(field, set);
+    };
+    let body: unknown;
+    try {
+      body = parseDeluge(w.deluge.text).body;
+    } catch {
+      continue;
+    }
+    const visit = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const item of node) visit(item);
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      const n = node as { kind?: unknown; [key: string]: unknown };
+      if (n.kind === 'assign') add(inputFieldOf(n.target));
+      if (n.kind === 'ui' && (n.action === 'show' || n.action === 'enable') && Array.isArray(n.targets)) for (const t of n.targets) add(inputFieldOf(t, true));
+      if (n.kind === 'call' && isObjectNode(n.callee) && n.callee.kind === 'member' && n.callee.property === 'select') add(inputFieldOf(n.callee.object, true));
+      // determinism-allow: AST key order is the parser's construction order, so the walk follows source order
+      for (const [key, value] of Object.entries(n)) if (key !== 'span') visit(value);
+    };
+    visit(body);
+  }
+  return out;
+}
+
+function isObjectNode(value: unknown): value is { kind?: unknown; [key: string]: unknown } {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** `input.F` names field F; with `bare`, a plain name `F` does too (ui targets, `F.select`). */
+function inputFieldOf(expr: unknown, bare = false): string | undefined {
+  if (!isObjectNode(expr)) return undefined;
+  if (expr.kind === 'member' && isObjectNode(expr.object) && expr.object.kind === 'name' && expr.object.name === 'input' && typeof expr.property === 'string') return expr.property;
+  if (bare && expr.kind === 'name' && typeof expr.name === 'string') return expr.name;
+  return undefined;
+}
+
+/**
+ * Fields an unconditional field rule hides or disables on this form.
+ *
+ * Only rules with no criteria are static: the client hides or disables the
+ * field in every record the covered event renders, so a posted value for it
+ * could not have come from the form. Conditional rules depend on sibling
+ * field values — client state the server cannot see — and are not denied
+ * here (counted by securityFidelity instead).
+ *
+ * Order matters: rules run in declaration order on load, and a later
+ * unconditional `show`/`enable` cancels an earlier `hide`/`disable` (and the
+ * reverse). The last static action touching a field wins, per write op.
+ *
+ * A field a form script of the same record event fills on the open form
+ * (`input.F = …` or `F.select(…)` in on load / on user input / a row event)
+ * or shows/enables there is not denied for that op: Creator submits the
+ * value the script set, so a posted value for it can come from the form.
+ */
+export function fieldRuleDenials(app: App, formName: string | undefined): FieldRuleDenial[] {
+  const state = new Map<string, { insert?: 'hide' | 'disable' | 'show' | 'enable'; update?: 'hide' | 'disable' | 'show' | 'enable' }>();
+  const scripted = clientWrittenFields(app, formName);
+  for (const w of app.workflows) {
+    if ((w.form ?? '') !== (formName ?? '')) continue;
+    const ops = recordEventOps(w.recordEvent);
+    if (!ops) continue;
+    for (const rule of w.fieldRules ?? []) {
+      if (rule.condition?.trim()) continue;
+      for (const action of rule.actions) {
+        const verb = action.action.trim().toLowerCase();
+        if (verb !== 'hide' && verb !== 'show' && verb !== 'enable' && verb !== 'disable') continue;
+        for (const target of action.fields) {
+          const field = target.trim();
+          if (!field) continue;
+          const entry = state.get(field) ?? {};
+          for (const op of ops) entry[op] = verb;
+          state.set(field, entry);
+        }
+      }
+    }
+  }
+  const out: FieldRuleDenial[] = [];
+  for (const [field, entry] of [...state.entries()].sort((a, b) => compareEnUs(a[0], b[0]))) {
+    const verbs = new Map<'hide' | 'disable', { insert: boolean; update: boolean }>();
+    for (const op of ['insert', 'update'] as const) {
+      const verb = entry[op];
+      if (verb !== 'hide' && verb !== 'disable') continue;
+      if (scripted.get(field)?.has(op)) continue;
+      const group = verbs.get(verb) ?? { insert: false, update: false };
+      group[op] = true;
+      verbs.set(verb, group);
+    }
+    // determinism-allow: verbs is keyed in the fixed insert/update scan order above, so it is the same for the same entry every time
+    for (const [action, group] of verbs) {
+      out.push({
+        field,
+        action,
+        ...(group.insert && group.update ? {} : { ops: group.insert ? (['insert'] as const) : (['update'] as const) }),
+      });
+    }
+  }
+  return out;
+}
+
+/** Conditional field rules of one form: dynamic, never server-enforced. */
+export function conditionalFieldRules(app: App, formName: string | undefined): number {
+  let count = 0;
+  for (const w of app.workflows) {
+    if ((w.form ?? '') !== (formName ?? '')) continue;
+    for (const rule of w.fieldRules ?? []) if (rule.condition?.trim()) count++;
+  }
+  return count;
+}
+
+/**
+ * Storage family of a plain leaf field for blank-to-null. Only the
+ * canonical typed kinds are marked: name/address parts recurse through
+ * writeField, so a decimal latitude/longitude is marked too.
+ */
+function writeScalar(rowId: string | undefined): WriteScalar | undefined {
+  switch (rowId) {
+    case 'number':
+      return 'number';
+    case 'decimal':
+    case 'percent':
+    case 'currency':
+      return 'decimal';
+    case 'date':
+      return 'date';
+    case 'date-time':
+      return 'datetime';
+    case 'time':
+      return 'time';
+    default:
+      return undefined;
+  }
+}
+
+function writeField(field: Field, app?: App): WriteField {
+  const readOnly = isReadonlyMatrix(field.type);
+  const node: WriteField = { name: field.name, ...(readOnly ? { readOnly: true } : {}) };
+  const row = fieldTypeRow(field.type);
+  const token = (field.type ?? '').trim().toLowerCase();
+  // A grid linked to another form: its rows are that form's records, posted
+  // as row objects (a lookup column carries the record id), and are screened
+  // against that form's fields like an inline subform's.
+  const linked = app ? linkedGridForm(app, field) : undefined;
+  if (linked) {
+    node.kind = 'subform';
+    node.fields = (app!.forms.find((item) => item.name === linked)?.fields ?? []).map((child) => writeField(child));
+    return node;
+  }
+  if (field.lookup) {
+    node.kind = 'lookup';
+    return node;
+  }
+  if (row && (row.id === 'file-upload' || row.id === 'image' || row.id === 'audio' || row.id === 'video' || row.id === 'signature')) {
+    node.kind = 'file';
+    return node;
+  }
+  if (row?.id === 'name' || row?.id === 'address' || token === 'name' || token === 'address') {
+    const defaults = row?.id === 'address' || token === 'address' ? ADDRESS_PARTS : NAME_PARTS;
+    const parts = field.subfields.length ? field.subfields : defaults.map(partField);
+    node.kind = 'composite';
+    node.fields = parts.map((part) => writeField(part));
+    return node;
+  }
+  if (row?.id === 'subform' || token === 'grid' || token === 'subform' || token === 'inline subform') {
+    node.kind = 'subform';
+    node.fields = field.subfields.map((child) => writeField(child));
+    return node;
+  }
+  const scalar = writeScalar(row?.id);
+  if (scalar) node.scalar = scalar;
+  const choices = closedChoices(field);
+  if (choices) node.choices = choices;
+  const initial = isMultiChoiceField(field) ? multiValueDefault(field.initialValue) : staticDefault(field.initialValue);
+  if (initial !== undefined) node.defaultValue = initial;
+  return node;
+}
+
+function partField(name: string): Field {
+  return {
+    name,
+    type: name === 'latitude' || name === 'longitude' ? 'decimal' : 'text',
+    modifiers: [],
+    required: false,
+    unique: false,
+    properties: [],
+    subfields: [],
+    annotations: [],
+    flags: [],
+    span: { start: 0, end: 0 },
+  };
+}
+
+function aioModule(opts: {
+  app: App;
+  form: string;
+  title: string;
+  path: string;
+  recordEvent?: string;
+  /** Every record event the merged scripts declared, when they differ. Scanners classify by this list. */
+  recordEvents?: string[];
+  systemWrite?: 'insert' | 'update' | 'add-or-edit' | null;
+  /** `./on-validate.mjs` siblings by record event scope. Imported only after deploy mode is live. */
+  validateSpecs?: { add: string[]; edit: string[] };
+  /** The form's `on start` presuccess module by record event scope, run before the validate siblings. */
+  presuccessSpecs?: { add: string[]; edit: string[] };
+  /** This module is the form's `on start` presuccess route; the submit pipeline imports it. */
+  presuccess?: boolean;
+  /** The presuccess bodies are buffer-safe: the pipeline defers their non-record effects until the row write commits. */
+  deferEffects?: boolean;
+  body: string;
+  /** Sourced schema plan; the embedded write rules match the provisioned store. */
+  schema?: SchemaPlan;
+  scriptEvents?: Record<string, number>;
+  /** Async on-success lane: the live endpoint stores the row and replies; the record trigger runs this script after commit (docs/event-deadletter.md). */
+  deferSuccess?: boolean;
+}): string {
+  const signals = signalsFor(opts.recordEvent);
+  const schema = formWriteSchema(opts.app, opts.form);
+  const lines = [
+    opts.title,
+    'Dry run: generated, not deployed.',
+    `Advanced I/O POST ${opts.path}`,
+    opts.recordEvent ? `Record event: ${opts.recordEvent}.` : 'No record event on this handler.',
+  ];
+  if (signals.length) {
+    lines.push(
+      `Signals: ${signals.join(', ')} (one rule per event; Data Store event listeners are deprecated).`,
+    );
+  } else if (opts.recordEvent) {
+    lines.push('No Signals event name mapped from this record event; none is invented.');
+  }
+  lines.push('The access gate runs before this script: hidden form, op view, and authorizeWrite.');
+  lines.push('authorizeWrite rejects a key that is not a writable field at that depth. It does not drop keys.');
+  if (opts.scriptEvents) {
+    lines.push(
+      'body.runEvent names the one merged script this request may run: the exported scriptEvents map resolves it to ctx.onlyScript, and an unlisted token is refused 404. No runEvent runs every merged script.',
+    );
+  }
+  if (schema?.ruleDenied.length) {
+    lines.push('authorizeWrite also refuses fields an unconditional field rule hides or disables (fieldRuleDenied). Conditional rules depend on client state and are not enforced here.');
+    lines.push(
+      'body.import === true marks a bulk import write (the seed/migrate-data path): the field-rule denials are skipped — they are on-load UI state, not data rules — while the profile grant, hidden export fields, read-only fields, choice lists and required/type checks still apply. The flag is honoured only for an Administrator-profile caller; for anyone else the post is authorized exactly as without it.',
+    );
+  }
+  if (opts.systemWrite) {
+    lines.push(
+      'After authorizeWrite, the server sets Added_User and Added_Time on insert, and Modified_User and Modified_Time on update. A client value is not copied into those columns. On edit, and on add or edit when body.ROWID names a row, the server loads that row when the caller may modify it and copies stored Added_User and Added_Time onto the record before the script. A row the caller may read but not modify is refused before the script runs. Add versus edit follows that ROWID, never body.op.',
+    );
+    lines.push(
+      'When functions/c2c-deploy.json mode is "live" and a datastore is injected, this handler validates, writes the row, then runs this script. Any other mode does not write. The script sees the inserted row, including ID (the stored ROWID) and system fields. If the script fails after the write, the row stays and the reply is still 200 wrote true with a warning {code POST_COMMIT_FAILED, message, requestId}; the failure is logged, its text never reaches the caller.',
+    );
+    lines.push(
+      'A live edit captures Catalyst MODIFIEDTIME while preparing the row, then re-reads ROWID/MODIFIEDTIME once immediately before updateRows. A change is refused as c2c code C2C_STALE_WRITE (409). This is c2c\'s stale check and one extra bounded read; Data Store itself has no optimistic lock.',
+    );
+    lines.push(
+      'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
+    );
+    if (!opts.deferSuccess && /shim\.input\.(?:set|insert)\(/.test(opts.body)) {
+      lines.push(
+        'Input fields this script assigns are saved after it runs, as one update of the changed fields on the committed row (Creator stores On Success input assignments with the record). The update is a server-side write: the profile grant screens it, a form field rule does not. A refusal is a post-commit warning.',
+      );
+    }
+    if (opts.deferSuccess) {
+      lines.push(
+        'Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the script. The after-commit event function (functions/events/after-commit.mjs) runs it when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md). Dry run still executes the script inline.',
+      );
+    }
+  }
+  lines.push('The previous row is loaded on the server. Dry run uses dryRunOld and does not read a client previous row.');
+  if (opts.presuccess) {
+    lines.push(
+      'Creator `on start` presuccess (form properties) actions. Nothing posts this route: the submit pipeline runs this module after the access gate and before the on-validate siblings, in the submit stub and in every live module that owns the submit URL. Field sets reach on validate and the stored row; mail, invokeurl and other-form writes are held until the row is stored and dropped on any refusal (Direct to and Send Email are documented on-submission actions: https://help.zoho.com/portal/en/kb/creator/developer-guide/forms/manage-forms/articles/redirect-on-form-submission). A cancel submit here refuses the write with 422. [UNVERIFIED] Creator\'s exact placement relative to On Validate, and whether an unscoped presuccess runs on edit; this port follows the record event scope.',
+    );
+  }
+  lines.push('Client tasks for this handler, if any, are in the matching client/handlers module.');
+  const schemaExports = schema
+    ? `export const fieldNames = ${JSON.stringify(schema.names)};
+export const readonlyFields = ${JSON.stringify(schema.readonlyNames)};
+export const fields = ${JSON.stringify(schema.fields)};${schema.ruleDenied.length ? `\nexport const fieldRuleDenied = ${JSON.stringify(schema.ruleDenied)};` : ''}
+`
+    : '';
+  // A store write checks the Create or Edit grant: edit when body.ROWID names
+  // a row or the handler is edit-only, add otherwise.
+  const writeOp = opts.systemWrite
+    ? opts.systemWrite === 'update'
+      ? '"update"'
+      : 'reqRowId ? "update" : "insert"'
+    : '';
+  const writeCall = schema
+    ? `authorizeWrite(access, principal, formName, record, { readonlyFields, fieldNames, fields${schema.ruleDenied.length ? ', ruleDenied: importWrite ? [] : fieldRuleDenied' : ''} }${writeOp ? `, ${writeOp}` : ''})`
+    : `authorizeWrite(access, principal, formName, record${writeOp ? `, undefined, ${writeOp}` : ''})`;
+  const importWriteDecl = schema?.ruleDenied.length
+    ? `  const importWrite = req && req.body && req.body.import === true && canImport(principal, access);
+`
+    : '';
+  const mailFrom = opts.body.includes('shim.mail.send') ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
+  const subformFields = currentRowFields(opts.body);
+  const usesSubformRow = subformFields.length > 0;
+  const subformField = subformFields.length === 1 ? subformFields[0]! : `[${subformFields.join(', ')}]`;
+  const subformRowCtx = usesSubformRow ? `\n    subformRow: requestSubformRow(req, ${subformField}, accepted),` : '';
+  const subformRowHelper = usesSubformRow ? `\n${SUBFORM_ROW_HELPER}` : '';
+  const liveImport = opts.systemWrite
+    ? `import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+`
+    : '';
+  const usesConnections = !!opts.systemWrite && usesZohoConnections(opts.body);
+  const usesThis = usesThisapp(opts.body);
+  const usesApp = usesAppUsers(opts.body);
+  const thisappImport = usesThis ? 'import { functions } from "../../thisapp.mjs";\n' : '';
+  const usesOutbound = !!opts.systemWrite && usesOutboundInvokeurl(opts.body);
+  const usesGetUrl = !!opts.systemWrite && usesOutboundGetUrl(opts.body);
+  const storeShape = opts.systemWrite ? fieldStoreShape(opts.app, opts.form) : { links: [], files: [] };
+  // On Success may assign input fields (input.Status = "..."). Creator saves
+  // them with the record; here the row is already committed, so the changed
+  // fields are written back after the script (successSetsHelper).
+  const savesSuccessSets = !!opts.systemWrite && !opts.deferSuccess && /shim\.input\.(?:set|insert)\(/.test(opts.body);
+  const successSetsBlock = savesSuccessSets ? `\n${successSetsHelper(storeShape)}` : '';
+  const hasPresuccess = !!opts.presuccessSpecs && opts.presuccessSpecs.add.length + opts.presuccessSpecs.edit.length > 0;
+  // The request ROWID determines add versus edit even when this module is
+  // itself scoped to `on add`; an edit must skip add-only validate siblings.
+  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, 'either', writeLiveSource(opts.form, storeShape), opts.presuccessSpecs)}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
+  const zoneFields = `${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}`;
+  const runtimeSetup = opts.systemWrite
+    ? `  const datastore = loadedStore || (live ? await liveDatastore() : null);
+  if (live && !datastore) {
+    send(res, 500, { dryRun: false, wrote: false, error: "live datastore is not configured" });
+    return;
+  }
+  const runtime = createRuntime({
+    dryRun: !live,
+    appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${zoneFields}${mailFrom},
+    ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
+${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' : ''}${usesOutbound ? '    ...(live ? { http: outboundHttp(outboundConfig(req)) } : {}),\n' : ''}${usesGetUrl ? '    ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(req)) } : {}),\n' : ''}${usesApp ? '    ...(live ? { appUsers: () => appUsers(req) } : {}),\n' : ''}    access,${usesThis ? '\n    functions,' : ''}
+  });
+  // The transcript holds record values, table names and ops. It is a
+  // dry-run debug view only: no live reply carries it.
+  const debugTranscript = live ? {} : { transcript: runtime.transcript };`
+    : `  const runtime = createRuntime({ dryRun: true, appTimeZone: process.env.C2C_APP_TIMEZONE${zoneFields}${mailFrom}, access${usesThis ? ', functions' : ''} });`;
+  // Creator's on edit validate sees the whole stored record as input: the
+  // fields the edit did not post are filled from the row loaded above (the
+  // caller's read and modify scope) while the validates run, and the filled
+  // values they leave unchanged are not written back.
+  const fillsStored = !!schema && (opts.validateSpecs?.edit.length ?? 0) > 0;
+  const storedFill = fillsStored
+    ? `      const filled = {};
+      if (ctx.rowId && loadedOld && loadedOld.loaded !== false) {
+        for (const name of fieldNames) {
+          if (Object.prototype.hasOwnProperty.call(ctx.record, name) || !Object.prototype.hasOwnProperty.call(loadedOld, name)) continue;
+          filled[name] = loadedOld[name];
+          ctx.record[name] = loadedOld[name];
+        }
+      }
+`
+    : '';
+  const storedUnfill = fillsStored
+    ? `      for (const name of Object.keys(filled)) {
+        if (ctx.record[name] === filled[name]) delete ctx.record[name];
+      }
+`
+    : '';
+  const successBody = opts.systemWrite
+    ? `    if (live) {
+${storedFill}${hasPresuccess ? `      // The form's \`on start\` presuccess actions run first, on the same
+      // record, before the on-validate siblings and the row write. A module
+      // marked deferEffects holds its non-record effects until the row commits.
+      for (const spec of presuccessSpecsFor(ctx.rowId)) {
+        const mod = await import(spec);
+        if (mod && mod.presuccess === true && typeof mod.handle === "function") {
+          if (mod.deferEffects === true) {
+            runtime.beginDeferredEffects(formName);
+            try {
+              await mod.handle(ctx);
+            } finally {
+              runtime.endDeferredEffects();
+            }
+          } else await mod.handle(ctx);
+        }
+      }
+` : ''}      for (const spec of validateSpecsFor(ctx.rowId)) {
+        const mod = await import(spec);
+        if (mod && typeof mod.handle === "function") await mod.handle(ctx);
+      }
+${storedUnfill}      await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
+    }
+    let result = null;
+    let warning = null;${savesSuccessSets ? '\n    const committed = live && ctx.persisted ? successSnapshot(ctx.record) : null;' : ''}
+    try {
+${hasPresuccess ? '      // Presuccess effects buffered on a buffer-safe body run once the row\n      // is committed and before this module\'s body; a failure is the same\n      // post-commit warning an on-success failure is.\n      if (live) await runtime.flushDeferredEffects();\n' : ''}      result = ${opts.deferSuccess ? 'live ? { deferred: "after-commit event" } : await handle(ctx)' : 'await handle(ctx)'};${savesSuccessSets ? '\n      if (committed) await saveSuccessSets(ctx, formName, committed);' : ''}
+    } catch (err) {
+      if (!ctx.persisted) throw err;
+      // The row is committed. A failure after it (on-success script, mail, a
+      // store refusal from a post-write call) is a logged warning on a 200,
+      // never a failed submit: a failure reply would invite a retry that
+      // inserts a second row. Its text never reaches the caller.
+      warning = postCommitWarning(err, { table: formName });
+    }
+    send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null, ...(warning ? { warning } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) } : { dryRun: true, result: result ?? null, ...(warning ? { warning } : {}), transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
+    : `    const result = await handle(ctx);
+    send(res, 200, { dryRun: true, result: result ?? null, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`;
+  // A client run names body.runEvent; only the merged script it resolves to
+  // through the emitted scriptEvents map runs. The index never comes from the
+  // body: an unlisted token, another event, or a foreign name is refused.
+  const scriptEventGate = opts.scriptEvents
+    ? `  const runEvent = req && req.body && typeof req.body.runEvent === "string" ? req.body.runEvent : "";
+  if (runEvent) {
+    const onlyScript = Object.prototype.hasOwnProperty.call(scriptEvents, runEvent) ? scriptEvents[runEvent] : -1;
+    if (onlyScript < 0) {
+      send(res, 404, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: "unknown script event" });
+      return;
+    }
+    ctx.onlyScript = onlyScript;
+  }
+`
+    : '';
+  const deleteRefusal = opts.body.includes('shim.validate.cancelDelete')
+    ? `    if (err && err.code === "DELETE_REFUSED") {
+      send(res, 422, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, refused: true, error: err.message, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
+      return;
+    }
+`
+    : '';
+  // cancel submit in this body or in a validate sibling run before the live write: nothing was written.
+  const submitRefusal =
+    opts.body.includes('shim.validate.cancelSubmit') ||
+    hasPresuccess ||
+    (opts.validateSpecs ? opts.validateSpecs.add.length + opts.validateSpecs.edit.length > 0 : false)
+      ? `    if (err && err.code === "SUBMIT_REFUSED") {
+      send(res, 422, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, wrote: false, refused: true, error: err.message, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
+      return;
+    }
+`
+      : '';
+  const refusal = `${deleteRefusal}${submitRefusal}`;
+  // A presuccess body may have queued effects; any refusal or failed write
+  // drops them. Buffering starts only on a module marked deferEffects.
+  const discardDeferred = hasPresuccess ? '    runtime.discardDeferredEffects();\n' : '';
+  const shimNames = opts.systemWrite
+    ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'postCommitWarning', 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
+    : ['authorizeRead', 'authorizeWrite', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest'];
+  if (schema?.ruleDenied.length) shimNames.push('canImport');
+  if (usesApp && !shimNames.includes('RecordAccessError')) shimNames.push('RecordAccessError');
+  for (const name of fieldStoreImports(storeShape)) {
+    if (!shimNames.includes(name)) shimNames.push(name);
+  }
+  const shimImports = shimNames.join(', ');
+  return `${banner(lines)}${liveImport}import { ${shimImports} } from "creator-to-catalyst/shims";
+import { send, isHidden, requestRowId } from "../_lib.mjs";
+${thisappImport}
+
+export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(opts.path)}, dryRun: true };
+
+export const access = ${accessLiteral(opts.app)};
+export const formName = ${JSON.stringify(opts.form)};
+export const recordEvent = ${JSON.stringify(opts.recordEvent ?? null)};
+${opts.recordEvents ? `export const recordEvents = ${JSON.stringify(opts.recordEvents)};
+` : ''}${opts.scriptEvents ? `export const scriptEvents = ${JSON.stringify(opts.scriptEvents)};
+` : ''}${opts.presuccess ? `export const presuccess = true;
+` : ''}${opts.deferEffects ? `export const deferEffects = true;
+` : ''}${schemaExports}
+${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
+  const shim = ctx.shim;
+${opts.body.includes('__c2cScript') ? '  if (!shim.__c2cScript) shim.__c2cScript = async (_index, run) => run();\n' : ''}${indent(opts.body)}
+}
+
+export default async function handler(req, res) {
+${opts.systemWrite ? '  const deploy = deployConfig();\n  const live = deploy.mode === "live";\n' : ''}  if (isHidden(access, formName)) {
+    send(res, 403, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: "hidden form" });
+    return;
+  }
+  const principal = principalFromRequest(req);
+  if (!principal?.profile) {
+    send(res, 401, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: "authenticated caller required" });
+    return;
+  }
+  const reqRowId = requestRowId(req);
+${opts.systemWrite === 'update' ? `  if (!reqRowId || !/^\\d+$/.test(reqRowId)) {
+    send(res, 400, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: "record needs body.ROWID" });
+    return;
+  }\n` : ''}  const record = req && req.body && req.body.record && typeof req.body.record === "object" && !Array.isArray(req.body.record) ? req.body.record : {};
+  let accepted = record;
+  let loadedOld = { __c2c: "dry-run-old", loaded: false };
+${opts.systemWrite ? `  let loadedStore = null;
+  if (reqRowId) {
+    try {
+      loadedStore = await liveDatastore();
+      if (!loadedStore || typeof loadedStore.query !== "function") {
+        send(res, 500, { dryRun: !live, error: "live datastore is not configured" });
+        return;
+      }
+      const readScoped = authorizeRead(access, principal, formName, { op: "==", field: "ROWID", value: reqRowId });
+      const readWhere = compileCriteria(readScoped.criteria);
+      const readRows = await loadedStore.query(formName, readWhere === "true" ? "" : readWhere, 1, 0, "ORDER BY ROWID");
+      const row = Array.isArray(readRows) && readRows[0] && typeof readRows[0] === "object" ? projectFields(readRows[0], readScoped.fields) : null;
+      if (!row) {
+        send(res, 404, { dryRun: !live, error: "no such row" });
+        return;
+      }
+      const modifyScoped = authorizeRead(access, principal, formName, { op: "==", field: "ROWID", value: reqRowId }, undefined, "modify");
+      const modifyWhere = compileCriteria(modifyScoped.criteria);
+      if (modifyWhere !== readWhere) {
+        const modifyRows = await loadedStore.query(formName, modifyWhere === "true" ? "" : modifyWhere, 1, 0, "ORDER BY ROWID");
+        const modifiable = Array.isArray(modifyRows) && modifyRows[0] && typeof modifyRows[0] === "object" ? projectFields(modifyRows[0], modifyScoped.fields) : null;
+        if (!modifiable) {
+          send(res, 403, { dryRun: !live, error: "record access: " + formName + " row is not visible", slots: null });
+          return;
+        }
+        loadedOld = modifiable;
+      } else loadedOld = row;
+    } catch (err) {
+      const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
+      send(res, denied ? 403 : 500, { dryRun: !live, error: denied ? err.message : "request failed" });
+      return;
+    }
+  }\n` : ''}${importWriteDecl}  try {
+    if (req && req.body && req.body.op === "view") {
+      authorizeRead(access, principal, formName, { op: "true" });
+      send(res, 200, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, view: true });
+      return;
+    }
+    accepted = ${writeCall}.values;
+  } catch (err) {
+    const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
+    send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed" });
+    return;
+  }
+${runtimeSetup}
+  const ctx = runtime.context({
+    record: accepted,
+    old: loadedOld,
+    principal,
+    appTimeZone: process.env.C2C_APP_TIMEZONE,
+    rowId: reqRowId,${subformRowCtx}
+  });
+${opts.systemWrite && schema ? '  // API and import inserts never saw the Slate prefill. Absent\n  // fields fall back to their Creator initial values here, so validate\n  // scripts and the row write see the same record as the form path.\n  if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);\n' : ''}${scriptEventGate}  try {
+${successBody}
+  } catch (err) {
+${discardDeferred}${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n    if (err && err.code === "C2C_STALE_WRITE") {\n      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });\n      return;\n    }\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
+    send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed", slots: null, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
+  }
+}
+`;
+}
+
+/** App-local helpers shared by every generated Advanced I/O handler. */
+export function aioLibraryModule(): string {
+  return `import { jsonReplacer } from "creator-to-catalyst/shims";
+
+export function send(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(body, jsonReplacer));
+}
+
+export function isHidden(access, name) {
+  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
+}
+
+export function requestRowId(req) {
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+  if (!body) return "";
+  const id = body.ROWID != null ? body.ROWID : body.rowid;
+  if (id == null || typeof id === "object") return "";
+  return String(id).trim();
+}
+`;
+}
+
+function clientModule(
+  body: string,
+  prefetchPath = '',
+  meta: { form?: string; event?: string; when?: string; signature?: string; params?: string[]; recordEvent?: string; runPath?: string; runEvent?: string; button?: string } = {},
+): string {
+  const params = meta.params ?? [];
+  const lines = [
+    'PWA client handler. Not server code.',
+    'alert, cancel submit, openUrl, info, reload, show/hide/enable/disable/clear, and field :ui tasks.',
+  ];
+  if (meta.signature) lines.push(`Signature (verbatim): ${meta.signature.replace(/\*\//g, '* /')}`);
+  if (params.length) lines.push('The function arguments are the parameters below, in declared order; the prefetch gets them as ctx.args.');
+  if (prefetchPath) {
+    lines.push(`Server reads used by conditions or loops are loaded once from POST ${prefetchPath}.`);
+    lines.push('The condition then runs in the browser against that snapshot. See CLIENT-SPLIT.md.');
+  }
+  lines.push('Dry run: not deployed.');
+  const load = prefetchPath
+    ? `${params.length ? `ctx.args = [${params.join(', ')}];\n` : ''}shim.client.touch(ctx);
+ctx.prefetchPath = ${JSON.stringify(prefetchPath)};
+const prefetched = await shim.client.prefetch(ctx, ${JSON.stringify(prefetchPath)});
+if (!prefetched || prefetched.ok !== true || prefetched.nonce !== ctx.formNonce) {
+  actions.push({ op: "info", message: (prefetched && prefetched.message) || "Prefetch is stale or failed; client action blocked." });
+  return actions;
+}
+const slots = prefetched.slots;
+ctx.slots = slots;
+`
+    : '';
+  const usesRun = !!meta.runPath && body.includes('shim.client.run(');
+  const runDecl = usesRun ? `ctx.runPath = ${JSON.stringify(meta.runPath)};\n${meta.runEvent ? `ctx.runEvent = ${JSON.stringify(meta.runEvent)};\n` : ''}` : '';
+  const usesRoundTrip = body.includes('shim.client.element(') || body.includes('shim.client.call(') || body.includes('shim.client.condition(') || usesRun;
+  // A refused or failed server round trip throws `c2cElementBlocked`: the run
+  // discards the actions already queued, so a failure never leaves partial
+  // client actions applied.
+  const wrapped = usesRoundTrip
+    ? `try {\n${indent(load + runDecl + body)}\n} catch (err) {\n  if (!err || err.c2cElementBlocked !== true) throw err;\n  actions.length = 0;\n  actions.push({ op: "info", message: (err && err.message) || "Prefetch is stale or failed; client action blocked." });\n  return actions;\n}`
+    : load + runDecl + body;
+  return `${banner(lines)}export const c2cHandler = ${JSON.stringify({
+    form: meta.form ?? null,
+    event: meta.event ?? null,
+    when: meta.when ?? null,
+    prefetch: prefetchPath || null,
+    recordEvent: meta.recordEvent ?? null,
+    ...(meta.runEvent ? { runEvent: meta.runEvent } : {}),
+  })};
+
+export async function clientActions(ctx${params.length ? `, ${params.join(', ')}` : ''}) {
+  const shim = ctx.shim;
+  const actions = [];
+${indent(wrapped)}
+  return actions;
+}
+`;
+}
+
+function prefetchModule(opts: { app: App; title: string; path: string; body: string; dir?: string; params?: string[]; form?: string; formGrant?: 'read' | 'write'; schema?: SchemaPlan; element?: boolean }): string {
+  const subformFields = currentRowFields(opts.body);
+  const subformRow = subformFields.length > 0;
+  const subformField = subformFields.length === 1 ? subformFields[0]! : `[${subformFields.join(', ')}]`;
+  const usesThis = usesThisapp(opts.body);
+  const usesApp = usesAppUsers(opts.body);
+  const thisappImport = usesThis ? `import { functions } from ${JSON.stringify(`${opts.dir ?? '../'}thisapp.mjs`)};\n` : '';
+  const params = opts.params ?? [];
+  // A custom function's prefetch reads its parameters from the arguments the client sent.
+  const bindArgs = params.length ? `var [${params.join(', ')}] = Array.isArray(ctx.args) ? ctx.args : [];\n` : '';
+  // A function's prefetch carries the same gate as the function route: a hidden
+  // form answers 403 before auth, and authorizeRead of the function's form runs
+  // inside the deny boundary before any server read happens.
+  // A form event's prefetch carries the form handler's gate: a caller with no
+  // write grant on the form cannot open it for entry, so it is refused with
+  // 403 before the runtime is created or any read runs.
+  const gated = !!opts.form;
+  const formName = gated ? opts.form! : '';
+  const writeGate = gated && opts.formGrant === 'write';
+  const element = !!opts.element;
+  // A client range request names one deferred slot and sends the `range`
+  // bounds it evaluated; the endpoint clamps them and runs only that read.
+  const usesRange = opts.body.includes('ctx.rangeSlot');
+  return `${banner([
+    opts.title,
+    'Client/server split. Dry run: generated, not deployed.',
+    `Advanced I/O POST ${opts.path}`,
+    'Runs the server reads a client condition or loop needs, once, and returns { slots }.',
+    ...(element ? ['A request that carries body.element { name, value } evaluates that loop element\'s slots only.'] : []),
+    writeGate
+      ? 'Gate order: hidden form, then authenticated profile, then authorizeWrite of the form — the same grant the form handler requires — before any read.'
+      : gated
+      ? 'Gate order: hidden form, then authenticated profile, then authorizeRead of the function form — the same gate the function route applies.'
+      : 'The caller profile and report record filters are applied before any row or field is returned.',
+    ...(usesRange ? ['A `slot`/`range` request serves one deferred read with bounds the client evaluated; the bounds are clamped here, never trusted.'] : []),
+    'The response nonce is the form state the slots were computed for. See CLIENT-SPLIT.md.',
+    'The previous row is not taken from the client. Dry run uses dryRunOld.',
+  ])}import { ${writeGate ? 'authorizeWrite, ' : gated ? 'authorizeRead, ' : ''}createRuntime, jsonReplacer, ${element ? 'LIMITS, ' : ''}principalFromRequest${usesApp ? ', RecordAccessError' : ''}${usesRange ? ', rangeSlotRequest' : ''} } from "creator-to-catalyst/shims";
+${thisappImport}
+export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(opts.path)}, dryRun: true };
+
+export const access = ${accessLiteral(opts.app)};
+${gated ? `
+export const formName = ${JSON.stringify(formName)};
+
+function isHidden(name) {
+  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
+}
+` : ''}
+${subformRow ? `${SUBFORM_ROW_HELPER}\n` : ''}${params.length || element ? `${REQUEST_ARGS_HELPER}\n` : ''}${element ? `${REQUEST_ELEMENT_HELPER}\n` : ''}${usesApp ? `${appUsersHelper(administratorProfiles(opts.app))}\n` : ''}export async function prefetch(ctx) {
+  const shim = ctx.shim;
+  const slots = {};
+${indent(bindArgs + opts.body)}
+  return slots;
+}
+
+export default async function handler(req, res) {
+${gated ? `  if (isHidden(formName)) {
+    res.writeHead(403, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ dryRun: true, error: "hidden form" }, jsonReplacer));
+    return;
+  }
+` : ''}${callerGate('prefetch: authenticated caller required')}${writeGate ? `
+  try {
+    authorizeWrite(access, principal, formName, {});
+  } catch (err) {
+${denyBody('prefetch failed')}
+    return;
+  }` : ''}
+  const runtime = createRuntime({ dryRun: true, appTimeZone: process.env.C2C_APP_TIMEZONE${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}, access${usesApp ? ', appUsers: () => appUsers(req)' : ''}${usesThis ? ', functions' : ''} });
+  const record = req?.body?.record ?? {};${usesRange ? `
+  const rangeReq = rangeSlotRequest(req?.body);
+  if (rangeReq.error) {
+    res.writeHead(400, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: rangeReq.error, slots: null }, jsonReplacer));
+    return;
+  }` : ''}
+  const ctx = runtime.context({
+    record,
+    old: { __c2c: "dry-run-old", loaded: false },
+    principal,
+    formNonce: typeof req?.body?.nonce === "string" ? req.body.nonce : undefined,
+    appTimeZone: process.env.C2C_APP_TIMEZONE,${subformRow ? `\n    subformRow: requestSubformRow(req, ${subformField}, record),` : ''}${params.length ? `\n    args: requestArgs(req, ${params.length}),` : ''}${element ? `\n    element: requestElement(req),` : ''}${usesRange ? `\n    rangeSlot: rangeReq.slot,\n    rangeFrom: rangeReq.from,\n    rangeTo: rangeReq.to,\n    rangeEmpty: rangeReq.empty === true,` : ''}
+  });
+  try {
+${gated && !writeGate ? '    authorizeRead(access, principal, formName, { op: "true" });\n' : ''}    const slots = await prefetch(ctx);${usesRange ? `
+    if (rangeReq.slot && !Object.hasOwn(slots, rangeReq.slot)) {
+      res.writeHead(400, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ error: "prefetch range: unknown slot", slots: null }, jsonReplacer));
+      return;
+    }` : ''}
+    res.writeHead(200, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ dryRun: true, slots: ${usesRange ? 'rangeReq.slot ? { [rangeReq.slot]: slots[rangeReq.slot] } : ' : ''}slots, nonce: ctx.formNonce ?? null, transcript: runtime.transcript }, jsonReplacer));
+  } catch (err) {
+${denyBody('prefetch failed')}
+  }
+}
+`;
+}
+
+function jobModule(opts: { app: App; name: string; pool: string; properties: Property[]; body: string; plan: SchedulePlan; schema?: SchemaPlan }): string {
+  const cron = opts.plan.kind === 'custom' ? opts.plan.cron : null;
+  const sweep = opts.plan.kind === 'form' ? opts.plan.sweep : null;
+  // With no app time zone, the schedule's own `time zone` keeps a live run from TimeZoneRequired.
+  const scheduleZone = cron?.c2c.timeZone ?? sweep?.timeZone;
+  const zoneFields = timeZoneFields(opts.app) || (scheduleZone ? `, settingsTimeZone: ${JSON.stringify(scheduleZone)}` : '');
+  const usesConnections = usesZohoConnections(opts.body);
+  const usesGetUrl = usesOutboundGetUrl(opts.body);
+  const usesThis = usesThisapp(opts.body);
+  const thisappImport = usesThis ? 'import { functions } from "../thisapp.mjs";\n' : '';
+  const mailFrom = opts.body.includes('shim.mail.send') ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
+  const how = cron
+    ? `Catalyst ${cron.cron_type} cron ${cron.cron_name} targets this module (job-scheduling.json).`
+    : sweep
+      ? `Form schedule: the ${SWEEPER_MODULE} Job fires handle() once per row that came due.`
+      : 'No cron: the schedule start or frequency did not convert (see migration-report.json). None is invented.';
+  return `${banner([
+    `Schedule ${opts.name}`,
+    'Catalyst Job function module.',
+    how,
+    'Creator schedules run as the application, not as a signed-in user.',
+    'This file is not an HTTP route. No client can call it.',
+    'jobRequest is the scheduler payload, not a request body.',
+    'Job pool names cannot contain "_" (console evidence).',
+    'Dry run unless deploy mode is live (c2c-deploy.json or C2C_DEPLOY_MODE) and a datastore is configured.',
+  ])}${JOB_LIVE_IMPORTS}import { createRuntime${usesGetUrl ? ', outboundGetUrl' : ''} } from "creator-to-catalyst/shims";
+${thisappImport}
+export const jobPool = ${JSON.stringify(opts.pool)};
+export const cron = ${JSON.stringify(cron)};
+${sweep ? `export const sweep = ${JSON.stringify(sweep)};
+` : ''}export const schedule = ${JSON.stringify(Object.fromEntries(opts.properties.map((p) => [p.key, p.value])), null, 2)};
+
+${usesConnections ? `\n${connectionsLiveHelpers('../')}\n` : ''}${usesGetUrl ? `\n${outboundLiveHelpers('../')}\n` : ''}
+export async function handle(ctx) {
+  const shim = ctx.shim;
+${indent(opts.body)}
+}
+
+${jobLiveHelpers()}
+export async function run(jobRequest, req) {
+  const deploy = deployConfig();
+  const live = deploy.mode === "live";
+  const datastore = live ? await liveDatastore() : null;
+  if (live && !datastore) throw new Error("live datastore is not configured");
+  const appTimeZone = process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined;
+  const runtime = createRuntime({
+    dryRun: !live,
+    appTimeZone${zoneFields}${schemaRuntimeOptions(opts.app, opts.schema)}${mailFrom},
+    ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),${usesConnections ? '\n    zohoConnections: await zohoConnections(jobRequest ?? null, live),' : ''}${usesGetUrl ? '\n    ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(jobRequest ?? null)) } : {}),' : ''}${usesThis ? '\n    functions,' : ''}
+  });
+  const ctx = runtime.context({ record: jobRequest ?? {}, appTimeZone });
+  return { dryRun: !live, result: await handle(ctx), transcript: runtime.transcript };
+}
+
+export default async function job(jobRequest, context) {
+  return closing(context, () => run(jobRequest, context));
+}
+`;
+}
+
+
+function machineModule(opts: { app: App; name: string; form?: string; event: string; scripts: { name: string; body: string }[]; machine: Record<string, unknown>; schema?: SchemaPlan; editWorkflows?: { validate: string[]; success: string[] } }): string {
+  const schema = opts.form ? formWriteSchema(opts.app, opts.form) : undefined;
+  const relativeForm = !!opts.machine.formCriteria && typeof opts.machine.formCriteria === 'object' && criteriaHasRelative(opts.machine.formCriteria as Criteria);
+  const usesConnections = opts.scripts.some((s) => usesZohoConnections(s.body));
+  const usesGetUrl = opts.scripts.some((s) => usesOutboundGetUrl(s.body));
+  const usesThis = opts.scripts.some((s) => usesThisapp(s.body));
+  const thisappImport = usesThis ? 'import { functions } from "../thisapp.mjs";\n' : '';
+  const mailFrom = opts.scripts.some((s) => s.body.includes('shim.mail.send')) ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
+  const schemaExports = schema
+    ? `export const fieldNames = ${JSON.stringify(schema.names)};
+export const readonlyFields = ${JSON.stringify(schema.readonlyNames)};
+export const fields = ${JSON.stringify(schema.fields)};
+`
+    : '';
+  const scriptDefs = opts.scripts
+    .map(
+      (script) => `async function script_${jsIdent(script.name)}(ctx) {
+  const shim = ctx.shim;
+${indent(script.body)}
+}`,
+    )
+    .join('\n\n');
+  const scriptMap = `{${opts.scripts.map((script) => `${JSON.stringify(script.name)}: script_${jsIdent(script.name)}`).join(', ')}}`;
+  const blueprint = opts.machine.kind === 'blueprint';
+  const phaseFields = blueprint && (!!opts.machine.stageFields || (Array.isArray(opts.machine.transitions) && (opts.machine.transitions as { fields?: unknown }[]).some((row) => !!row.fields)));
+  const notOwner = blueprint ? 'caller is not an owner of this transition' : 'caller is not an approver for this stage';
+  const fieldBanner = phaseFields
+    ? [
+        'Field settings: machine.stageFields lists, per stage, the visible, hidden,',
+        'updatable and read-only fields while a record sits in that stage; a',
+        'transition\'s fields list what body.fields may set during it (mandatory',
+        'ones must be filled). Any other field answers 400 naming it. The record',
+        'read and the edit submit import visibleRecord and stageUpdateError.',
+      ]
+    : [];
+  const fieldHelpers = phaseFields
+    ? `const SYSTEM_FIELDS = ["ROWID", "ID", "Added_User", "Added_Time", "Modified_User", "Modified_Time"];
+
+function stageRules(record) {
+  const stage = record && typeof record[statusColumn()] === "string" ? record[statusColumn()] : "";
+  const all = machine.stageFields && typeof machine.stageFields === "object" ? machine.stageFields : {};
+  return { stage, rules: Object.prototype.hasOwnProperty.call(all, stage) ? all[stage] : null };
+}
+
+function isFormField(key) {
+  return Array.isArray(machine.formFields) && machine.formFields.includes(key) && !SYSTEM_FIELDS.includes(key);
+}
+
+function shown(rules, key) {
+  if (!rules || !isFormField(key)) return true;
+  if (Array.isArray(rules.hidden) && rules.hidden.includes(key)) return false;
+  return !Array.isArray(rules.visible) || rules.visible.includes(key);
+}
+
+function changeable(rules, key) {
+  if (!rules) return true;
+  if (!shown(rules, key)) return false;
+  if (Array.isArray(rules.readonly) && rules.readonly.includes(key)) return false;
+  return !Array.isArray(rules.updatable) || rules.updatable.includes(key);
+}
+
+// The record read: drops the fields the stored record's current stage does
+// not show. The stage comes from the stored row, never from the projection.
+export function visibleRecord(record, stored) {
+  if (!record || typeof record !== "object") return record;
+  const { rules } = stageRules(stored && typeof stored === "object" ? stored : record);
+  if (!rules) return record;
+  const out = {};
+  for (const key of Object.keys(record)) if (shown(rules, key)) out[key] = record[key];
+  return out;
+}
+
+// The edit submit: the first submitted field the stored record's stage does
+// not let a caller change, as { field, error } for a 400 reply, else "".
+export function stageUpdateError(stored, keys) {
+  const { stage, rules } = stageRules(stored);
+  if (!rules) return "";
+  for (const key of Array.isArray(keys) ? keys : []) {
+    if (!changeable(rules, key)) return { field: key, error: "field " + key + " is not updatable in stage " + stage };
+  }
+  return "";
+}
+
+// The fields a transition call sets: only the transition's updatable fields,
+// and every mandatory one filled. With no field settings no field is set.
+// A during list that says which fields show but names no updatable set means
+// Creator treats those visible fields as settable during the transition — a
+// reject-with-reason transition is the common case — so the visible list is
+// the updatable set, minus anything read-only.
+function transitionFieldError(row, supplied) {
+  const rules = row && row.fields && typeof row.fields === "object" ? row.fields : {};
+  const updatable = Array.isArray(rules.updatable) ? rules.updatable : Array.isArray(rules.visible) ? rules.visible : [];
+  for (const key of Object.keys(supplied)) {
+    if (!updatable.includes(key) || (Array.isArray(rules.readonly) && rules.readonly.includes(key))) {
+      return { field: key, error: "field " + key + " is not updatable during transition " + (row.name || "") };
+    }
+  }
+  for (const key of Array.isArray(rules.mandatory) ? rules.mandatory : []) {
+    const value = supplied[key];
+    if (value == null || (typeof value === "string" && !value.trim()) || (Array.isArray(value) && !value.length)) {
+      return { field: key, error: "field " + key + " is required for transition " + (row.name || "") };
+    }
+  }
+  return "";
+}
+
+`
+    : '';
+  const fieldApply = phaseFields
+    ? `
+    const supplied = body.fields && typeof body.fields === "object" && !Array.isArray(body.fields) ? body.fields : {};
+    const fieldError = transitionFieldError(chosen, supplied);
+    if (fieldError) {
+      send(res, 400, { dryRun: !live, error: fieldError.error, field: fieldError.field });
+      return;
+    }
+    for (const key of Object.keys(supplied)) record[key] = supplied[key];`
+    : '';
+  const editWorkflows = opts.editWorkflows ?? { validate: [], success: [] };
+  const editWorkflowSource = `// A transition row with workflowStatus === true is an update-fields during
+// action whose workflows are on: the save fires the governed form's on-edit
+// workflows — On Validate before the field write, On Success after it — and
+// the stage changes only once they succeed. The specs are the same modules
+// the form's edit submit endpoint uses; a workflow with no server actions
+// emits no module, so a missing file means nothing to run.
+const EDIT_VALIDATE_SPECS = ${JSON.stringify(editWorkflows.validate)};
+const EDIT_SUCCESS_SPECS = ${JSON.stringify(editWorkflows.success)};
+
+async function callEditWorkflow(spec, ctx) {
+  let mod;
+  try {
+    mod = await import(spec);
+  } catch (err) {
+    if (err && err.code === "ERR_MODULE_NOT_FOUND" && String(err.message || "").includes(spec.slice(3))) return;
+    throw err;
+  }
+  if (mod && typeof mod.handle === "function") await mod.handle(ctx);
+}
+`;
+  return `${banner([
+    `State machine ${opts.name}`,
+    'Circuits is not available in the IN data centre. No US data centre.',
+    'Generated shape: status column + transition history table + Advanced I/O approve, reject, and transition endpoints.',
+    'Gate order: hidden form, then authenticated profile, then approver and status.',
+    'functions/c2c-deploy.json mode (or C2C_DEPLOY_MODE) decides: "live" loads the',
+    'record by body.ROWID through the caller-scoped read, requires it to satisfy',
+    'the machine form criteria, validates the transition against its stored',
+    'stage, runs the transition script, then writes the status and a history row.',
+    'Anything else uses a placeholder stage (body.stage) and records the writes',
+    'on the transcript without effects.',
+    'body.status is the target stage; approve and reject infer it when only one',
+    'transition matches the stored stage. The stored stage, never the body, is the from.',
+    'A user, role, profile, or form-field approver must match the principal. A',
+    'field approver reads the record field the .ds named; a field that is not a',
+    'users field, and a reporting-level approver, deny with that reason. Both are',
+    'counted in migration-report.json. They are not silent misses. The literal',
+    'deny reasons are "unsupported: form-field approver" and',
+    '"unsupported: reporting-level approver".',
+    'A transition writes through datastore.writeRow: the machine stage write does',
+    'not need the caller edit access the profile form write would require.',
+    'SLA timeouts would be Signals or a Job cron; none is created.',
+    'The submit handler calls begin() before the row write and commit() after it,',
+    'so the first stage and (approvals) the submit history row persist with the record.',
+    ...fieldBanner,
+  ])}import { authorizeRead, ${relativeForm ? 'bindRelativeCriteria, criteriaHasRelative, ' : ''}createRuntime, jsonReplacer, matchRow, ${usesGetUrl ? 'outboundGetUrl, ' : ''}principalFromRequest, replyStoreError } from "creator-to-catalyst/shims";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+${thisappImport}
+
+export const access = ${accessLiteral(opts.app)};
+export const formName = ${JSON.stringify(opts.form ?? '')};
+export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(`/flows/${opts.name}`)}, paths: ["/flows/${opts.name}/approve", "/flows/${opts.name}/reject", "/flows/${opts.name}/transition"] };
+${schemaExports}
+export const machine = ${JSON.stringify(
+    {
+      form: opts.form ?? null,
+      event: opts.event,
+      circuits: false,
+      ...(opts.machine as object),
+      endpoints: {
+        approve: `/flows/${slug(opts.name)}/approve`,
+        reject: `/flows/${slug(opts.name)}/reject`,
+        transition: `/flows/${slug(opts.name)}/transition`,
+      },
+    },
+    null,
+    2,
+  )};
+
+function send(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(body, jsonReplacer));
+}
+
+// All client-visible read failures deliberately cross one denial boundary.
+// Keep this object literal local so callers cannot observe adapter errors or
+// distinguish hidden, missing, and unauthorized rows.
+const READ_DENIAL = { ok: false, code: "READ_DENIED", message: "Unable to read requested data" };
+
+// Framework middleware must preserve the request bytes as req.rawBody.  This
+// scanner walks those bytes with an explicit stack, never recursion, so input
+// of any depth cannot exhaust the call stack.  JSON.parse is used only for
+// individual string tokens, so escaped key names compare after JSON
+// unescaping (for example \\u0061rgs == args).  A malformed body, trailing
+// data, or a duplicate member at any object depth fails closed.
+function rawJsonHasUniqueKeys(raw) {
+  if (typeof raw !== "string") return false;
+  let i = 0;
+  const n = raw.length;
+  const ws = () => { while (i < n && (raw[i] === " " || raw[i] === "\\t" || raw[i] === "\\n" || raw[i] === "\\r")) i++; };
+  const fail = () => { throw new Error("invalid"); };
+  const readString = () => {
+    if (raw[i] !== '"') fail();
+    const start = i++;
+    while (i < n) {
+      const c = raw[i++];
+      if (c === "\\\\") { if (i >= n) fail(); i++; }
+      else if (c === '"') return JSON.parse(raw.slice(start, i));
+      else if (c < " ") fail();
+    }
+    fail();
+  };
+  const readScalar = () => {
+    const m = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/.exec(raw.slice(i));
+    if (!m) fail();
+    i += m[0].length;
+  };
+  // Frames: an object waits for a first key or "}" (phase 0), a key after ","
+  // (phase 1), a member value (phase 2), or "," / "}" (phase 3); an array
+  // waits for a first element or "]" (phase 0), an element (phase 2), or
+  // "," / "]" (phase 3).  done means the single root value completed.
+  const stack = [];
+  let done = false;
+  const popFrame = () => {
+    stack.pop();
+    if (stack.length === 0) done = true;
+    else stack[stack.length - 1].phase = 3;
+  };
+  const scalarAt = () => {
+    if (raw[i] === '"') readString();
+    else if (i >= n) fail();
+    else readScalar();
+  };
+  try {
+    for (;;) {
+      ws();
+      if (stack.length === 0) {
+        if (done) return i === n;
+        const c = raw[i];
+        if (c === "{") { i++; stack.push({ obj: true, keys: new Set(), phase: 0 }); continue; }
+        if (c === "[") { i++; stack.push({ obj: false, phase: 0 }); continue; }
+        if (i >= n) return false;
+        scalarAt();
+        done = true;
+        continue;
+      }
+      const top = stack[stack.length - 1];
+      if (top.obj) {
+        if (top.phase <= 1) {
+          if (top.phase === 0 && raw[i] === "}") { i++; popFrame(); continue; }
+          const key = readString();
+          if (top.keys.has(key)) return false;
+          top.keys.add(key);
+          ws();
+          if (raw[i] !== ":") return false;
+          i++;
+          top.phase = 2;
+          continue;
+        }
+        if (top.phase === 2) {
+          const c = raw[i];
+          if (c === "{") { i++; stack.push({ obj: true, keys: new Set(), phase: 0 }); continue; }
+          if (c === "[") { i++; stack.push({ obj: false, phase: 0 }); continue; }
+          if (i >= n) return false;
+          scalarAt();
+          top.phase = 3;
+          continue;
+        }
+        if (raw[i] === ",") { i++; top.phase = 1; continue; }
+        if (raw[i] === "}") { i++; popFrame(); continue; }
+        return false;
+      }
+      if (top.phase !== 3) {
+        if (top.phase === 0 && raw[i] === "]") { i++; popFrame(); continue; }
+        const c = raw[i];
+        if (c === "{") { i++; stack.push({ obj: true, keys: new Set(), phase: 0 }); continue; }
+        if (c === "[") { i++; stack.push({ obj: false, phase: 0 }); continue; }
+        if (i >= n) return false;
+        scalarAt();
+        top.phase = 3;
+        continue;
+      }
+      if (raw[i] === ",") { i++; top.phase = 2; continue; }
+      if (raw[i] === "]") { i++; popFrame(); continue; }
+      return false;
+    }
+  } catch (err) {
+    return false;
+  }
+}
+
+function isHidden(name) {
+  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
+}
+
+function deny(message) {
+  const err = new Error(message);
+  err.code = "RECORD_ACCESS_DENIED";
+  err.name = "RecordAccessError";
+  throw err;
+}
+
+function listed(value) {
+  return String(value || "").split(/[;,]/).map((part) => part.trim().replace(/^"|"$/g, "")).filter(Boolean);
+}
+
+function same(left, right) {
+  return String(left || "").trim().toLowerCase() === String(right || "").trim().toLowerCase();
+}
+
+// A users-field value matches the caller when any of its ids or names do.
+// A {id,label} lookup shape compares its scalar members; a list matches any item.
+function userValueMatches(value, principal) {
+  if (Array.isArray(value)) return value.some((item) => userValueMatches(item, principal));
+  if (value && typeof value === "object") {
+    return userValueMatches(value.id ?? value.ID ?? value.email ?? value.name ?? value.value, principal);
+  }
+  return same(value, principal.loginUser) || same(value, principal.userId);
+}
+
+function approverDecision(principal, approvers, record) {
+  const rows = Array.isArray(approvers) ? approvers : [];
+  // No approvers: the transition is open to any caller that passes the gates.
+  if (!rows.length) return "";
+  let unsupported = "";
+  for (const row of rows) {
+    if (!row) continue;
+    if (row.kind === "unsupported") {
+      if (!unsupported) unsupported = row.reason || "unsupported approver";
+      continue;
+    }
+    if (row.kind === "field") {
+      if (userValueMatches(record && record[row.value], principal)) return "";
+      continue;
+    }
+    const values = listed(row && row.value);
+    if (row.kind === "role" && values.some((value) => same(value, principal.role))) return "";
+    if (row.kind === "profile" && values.some((value) => same(value, principal.profile))) return "";
+    if (row.kind === "user" && values.some((value) => same(value, principal.loginUser) || same(value, principal.userId))) return "";
+  }
+  return unsupported || ${JSON.stringify(notOwner)};
+}
+
+function statusColumn() {
+  return machine.statusColumn || "Status";
+}
+
+${fieldHelpers}function placeholder(req) {
+  const record = { __c2c: "dry-run-record", loaded: false };
+  const supplied = req && req.body && typeof req.body.stage === "string" ? req.body.stage.trim() : "";
+  record[statusColumn()] = supplied || machine.currentStatus || machine.start || "";
+  return record;
+}
+
+function targets(action, record) {
+  const stage = record && typeof record[statusColumn()] === "string" ? record[statusColumn()] : "";
+  const rows = Array.isArray(machine.transitions) ? machine.transitions : [];
+  return rows.filter((row) => row && row.action === action && row.from === stage && row.to);
+}
+
+function requestRowId(req) {
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+  if (!body) return "";
+  const id = body.ROWID != null ? body.ROWID : body.rowid;
+  if (id == null || typeof id === "object") return "";
+  return String(id).trim();
+}
+
+function actorOf(ctx) {
+  const p = ctx && ctx.principal;
+  return (p && (p.loginUser || p.userId || p.profile)) || "";
+}
+
+// The decision comment rides body.comment. The history Comment column is
+// VarChar(255), so the text is capped at 255 code points and astral
+// characters are never split.
+function requestComment(req) {
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+  const raw = typeof body.comment === "string" ? body.comment.trim() : "";
+  return Array.from(raw).slice(0, 255).join("");
+}
+
+function historyRow(ctx, action, name, from, to, rowId, comment) {
+  return {
+    Machine: machine.name || ${JSON.stringify(opts.name)},
+    Form: machine.form || formName,
+    Record_ID: String(rowId || ""),
+    Action: action,
+    Name: name || "",
+    From_Status: from || "",
+    To_Status: to || "",
+    Actor: actorOf(ctx),
+    Comment: comment || "",
+  };
+}
+
+${liveHelpers('../')}
+${usesConnections ? `\n${connectionsLiveHelpers('../')}\n` : ''}${usesGetUrl ? `\n${outboundLiveHelpers('../')}\n` : ''}
+${scriptDefs || '// This machine declares no transition scripts.'}
+const SCRIPTS = ${scriptMap};
+${editWorkflowSource}
+
+// The named export a thisapp registry or a submit handler calls: the script for
+// the transition ctx.transition names. Submit sets action "submit" + on_start.
+export async function handle(ctx) {
+  const script = ctx && ctx.transition && ctx.transition.script;
+  const fn = script && SCRIPTS[script];
+  return fn ? await fn(ctx) : null;
+}
+
+// Submit path, before the row write: the first machine whose form criteria the
+// new record satisfies claims it — the record gets the machine start stage and
+// the machine's on-start script runs in the same context.
+export async function begin(ctx) {
+  const record = ctx && ctx.record;
+  if (!record || ctx.__c2cFlow || ctx.rowId || ctx.writeOp === "update") return;
+  ${relativeForm ? `let formCriteria = machine.formCriteria;
+  if (formCriteria && criteriaHasRelative(formCriteria)) {
+    try {
+      formCriteria = bindRelativeCriteria(formCriteria, ctx.now, ctx.appTimeZone || "");
+    } catch {
+      return;
+    }
+  }
+  if (formCriteria && !matchRow(record, formCriteria)) return;` : 'if (machine.formCriteria && !matchRow(record, machine.formCriteria)) return;'}
+  record[statusColumn()] = machine.start;
+  ctx.__c2cFlow = machine.slug;
+  ctx.transition = { action: "submit", to: machine.start, script: "on_start" };
+  await handle(ctx);
+}
+
+// Submit path, after the row write: the history row for the machine that
+// claimed the record. ROWID is known only after the insert. Approvals log the
+// submit event; a blueprint's start stage is not a transition and is not logged.
+export async function commit(ctx) {
+  const record = ctx && ctx.record;
+  if (!ctx || ctx.__c2cFlow !== machine.slug || !machine.historyTable || machine.submitHistory !== true) return;
+  const rowId = ctx.rowId || (record && (record.ROWID || record.ID)) || "";
+  await ctx.shim.datastore.insertRow(ctx, machine.historyTable, historyRow(ctx, "submit", "", "", machine.start, rowId));
+}
+
+async function run(req, res, action) {
+  if (isHidden(formName)) {
+    send(res, 403, { dryRun: true, error: "hidden form" });
+    return;
+  }
+  const principal = principalFromRequest(req);
+  if (!principal?.profile) {
+    send(res, 401, { dryRun: true, error: "authenticated caller required" });
+    return;
+  }
+  const deploy = deployConfig();
+  const live = deploy.mode === "live";
+  try {
+    if (formName) authorizeRead(access, principal, formName, { op: "true" });
+    const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    const status = typeof body.status === "string" ? body.status : "";
+    const datastore = live ? await liveDatastore() : null;
+    if (live && !datastore) {
+      send(res, 500, { dryRun: false, error: "live datastore is not configured" });
+      return;
+    }
+    const runtime = createRuntime({
+      dryRun: !live,
+      appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}${mailFrom},
+      ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
+${usesConnections ? '      zohoConnections: await zohoConnections(req, live),\n' : ''}${usesGetUrl ? '      ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(req)) } : {}),\n' : ''}      access,
+      flowHistoryTable: machine.historyTable || undefined,${usesThis ? '\n      functions,' : ''}
+    });
+    let record;
+    let old = { __c2c: "dry-run-old", loaded: false };
+    let rowId = "";
+    if (live) {
+      rowId = requestRowId(req);
+      if (!rowId) {
+        send(res, 422, { dryRun: false, error: "a live transition needs body.ROWID" });
+        return;
+      }
+      const args = [{ op: "==", field: "ROWID", value: rowId }];
+      if (machine.formCriteria) args.push(machine.formCriteria);
+      const criteria = args.length > 1 ? { op: "and", args } : args[0];
+      const probe = runtime.context({ record: {}, old: {}, principal, appTimeZone: process.env.C2C_APP_TIMEZONE });
+      const rows = await probe.shim.datastore.rows(
+        probe,
+        probe.shim.datastore.query(probe, formName, criteria, { system: true }),
+      );
+      const row = rows[0];
+      if (!row || typeof row !== "object" || !row.values || typeof row.values !== "object") deny("record is not visible to this caller");
+      record = row.values;
+      old = { ...record };
+    } else {
+      record = placeholder(req);
+    }
+    const from = typeof record[statusColumn()] === "string" ? record[statusColumn()] : "";
+    const candidates = targets(action, record);
+    const validCandidates = [];
+    const gated = [];
+    const unevaluated = new Set();
+    const gateReasons = new Map();
+    for (const row of candidates) {
+      const gates = Array.isArray(row.conditionScripts) ? row.conditionScripts : [];
+      if (!gates.length) {
+        validCandidates.push(row);
+        continue;
+      }
+      if (!live) {
+        // A dry run has no stored record, so field criteria cannot be
+        // evaluated. The transition still runs and the reply says the
+        // criteria were not evaluated.
+        unevaluated.add(row);
+        validCandidates.push(row);
+        continue;
+      }
+      let pass = true;
+      for (const gate of gates) {
+        const fn = SCRIPTS[gate];
+        // A declared condition with no emitted script blocks; it never opens.
+        if (!fn) {
+          pass = false;
+          break;
+        }
+        let verdict = false;
+        try {
+          verdict = await fn(runtime.context({ record, old, principal, rowId, appTimeZone: process.env.C2C_APP_TIMEZONE }));
+        } catch (gateErr) {
+          // A condition that cannot run — it names a field that is not on the
+          // form — closes its own gate with its own reason instead of failing
+          // the request. Any other condition error still fails the request.
+          if (gateErr && (gateErr.code === "RECORD_ACCESS_DENIED" || gateErr.name === "RecordAccessError") && gateErr.message) {
+            gateReasons.set(row, String(gateErr.message));
+            pass = false;
+            break;
+          }
+          throw gateErr;
+        }
+        if (!verdict) {
+          pass = false;
+          break;
+        }
+      }
+      if (pass) validCandidates.push(row);
+      else gated.push(row);
+    }
+    const chosen = status ? validCandidates.find((row) => row.to === status) : validCandidates.length === 1 ? validCandidates[0] : null;
+    if (!chosen) {
+      // A real transition that failed its criteria is not "no such transition".
+      const filtered = status ? gated.some((row) => row.to === status) : candidates.length > 0 && gated.length === candidates.length;
+      let reason = filtered ? "transition criteria not met" : "status is not a transition of this stage";
+      if (filtered) {
+        const blocked = status ? gated.filter((row) => row.to === status) : gated;
+        const distinct = Array.from(new Set(blocked.map((row) => gateReasons.get(row)).filter(Boolean)));
+        if (distinct.length === 1) reason = distinct[0];
+      }
+      deny(reason);
+    }
+    const approverError = approverDecision(principal, chosen.approvers, record);
+    if (approverError) deny(approverError);${fieldApply}
+    record[statusColumn()] = chosen.to;
+    // The newest submit row for this record names its submitter; no submit
+    // row leaves it null. The machine's own history-table read does not need
+    // the caller to hold a grant on that table.
+    let submitter = null;
+    if (live && machine.historyTable && machine.event === "approval") {
+      const criteria = {
+        op: "and",
+        args: [
+          { op: "==", field: "Form", value: machine.form || formName },
+          { op: "==", field: "Record_ID", value: String(rowId || "") },
+          { op: "==", field: "Action", value: "submit" }
+        ]
+      };
+      const probe = runtime.context({ record: {}, old: {}, principal, appTimeZone: process.env.C2C_APP_TIMEZONE });
+      const rows = await probe.shim.datastore.historyRows(probe, machine.historyTable, criteria, { sort: { field: "ROWID", dir: "desc" }, range: { from: 1, to: 1 } });
+      if (rows.length > 0 && rows[0].values.Actor) {
+        submitter = rows[0].values.Actor;
+      }
+    }
+
+    const ctx = runtime.context({
+      record,
+      old,
+      principal,
+      rowId: live ? rowId : undefined,
+      transition: { action, from, to: chosen.to, level: chosen.level, script: chosen.script },
+      approver: { submitter },
+      appTimeZone: process.env.C2C_APP_TIMEZONE,
+    });
+    // update_fields with workflows on: the form's edit-scope On Validate
+    // handlers run before any transition script, so a refusal (422) leaves no
+    // script side effects.
+    if (chosen.workflowStatus === true) {
+      for (const spec of EDIT_VALIDATE_SPECS) await callEditWorkflow(spec, ctx);
+    }
+    const result = await handle(ctx);
+    const patch = {};
+    for (const key of Object.keys(record)) {
+      if (key === "__c2c") continue;
+      if (JSON.stringify(record[key]) !== JSON.stringify(old[key])) patch[key] = record[key];
+    }
+    patch[statusColumn()] = chosen.to;
+    if (chosen.workflowStatus === true) {
+      // Then the field write, then the edit-scope On Success handlers, and
+      // only then the stage write — Creator changes the stage only once the
+      // on-edit workflows succeed. Nothing is rolled back when On Success
+      // fails: the field write stays and the stage does not move, as in
+      // Creator, which saves the record before On Success runs.
+      const fieldsPatch = {};
+      for (const key of Object.keys(patch)) if (key !== statusColumn()) fieldsPatch[key] = patch[key];
+      if (Object.keys(fieldsPatch).length) await ctx.shim.datastore.writeRow(ctx, formName, rowId || "dry-run", fieldsPatch);
+      for (const spec of EDIT_SUCCESS_SPECS) await callEditWorkflow(spec, ctx);
+      await ctx.shim.datastore.writeRow(ctx, formName, rowId || "dry-run", { [statusColumn()]: chosen.to });
+    } else {
+      await ctx.shim.datastore.writeRow(ctx, formName, rowId || "dry-run", patch);
+    }
+    if (machine.historyTable) {
+      await ctx.shim.datastore.insertRow(ctx, machine.historyTable, historyRow(ctx, action, chosen.name, from, chosen.to, rowId, requestComment(req)));
+    }
+    // The after phase runs last, once the stage write has succeeded; any field
+    // it sets is written then, never the stage.
+    const afterFn = chosen.afterScript && SCRIPTS[chosen.afterScript];
+    if (afterFn) {
+      const before = { ...record };
+      await afterFn(ctx);
+      const afterPatch = {};
+      for (const key of Object.keys(record)) {
+        if (key === "__c2c" || key === statusColumn()) continue;
+        if (JSON.stringify(record[key]) !== JSON.stringify(before[key])) afterPatch[key] = record[key];
+      }
+      if (Object.keys(afterPatch).length) await ctx.shim.datastore.writeRow(ctx, formName, rowId || "dry-run", afterPatch);
+    }
+    ctx.persisted = true;
+    // The transcript is a dry-run debug view only: no live reply carries it.
+    // A dry run over a conditional transition says its criteria were not
+    // evaluated — there is no stored record to test them against.
+    send(res, 200, { dryRun: !live, wrote: live, action, from, status: chosen.to, result: result ?? null, ...(live ? {} : { transcript: runtime.transcript, ...(unevaluated.has(chosen) ? { criteria: "not evaluated in dry run" } : {}) }) });
+  } catch (err) {
+    // The status/history write failed at the store. Same mapping as
+    // the submit handlers; Catalyst's text never reaches the caller.
+    if (replyStoreError(res, err, { live, table: formName })) return;
+    if (err && err.code === "SUBMIT_REFUSED") {
+      send(res, 422, { dryRun: !live, wrote: false, refused: true, error: err.message });
+      return;
+    }
+    const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
+    send(res, denied ? 403 : 500, { dryRun: !live, error: denied ? err.message : "request failed" });
+  }
+}
+
+export async function approve(req, res) {
+  return run(req, res, "approve");
+}
+export async function reject(req, res) {
+  return run(req, res, "reject");
+}
+export async function transition(req, res) {
+  return run(req, res, "transition");
+}
+
+// The Advanced I/O entry routes every machine.endpoints path to this module.
+// The URL suffix picks the action (/flows/<name>/approve|reject|transition);
+// the bare /flows/<name> route takes body.action instead.
+export default async function handler(req, res) {
+  const leaf = String((req && req.url) || "").split("?")[0].split("/").filter(Boolean).pop() || "";
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+  const action = leaf === "approve" || leaf === "reject" || leaf === "transition" ? leaf : String(body.action || "");
+  if (action === "approve" || action === "reject" || action === "transition") return run(req, res, action);
+  send(res, 404, { error: "no such endpoint" });
+}
+`;
+}
+
+/**
+ * Event-time endpoint for a client condition's read-only `thisapp` call.
+ * It is deliberately separate from the prefetch module: the request carries
+ * function arguments, the server runs the registered callee, and the response
+ * carries one value rather than prefetch slots.
+ */
+/** Parent form → subform field link name → the child table that proves element membership for a `{kind:"element"}` handle. */
+function elementLinksOf(app: App, schema?: SchemaPlan): Record<string, Record<string, { table: string; parentColumn: string }>> {
+  const out: Record<string, Record<string, { table: string; parentColumn: string }>> = {};
+  for (const [form, links] of Object.entries(subformTablesOf(schema ?? schemaOf(app))).sort(([a], [b]) => compareEnUs(a, b))) {
+    const map: Record<string, { table: string; parentColumn: string }> = {};
+    for (const link of [...links].sort((a, b) => compareEnUs(a.field, b.field))) map[link.field] = { table: link.table, parentColumn: link.parentColumn };
+    out[form] = map;
+  }
+  return out;
+}
+
+export function functionCallModule(opts: {
+  app: App;
+  name: string;
+  signature?: string;
+  params: string[];
+  reads: string[];
+  writes?: { form: string; op: 'insert' | 'update' | 'delete' }[];
+  schema?: SchemaPlan;
+  /** A compiled `c2cCond_*` server condition: same route and auth, and the success body is exactly `{ok, nonce, value}`. */
+  condition?: boolean;
+}): string {
+  const path = `/functions/${slug(opts.name)}/call`;
+  const pathArgs = JSON.stringify(opts.name.split('.'));
+  const readForms = [...new Set(opts.reads)].sort(compareEnUs);
+  const writeForms = [...(opts.writes ?? [])].sort((a, b) => compareEnUs(a.form, b.form) || compareEnUs(a.op, b.op));
+  const needsRows = readForms.length > 0 || writeForms.length > 0;
+  return `${banner([
+    `Client call for ${opts.name}`,
+    opts.signature ? `Signature (verbatim): ${opts.signature.replace(/\*\//g, '* /')}` : opts.condition ? 'A client condition compiled into a read-only server function.' : 'No signature on the IR node.',
+    `Advanced I/O POST ${path}`,
+    writeForms.length ? 'Runs one translated app function from a generated ExecuteFunction button.' : 'Runs one app function the generator proved read-only from its emitted server body.',
+    'body.args are plain JSON data, one per declared parameter, at most 64 KB encoded. Branded, non-plain, or over-deep values are refused.',
+    'Dry run reports value null — a placeholder must never take the true branch of a client condition.',
+    writeForms.length ? 'The client form, record, old row, and field names are not read. Authorization is checked for every form the callee reads, and authorizeWrite/authorizeDelete checks every form the callee writes.' : 'The client form, record, old row, and field names are not read. Authorization is checked for every form the callee reads.',
+    'The response nonce is the form state the condition ran for.',
+    'Error replies carry a machine-readable code (never match the message): integrity failures abort the caller, read failures (READ_DENIED, STORE_UNAVAILABLE) evaluate false.',
+    'Each call writes one structured log line: correlation id, signature id, reads {forms, rows, bytes}, outcome code, latency. It never carries argument values, record ids, row contents, criteria, store error text, or the nonce beyond its length.',
+    'A call may read at most C2C_CALL_ROW_BUDGET rows (default 128, max 1048576) and answer at most C2C_CALL_RESPONSE_BYTES serialized body bytes (default 262144, max 16777216); only a bare unsigned decimal integer counts, anything else falls back to the default with a sanitized warning, and a tripped cap returns the same sanitized failure as any other failed call.',
+    'functions/c2c-deploy.json mode (or C2C_DEPLOY_MODE) decides: "live" runs the function; anything else returns the runtime dry-run result.',
+  ])}import { RecordAccessError, authorizeDelete, authorizeRead, authorizeWrite, compileCriteria, createRuntime, jsonReplacer, principalFromRequest, projectFields } from "creator-to-catalyst/shims";
+import { functions } from "../thisapp.mjs";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
+
+export const access = ${accessLiteral(opts.app)};
+export const readForms = ${JSON.stringify(readForms)};
+export const writeForms = ${JSON.stringify(writeForms)};
+export const elementLinks = ${JSON.stringify(elementLinksOf(opts.app, opts.schema))};
+
+function send(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(body, jsonReplacer));
+}
+
+const READ_DENIAL = { ok: false, code: "READ_DENIED", message: "Unable to read requested data" };
+
+function rawJsonHasUniqueKeys(raw) {
+  if (typeof raw !== "string") return false;
+  let i = 0;
+  const n = raw.length;
+  const ws = () => { while (i < n && (raw[i] === " " || raw[i] === "\\t" || raw[i] === "\\n" || raw[i] === "\\r")) i++; };
+  const fail = () => { throw new Error("invalid"); };
+  const readString = () => {
+    if (raw[i] !== '"') fail();
+    const start = i++;
+    while (i < n) {
+      const c = raw[i++];
+      if (c === "\\\\") { if (i >= n) fail(); i++; }
+      else if (c === '"') return JSON.parse(raw.slice(start, i));
+      else if (c < " ") fail();
+    }
+    fail();
+  };
+  const readScalar = () => {
+    const m = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/.exec(raw.slice(i));
+    if (!m) fail();
+    i += m[0].length;
+  };
+  // Frames: an object waits for a first key or "}" (phase 0), a key after ","
+  // (phase 1), a member value (phase 2), or "," / "}" (phase 3); an array
+  // waits for a first element or "]" (phase 0), an element (phase 2), or
+  // "," / "]" (phase 3).  done means the single root value completed.
+  const stack = [];
+  let done = false;
+  const popFrame = () => {
+    stack.pop();
+    if (stack.length === 0) done = true;
+    else stack[stack.length - 1].phase = 3;
+  };
+  const scalarAt = () => {
+    if (raw[i] === '"') readString();
+    else if (i >= n) fail();
+    else readScalar();
+  };
+  try {
+    for (;;) {
+      ws();
+      if (stack.length === 0) {
+        if (done) return i === n;
+        const c = raw[i];
+        if (c === "{") { i++; stack.push({ obj: true, keys: new Set(), phase: 0 }); continue; }
+        if (c === "[") { i++; stack.push({ obj: false, phase: 0 }); continue; }
+        if (i >= n) return false;
+        scalarAt();
+        done = true;
+        continue;
+      }
+      const top = stack[stack.length - 1];
+      if (top.obj) {
+        if (top.phase <= 1) {
+          if (top.phase === 0 && raw[i] === "}") { i++; popFrame(); continue; }
+          const key = readString();
+          if (top.keys.has(key)) return false;
+          top.keys.add(key);
+          ws();
+          if (raw[i] !== ":") return false;
+          i++;
+          top.phase = 2;
+          continue;
+        }
+        if (top.phase === 2) {
+          const c = raw[i];
+          if (c === "{") { i++; stack.push({ obj: true, keys: new Set(), phase: 0 }); continue; }
+          if (c === "[") { i++; stack.push({ obj: false, phase: 0 }); continue; }
+          if (i >= n) return false;
+          scalarAt();
+          top.phase = 3;
+          continue;
+        }
+        if (raw[i] === ",") { i++; top.phase = 1; continue; }
+        if (raw[i] === "}") { i++; popFrame(); continue; }
+        return false;
+      }
+      if (top.phase !== 3) {
+        if (top.phase === 0 && raw[i] === "]") { i++; popFrame(); continue; }
+        const c = raw[i];
+        if (c === "{") { i++; stack.push({ obj: true, keys: new Set(), phase: 0 }); continue; }
+        if (c === "[") { i++; stack.push({ obj: false, phase: 0 }); continue; }
+        if (i >= n) return false;
+        scalarAt();
+        top.phase = 3;
+        continue;
+      }
+      if (raw[i] === ",") { i++; top.phase = 2; continue; }
+      if (raw[i] === "]") { i++; popFrame(); continue; }
+      return false;
+    }
+  } catch (err) {
+    return false;
+  }
+}
+
+function isHidden(name) {
+  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
+}
+
+// Identity-bound read: a {kind:"record"} handle resolves to the stored row only
+// when the caller's scoped criteria — ROWID and the grant's record filter /
+// owner scope compiled into the same query — still returns it. Authorization
+// and the fetch are one snapshot, so a record changed between the check and
+// the read never serves a stale authorization, and another user's row answers
+// with the same denial as one that does not exist. Only the grant's declared
+// fields reach the callee, never a whole record. An editRecordId the handle
+// does not own is denied. A {kind:"element"} handle must prove membership: the
+// subform field of the declared parent form names a child table, the child row
+// exists and names its parent record, and the parent passes the same scoped
+// read; any other (form, subform, rowId) triple is denied.
+function containsHandle(value) {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(containsHandle);
+  if (value.kind === "record" || value.kind === "element") return true;
+  return Object.values(value).some(containsHandle);
+}
+
+async function resolveReadArg(datastore, principal, value, editRecordId) {
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return Promise.all(value.map((item) => resolveReadArg(datastore, principal, item, editRecordId)));
+  if (!value.kind) {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = await resolveReadArg(datastore, principal, value[key], editRecordId);
+    return out;
+  }
+  const deny = () => { throw new RecordAccessError("record access: denied"); };
+  const rowId = (id) => {
+    const text = String(id ?? "");
+    if (!/^[0-9]{1,20}$/.test(text)) deny();
+    return text;
+  };
+  const fetchScopedRow = async (form, recordId, scope) => {
+    const rows = await datastore.query(form, compileCriteria(scope.criteria), 1, 0, "ORDER BY ROWID");
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row || String(row.ROWID ?? "") !== String(recordId)) deny();
+    return row;
+  };
+  if (value.kind === "record" && readForms.includes(value.form) && !isHidden(value.form)) {
+    const recordId = rowId(value.recordId);
+    if (editRecordId !== undefined && String(editRecordId) !== recordId) deny();
+    const scope = authorizeRead(access, principal, value.form, { op: "==", field: "ROWID", value: recordId });
+    const row = await fetchScopedRow(value.form, recordId, scope);
+    const values = scope.fields ? projectFields(row, [...new Set(["ID", "ROWID", ...scope.fields])]) : { ...row };
+    return { __row: true, form: value.form, values };
+  }
+  if (value.kind === "element" && readForms.includes(value.form) && !isHidden(value.form)) {
+    const rowIdValue = rowId(value.rowId);
+    const links = elementLinks[value.form];
+    const link = links && Object.hasOwn(links, value.subform) ? links[value.subform] : undefined;
+    if (!link) deny();
+    const children = await datastore.query(link.table, compileCriteria({ op: "==", field: "ROWID", value: rowIdValue }), 1, 0, "ORDER BY ROWID");
+    const child = Array.isArray(children) ? children[0] : null;
+    if (!child || String(child.ROWID ?? "") !== rowIdValue) deny();
+    const parentId = child[link.parentColumn];
+    if (parentId === undefined || parentId === null || String(parentId) === "") deny();
+    if (editRecordId !== undefined && String(editRecordId) !== String(parentId)) deny();
+    const scope = authorizeRead(access, principal, value.form, { op: "==", field: "ROWID", value: String(parentId) }, value.subform);
+    await fetchScopedRow(value.form, parentId, scope);
+    return { __row: true, form: value.form, values: { ...child } };
+  }
+  deny();
+}
+
+${REQUEST_ARGS_HELPER}
+${liveHelpers('../')}
+
+// Per-request ceilings for one client call, overridable through the
+// environment so a deployment can tighten or relax them without regenerating.
+// A value counts only when the whole trimmed string is an unsigned decimal
+// integer in [1, the cap maximum]; anything else — unset, empty, signed,
+// decimal, exponent, hex, a numeric prefix like "128abc", or an out-of-range
+// number — falls back to the default and logs one sanitized line per process
+// naming the variable (never its raw value), so a bad value can neither
+// weaken nor silently tighten a cap.
+// C2C_CALL_ROW_BUDGET: default 128, maximum 1048576.
+// C2C_CALL_RESPONSE_BYTES: default 262144, maximum 16777216. It measures the
+// serialized JSON response body in UTF-8 bytes only: the status line and the
+// three fixed headers are byte-identical on every reply, so the body is the
+// only part of the response size an attacker can influence — bounding it
+// bounds the whole size oracle.
+// A call that trips either cap gets the same sanitized failure body as any
+// other failed call — the cap is logged, never distinguished on the wire.
+const callCapWarned = Object.create(null);
+function callCap(name, fallback, max) {
+  const raw = typeof process !== "undefined" && process.env ? process.env[name] : undefined;
+  const text = raw === undefined ? "" : String(raw).trim();
+  const n = /^[0-9]+$/.test(text) ? Number(text) : NaN;
+  if (Number.isSafeInteger(n) && n >= 1 && n <= max) return n;
+  if (!callCapWarned[name]) {
+    callCapWarned[name] = true;
+    try {
+      console.log(JSON.stringify({ event: "c2c_client_call_env", name, invalid: true }));
+    } catch (err) {
+      /* a failed log write must never change the response */
+    }
+  }
+  return fallback;
+}
+
+function callRowBudget() {
+  return callCap("C2C_CALL_ROW_BUDGET", 128, 1048576);
+}
+
+function callResponseBytes() {
+  return callCap("C2C_CALL_RESPONSE_BYTES", 262144, 16777216);
+}
+
+// Wraps the live adapter so meter.rows / meter.bytes / meter.forms count the
+// reads the call actually performs. Exceeding the row budget throws a coded
+// error the handler maps to the sanitized failure, and meter.cap records the
+// trip for the log line. Counting itself can never fail a read.
+function countedStore(store, meter) {
+  if (!store || typeof store.query !== "function") return store;
+  const original = store.query.bind(store);
+  const counted = Object.create(store);
+  counted.query = async (form, where, limit, offset, orderBy) => {
+    const rows = await original(form, where, limit, offset, orderBy);
+    try {
+      const list = Array.isArray(rows) ? rows : [];
+      meter.forms.add(form);
+      meter.rows += list.length;
+      meter.bytes += Buffer.byteLength(JSON.stringify(list, jsonReplacer) || "", "utf8");
+    } catch (meterErr) {
+      /* metering never changes what a read returns */
+    }
+    if (meter.rows > callRowBudget()) {
+      if (!meter.cap) meter.cap = "rows";
+      const err = new Error("call read budget exceeded");
+      err.code = "C2C_CALL_BUDGET";
+      throw err;
+    }
+    return rows;
+  };
+  return counted;
+}
+
+// One JSON line per call, after the response is written. Only approved fields:
+// correlation id (minted here, never client-supplied), signature id, read
+// counts, the sanitized outcome code, latency, and the nonce length.
+function logCall(meter) {
+  try {
+    console.log(JSON.stringify({
+      event: "c2c_client_call",
+      cid: meter.cid,
+      fn: ${JSON.stringify(opts.name)},
+      reads: { forms: meter.forms.size, rows: meter.rows, bytes: meter.bytes },
+      status: meter.code,
+      ms: Date.now() - meter.at,
+      nonceLen: meter.nonceLen,
+      ...(meter.cap ? { cap: meter.cap } : {}),
+    }));
+  } catch (err) {
+    /* a failed log write must never change the response */
+  }
+}
+
+export default async function handler(req, res) {
+  const meter = { at: Date.now(), cid: randomUUID(), forms: new Set(), rows: 0, bytes: 0, cap: "", code: "CALL_FAILED", nonceLen: 0 };
+  let live = false;
+  const reply = (status, body) => {
+    meter.code = body && body.ok === true ? "OK" : String((body && body.code) || "CALL_FAILED");
+    if (Buffer.byteLength(JSON.stringify(body, jsonReplacer) || "", "utf8") > callResponseBytes()) {
+      if (!meter.cap) meter.cap = "bytes";
+      meter.code = "CALL_FAILED";
+      status = 500;
+      body = { ok: false, dryRun: !live, code: "CALL_FAILED", error: "request failed" };
+    }
+    send(res, status, body);
+    logCall(meter);
+  };
+  const principal = principalFromRequest(req);
+  if (!principal) {
+    reply(401, READ_DENIAL);
+    return;
+  }
+  const deniedForm = [...readForms, ...writeForms.map((w) => w.form)].find(isHidden);
+  if (deniedForm) {
+    reply(403, READ_DENIAL);
+    return;
+  }
+  const rawBody = req && (typeof req.rawBody === "string" ? req.rawBody : Buffer.isBuffer(req.rawBody) ? req.rawBody.toString("utf8") : null);
+  if (!rawJsonHasUniqueKeys(rawBody)) {
+    reply(403, READ_DENIAL);
+    return;
+  }
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+  meter.nonceLen = typeof body.nonce === "string" ? body.nonce.length : 0;
+  const sentArgs = Array.isArray(body.args) ? body.args : [];
+  const handleStatsValue = { handles: 0, rows: 0, forms: new Set() };
+  const perHandleRows = new Map();
+  for (const arg of sentArgs) handleStats(arg, handleStatsValue, perHandleRows);
+  const bodyKeys = Object.keys(body);
+  const validKeys = bodyKeys.every((key) => key === "nonce" || key === "args" || key === "editRecordId") && new Set(bodyKeys).size === bodyKeys.length;
+  if (!validKeys || !Array.isArray(body.args) || sentArgs.length !== ${opts.params.length} || (body.nonce !== undefined && (typeof body.nonce !== "string" || body.nonce.length === 0 || Buffer.byteLength(body.nonce, "utf8") > 128)) || (body.editRecordId !== undefined && (typeof body.editRecordId !== "string" || body.editRecordId.length === 0 || Buffer.byteLength(body.editRecordId, "utf8") > 256)) || sentArgs.some((arg) => !plainJsonArg(arg, 0)) || handleStatsValue.handles > 32 || handleStatsValue.forms.size > 8 || ![...handleStatsValue.forms].every((name) => readForms.includes(name) || writeForms.some((w) => w.form === name)) || handleStatsValue.rows > 128 || [...perHandleRows.values()].some((n) => n > 16) || Buffer.byteLength(JSON.stringify(sentArgs), "utf8") > 65536) {
+    reply(403, READ_DENIAL);
+    return;
+  }
+  const deploy = deployConfig();
+  live = deploy.mode === "live";
+  // Dispatch must reach the declared name this endpoint was proved for: the
+  // same exact-then-folded lookup the runtime performs, required to land on
+  // the exact registry key.
+  const callName = ${pathArgs}.join(".");
+  const resolvedKey = functions[callName] !== undefined
+    ? callName
+    : Object.keys(functions).find((key) => key.toLowerCase() === callName.toLowerCase());
+  if (resolvedKey !== callName) {
+    reply(403, READ_DENIAL);
+    return;
+  }
+  try {
+    for (const form of readForms) authorizeRead(access, principal, form, { op: "true" });
+    for (const write of writeForms) {
+      if (write.op === "delete") authorizeDelete(access, principal, write.form);
+      else authorizeWrite(access, principal, write.form, {}, undefined, write.op);
+    }
+    const wantsStore = ${needsRows ? 'true' : 'false'} || sentArgs.some(containsHandle);
+    const stored = live && wantsStore ? await liveDatastore() : null;
+    if (live && wantsStore && !stored) {
+      reply(500, { ok: false, dryRun: false, code: "STORE_UNAVAILABLE", error: "live datastore is not configured" });
+      return;
+    }
+    const datastore = stored ? countedStore(stored, meter) : null;
+    const boundArgs = datastore ? await Promise.all(sentArgs.map((arg) => resolveReadArg(datastore, principal, arg, body.editRecordId))) : sentArgs;
+    const runtime = createRuntime({
+      dryRun: !live,
+      appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)},
+      ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
+      access,
+      authorizeScriptWrites: ${writeForms.length ? 'true' : 'false'},
+      functions,
+    });
+    const ctx = runtime.context({
+      record: {},
+      old: { __c2c: "dry-run-old", loaded: false },
+      principal,
+      formNonce: typeof body.nonce === "string" ? body.nonce : undefined,
+      appTimeZone: process.env.C2C_APP_TIMEZONE,
+    });
+    const value = await ctx.shim.thisapp.call(ctx, ${pathArgs}, boundArgs);
+    ${writeForms.length ? 'await ctx.shim.datastore.flush(ctx);' : ''}
+    ${opts.condition
+      ? 'reply(200, { ok: true, nonce: ctx.formNonce ?? null, value: live ? (value ?? null) : null });'
+      : 'reply(200, { ok: true, dryRun: !live, nonce: ctx.formNonce ?? null, value: live ? (value ?? null) : null, ...(live ? {} : { transcript: runtime.transcript }) });'}
+  } catch (err) {
+    const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
+    reply(denied ? 403 : 500, denied ? READ_DENIAL : { ok: false, dryRun: !live, code: "CALL_FAILED", error: "request failed" });
+  }
+}
+`;
+}
+
+/**
+ * The callee module for a compiled server condition: the emitted read-only
+ * `async function` plus a `call` export matching the thisapp registry shape
+ * (`call(ctx, ...args)`), so `ctx.shim.thisapp.call` dispatches to it exactly
+ * like a read-only app function. Not an HTTP route — the generated
+ * `<slug>-call.mjs` endpoint is the only way in.
+ */
+function conditionFunctionModule(opts: { def: ServerConditionDef }): string {
+  return `${banner([
+    `Server condition ${opts.def.name}`,
+    'A client condition the browser cannot evaluate, compiled to a read-only',
+    'server function. Reachable only through the generated client-call',
+    `endpoint (POST /functions/${slug(opts.def.name)}/call); routes.json has no`,
+    'path for it. Parameters are the bound field values the caller sent.',
+  ])}${opts.def.body}
+
+/**
+ * Fail-closed declaration the browser-side coordinator enforces for this
+ * condition. securityRelevant marks a gate over an exposure or mutation;
+ * safeDefault is the only non-deny resolution on an unverified reply — its
+ * absence means no resolution is safe and the handler aborts.
+ */
+export const conditionMeta = ${JSON.stringify(opts.def.meta)};
+
+export async function call(ctx, ...args) {
+  return ${opts.def.name}(ctx, ctx.shim, ...args);
+}
+
+export default async function handler(req, res) {
+  res.writeHead(404, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+  res.end('{"error":"no such endpoint"}');
+}
+`;
+}
+
+function customModule(opts: {
+  app: App;
+  name: string;
+  signature?: string;
+  params: string[];
+  form?: string;
+  body: string;
+  row: '' | 'rec' | 'recs';
+  /** Set only when `api` blocks publish the function over HTTP. `method` is the route verb; `methodNote` is set when no single verb can be written. */
+  api?: { publishers: ApiPublish[]; admins: string[]; method?: string; methodNote?: string };
+  schema?: SchemaPlan;
+}): string {
+  const args = opts.params.join(', ');
+
+  // The query keys are the signature's parameter names as the client writes
+  // them (pre-jsIdent: a `var` parameter is still `?var=` on the wire).
+  const queryParams = rawFnParams(opts.signature);
+  const queryTypes: Record<string, string> = {};
+  for (const p of fnSignatureParams(opts.signature)) {
+    // The handler coerces by the compiler-normalised type so every spelling the
+    // signature accepts (`bool`, `integer`, `collection`, …) behaves identically
+    // on GET and POST. A spelling with no normalised type is passed through so
+    // the handler can 400 naming it rather than binding a raw string.
+    if (queryParams.includes(p.name)) queryTypes[p.name] = normType(p.type) ?? p.type.trim().toLowerCase();
+  }
+  const argsListLogic = `    let argsList;
+    if (req.method === "GET" || req.method === "DELETE") {
+      const queryArgs = requestQueryArgs(req, ${JSON.stringify(queryParams)}, ${JSON.stringify(queryTypes)});
+      if (queryArgs.error) {
+        send(res, 400, { dryRun: !live, error: queryArgs.error });
+        return;
+      }
+      argsList = queryArgs.args;
+    } else {
+      argsList = requestArgs(req, ${opts.params.length});
+    }`;
+
+  const rowLine = opts.row ? 'row: { __row: true, form: formName, values: record },' : 'row: undefined,';
+  const usesConnections = usesZohoConnections(opts.body);
+  const usesGetUrl = usesOutboundGetUrl(opts.body);
+  const usesThis = usesThisapp(opts.body);
+  const usesApp = usesAppUsers(opts.body);
+  const mailFrom = opts.body.includes('shim.mail.send') ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
+  // Function arguments are the function's `input`: `input.<param>` reads
+  // ctx.record[param], so the HTTP args land on the record by name.
+  const bindParams = opts.params.length
+    ? `\n    ${JSON.stringify(opts.params)}.forEach((param, i) => { if (i < argsList.length) record[param] = argsList[i]; });`
+    : '';
+  // The row binding is jsIdent'd (`rec`/`recs` are reserved → `d_rec`/`d_recs`),
+  // and is suppressed when a parameter or a user declaration already owns the name.
+  const rowIdent = opts.row ? jsIdent(opts.row) : '';
+  const rowDecl = rowIdent && !opts.params.includes(rowIdent) && !declaresIdent(opts.body, rowIdent) ? rowIdent : '';
+  const intro = [
+    `Function ${opts.name}`,
+    opts.signature ? `Signature (verbatim): ${opts.signature.replace(/\*\//g, '* /')}` : 'No signature on the IR node.',
+    opts.form ? `Form: ${opts.form}` : 'No form on the IR node.',
+    opts.row === 'rec'
+      ? 'Execution is for each record: `rec` is the current row loaded on the server.'
+      : opts.row === 'recs'
+        ? 'Execution is for a collection of records: `recs` is the selected records; the form name names it.'
+        : 'Not a for-each-record function.',
+  ];
+  const declaration = `export const access = ${accessLiteral(opts.app)};
+export const formName = ${JSON.stringify(opts.form ?? '')};
+
+export async function ${safeFn(opts.name)}(ctx${args ? `, ${args}` : ''}) {
+  const shim = ctx.shim;
+${rowDecl ? `  const ${rowDecl} = ctx.row;\n` : ''}${indent(opts.body)}
+}
+`;
+  if (!opts.api) {
+    // Not an HTTP route. Creator invokes a custom function in-process — from
+    // workflow actions and `thisapp.<fn>()` — so the module keeps the named
+    // export the generated registry lazy-imports and nothing else routes to
+    // it. The default export answers 404 if a request reaches it anyway.
+    return `${banner([
+      ...intro,
+      'Not an HTTP route: no `api <name> { ... }` block publishes this function.',
+      'routes.json has no path for it; only in-process dispatch can call it.',
+    ])}${declaration}
+export default async function handler(req, res) {
+  res.writeHead(404, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+  res.end('{"error":"no such endpoint"}');
+}
+`;
+  }
+  const publishers = opts.api.publishers.map((p) => `${p.api}${p.scope ? ` (scope ${JSON.stringify(p.scope)})` : ' (no scope)'}`).join(', ');
+  const adminNames = JSON.stringify(opts.api.admins);
+  const route = `/functions/${slug(opts.name)}`;
+  const method = opts.api.method;
+  const routeLine = (method ? `${method} ${route}` : (opts.api.methodNote ?? 'No Advanced I/O route is written.')).replace(/\*\//g, '* /');
+  const endpointExport = method
+    ? `export const endpoint = { type: "advancedio", method: ${JSON.stringify(method)}, path: ${JSON.stringify(route)}, dryRun: true };\n\n`
+    : '\n';
+  return `${banner([
+    ...intro,
+    `HTTP-exposed by custom API: ${publishers}.`,
+    opts.api.admins.length
+      ? `Gate order: hidden form, authenticated profile, then Administrator-preset profile (${opts.api.admins.join(', ')}), then authorizeRead of the form.`
+      : 'Gate order: hidden form, authenticated profile, then Administrator-preset profile — none is declared, so every caller is denied.',
+    'functions/c2c-deploy.json mode (or C2C_DEPLOY_MODE) decides: "live" runs the',
+    'function for real; anything else records the transcript without effects.',
+    'The client record, previous row, and subform row are not read. Dry run uses placeholders.',
+    'body.args are plain JSON data, one per parameter: a fetched row, query or binding from the client is null.',
+    'GET and DELETE have no body: each declared parameter is a required query parameter, coerced to its declared type; an unknown key is ignored with a warning.',
+    'POST /functions/' + slug(opts.name),
+    routeLine,
+  ])}import { authorizeRead, createRuntime, jsonReplacer, ${usesGetUrl ? 'outboundGetUrl, ' : ''}principalFromRequest${usesApp ? ', RecordAccessError' : ''} } from "creator-to-catalyst/shims";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+${usesThis ? 'import { functions } from "../thisapp.mjs";\n' : ''}${endpointExport}${declaration}
+function send(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(body, jsonReplacer));
+}
+
+function isHidden(name) {
+  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
+}
+
+const adminProfiles = ${adminNames};
+
+${REQUEST_ARGS_HELPER}
+${liveHelpers('../')}
+${usesConnections ? `\n${connectionsLiveHelpers('../')}\n` : ''}${usesGetUrl ? `\n${outboundLiveHelpers('../')}\n` : ''}${usesApp ? `\n${appUsersHelper(opts.api?.admins ?? administratorProfiles(opts.app))}\n` : ''}
+export default async function handler(req, res) {
+  if (isHidden(formName)) {
+    send(res, 403, { dryRun: true, error: "hidden form" });
+    return;
+  }
+  const principal = principalFromRequest(req);
+  if (!principal?.profile) {
+    send(res, 401, { dryRun: true, error: "authenticated caller required" });
+    return;
+  }
+  if (!adminProfiles.includes(String(principal.profile))) {
+    send(res, 403, { dryRun: true, error: "custom API functions require an Administrator profile" });
+    return;
+  }
+  const deploy = deployConfig();
+  const live = deploy.mode === "live";
+  try {
+    if (formName) authorizeRead(access, principal, formName, { op: "true" });
+${argsListLogic}
+    const datastore = live ? await liveDatastore() : null;${needsDatastore(opts.body) ? `
+    if (live && !datastore) {
+      send(res, 500, { dryRun: false, error: "live datastore is not configured" });
+      return;
+    }` : ''}
+    const record = { __c2c: "dry-run-record", loaded: false };${bindParams}
+    const runtime = createRuntime({
+      dryRun: !live,
+      appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}${mailFrom},
+      ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
+${usesConnections ? '      zohoConnections: await zohoConnections(req, live),\n' : ''}${usesGetUrl ? '      ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(req)) } : {}),\n' : ''}${usesApp ? '      ...(live ? { appUsers: () => appUsers(req) } : {}),\n' : ''}      access,${usesThis ? '\n      functions,' : ''}
+    });
+    const ctx = runtime.context({
+      record,
+      old: { __c2c: "dry-run-old", loaded: false },
+      principal,
+      ${rowLine}
+      appTimeZone: process.env.C2C_APP_TIMEZONE,
+    });
+    const result = await ${safeFn(opts.name)}(ctx, ...argsList);
+    // The transcript holds record values, table names and ops. It is a
+    // dry-run debug view only: no live reply carries it.
+    send(res, 200, live ? { dryRun: false, result: result ?? null } : { dryRun: true, result: result ?? null, transcript: runtime.transcript });
+  } catch (err) {
+    const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
+    send(res, denied ? 403 : 500, { dryRun: !live, error: denied ? err.message : "request failed" });
+  }
+}
+`;
+}
+
+/** One row of functions/thisapp.mjs: the `thisapp.<fn>` dispatch registry. */
+interface ThisappEntry {
+  /** Deluge name as written in the .ds (`"ListGeneration.generate_list"`). */
+  name: string;
+  /** Import specifier relative to functions/ (`"./custom/x.mjs"`). */
+  spec: string;
+  exported: string;
+  params: string[];
+  /** parameter name → form link name, for form-typed parameters. */
+  recordParams: Record<string, string>;
+  /** Form link name for a `for each record` function; empty otherwise. */
+  rowForm: string;
+}
+
+/**
+ * The generated `thisapp.<fn>(args)` registry. Every generated module that
+ * calls `shim.thisapp.call` passes this map to `createRuntime` as
+ * `functions`; the runtime resolves the dotted path against it in-process —
+ * no HTTP call, no separate function. `params` lets `input.<param>` resolve
+ * in the callee, `recordParams` unwraps a `__row` argument to its values,
+ * and `rowForm` binds `rec` on a `for each record` function.
+ */
+function thisappModule(entries: ThisappEntry[]): string {
+  // The callee module is imported lazily, at dispatch time, so a custom
+  // function whose generated module fails to parse (an untranslated
+  // statement, a reserved-word parameter) does not take down every module
+  // that can call `thisapp.<fn>` — only the call itself fails.
+  const seen = new Set<string>();
+  const unique = entries.filter((e) => {
+    // Two functions may share a Deluge name; the first declaration wins,
+    // matching an exact-then-insensitive lookup at runtime.
+    if (seen.has(e.name)) return false;
+    seen.add(e.name);
+    return true;
+  });
+  const map = unique
+    .map((e) => {
+      const extra = [
+        `params: ${JSON.stringify(e.params)}`,
+        Object.keys(e.recordParams).length ? `recordParams: ${JSON.stringify(e.recordParams)}` : '',
+        e.rowForm ? `rowForm: ${JSON.stringify(e.rowForm)}` : '',
+      ]
+        .filter(Boolean)
+        .join(', ');
+      return `  ${JSON.stringify(e.name)}: { call: async (...a) => (await import(${JSON.stringify(e.spec)})).${e.exported}(...a), ${extra} },`;
+    })
+    .join('\n');
+  return `${banner([
+    'thisapp.<fn>(args) registry: every custom function this app generated,',
+    'keyed by its Deluge name. Modules that call shim.thisapp.call pass this',
+    'map to createRuntime; dispatch runs in-process in live mode and is',
+    'recorded in a dry run. Names are looked up exactly, then case-insensitively.',
+    'The callee module is imported on first dispatch: a broken function module',
+    'only fails the call that reaches it.',
+  ])}export const functions = {
+${map}
+};
+`;
+}
+
+/**
+ * The block's single language, when its JSON has exactly one top-level key
+ * that names a language (`Language_Settings` is a settings object, not a
+ * language). Any other shape has no one language to name, so the block is
+ * reported as a whole instead.
+ */
+export function translationLanguage(t: Translation): string | undefined {
+  if (t.data && typeof t.data === 'object' && !Array.isArray(t.data)) {
+    // determinism-allow: only keys.length and keys[0] (the sole key when length is 1) are read -- insertion order never reaches generated output.
+    const keys = Object.keys(t.data);
+    // `Language_Settings` is a settings object, not a language to name.
+    if (keys.length === 1 && keys[0] !== 'Language_Settings') return keys[0];
+  }
+  return undefined;
+}
+
+/**
+ * The parts of a `translation` block with no generated equivalent as an
+ * explicit manual step: string labels land in the client i18n table and the
+ * app language settings land on the model, so only the listed pieces are left
+ * for the user to carry into the new app by hand.
+ */
+function translationWarning(t: Translation, leftovers: string[]): GenerateWarning {
+  const lang = translationLanguage(t);
+  const name = lang !== undefined ? `translation:${lang}` : 'translation block';
+  const head = lang !== undefined ? `Translation "${lang}"` : 'A translation block';
+  const verb = leftovers.length === 1 ? 'is' : 'are';
+  const them = leftovers.length === 1 ? 'it' : 'them';
+  return {
+    construct: 'translation-not-migrated',
+    name,
+    note: `${head}: ${leftovers.join('; ')} ${verb} not migrated — the generated client carries string labels and app language settings, and has no equivalent for ${them}. The generated app renders the default-language text only; carry ${them} into the new app by hand.`,
+  };
+}
+
+/**
+ * One phone/tablet device's per-form setting (e.g. a mobile offline sync
+ * scope of "owned records only" vs "all") as an explicit manual step: the
+ * generated client has no per-device config and always reads the same
+ * scope the web app does, so a narrower device scope is not reproduced.
+ */
+function deviceFormWarning(device: Device, form: Device['forms'][number]): GenerateWarning {
+  const keys = form.properties.map((p) => p.key).sort(compareEnUs);
+  return {
+    construct: 'device-form-setting-not-migrated',
+    name: `${device.device}:${form.name}`,
+    note: `The ${device.device} device sets ${keys.map((k) => `"${k}"`).join(', ')} on form ${form.name}. This is a device-specific setting (for example, which records sync to the device for offline use) with no Catalyst equivalent; the generated client always reads the same scope as the web app. Reproduce the intended scope by hand in the rebuilt mobile app.`,
+  };
+}
+
+function paymentStub(w: Workflow): string {
+  return `${banner([
+    `Payments workflow ${w.name}`,
+    'Not supported: payments are not supported in this version (counted).',
+    'No gateway, sandbox charge, or payment SDK call is generated.',
+  ])}export const support = "not-supported";
+export const reason = "Payments stay Not supported. No gateway is called.";
+export const workflow = ${JSON.stringify({ name: w.name, form: w.form ?? null, event: w.event })};
+
+export default function unsupported() {
+  throw new Error("payments are not supported");
+}
+`;
+}
+
+function safeFn(name: string): string {
+  const s = name.replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1');
+  return /^[$A-Za-z_]/.test(s) ? s : `fn_${s}`;
+}
+
+export interface DateOrderConstraint {
+  earlierField: string;
+  laterField: string;
+  strict: boolean;
+}
+
+export interface FormDateOrderResult {
+  constraints: DateOrderConstraint[];
+  unsupportedRules: string[];
+}
+
+function hasCancelSubmit(stmt: Stmt): boolean {
+  if (stmt.kind === 'cancelSubmit') return true;
+  if (stmt.kind === 'block') return stmt.body.some(hasCancelSubmit);
+  if (stmt.kind === 'if') {
+    if (hasCancelSubmit(stmt.then)) return true;
+    if (stmt.elifs?.some((e) => hasCancelSubmit(e.body))) return true;
+    if (stmt.else && hasCancelSubmit(stmt.else)) return true;
+  }
+  if (stmt.kind === 'try') {
+    return hasCancelSubmit(stmt.body) || (stmt.catchBody ? hasCancelSubmit(stmt.catchBody) : false);
+  }
+  return false;
+}
+
+function unwrapParens(expr: Expr): Expr {
+  let cur = expr;
+  while (cur.kind === 'paren') cur = cur.expr;
+  return cur;
+}
+
+function fieldRefOf(expr: Expr): string | undefined {
+  const u = unwrapParens(expr);
+  if (u.kind === 'member' && u.object.kind === 'name' && u.object.name === 'input') {
+    return u.property;
+  }
+  if (u.kind === 'name') {
+    return u.name;
+  }
+  return undefined;
+}
+
+const NEGATED_COMPARE: Record<string, string> = {
+  '<': '>=',
+  '<=': '>',
+  '>': '<=',
+  '>=': '<',
+  '==': '!=',
+  '=': '!=',
+  '!=': '==',
+};
+
+/**
+ * The logical negation of a guard expression as an Expr. Comparisons flip
+ * (`!(A > B)` is `A <= B`), `&&`/`||` de Morgan, and `!!` cancels; anything
+ * else stays wrapped in `!` so the caller can still count it.
+ */
+function negateTest(test: Expr): Expr {
+  const u = unwrapParens(test);
+  if (u.kind === 'unary' && u.op === '!') return u.expr;
+  if (u.kind === 'binary') {
+    const op = u.op.toLowerCase();
+    if (op === '&&' || op === 'and') {
+      return { kind: 'binary', op: '||', left: negateTest(u.left), right: negateTest(u.right), span: u.span };
+    }
+    if (op === '||' || op === 'or') {
+      return { kind: 'binary', op: '&&', left: negateTest(u.left), right: negateTest(u.right), span: u.span };
+    }
+    const flipped = NEGATED_COMPARE[u.op];
+    if (flipped) return { kind: 'binary', op: flipped, left: u.left, right: u.right, span: u.span };
+  }
+  return { kind: 'unary', op: '!', expr: u, span: u.span };
+}
+
+const MAX_TEST_ANALYSIS_DEPTH = 512;
+
+/** Every date field this expression references at any depth (call args, members, operands). */
+function exprDateRefs(expr: Expr, dateFields: Set<string>, into: Set<string>, depth = 0): void {
+  if (depth >= MAX_TEST_ANALYSIS_DEPTH) return;
+  const u = unwrapParens(expr);
+  const ref = fieldRefOf(u);
+  if (ref && dateFields.has(ref)) into.add(ref);
+  switch (u.kind) {
+    case 'binary':
+      exprDateRefs(u.left, dateFields, into, depth + 1);
+      exprDateRefs(u.right, dateFields, into, depth + 1);
+      return;
+    case 'unary':
+      exprDateRefs(u.expr, dateFields, into, depth + 1);
+      return;
+    case 'call':
+      exprDateRefs(u.callee, dateFields, into, depth + 1);
+      for (const arg of u.args) exprDateRefs(arg, dateFields, into, depth + 1);
+      return;
+    case 'member':
+      exprDateRefs(u.object, dateFields, into, depth + 1);
+      return;
+    case 'index':
+      exprDateRefs(u.object, dateFields, into, depth + 1);
+      exprDateRefs(u.index, dateFields, into, depth + 1);
+      return;
+    case 'list':
+      for (const el of u.elements) exprDateRefs(el, dateFields, into, depth + 1);
+      return;
+    case 'map':
+      for (const entry of u.entries) {
+        exprDateRefs(entry.key, dateFields, into, depth + 1);
+        exprDateRefs(entry.value, dateFields, into, depth + 1);
+      }
+      return;
+    case 'ifExpr':
+      exprDateRefs(u.test, dateFields, into, depth + 1);
+      exprDateRefs(u.then, dateFields, into, depth + 1);
+      if (u.else) exprDateRefs(u.else, dateFields, into, depth + 1);
+      return;
+    case 'criteria':
+      exprDateRefs(u.object, dateFields, into, depth + 1);
+      exprDateRefs(u.criteria, dateFields, into, depth + 1);
+      return;
+    case 'insert':
+      for (const param of u.entries) exprDateRefs(param.value, dateFields, into, depth + 1);
+      return;
+    case 'colonCall':
+      exprDateRefs(u.object, dateFields, into, depth + 1);
+      for (const arg of u.args) exprDateRefs(arg, dateFields, into, depth + 1);
+      return;
+    case 'invokeurl':
+    case 'sendmail':
+    case 'pushnotification':
+      for (const param of u.entries) exprDateRefs(param.value, dateFields, into, depth + 1);
+      return;
+    default:
+      return;
+  }
+}
+
+function isNullLiteral(expr: Expr): boolean {
+  const u = unwrapParens(expr);
+  return u.kind === 'name' && u.name === 'null';
+}
+
+function extractConstraintsFromTest(
+  test: Expr,
+  dateFields: Set<string>,
+  constraints: DateOrderConstraint[],
+  unsupported: string[],
+  depth = 0,
+): void {
+  const produced = constraints.length + unsupported.length;
+  const unwrapped = unwrapParens(test);
+  if (depth >= MAX_TEST_ANALYSIS_DEPTH) {
+    const refs = new Set<string>();
+    exprDateRefs(unwrapped, dateFields, refs);
+    unsupported.push(
+      refs.size
+        ? `date comparison involving ${[...refs].sort().join(', ')}`
+        : 'unparseable validation expression',
+    );
+    return;
+  }
+  if (unwrapped.kind === 'unknown') {
+    const refs = new Set<string>();
+    for (const f of dateFields) {
+      if (new RegExp(`\\b${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(unwrapped.text)) refs.add(f);
+    }
+    unsupported.push(
+      refs.size
+        ? `date comparison involving ${[...refs].sort().join(', ')}`
+        : 'unparseable validation expression',
+    );
+    return;
+  }
+  if (unwrapped.kind === 'unary' && unwrapped.op === '!') {
+    // Recurse on the negation only when it changed the node. negateTest
+    // leaves a `!` on a call, name or any opaque operand wrapped in `!`
+    // again; recursing on that would revisit the same node forever, so such
+    // a leaf is counted by its date references below.
+    const inner = unwrapParens(unwrapped.expr);
+    const negated = unwrapParens(negateTest(inner));
+    if (!(negated.kind === 'unary' && negated.expr === inner)) {
+      extractConstraintsFromTest(negated, dateFields, constraints, unsupported, depth + 1);
+      return;
+    }
+  } else if (unwrapped.kind === 'binary' && (unwrapped.op === '||' || unwrapped.op === 'or')) {
+    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported, depth + 1);
+    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported, depth + 1);
+    return;
+  } else if (unwrapped.kind === 'binary' && (unwrapped.op === '&&' || unwrapped.op === 'and')) {
+    // Both sides of a refusing guard must hold: keep every constraint and
+    // every counted unsupported part, whichever side produced it.
+    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported, depth + 1);
+    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported, depth + 1);
+    return;
+  } else if (unwrapped.kind === 'binary') {
+    const leftField = fieldRefOf(unwrapped.left);
+    const rightField = fieldRefOf(unwrapped.right);
+    const leftIsDate = leftField ? dateFields.has(leftField) : false;
+    const rightIsDate = rightField ? dateFields.has(rightField) : false;
+
+    if (leftIsDate && rightIsDate && leftField && rightField) {
+      if (leftField === rightField) {
+        unsupported.push(`${leftField} ${unwrapped.op} ${rightField}`);
+        return;
+      }
+      switch (unwrapped.op) {
+        case '<=':
+          constraints.push({ earlierField: rightField, laterField: leftField, strict: true });
+          return;
+        case '<':
+          constraints.push({ earlierField: rightField, laterField: leftField, strict: false });
+          return;
+        case '>=':
+          constraints.push({ earlierField: leftField, laterField: rightField, strict: true });
+          return;
+        case '>':
+          constraints.push({ earlierField: leftField, laterField: rightField, strict: false });
+          return;
+        case '==':
+        case '=':
+          constraints.push({ earlierField: leftField, laterField: rightField, strict: true });
+          return;
+        case '!=':
+          unsupported.push(`${leftField} != ${rightField}`);
+          return;
+        default:
+          unsupported.push(`${leftField} ${unwrapped.op} ${rightField}`);
+          return;
+      }
+    } else if (leftIsDate || rightIsDate) {
+      // A null check on a date field narrows presence, not order: it is
+      // neither a constraint nor an unsupported rule.
+      if (
+        (unwrapped.op === '==' || unwrapped.op === '=' || unwrapped.op === '!=') &&
+        (isNullLiteral(unwrapped.left) || isNullLiteral(unwrapped.right))
+      ) {
+        return;
+      }
+      unsupported.push(`date comparison involving ${leftIsDate ? leftField : rightField}`);
+      return;
+    }
+  }
+  // Any guard that references a date field anywhere but produced neither a
+  // constraint nor a reason — a method call, a unary shape, an arithmetic
+  // expression — is counted as a rule the seed could not analyse, never
+  // silently dropped.
+  if (constraints.length + unsupported.length === produced) {
+    const refs = new Set<string>();
+    exprDateRefs(unwrapped, dateFields, refs);
+    if (refs.size) {
+      unsupported.push(`date comparison involving ${[...refs].sort().join(', ')}`);
+    }
+  }
+}
+
+function tableDateFields(app: App, tableName: string): Set<string> {
+  const set = new Set<string>();
+  const form = app.forms.find((f) => f.name === tableName);
+  if (form) {
+    for (const f of form.fields) {
+      const t = normalizeType(f.type);
+      const row = fieldTypeRow(f.type);
+      if (row?.id === 'date' || row?.id === 'date-time' || t === 'date' || t === 'datetime' || t === 'date-time') {
+        set.add(f.name);
+      }
+    }
+    return set;
+  }
+  const plan = schemaOf(app);
+  const childTable = plan.tables.find((t) => t.name === tableName && t.role === 'child');
+  if (childTable?.subform) {
+    const parentForm = app.forms.find((f) => f.name === childTable.subform!.form);
+    const subField = parentForm?.fields.find((f) => f.name === childTable.subform!.field);
+    if (subField) {
+      for (const f of subField.subfields) {
+        const t = normalizeType(f.type);
+        const row = fieldTypeRow(f.type);
+        if (row?.id === 'date' || row?.id === 'date-time' || t === 'date' || t === 'datetime' || t === 'date-time') {
+          set.add(f.name);
+        }
+      }
+    }
+  }
+  return set;
+}
+
+/**
+ * Extract date-ordering constraints and unsupported validation rules from
+ * `on validate` form handlers that run on record add.
+ */
+export function formDateOrderRules(app: App, formName: string): FormDateOrderResult {
+  const dateFields = tableDateFields(app, formName);
+  if (dateFields.size < 2) {
+    return { constraints: [], unsupportedRules: [] };
+  }
+
+  const workflows = handlerGroup(app, formName, 'validate').filter((w) => {
+    const scope = recordScope(w);
+    return scope === 'add' || scope === 'both';
+  });
+
+  const constraints: DateOrderConstraint[] = [];
+  const unsupportedRules: string[] = [];
+
+  const visitStmt = (stmt: Stmt) => {
+    if (stmt.kind === 'if') {
+      if (hasCancelSubmit(stmt.then)) {
+        extractConstraintsFromTest(stmt.test, dateFields, constraints, unsupportedRules);
+      }
+      for (const elif of stmt.elifs ?? []) {
+        if (hasCancelSubmit(elif.body)) {
+          extractConstraintsFromTest(elif.test, dateFields, constraints, unsupportedRules);
+        }
+      }
+      visitStmt(stmt.then);
+      for (const elif of stmt.elifs ?? []) visitStmt(elif.body);
+      if (stmt.else) visitStmt(stmt.else);
+    } else if (stmt.kind === 'block') {
+      for (const inner of stmt.body) visitStmt(inner);
+    } else if (stmt.kind === 'try') {
+      visitStmt(stmt.body);
+      if (stmt.catchBody) visitStmt(stmt.catchBody);
+    } else if (stmt.kind === 'unknown' && /cancel\s+submit/i.test(stmt.text)) {
+      unsupportedRules.push('unparseable validation statement');
+    }
+  };
+
+  for (const w of workflows) {
+    if (!w.deluge?.text?.trim()) continue;
+    let script: Script;
+    try {
+      script = parse(w.deluge.text);
+    } catch {
+      if (w.deluge.text.includes('cancel submit')) {
+        unsupportedRules.push(`unparseable validation workflow ${w.name || formName}`);
+      }
+      continue;
+    }
+    for (const stmt of script.body) {
+      visitStmt(stmt);
+    }
+  }
+
+  const deduped: DateOrderConstraint[] = [];
+  const seen = new Map<string, DateOrderConstraint>();
+  for (const c of constraints) {
+    const key = `${c.earlierField}->${c.laterField}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, c);
+      deduped.push(c);
+    } else if (c.strict && !existing.strict) {
+      existing.strict = true;
+    }
+  }
+
+  return { constraints: deduped, unsupportedRules };
+}

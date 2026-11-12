@@ -1,0 +1,7 @@
+/*
+ * Your theme. Loaded after the generated theme, so anything here wins.
+ * Set the --c2c-* tokens (lib/c2c-ui/styles/tokens.css lists them) or any
+ * Arc token, for example:
+ *
+ *   :root { --c2c-accent: #7747ff; --radius-control: 1rem; }
+ */

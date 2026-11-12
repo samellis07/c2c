@@ -1,0 +1,772 @@
+{
+  "schema": "c2c-analyze/1",
+  "app": {
+    "name": "Library_System_Application",
+    "shape": "B",
+    "dialect": "D2"
+  },
+  "matrix": {
+    "matrix": "feature-matrix-v4",
+    "source": "feature-matrix-v4",
+    "sourceSha256": "1f256aed8a4e4826ce02181864bb3a6b0e60acab97465538fe695e9f178cb26e",
+    "snapshotDate": "2026-10-06",
+    "provisional": false
+  },
+  "features": {
+    "used": [
+      {
+        "id": 1,
+        "area": "Field type",
+        "feature": "Single line",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 3,
+        "area": "Field type",
+        "feature": "Email",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 4,
+        "area": "Field type",
+        "feature": "Phone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 5,
+        "area": "Field type",
+        "feature": "Number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 6,
+        "area": "Field type",
+        "feature": "Decimal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 8,
+        "area": "Field type",
+        "feature": "Currency",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 9,
+        "area": "Field type",
+        "feature": "Date",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 13,
+        "area": "Field type",
+        "feature": "Dropdown",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 16,
+        "area": "Field type",
+        "feature": "Checkbox (multi)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 17,
+        "area": "Field type",
+        "feature": "Lookup single",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 29,
+        "area": "Field type",
+        "feature": "Auto number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 30,
+        "area": "Field type",
+        "feature": "Name (composite)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 32,
+        "area": "Field type",
+        "feature": "Section",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 44,
+        "area": "Field property",
+        "feature": "Mandatory",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 45,
+        "area": "Field property",
+        "feature": "Unique / no duplicates",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 46,
+        "area": "Field property",
+        "feature": "Default value",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 47,
+        "area": "Field property",
+        "feature": "Max length",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 8
+      },
+      {
+        "id": 52,
+        "area": "Field property",
+        "feature": "Personal data / encrypt",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 56,
+        "area": "Field property",
+        "feature": "System record id",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 58,
+        "area": "Report",
+        "feature": "List report",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 77,
+        "area": "Report",
+        "feature": "Record-level custom action",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 81,
+        "area": "Report",
+        "feature": "Import into a report",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 85,
+        "area": "Workflow",
+        "feature": "User input of a field",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 88,
+        "area": "Workflow",
+        "feature": "Validation on form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 89,
+        "area": "Workflow",
+        "feature": "Successful form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 106,
+        "area": "Deluge",
+        "feature": "if / else",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 111,
+        "area": "Deluge",
+        "feature": "Date-time and app timezone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 8
+      },
+      {
+        "id": 114,
+        "area": "Deluge",
+        "feature": "fetch by criteria",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 115,
+        "area": "Deluge",
+        "feature": "update record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 116,
+        "area": "Deluge",
+        "feature": "delete record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 119,
+        "area": "Deluge",
+        "feature": "sendmail",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 127,
+        "area": "Deluge",
+        "feature": "alert",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 128,
+        "area": "Deluge",
+        "feature": "cancel submit",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 137,
+        "area": "Pages and UI",
+        "feature": "Page / dashboard",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 138,
+        "area": "Pages and UI",
+        "feature": "Panel, chart, gauge, search, button on a page",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 143,
+        "area": "Security and portal",
+        "feature": "Roles (data hierarchy)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 144,
+        "area": "Security and portal",
+        "feature": "Profiles (feature permissions)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 146,
+        "area": "Security and portal",
+        "feature": "Customer portal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 163,
+        "area": "Platform",
+        "feature": "Import data (CSV, XLS, JSON)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      }
+    ],
+    "counts": {
+      "supported": 0,
+      "adapter": 39,
+      "needs-assessment": 0,
+      "gap": 0,
+      "blocker": 0
+    },
+    "needsAssessment": [],
+    "scope": [
+      {
+        "feature": "Payments",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Offline",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Form Email",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "C8 dialect",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Cliq bots",
+        "label": "not supported in this version (counted)"
+      },
+      {
+        "feature": "Native mobile / MDM",
+        "label": "not supported in this version (counted; on the roadmap)"
+      },
+      {
+        "feature": "Marketplace publishing",
+        "label": "not applicable (out of scope)"
+      },
+      {
+        "feature": "Zia AI builder",
+        "label": "not applicable (out of scope)"
+      },
+      {
+        "feature": "On-prem Data Bridge",
+        "label": "not applicable (out of scope)"
+      }
+    ],
+    "excluded": 9,
+    "unmapped": [
+      {
+        "area": "Workflow",
+        "feature": "Function on records (not a matrix row)",
+        "uses": 7
+      }
+    ],
+    "notObservable": 47
+  },
+  "fieldGaps": [
+    {
+      "matrixId": "auto-number",
+      "count": 4,
+      "reason": "ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.",
+      "fields": [
+        {
+          "form": "Book",
+          "field": "Book_ID"
+        },
+        {
+          "form": "Member_Info",
+          "field": "Auto_Number"
+        },
+        {
+          "form": "Book_Transaction",
+          "field": "Trans"
+        },
+        {
+          "form": "Staff_Members",
+          "field": "Staff_ID"
+        }
+      ]
+    },
+    {
+      "matrixId": "checkbox-multi",
+      "count": 1,
+      "reason": "The .ds token checkboxes is a list, not a boolean. Stored as text holding a JSON list. values = Form.Field is a multi lookup (junction table).",
+      "fields": [
+        {
+          "form": "Book",
+          "field": "Mark_as_Featured"
+        }
+      ]
+    },
+    {
+      "matrixId": "currency",
+      "count": 1,
+      "reason": "Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "Book_Transaction",
+          "field": "Fine_Amount"
+        }
+      ]
+    },
+    {
+      "matrixId": "decimal",
+      "count": 1,
+      "reason": "Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "Member_Info",
+          "field": "Max_Books_Allowed"
+        }
+      ]
+    },
+    {
+      "matrixId": "email",
+      "count": 2,
+      "reason": "There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
+      "fields": [
+        {
+          "form": "Member_Info",
+          "field": "Email"
+        },
+        {
+          "form": "Staff_Members",
+          "field": "Staff_Email"
+        }
+      ]
+    },
+    {
+      "matrixId": "lookup-single",
+      "count": 2,
+      "reason": "Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "fields": [
+        {
+          "form": "Book_Transaction",
+          "field": "Member"
+        },
+        {
+          "form": "Book_Transaction",
+          "field": "Book"
+        }
+      ]
+    },
+    {
+      "matrixId": "phone",
+      "count": 2,
+      "reason": "There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
+      "fields": [
+        {
+          "form": "Member_Info",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "Staff_Members",
+          "field": "Phone_Number"
+        }
+      ]
+    }
+  ],
+  "hiddenParts": [
+    {
+      "location": "report Book_by_Genre",
+      "reason": "the kanban view is not drawn"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<search>: ZML <search> has no generated component"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<searchbar>: ZML <searchbar> has no generated component"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<searchbutton>: ZML <searchbutton> has no generated component"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<button>: the VIEW button opens without its values (View all Books)"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<text>: the value distinctcount is not generated yet"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<button>: the View button opens without its values (Overdue transactions)"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<button>: the Staff Activity Log button opens without its values (Staff Activity Log)"
+    }
+  ],
+  "residuals": [
+    {
+      "id": "field-property:Staff_Members.Phone_Number property defaultcountry",
+      "kind": "field-property",
+      "construct": "Staff_Members.Phone_Number property defaultcountry",
+      "form": "Staff_Members",
+      "field": "Phone_Number",
+      "property": "property defaultcountry",
+      "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
+      "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.",
+      "stepSource": "specific"
+    }
+  ],
+  "deluge": {
+    "units": 14,
+    "statements": 65,
+    "translated": 5,
+    "shimmed": 60,
+    "todo": 10,
+    "todoLocations": [
+      {
+        "location": "field privacy flags",
+        "construct": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection needed for Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "report Book_Report block options",
+        "construct": "Report \"Book_Report\" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46."
+      },
+      {
+        "location": "report Book_by_Genre block options",
+        "construct": "Report \"Book_by_Genre\" has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music."
+      },
+      {
+        "location": "report All_Member_Infos block options",
+        "construct": "Report \"All_Member_Infos\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world."
+      },
+      {
+        "location": "report All_Book_Transactions block options",
+        "construct": "Report \"All_Book_Transactions\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world."
+      },
+      {
+        "location": "report All_Staff_Members block options",
+        "construct": "Report \"All_Staff_Members\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world."
+      },
+      {
+        "location": "page DashBoard.Book_Report",
+        "construct": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+        "scope": "ui"
+      },
+      {
+        "location": "page DashBoard.Book_Report",
+        "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+        "scope": "ui",
+        "manualStep": "On page \"DashBoard\", wire click parameters \"View all Books\" to the generated <button> \"Book_Report\" click handler."
+      },
+      {
+        "location": "page DashBoard.All_Book_Transactions",
+        "construct": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
+        "scope": "ui",
+        "manualStep": "On page \"DashBoard\", wire click parameters \"Borrowed Book\" to the generated <text> \"All_Book_Transactions\" click handler."
+      },
+      {
+        "location": "page DashBoard.All_Book_Transactions",
+        "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+        "scope": "ui",
+        "manualStep": "On page \"DashBoard\", wire click parameters \"Overdue transactions\" to the generated <button> \"All_Book_Transactions\" click handler."
+      }
+    ]
+  },
+  "blockers": [
+    {
+      "kind": "deluge",
+      "label": "silent drop field-property: Staff_Members.Phone_Number property defaultcountry",
+      "detail": "Field Staff_Members.Phone_Number property defaultcountry is not in the generated field. Add one: either emit the setting or record the manual step.",
+      "scope": "app",
+      "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected."
+    },
+    {
+      "kind": "ui",
+      "label": "field privacy flags",
+      "detail": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection needed for Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "page DashBoard.All_Book_Transactions",
+      "detail": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+      "scope": "ui",
+      "manualStep": "On page \"DashBoard\", wire click parameters \"Overdue transactions\" to the generated <button> \"All_Book_Transactions\" click handler."
+    },
+    {
+      "kind": "ui",
+      "label": "page DashBoard.All_Book_Transactions",
+      "detail": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
+      "scope": "ui",
+      "manualStep": "On page \"DashBoard\", wire click parameters \"Borrowed Book\" to the generated <text> \"All_Book_Transactions\" click handler."
+    },
+    {
+      "kind": "ui",
+      "label": "page DashBoard.Book_Report",
+      "detail": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+      "scope": "ui",
+      "manualStep": "On page \"DashBoard\", wire click parameters \"View all Books\" to the generated <button> \"Book_Report\" click handler."
+    },
+    {
+      "kind": "ui",
+      "label": "page DashBoard.Book_Report",
+      "detail": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Book_Transactions block options",
+      "detail": "Report \"All_Book_Transactions\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world."
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Member_Infos block options",
+      "detail": "Report \"All_Member_Infos\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world."
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Staff_Members block options",
+      "detail": "Report \"All_Staff_Members\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world."
+    },
+    {
+      "kind": "ui",
+      "label": "report Book_by_Genre block options",
+      "detail": "Report \"Book_by_Genre\" has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music."
+    },
+    {
+      "kind": "ui",
+      "label": "report Book_Report block options",
+      "detail": "Report \"Book_Report\" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46."
+    }
+  ],
+  "determinism": {
+    "deterministic": false,
+    "todoCount": 10,
+    "fillLockEntries": 0,
+    "todoKinds": [
+      {
+        "construct": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"All_Book_Transactions\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"All_Member_Infos\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"All_Staff_Members\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Book_by_Genre\" has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.",
+        "count": 1
+      },
+      {
+        "construct": "Report \"Book_Report\" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
+        "count": 1
+      },
+      {
+        "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
+        "count": 1
+      },
+      {
+        "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
+        "count": 1
+      },
+      {
+        "construct": "ZML <search> \"Book_Report\" criteria \"Title.contains(input.searchString)\" is not generated; wire the search filter by hand",
+        "count": 1
+      },
+      {
+        "construct": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
+        "count": 1
+      }
+    ],
+    "uiTodoCount": 10,
+    "silentDrops": 1,
+    "silentDropKinds": [
+      {
+        "construct": "field-property",
+        "count": 1
+      }
+    ]
+  },
+  "score": {
+    "readiness": 78,
+    "band": "needs-work",
+    "features": 75,
+    "deluge": 82
+  },
+  "effort": {
+    "estimate": true,
+    "hours": 86,
+    "weights": {
+      "hoursPerFeature": {
+        "supported": 0,
+        "adapter": 2,
+        "needs-assessment": 4,
+        "gap": 8,
+        "blocker": 16
+      },
+      "hoursPerShimmedStatement": 0.1,
+      "hoursPerTodoStatement": 1,
+      "hoursPerSchemaTable": 0.5,
+      "hoursPerTodoForm": 4,
+      "hoursPerTodoReport": 4,
+      "hoursPerTodoPage": 8,
+      "hoursPerCronJob": 1
+    }
+  },
+  "catalyst": {
+    "tables": 4,
+    "nosqlCollections": 0,
+    "delugeUnits": 14,
+    "functions": 1,
+    "cronJobs": 0,
+    "slatePages": 10,
+    "cost": "not estimated"
+  }
+}

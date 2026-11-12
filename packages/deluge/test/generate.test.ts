@@ -1,0 +1,9880 @@
+import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { Readable } from 'node:stream';
+import vm from 'node:vm';
+import { test } from 'node:test';
+import { deriveIr, emptyApp, headerWords, isGroup, parse, parseFile, parseProject, sig, walkStatements, type App, type BlueprintTransition, type FunctionDef, type Property, type PropertyBlock, type Workflow } from '../../core/src/index.js';
+import { createRuntime, LIMITS } from '../../shims/src/runtime.js';
+import { RecordAccessError } from '../../shims/src/access.js';
+import { mockDatastore } from '../../shims/test/zcql-mock.js';
+import { aioLibraryModule, conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, FORM_EVENT_SERVER_UNINVOKED, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
+import { mutatesParameters } from '../src/param-mutation.js';
+
+function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
+
+const Z = { start: 0, end: 0 };
+
+function workflow(partial: Partial<Workflow> & Pick<Workflow, 'name' | 'event'>): Workflow {
+  return { deluge: null, properties: [], span: Z, ...partial };
+}
+
+function app(partial: Partial<App>): App {
+  return { ...emptyApp('empty'), name: 'Demo_App', ...partial };
+}
+
+function check(source: string, name: string): void {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-deluge-'));
+  const file = join(dir, name);
+  writeFileSync(file, source);
+  const ran = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  assert.equal(ran.status, 0, ran.stderr || ran.stdout);
+}
+
+test('handlers embed the IR time zone and still honour C2C_APP_TIMEZONE', () => {
+  const g = generate(
+    app({
+      settings: [{ key: 'time zone', value: '"Asia/Kolkata"', span: Z }],
+      workflows: [
+        workflow({
+          name: 'On add',
+          form: 'Orders',
+          event: 'on success',
+          deluge: { text: 'x = zoho.currentdate;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
+  assert.ok(server);
+  assert.match(stripComments(server.source), /settingsTimeZone: "Asia\/Kolkata"/);
+  assert.match(stripComments(server.source), /C2C_APP_TIMEZONE/);
+  const report = g.files.find((f) => f.path === 'migration-report.json');
+  assert.ok(report);
+  const sized = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'On add',
+          form: 'Orders',
+          event: 'on success',
+          deluge: { text: 'n = rows.get("contacts").size();', span: Z },
+        }),
+      ],
+    }),
+  );
+  const sizedReport = JSON.parse(sized.files.find((f) => f.path === 'migration-report.json')!.source) as {
+    untranslated: { construct: string }[];
+  };
+  assert.equal(sizedReport.untranslated.some((row) => row.construct === 'method:get'), false);
+  assert.equal(sizedReport.untranslated.some((row) => row.construct === 'method:size'), false);
+  const sizedServer = sized.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
+  assert.ok(sizedServer);
+  assert.match(stripComments(sizedServer.source), /shim\.list\.size\(shim\.list\.get\(rows, "contacts"\)\)/);
+});
+
+test('AIO handlers share one app library and import its common request helpers', () => {
+  const g = generate(app({
+    workflows: [
+      workflow({ name: 'Success A', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;', span: Z } }),
+      workflow({ name: 'Success B', form: 'Invoices', event: 'on success', deluge: { text: 'x = 2;', span: Z } }),
+    ],
+  }));
+  const libs = g.files.filter((file) => file.path === 'functions/aio/_lib.mjs');
+  assert.equal(libs.length, 1);
+  assert.match(libs[0].source, /export function requestRowId/);
+  const handlers = g.files.filter((file) => file.path.startsWith('functions/aio/') && file.path.endsWith('/on-success.mjs'));
+  assert.equal(handlers.length, 2);
+  for (const handler of handlers) {
+    assert.match(handler.source, /from "\.\.\/_lib\.mjs"/);
+    assert.doesNotMatch(handler.source, /function requestRowId\(/);
+  }
+});
+
+test('generated function response helpers set nosniff and no-store on every status path', () => {
+  const g = generate(app({ workflows: [workflow({ name: 'Success', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;', span: Z } })] }));
+  const sources = g.files.filter((file) => file.path.startsWith('functions/') && /writeHead\(/.test(file.source)).map((file) => file.source);
+  assert.ok(sources.length > 0);
+  for (const source of sources) {
+    for (const line of source.split('\n').filter((row) => /writeHead\(/.test(row))) {
+      assert.match(line, /"X-Content-Type-Options": "nosniff"/);
+      assert.match(line, /"Cache-Control": "no-store"/);
+    }
+  }
+});
+
+test('every generator writeHead template sets nosniff and no-store, including 401, 403, 400 and 404', () => {
+  const source = readFileSync(new URL('../src/generate.js', import.meta.url), 'utf8');
+  const lines = source.split('\n').filter((row) => /res\.writeHead\(/.test(row));
+  assert.ok(lines.length >= 11, `expected every template writeHead, found ${lines.length}`);
+  for (const line of lines) {
+    assert.match(line, /"X-Content-Type-Options": "nosniff"/, line);
+    assert.match(line, /"Cache-Control": "no-store"/, line);
+  }
+  assert.ok(lines.filter((line) => /writeHead\(401\b/.test(line)).length >= 1, '401 caller gate');
+  assert.ok(lines.filter((line) => /writeHead\(403\b|writeHead\(denied \? 403\b/.test(line)).length >= 2, '403 paths');
+  assert.ok(lines.filter((line) => /writeHead\(400\b/.test(line)).length >= 2, '400 paths');
+  assert.ok(lines.filter((line) => /writeHead\(404\b/.test(line)).length >= 1, '404 path');
+});
+
+test('generated handlers include schema-derived multi-lookup hydration metadata', () => {
+  const parsed = deriveIr(parse(`application "Multi Lookup"
+{
+form Author
+{
+Name
+(
+type = text
+)
+}
+form Team
+{
+Members
+(
+type = list
+values = Author.ID
+)
+}
+}`));
+  const generated = generate({
+    ...parsed,
+    workflows: [workflow({ name: 'On Success', form: 'Team', event: 'on success', deluge: { text: 'x = 1;', span: Z } })],
+  });
+  const sources = generated.files.map((file) => file.source).join('\n');
+  assert.match(sources, /multiLookups: \{"Team":\{"Members":\{"table":"Team__Members","parentColumn":"parent_id","valueColumn":"Members","orderColumn":"row_order"\}\}\}/);
+});
+
+test('form events become Advanced I/O handlers and client modules', () => {
+  const g = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'On add',
+          form: 'Orders',
+          event: 'on validate',
+          recordEvent: 'on add',
+          deluge: { text: 'if(input.A == 1) { alert "x"; }\nx = 1;', span: { start: 40, end: 80 } },
+          fieldRules: [{ condition: 'input.A == 1', actions: [{ action: 'hide', fields: ['Secret'] }], span: Z }],
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/orders/on-validate.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-validate.mjs');
+  assert.ok(server);
+  assert.ok(client);
+  assert.match(stripComments(server.source), /advancedio/);
+  assert.match(stripComments(server.source), /row_inserted/);
+  assert.match(stripComments(server.source), /x = 1/);
+  assert.doesNotMatch(stripComments(server.source), /cancelSubmit|"alert"/);
+  assert.doesNotMatch(stripComments(server.source), /body\.old/);
+  assert.match(stripComments(server.source), /dry-run-old/);
+  assert.match(stripComments(client.source), /"alert"/);
+  assert.match(stripComments(client.source), /"hide"/);
+  assert.match(stripComments(server.source), /C2C_APP_TIMEZONE/);
+  assert.match(stripComments(server.source), /dryRun: true/);
+  assert.match(stripComments(server.source), /authorizeWrite/);
+  assert.match(stripComments(server.source), /op === "view"/);
+  assert.match(stripComments(server.source), /hidden form/);
+  assert.doesNotMatch(stripComments(server.source), /\bfetch\s*\(/);
+  check(server.source, 'aio.mjs');
+  check(client.source, 'client.mjs');
+  const shifted = g.todos.filter((t) => t.construct !== 'client-condition-uses-server');
+  for (const item of shifted) assert.ok(item.start >= 40);
+});
+
+test('a client condition that reads the server gets a prefetch endpoint', () => {
+  const g = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'On load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: { text: 'if (Orders[Status == "Open"].count() > 0) { alert "open"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
+  assert.ok(prefetch);
+  assert.ok(client);
+  assert.match(stripComments(prefetch.source), /POST \/forms\/Orders\/load\/prefetch/);
+  assert.match(stripComments(prefetch.source), /return slots/);
+  assert.match(stripComments(prefetch.source), /shim\.datastore\.aggregate/);
+  assert.match(stripComments(client.source), /shim\.client\.prefetch/);
+  assert.match(stripComments(client.source), /slots\["c0"\]/);
+  assert.match(stripComments(client.source), /shim\.client\.touch/);
+  assert.match(stripComments(client.source), /prefetched\.ok !== true/);
+  assert.match(stripComments(client.source), /client action blocked/);
+  assert.match(stripComments(prefetch.source), /principalFromRequest/);
+  assert.match(stripComments(prefetch.source), /authenticated caller required/);
+  assert.match(stripComments(prefetch.source), /RECORD_ACCESS_DENIED/);
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  check(prefetch.source, 'prefetch.mjs');
+  check(client.source, 'client-prefetch.mjs');
+});
+
+test('a prefetch that replays a self-assigned binding still honours the caller read policy', async () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Name')]), plainForm('Products', [plainField('Title')])],
+      profiles: [
+        {
+          name: 'Staff',
+          type: 'Users_Permissions',
+          properties: [],
+          modules: [
+            {
+              component: 'Products',
+              properties: [{ key: 'enabled', value: 'viewall', span: Z }],
+              reports: [],
+              fields: [],
+              span: Z,
+            },
+          ],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'On load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: { text: 'n = 0;\nn = n + 1;\nfor each r in Orders[ID != 0] sort by ID asc range from 1 to n { alert r.Name; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  assert.ok(prefetch);
+  // The replayed binding and the ranged query run inside the same gated prefetch:
+  // a caller with no Orders grant is refused, not served a partial snapshot.
+  const mod = await loadModule(prefetch.source, 'prefetch-denied.mjs');
+  const denied = await invoke(mod.default, { user: { profile: 'Staff', loginUser: 's@t' }, body: { record: {} } });
+  assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  assert.match(String(denied.body.error), /cannot view Orders/);
+});
+
+function grantModule(component: string, enabled: string): App['profiles'][number]['modules'][number] {
+  return { component, properties: [{ key: 'enabled', value: enabled, span: Z }], reports: [], fields: [], span: Z };
+}
+
+test('a form prefetch enforces the form grant before any read: an ungranted profile gets 403 and no transcript', async () => {
+  // Restaurants shape: Cashier may read Menu but has no grant on
+  // Add_Restaurant_Details; Kitchen Staff may read Menu but has no grant on
+  // New_Order. Before, both prefetches answered 200 with slots and a transcript.
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Add_Restaurant_Details', [plainField('Name')]),
+        plainForm('New_Order', [plainField('Item')]),
+        plainForm('Menu', [plainField('Title')]),
+      ],
+      profiles: [
+        { name: 'Cashier', type: 'Users_Permissions', properties: [], modules: [grantModule('Menu', 'viewall'), grantModule('New_Order', 'create, viewall')], span: Z },
+        { name: 'Kitchen Staff', type: 'Users_Permissions', properties: [], modules: [grantModule('Menu', 'viewall')], span: Z },
+        { name: 'Manager', type: 'Users_Permissions', properties: [], modules: [grantModule('Menu', 'viewall'), grantModule('Add_Restaurant_Details', 'create, viewall')], span: Z },
+      ],
+      workflows: [
+        workflow({
+          name: 'Check name',
+          form: 'Add_Restaurant_Details',
+          event: 'on validate',
+          deluge: { text: 'if (Menu[Title == Name].count() > 0) { alert "taken"; }', span: Z },
+        }),
+        workflow({
+          name: 'Pick item',
+          form: 'New_Order',
+          event: 'on user input of Item',
+          deluge: { text: 'if (Menu[Title == Item].count() > 0) { alert "on menu"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const validate = g.files.find((f) => f.path === 'functions/aio/add-restaurant-details/on-validate-prefetch.mjs');
+  const input = g.files.find((f) => f.path.startsWith('functions/aio/new-order/') && f.path.endsWith('-prefetch.mjs'));
+  assert.ok(validate && input, g.files.map((f) => f.path).join('\n'));
+  for (const pre of [validate, input]) {
+    const src = stripComments(pre.source);
+    assert.match(src, /if \(isHidden\(formName\)\)/);
+    // The grant check runs before the runtime exists, so nothing is executed.
+    const grantAt = src.indexOf('authorizeWrite(access, principal, formName, {})');
+    assert.ok(grantAt >= 0 && grantAt < src.indexOf('createRuntime({'));
+    check(pre.source, 'form-grant-prefetch.mjs');
+  }
+  const validateMod = await loadModule(validate.source, 'validate-prefetch.mjs');
+  const inputMod = await loadModule(input.source, 'input-prefetch.mjs');
+  const cashier = await invoke(validateMod.default, { user: { profile: 'Cashier', loginUser: 'c@t' }, body: { record: { Name: 'x' } } });
+  assert.equal(cashier.status, 403, JSON.stringify(cashier.body));
+  assert.match(String(cashier.body.error), /cannot view Add_Restaurant_Details/);
+  assert.equal('transcript' in cashier.body, false);
+  assert.equal(cashier.body.slots, null);
+  const kitchen = await invoke(inputMod.default, { user: { profile: 'Kitchen Staff', loginUser: 'k@t' }, body: { record: { Item: 'x' } } });
+  assert.equal(kitchen.status, 403, JSON.stringify(kitchen.body));
+  assert.equal('transcript' in kitchen.body, false);
+  assert.equal(kitchen.body.slots, null);
+  // Granted profiles still get their slots.
+  const manager = await invoke(validateMod.default, { user: { profile: 'Manager', loginUser: 'm@t' }, body: { record: { Name: 'x' } } });
+  assert.equal(manager.status, 200, JSON.stringify(manager.body));
+  assert.ok(manager.body.slots && typeof manager.body.slots === 'object');
+  const cashierOrder = await invoke(inputMod.default, { user: { profile: 'Cashier', loginUser: 'c@t' }, body: { record: { Item: 'x' } } });
+  assert.equal(cashierOrder.status, 200, JSON.stringify(cashierOrder.body));
+  const anon = await invoke(validateMod.default, { body: { record: {} } });
+  assert.equal(anon.status, 401);
+});
+
+test('bare field names in a workflow body read input on both sides', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Status'), plainField('Total')])],
+      workflows: [
+        workflow({
+          name: 'On validate',
+          form: 'Orders',
+          event: 'on validate',
+          deluge: { text: 'if (Status == "Open") { y = Total; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/orders/on-validate.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-validate.mjs');
+  assert.ok(server);
+  assert.ok(client);
+  for (const m of [server, client]) {
+    assert.match(stripComments(m.source), /if \(\(shim\.input\.get\(ctx, "Status"\) == "Open"\)\)/);
+    assert.match(stripComments(m.source), /var y = shim\.input\.get\(ctx, "Total"\)/);
+    check(m.source, 'body-input.mjs');
+  }
+  // A local of the same name still shadows the field.
+  const shadowed = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Status')])],
+      workflows: [
+        workflow({
+          name: 'On validate',
+          form: 'Orders',
+          event: 'on validate',
+          deluge: { text: 'Status = "x";\nif (Status == "x") { y = 1; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const shadowServer = shadowed.files.find((f) => f.path === 'functions/aio/orders/on-validate.mjs');
+  assert.ok(shadowServer);
+  assert.match(stripComments(shadowServer.source), /var Status = "x";/);
+  assert.match(stripComments(shadowServer.source), /if \(\(Status == "x"\)\)/);
+  assert.doesNotMatch(stripComments(shadowServer.source), /shim\.input\.get\(ctx, "Status"\)/);
+});
+
+test('bare field names in a schedule body read the job record', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Bookings', [plainField('Official_Email')])],
+      workflows: [
+        workflow({
+          name: 'Remind',
+          type: 'schedule',
+          form: 'Bookings',
+          event: 'schedule',
+          deluge: { text: 'sendmail ( to : Official_Email );', span: Z },
+        }),
+      ],
+    }),
+  );
+  const job = g.files.find((f) => f.path === 'functions/job/remind.mjs');
+  assert.ok(job);
+  assert.match(stripComments(job.source), /shim\.input\.get\(ctx, "Official_Email"\)/);
+  check(job.source, 'job-input.mjs');
+});
+
+test(':ui and openUrl args that need the server go through prefetch slots', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Status'), plainField('Items', 'grid', ['Item'])])],
+      workflows: [
+        workflow({
+          name: 'add row',
+          form: 'Orders',
+          event: 'on add row of Items',
+          deluge: { text: 'all = Orders[Status == "Open"].ID.getAll();\nrow.Items:ui.add(all);\nopenUrl ("http://x/" + all.size());', span: Z },
+        }),
+      ],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-add-row-of-items.mjs');
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-add-row-of-items-prefetch.mjs');
+  assert.ok(client);
+  assert.ok(prefetch);
+  assert.match(stripComments(client.source), /args: \[slots\["c0"\]\]/);
+  assert.match(stripComments(client.source), /op: "openUrl", args: \[slots\["c1"\]\]/);
+  assert.match(stripComments(prefetch.source), /var all = await shim\.datastore\.column/);
+  assert.doesNotMatch(stripComments(client.source), /\ball\b[^"]/);
+  check(client.source, 'client-ui-args.mjs');
+  check(prefetch.source, 'prefetch-ui-args.mjs');
+});
+
+test('a client condition reading a loop-scoped binding is a row map, not a free prefetch name', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Status'), plainField('Code')])],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'for each r in Orders[Status == "Open"] {\n  q = Items[Code == r.Code];\n  if (q.count() > 0) { info "hit"; }\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  assert.ok(client);
+  assert.ok(prefetch);
+  const pre = stripComments(prefetch.source);
+  const loopAt = pre.indexOf('for (var r of');
+  assert.ok(loopAt > 0);
+  // `q` is bound inside the loop. It is not a free name beside the collection slot.
+  assert.equal(pre.slice(0, loopAt).includes('var q'), false);
+  // The keyed fetch rebinds to the row's fetched rows; `q.count()` aggregates them in memory.
+  assert.match(pre, /var q = \(norm_c\d+_\d+ != null && res_c\d+_\d+\.has/);
+  assert.match(pre, /shim\.list\.aggregate\(q, "count", undefined\)/);
+  assert.match(pre, /shim\.record\.get\(r, "Code"\)/);
+  assert.match(stripComments(client.source), /slots\["c\d+"\]\[shim\.record\.get\(r, "ID"\)\]/);
+  assert.match(stripComments(client.source), /"info"/);
+  assert.doesNotMatch(stripComments(client.source), /client-condition-uses-server/);
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  check(client.source, 'client-loop-map.mjs');
+  check(prefetch.source, 'prefetch-loop-map.mjs');
+});
+
+test('a prefetched row map returns the second form field for each fetched row, and null when nothing matches', async () => {
+  const script = [
+    'for each rec in Orders[Status == "Open"] {',
+    '  alert Customers[Code == rec.Code].Name;',
+    '  hide input.Secret;',
+    '  openUrl("https://example.test/" + rec.Code, "same window");',
+    '}',
+  ].join('\n');
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Customers', [plainField('Code'), plainField('Name')]),
+      ],
+      workflows: [workflow({ name: 'on load', form: 'Orders', event: 'on load', deluge: { text: script, span: Z } })],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  assert.ok(client && prefetch);
+  assert.equal(g.todos.some((t) => t.construct === 'client-loop-uses-server' || t.construct === 'client-condition-uses-server'), false);
+  check(client.source, 'row-map-client.mjs');
+  check(prefetch.source, 'row-map-prefetch.mjs');
+  const pre = (await loadModule(prefetch.source, 'row-map-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const cmod = (await loadModule(client.source, 'row-map-client.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: unknown; args?: unknown[] }[]>;
+  };
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+        { ROWID: '3', Status: 'Open', Code: 'C' },
+        { ROWID: '4', Status: 'Closed', Code: 'Z' },
+      ],
+      Customers: [
+        { ROWID: '10', Code: 'A', Name: 'Ada' },
+        { ROWID: '20', Code: 'B', Name: 'Bea' },
+        { ROWID: '40', Code: 'Z', Name: 'Zoe' },
+      ],
+    },
+    clientPrefetch: async (_path, nonce) => ({ nonce, slots: await pre.prefetch(seeded.context({ record: {} })) }),
+  });
+  const actions = await cmod.clientActions(seeded.context({ record: {} }));
+  assert.deepEqual(
+    actions.map((a) => a.op),
+    ['alert', 'hide', 'openUrl', 'alert', 'hide', 'openUrl', 'alert', 'hide', 'openUrl'],
+  );
+  assert.deepEqual(
+    actions.filter((a) => a.op === 'alert').map((a) => a.message),
+    ['Ada', 'Bea', null],
+  );
+  assert.deepEqual(
+    actions.filter((a) => a.op === 'openUrl').map((a) => a.args?.[0]),
+    ['https://example.test/A', 'https://example.test/B', 'https://example.test/C'],
+  );
+
+  const branched = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Customers', [plainField('Code'), plainField('Name')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'for each rec in Orders[Status == "Open"] {\n  if (Customers[Code == rec.Code].Name == "Ada") { alert rec.Code; }\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  const ifClient = branched.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+  const ifPre = branched.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!;
+  assert.equal(branched.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const ifPrefetch = (await loadModule(ifPre.source, 'if-map-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const ifMod = (await loadModule(ifClient.source, 'if-map-client.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: unknown }[]>;
+  };
+  const ifRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+        { ROWID: '3', Status: 'Open', Code: 'C' },
+      ],
+      Customers: [
+        { ROWID: '10', Code: 'A', Name: 'Ada' },
+        { ROWID: '20', Code: 'B', Name: 'Bea' },
+      ],
+    },
+    clientPrefetch: async (_path, nonce) => ({ nonce, slots: await ifPrefetch.prefetch(ifRuntime.context({ record: {} })) }),
+  });
+  const ifActions = await ifMod.clientActions(ifRuntime.context({ record: {} }));
+  assert.deepEqual(ifActions.map((a) => a.message), ['A']);
+});
+
+test('batched lookupMap prefetches 2000 rows with 3 distinct keys in constant datastore queries and satisfies access probes', async () => {
+  const script = [
+    'for each rec in Orders[Status == "Open"] {',
+    '  alert Customers[Code == rec.Code].Name;',
+    '  hide input.Secret;',
+    '  openUrl("https://example.test/" + rec.Code, "same window");',
+    '}',
+  ].join('\n');
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Customers', [plainField('Code'), plainField('Name')]),
+      ],
+      workflows: [workflow({ name: 'on load', form: 'Orders', event: 'on load', deluge: { text: script, span: Z } })],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  assert.ok(client && prefetch);
+  check(client.source, 'batched-row-map-client.mjs');
+  check(prefetch.source, 'batched-row-map-prefetch.mjs');
+  const pre = (await loadModule(prefetch.source, 'batched-row-map-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const cmod = (await loadModule(client.source, 'batched-row-map-client.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: unknown; args?: unknown[] }[]>;
+  };
+
+  // Generate 2000 Orders with 3 distinct codes: A, B, C
+  const ordersSeed: Record<string, unknown>[] = [];
+  const codes = ['A', 'B', 'C'];
+  for (let i = 1; i <= 2000; i++) {
+    ordersSeed.push({ ROWID: String(i), Status: 'Open', Code: codes[(i - 1) % 3] });
+  }
+  const customersSeed = [
+    { ROWID: '100', Code: 'A', Name: 'Ada' },
+    { ROWID: '200', Code: 'B', Name: 'Bea' },
+    // Code 'C' does not exist in Customers
+  ];
+
+  // 1. Datastore call-count test: 2000 rows -> exactly 2 fetch queries (1 Orders, 1 Customers)
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: ordersSeed,
+      Customers: customersSeed,
+    },
+  });
+  const ctx = runtime.context({ record: {} });
+  const slots = await pre.prefetch(ctx);
+
+  const fetchCalls = runtime.transcript.filter((e) => e.op === 'fetch');
+  const fieldCalls = runtime.transcript.filter((e) => e.op === 'field');
+  assert.equal(fetchCalls.length, 2, 'exactly 2 fetch calls: 1 for Orders, 1 for batched Customers');
+  assert.equal(fieldCalls.length, 0, 'zero per-row field calls');
+
+  // 2. Map results identical to per-row path on same data & keys = exactly fetched row ids
+  const rowMap = slots['c0'] as Record<string, unknown>;
+  assert.ok(rowMap, 'row map slot exists');
+  const keys = Object.keys(rowMap);
+  assert.equal(keys.length, 2000, 'map keys = exactly fetched row ids count');
+  for (let i = 1; i <= 2000; i++) {
+    const id = String(i);
+    assert.ok(Object.hasOwn(rowMap, id), `map has key ${id}`);
+    const code = codes[(i - 1) % 3];
+    const expected = code === 'A' ? 'Ada' : code === 'B' ? 'Bea' : null;
+    assert.equal(rowMap[id], expected, `row ${id} (Code ${code}) mapped value`);
+  }
+
+  // 3. Order of client operations unchanged
+  const clientRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    clientPrefetch: async (_path, nonce) => ({ nonce, slots }),
+  });
+  const actions = await cmod.clientActions(clientRuntime.context({ record: {} }));
+  assert.equal(actions.length, 2000 * 3, '2000 rows * 3 actions per row');
+  for (let i = 0; i < 2000; i++) {
+    assert.equal(actions[i * 3]?.op, 'alert');
+    assert.equal(actions[i * 3 + 1]?.op, 'hide');
+    assert.equal(actions[i * 3 + 2]?.op, 'openUrl');
+  }
+
+  // 4. Review access probe: RecordAccessError on no grant
+  const noGrantAccess = {
+    profiles: {
+      Staff: {
+        Orders: { fields: ['Status', 'Code'] },
+        // Customers not granted
+      },
+    },
+    roles: ['Librarian'],
+  };
+  const noGrantRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: noGrantAccess,
+    seed: { Orders: ordersSeed, Customers: customersSeed },
+  });
+  const noGrantCtx = noGrantRuntime.context({
+    principal: { profile: 'Staff', role: 'Librarian', loginUser: 'user@example.test' },
+    record: {},
+  });
+  await assert.rejects(() => pre.prefetch(noGrantCtx), (err: unknown) => {
+    return (err instanceof RecordAccessError) || (err as { name?: string }).name === 'RecordAccessError';
+  }, 'RecordAccessError thrown on no grant');
+
+  // 5. Review access probe: RECORD_ACCESS_DENIED on hidden field
+  const hiddenFieldAccess = {
+    profiles: {
+      Staff: {
+        Orders: { fields: ['Status', 'Code'] },
+        Customers: { fields: ['Code'] }, // Name is hidden
+      },
+    },
+    roles: ['Librarian'],
+  };
+  const hiddenFieldRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: hiddenFieldAccess,
+    seed: { Orders: ordersSeed, Customers: customersSeed },
+  });
+  const hiddenFieldCtx = hiddenFieldRuntime.context({
+    principal: { profile: 'Staff', role: 'Librarian', loginUser: 'user@example.test' },
+    record: {},
+  });
+  await assert.rejects(() => pre.prefetch(hiddenFieldCtx), (err: unknown) => {
+    const accessErr = err as { code?: string; name?: string };
+    return accessErr.code === 'RECORD_ACCESS_DENIED' || accessErr.name === 'RecordAccessError';
+  }, 'RECORD_ACCESS_DENIED thrown on hidden field');
+
+  // 6. Review access probe: Record filter hiding rows maps to null
+  const filteredAccess = {
+    profiles: {
+      Staff: {
+        Orders: { fields: ['Status', 'Code'] },
+        Customers: {
+          fields: ['Code', 'Name'],
+          recordFilter: { op: '==' as const, field: 'Code', value: 'A' }, // Only 'A' visible, 'B' hidden
+        },
+      },
+    },
+    roles: ['Librarian'],
+  };
+  const filteredRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: filteredAccess,
+    seed: { Orders: ordersSeed, Customers: customersSeed },
+  });
+  const filteredCtx = filteredRuntime.context({
+    principal: { profile: 'Staff', role: 'Librarian', loginUser: 'user@example.test' },
+    record: {},
+  });
+  const filteredSlots = await pre.prefetch(filteredCtx);
+  const filteredMap = filteredSlots['c0'] as Record<string, unknown>;
+  // For Code A: Ada. For Code B: null (hidden by record filter). For Code C: null.
+  for (let i = 1; i <= 2000; i++) {
+    const id = String(i);
+    const code = codes[(i - 1) % 3];
+    const expected = code === 'A' ? 'Ada' : null;
+    assert.equal(filteredMap[id], expected, `filtered row ${id} mapped value`);
+  }
+});
+
+test('a client-evaluated range bound is a deferred slot read the endpoint validates and clamps', async () => {
+  // Shape A: an earlier client loop accumulates `proplength`, so the next
+  // loop's end bound is that count. The client sends it as a request
+  // parameter; the endpoint validates, clamps, and runs only the generated
+  // query — form, criteria, sort, and access policy never move. A write of
+  // the same name inside this loop is not the bound: the range is evaluated
+  // once, before the body.
+  const script = [
+    'proplength = 0;',
+    'marks = {"a"};',
+    'for each mark in marks {',
+    '  proplength = proplength + 1;',
+    '}',
+    'for each rec in Orders[ID != 0] sort by Added_Time desc range from 1 to 11 - proplength {',
+    '  info rec.Name;',
+    '  proplength = proplength + 1;',
+    '}',
+  ].join('\n');
+  const g = generate(
+    app({
+      // The form prefetch requires the form handler's write grant: Staff may add Orders.
+      profiles: [{ ...ordersStaff, modules: [{ ...ordersStaff.modules[0]!, properties: [{ key: 'enabled', value: 'create, viewall', span: Z }] }] } as App['profiles'][number]],
+      forms: [plainForm('Orders', [plainField('Name'), plainField('Added_Time'), plainField('Status')])],
+      workflows: [workflow({ name: 'on load', form: 'Orders', event: 'on load', deluge: { text: script, span: Z } })],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  assert.ok(client && prefetch);
+  assert.equal(g.todos.some((t) => t.construct === 'client-loop-uses-server'), false);
+  check(client.source, 'range-slot-client.mjs');
+  check(prefetch.source, 'range-slot-prefetch.mjs');
+  const clientCode = stripComments(client.source);
+  assert.match(clientCode, /await shim\.client\.rows\(ctx, "c0", 1, \(11 - proplength\)\)/);
+  assert.match(clientCode, /for \(var d_rec of shim\.each\(ctx, range_c0\.rows\)\)/);
+  const pre = stripComments(prefetch.source);
+  assert.match(pre, /rangeSlotRequest\(req\?\.body\)/);
+  assert.match(pre, /ctx\.rangeSlot === "c0"/);
+  assert.match(pre, /ctx\.rangeEmpty \? \[\] :/);
+  assert.match(pre, /range: \{ from: ctx\.rangeFrom, to: ctx\.rangeTo \}/);
+
+  const mod = (await loadModule(prefetch.source, 'range-slot-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+    default: (req: unknown, res: unknown) => unknown;
+  };
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+
+  // Malformed bounds refuse with the same error envelope the endpoint uses.
+  for (const range of [{ from: '1', to: 11 }, { from: 1.5, to: 11 }, { to: 11 }, undefined]) {
+    const bad = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range } });
+    assert.equal(bad.status, 400, `range ${JSON.stringify(range)} must be refused`);
+    assert.ok(bad.body.error, 'refusal carries a message');
+  }
+  // An unauthenticated caller is refused before any read runs.
+  const anon = await invoke(mod.default, { body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: 1, to: 5 } } });
+  assert.equal(anon.status, 401);
+  // A profile with no grant on the form gets the same access refusal as any
+  // other client round trip.
+  const guest = await invoke(mod.default, {
+    user: { profile: 'Guest', email: 'g@example.com' },
+    body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: 1, to: 5 } },
+  });
+  assert.equal(guest.status, 403);
+  // A slot the endpoint did not generate is refused: the request picks the
+  // read, never the query.
+  const unknown = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c9', range: { from: 1, to: 5 } } });
+  assert.equal(unknown.status, 400);
+  // A valid request answers with only the slot it named — the eager reads are
+  // not recomputed for a deferred range request.
+  const ok = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: 1, to: 11 } } });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(Object.keys(ok.body.slots as Record<string, unknown>), ['c0']);
+  // A forged wide range is clamped by the endpoint, not refused outright.
+  const wide = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: 1, to: 100000 } } });
+  assert.equal(wide.status, 200);
+  // A forged deep start is refused before any read; a deep page inside the bound is served.
+  const deep = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: 1_000_000_000_000, to: 1_000_000_000_300 } } });
+  assert.equal(deep.status, 400);
+  assert.equal(deep.body.slots, null);
+  const deepOk = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: LIMITS.zcqlMaxRows - 99, to: LIMITS.zcqlMaxRows } } });
+  assert.equal(deepOk.status, 200);
+  assert.deepEqual(Object.keys(deepOk.body.slots as Record<string, unknown>), ['c0']);
+
+  // The clamp is real: a seeded store yields at most the ZCQL page cap, and an
+  // access record filter still narrows the deferred read.
+  const ordersSeed: Record<string, unknown>[] = [];
+  for (let i = 1; i <= 400; i++) ordersSeed.push({ ROWID: String(i), Name: `n${i}`, Status: i <= 200 ? 'Open' : 'Closed' });
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: { Orders: ordersSeed },
+    access: {
+      profiles: { Staff: { Orders: { fields: ['Name', 'Status'], recordFilter: { op: '==', field: 'Status', value: 'Open' } } } },
+      roles: [],
+    },
+  });
+  const clamped = await mod.prefetch(
+    seeded.context({
+      record: {},
+      principal: { profile: 'Staff', loginUser: 'a@example.com' },
+      rangeSlot: 'c0',
+      rangeFrom: 1,
+      rangeTo: 1 + LIMITS.zcqlRowsPerQuery,
+    }),
+  );
+  const rows = clamped['c0'] as unknown[];
+  assert.equal(rows.length, 200, 'the deferred read serves the caller\'s filtered, capped window');
+  // An empty range (the client's `to` preceded `from`) reads nothing.
+  const empty = await mod.prefetch(
+    seeded.context({
+      record: {},
+      principal: { profile: 'Staff', loginUser: 'a@example.com' },
+      rangeSlot: 'c0',
+      rangeFrom: 1,
+      rangeTo: 0,
+      rangeEmpty: true,
+    }),
+  );
+  assert.deepEqual(empty['c0'], []);
+});
+
+
+test('a compound criteria batches and evaluates: static conjunct filters rows, quote-bearing keys stay safe', async () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Customers', [plainField('Code'), plainField('Name'), plainField('Active', 'checkbox')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'for each rec in Orders[Status == "Open"] {\n  alert Customers[Code == rec.Code && Active == true].Name;\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  assert.equal(g.todos.some((t) => t.construct === 'client-loop-uses-server'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!;
+  check(client.source, 'compound-map-client.mjs');
+  check(prefetch.source, 'compound-map-prefetch.mjs');
+  const pre = (await loadModule(prefetch.source, 'compound-map-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const cmod = (await loadModule(client.source, 'compound-map-client.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: unknown }[]>;
+  };
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+        { ROWID: '3', Status: 'Open', Code: "O'Brien" },
+        { ROWID: '4', Status: 'Open', Code: 'C' },
+      ],
+      Customers: [
+        { ROWID: '10', Code: 'A', Name: 'Ada', Active: 'true' },
+        { ROWID: '20', Code: 'B', Name: 'Bea', Active: 'false' },
+        { ROWID: '30', Code: "O'Brien", Name: 'Obi', Active: 'true' },
+        { ROWID: '40', Code: 'C', Name: 'Cy', Active: true },
+      ],
+    },
+  });
+  const slots = await pre.prefetch(runtime.context({ record: {} }));
+  const fetchCalls = runtime.transcript.filter((e) => e.op === 'fetch');
+  assert.equal(fetchCalls.length, 2, 'Orders fetch plus one batched Customers read');
+  assert.equal(runtime.transcript.filter((e) => e.op === 'field').length, 0);
+  const customersFetch = fetchCalls.find((e) => e.form === 'Customers')!;
+  // The key set is quote-safe: O'Brien arrives as a doubled-quote literal.
+  assert.match(String(customersFetch.where), /O''Brien/);
+  // criteria.ts lit() quotes decision cells because Data Store returns them as varchar strings.
+  assert.match(String(customersFetch.where), /Active = 'true'/);
+  const map = slots['c0'] as Record<string, unknown>;
+  assert.deepEqual(
+    [map['1'], map['2'], map['3'], map['4']],
+    ['Ada', null, 'Obi', 'Cy'],
+    'active rows map; inactive and missing keys map to null; boolean seed uses sameCell bridge',
+  );
+  const clientRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    clientPrefetch: async (_path, nonce) => ({ nonce, slots }),
+  });
+  const actions = await cmod.clientActions(clientRuntime.context({ record: {} }));
+  assert.deepEqual(actions.map((a) => a.message), ['Ada', null, 'Obi', 'Cy']);
+});
+
+test('two server field reads in one client condition batch into two map lookups on shared keys', async () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Customers', [plainField('Code'), plainField('Credit'), plainField('Limit')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'for each rec in Orders[Status == "Open"] {\n  if (Customers[Code == rec.Code].Credit > Customers[Code == rec.Code].Limit) {\n    alert rec.Code;\n  }\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+  const preSrc = stripComments(prefetch.source);
+  const lookups = preSrc.match(/shim\.datastore\.lookupMap/g) ?? [];
+  assert.equal(lookups.length, 2, 'Credit and Limit each batch into a lookupMap');
+  const pre = (await loadModule(prefetch.source, 'two-field-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const cmod = (await loadModule(client.source, 'two-field-client.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: unknown }[]>;
+  };
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+        { ROWID: '3', Status: 'Open', Code: 'C' },
+      ],
+      Customers: [
+        { ROWID: '10', Code: 'A', Credit: 90, Limit: 100 },
+        { ROWID: '20', Code: 'B', Credit: 250, Limit: 100 },
+      ],
+    },
+  });
+  const slots = await pre.prefetch(runtime.context({ record: {} }));
+  assert.equal(runtime.transcript.filter((e) => e.op === 'fetch').length, 3, 'Orders plus two batched Customers reads');
+  assert.equal(runtime.transcript.filter((e) => e.op === 'field').length, 0);
+  const clientRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    clientPrefetch: async (_path, nonce) => ({ nonce, slots }),
+  });
+  const actions = await cmod.clientActions(clientRuntime.context({ record: {} }));
+  assert.deepEqual(actions.map((a) => a.message), ['B'], 'only the over-limit row alerts');
+});
+
+test('a row-keyed aggregate in a client condition batches into aggregateMap and counts missing keys as zero', async () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Lines', [plainField('OrderCode'), plainField('Qty', 'decimal')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'for each rec in Orders[Status == "Open"] {\n  if (Lines[OrderCode == rec.Code].count() > 1) {\n    alert rec.Code;\n  }\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+  assert.match(stripComments(prefetch.source), /await shim\.datastore\.aggregateMap\(ctx, "Lines", "OrderCode", keys_c\d+_\d+, "count", undefined\)/);
+  const pre = (await loadModule(prefetch.source, 'agg-map-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const cmod = (await loadModule(client.source, 'agg-map-client.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: unknown }[]>;
+  };
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+        { ROWID: '3', Status: 'Open', Code: 'C' },
+      ],
+      Lines: [
+        { ROWID: '10', OrderCode: 'A', Qty: 1 },
+        { ROWID: '11', OrderCode: 'A', Qty: 2 },
+        { ROWID: '12', OrderCode: 'B', Qty: 5 },
+      ],
+    },
+  });
+  const slots = await pre.prefetch(runtime.context({ record: {} }));
+  assert.equal(runtime.transcript.filter((e) => e.op === 'fetch').length, 1, 'only the Orders fetch');
+  const aggregates = runtime.transcript.filter((e) => e.op === 'aggregate');
+  assert.equal(aggregates.length, 1, 'one batched Lines aggregate, not one per row');
+  assert.equal(aggregates[0]!.form, 'Lines');
+  assert.equal(runtime.transcript.filter((e) => e.op === 'field').length, 0);
+  const clientRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    clientPrefetch: async (_path, nonce) => ({ nonce, slots }),
+  });
+  const actions = await cmod.clientActions(clientRuntime.context({ record: {} }));
+  assert.deepEqual(actions.map((a) => a.message), ['A'], 'only the two-line order alerts; the missing key counts 0');
+
+  // Access probes: aggregate batched reads stay behind the same read policy.
+  const staff = {
+    profiles: {
+      Staff: {
+        Orders: { fields: ['Status', 'Code'] },
+        Lines: { fields: ['OrderCode', 'Qty'], recordFilter: { op: '==' as const, field: 'Qty', value: 1 } },
+      },
+    },
+    roles: ['Staff'],
+  };
+  const scopedRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: staff,
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+      ],
+      Lines: [
+        { ROWID: '10', OrderCode: 'A', Qty: 1 },
+        { ROWID: '11', OrderCode: 'A', Qty: 2 },
+        { ROWID: '12', OrderCode: 'B', Qty: 5 },
+      ],
+    },
+  });
+  const scopedSlots = await pre.prefetch(
+    scopedRuntime.context({ principal: { profile: 'Staff', role: 'Staff', loginUser: 'user@example.test' }, record: {} }),
+  );
+  const scopedMap = scopedSlots['c0'] as Record<string, unknown>;
+  assert.equal((slots['c0'] as Record<string, unknown>)['1'], true, 'unfiltered: two lines satisfy > 1');
+  assert.equal(scopedMap['1'], false, 'the filter hides the Qty=2 line: count 1 fails > 1');
+  assert.equal(scopedMap['2'], false, 'the filter hides every B line');
+
+  const noGrant = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: { profiles: { Staff: { Orders: { fields: ['Status', 'Code'] } } }, roles: ['Staff'] },
+    seed: { Orders: [{ ROWID: '1', Status: 'Open', Code: 'A' }], Lines: [] },
+  });
+  await assert.rejects(
+    () => pre.prefetch(noGrant.context({ principal: { profile: 'Staff', role: 'Staff', loginUser: 'user@example.test' }, record: {} })),
+    (err: unknown) => (err as { name?: string }).name === 'RecordAccessError',
+    'no Lines grant refuses the prefetch',
+  );
+});
+
+test('a nested row collection batches into rowsMap, keeps row order, and honours access filters', async () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Lines', [plainField('OrderCode'), plainField('Item')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'for each rec in Orders[Status == "Open"] {\n  for each line in Lines[OrderCode == rec.Code] {\n    alert line.Item;\n  }\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-loop-uses-server'), false);
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+  assert.match(stripComments(prefetch.source), /await shim\.datastore\.rowsMap\(ctx, "Lines", "OrderCode", keys_c\d+_\d+\)/);
+  const pre = (await loadModule(prefetch.source, 'rows-map-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const cmod = (await loadModule(client.source, 'rows-map-client.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: unknown }[]>;
+  };
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+        { ROWID: '3', Status: 'Open', Code: 'C' },
+      ],
+      Lines: [
+        { ROWID: '10', OrderCode: 'A', Item: 'a1' },
+        { ROWID: '11', OrderCode: 'A', Item: 'a2' },
+        { ROWID: '12', OrderCode: 'B', Item: 'b1' },
+      ],
+    },
+  });
+  const slots = await pre.prefetch(runtime.context({ record: {} }));
+  const fetchCalls = runtime.transcript.filter((e) => e.op === 'fetch');
+  assert.equal(fetchCalls.length, 2, 'Orders plus one batched Lines read');
+  const map = slots['c0'] as Record<string, unknown>;
+  assert.equal((map['3'] as unknown[]).length, 0, 'no lines for C: empty collection');
+  const clientRuntime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    clientPrefetch: async (_path, nonce) => ({ nonce, slots }),
+  });
+  const actions = await cmod.clientActions(clientRuntime.context({ record: {} }));
+  assert.deepEqual(actions.map((a) => a.message), ['a1', 'a2', 'b1'], 'inner loop replays the mapped rows in order');
+
+  // Access: no Lines grant refuses; a record filter drops rows from the mapped collection.
+  const noGrant = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: { profiles: { Staff: { Orders: { fields: ['Status', 'Code'] } } }, roles: ['Staff'] },
+    seed: { Orders: [{ ROWID: '1', Status: 'Open', Code: 'A' }], Lines: [] },
+  });
+  await assert.rejects(
+    () => pre.prefetch(noGrant.context({ principal: { profile: 'Staff', role: 'Staff', loginUser: 'user@example.test' }, record: {} })),
+    (err: unknown) => (err as { name?: string }).name === 'RecordAccessError',
+    'no Lines grant refuses the prefetch',
+  );
+  const filtered = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: {
+      profiles: {
+        Staff: {
+          Orders: { fields: ['Status', 'Code'] },
+          Lines: { fields: ['OrderCode', 'Item'], recordFilter: { op: '!=' as const, field: 'Item', value: 'a2' } },
+        },
+      },
+      roles: ['Staff'],
+    },
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A' },
+        { ROWID: '2', Status: 'Open', Code: 'B' },
+      ],
+      Lines: [
+        { ROWID: '10', OrderCode: 'A', Item: 'a1' },
+        { ROWID: '11', OrderCode: 'A', Item: 'a2' },
+        { ROWID: '12', OrderCode: 'B', Item: 'b1' },
+      ],
+    },
+  });
+  const filteredSlots = await pre.prefetch(
+    filtered.context({ principal: { profile: 'Staff', role: 'Staff', loginUser: 'user@example.test' }, record: {} }),
+  );
+  const filteredMap = filteredSlots['c0'] as Record<string, unknown>;
+  const aItems = (filteredMap['1'] as { values?: Record<string, unknown> }[]).map((r) => r.values?.Item ?? (r as Record<string, unknown>).Item);
+  assert.deepEqual(aItems, ['a1'], 'the filtered-out line never reaches the map');
+
+  const hiddenItem = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    access: {
+      profiles: {
+        Staff: {
+          Orders: { fields: ['Status', 'Code'] },
+          Lines: { fields: ['OrderCode'] }, // Item is hidden
+        },
+      },
+      roles: ['Staff'],
+    },
+    seed: {
+      Orders: [{ ROWID: '1', Status: 'Open', Code: 'A' }],
+      Lines: [{ ROWID: '10', OrderCode: 'A', Item: 'a1' }],
+    },
+  });
+  const hiddenSlots = await pre.prefetch(
+    hiddenItem.context({ principal: { profile: 'Staff', role: 'Staff', loginUser: 'user@example.test' }, record: {} }),
+  );
+  const hiddenRows = (hiddenSlots['c0'] as Record<string, unknown>)['1'] as { values: Record<string, unknown> }[];
+  assert.equal(hiddenRows.length, 1, 'the row itself is still visible');
+  assert.equal(hiddenRows[0]!.values.Item, undefined, 'the hidden field value is not projected into the map');
+});
+
+test('a local binding carrying a row-keyed read still batches, and a second keyed leaf post-filters', async () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code'), plainField('Region')]),
+        plainForm('Customers', [plainField('Code'), plainField('Name'), plainField('Region')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'for each rec in Orders[Status == "Open"] {\n  k = Customers[Code == rec.Code].Name;\n  alert k;\n  if (Customers[Code == rec.Code && Region == rec.Region].Name == "Bea") { alert "hit"; }\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!;
+  const pre = stripComments(prefetch.source);
+  assert.match(pre, /await shim\.datastore\.lookupMap\(ctx, "Customers", "Code", "Name", keys_c\d+_\d+\)/);
+  // Two row-keyed leaves: one batched `IN` on Code, then `matches` applies `Region == rec.Region` per row.
+  assert.match(pre, /await shim\.datastore\.rowsMap\(ctx, "Customers", "Code", keys_c\d+_\d+\)/);
+  assert.match(pre, /shim\.datastore\.matches\(ctx, cand, \{ op: "==", field: "Region", value: shim\.record\.get\(d_rec, "Region"\) \}\)/);
+  assert.doesNotMatch(pre, /await shim\.datastore\.field\(ctx, shim\.datastore\.query/);
+  const mod = (await loadModule(prefetch.source, 'local-read-prefetch.mjs')) as unknown as {
+    prefetch: (ctx: unknown) => Promise<Record<string, unknown>>;
+  };
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Orders: [
+        { ROWID: '1', Status: 'Open', Code: 'A', Region: 'EU' },
+        { ROWID: '2', Status: 'Open', Code: 'B', Region: 'US' },
+      ],
+      Customers: [
+        { ROWID: '10', Code: 'A', Name: 'Ada', Region: 'EU' },
+        { ROWID: '20', Code: 'B', Name: 'Bea', Region: 'US' },
+      ],
+    },
+  });
+  const slots = await mod.prefetch(runtime.context({ record: {} }));
+  const names = Object.values(slots)
+    .map((slot) => slot as Record<string, unknown>)
+    .find((slot) => slot && typeof slot === 'object' && slot['1'] === 'Ada');
+  assert.ok(names, 'the batched local-binding slot maps row 1 to Ada');
+  assert.equal(names['2'], 'Bea', 'the local binding replays the batched value per row');
+  // The post-filter sees the second keyed leaf: row 1's candidate is Ada (EU),
+  // row 2's is Bea (US) — `Name == "Bea"` is true only for row 2.
+  const hits = Object.values(slots)
+    .map((slot) => slot as Record<string, unknown>)
+    .find((slot) => slot && typeof slot === 'object' && typeof slot['1'] === 'boolean');
+  assert.ok(hits, 'the two-leaf condition slot exists');
+  assert.deepEqual([hits['1'], hits['2']], [false, true]);
+});
+
+test('a compound criteria keeps the extra conjuncts inside one batched lookup', () => {
+  const scriptMultiple = [
+    'for each rec in Orders[Status == "Open"] {',
+    '  alert Customers[Code == rec.Code && Active == true].Name;',
+    '}',
+  ].join('\n');
+  const g1 = generate(
+    app({
+      forms: [
+        plainForm('Orders', [plainField('Status'), plainField('Code')]),
+        plainForm('Customers', [plainField('Code'), plainField('Name'), plainField('Active')]),
+      ],
+      workflows: [workflow({ name: 'on load', form: 'Orders', event: 'on load', deluge: { text: scriptMultiple, span: Z } })],
+    }),
+  );
+  const preMultiple = g1.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!;
+  assert.ok(preMultiple);
+  const pre = stripComments(preMultiple.source);
+  // The row-keyed equality is batched; the remaining conjunct goes into the same query.
+  assert.match(pre, /await shim\.datastore\.lookupMap\(ctx, "Customers", "Code", "Name", keys_c\d+_\d+, \{ op: "==", field: "Active", value: true \}\)/);
+  assert.doesNotMatch(pre, /= await shim\.datastore\.field/);
+});
+
+test('non-keyed row reads (inequality, disjunction, dotted key) keep the per-row datastore query path', () => {
+  for (const crit of ['Code != rec.Code', 'Code == rec.Code || Active == true', 'Address.City == rec.City']) {
+    const g = generate(
+      app({
+        forms: [
+          plainForm('Orders', [plainField('Status'), plainField('Code'), plainField('City')]),
+          plainForm('Customers', [plainField('Code'), plainField('Name'), plainField('Active'), plainField('Address')]),
+        ],
+        workflows: [
+          workflow({
+            name: 'on load',
+            form: 'Orders',
+            event: 'on load',
+            deluge: { text: `for each rec in Orders[Status == "Open"] {\n  alert Customers[${crit}].Name;\n}`, span: Z },
+          }),
+        ],
+      }),
+    );
+    const pre = stripComments(g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs')!.source);
+    assert.match(pre, /slots\["c\d+"\]\[shim\.record\.get\(d_rec, "ID"\)\] = await shim\.datastore\.field/, crit);
+    assert.doesNotMatch(pre, /shim\.datastore\.lookupMap/, crit);
+  }
+});
+
+test('an unparseable assignment still binds its target on both sides', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Status')])],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: { text: 'ids = 1 +;\nn = ids.size();', span: Z },
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/orders/on-load.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
+  assert.ok(server);
+  assert.ok(client);
+  for (const m of [server, client]) {
+    assert.match(stripComments(m.source), /var ids = await shim\.todo\(ctx, "task:ids"/);
+    assert.match(stripComments(m.source), /var n = shim\.list\.size\(ids\)/);
+    check(m.source, 'unknown-assign.mjs');
+  }
+});
+
+test('a Form.Subform() row constructor stays client-capable inside a prefetched loop', () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Quotes', [plainField('Items', 'grid', ['Item'])]),
+        plainForm('Orders', [plainField('Quote_No'), plainField('Items', 'grid', ['Item'])]),
+      ],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: {
+            text: 'q = Quotes[ID == input.Quote_No];\nfor each r in q.Items {\n  nr = Orders.Items();\n  input.Items.insert(nr);\n}',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  const server = g.files.find((f) => f.path === 'functions/aio/orders/on-load.mjs');
+  assert.ok(client);
+  assert.ok(prefetch);
+  assert.ok(server);
+  // `nr` is a fresh row bound to the subform; insert renders a grid row on the client.
+  assert.match(stripComments(client.source), /for \(var r of shim\.each\(ctx, slots\["c0"\]\)\)/);
+  assert.match(stripComments(client.source), /var nr = shim\.record\.bind\(ctx, \{\}, "Orders\.Items"\)/);
+  assert.match(stripComments(client.source), /actions\.push\(\{ op: "subform", method: "insert", target: \["Items"\], args: \[nr\] \}\)/);
+  assert.doesNotMatch(stripComments(client.source), /\bvar q\b/);
+  assert.match(stripComments(server.source), /var nr = shim\.record\.bind\(ctx, \{\}, "Orders\.Items"\)/);
+  assert.match(stripComments(server.source), /shim\.input\.insert\(ctx, \["Items"\], nr\)/);
+  assert.match(stripComments(prefetch.source), /var q = shim\.datastore\.query\(ctx, "Quotes"/);
+  check(client.source, 'subform-ctor-client.mjs');
+  check(server.source, 'subform-ctor-server.mjs');
+  check(prefetch.source, 'subform-ctor-prefetch.mjs');
+});
+
+test('a bare form name in a for-each is the form collection, and yesterday is a day offset', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Staff', [plainField('Email')])],
+      workflows: [
+        workflow({
+          name: 'on load',
+          form: 'Staff',
+          event: 'on load',
+          deluge: { text: 'for each s in Staff {\n  seen = s.Email;\n}\nd = yesterday;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/staff/on-load.mjs');
+  assert.ok(server);
+  assert.match(stripComments(server.source), /shim\.datastore\.rows\(ctx, shim\.datastore\.query\(ctx, "Staff", \{ op: "true" \}\)\)/);
+  assert.match(stripComments(server.source), /shim\.record\.get\(s, "Email"\)/);
+  assert.match(stripComments(server.source), /var d = shim\.date\.addDay\(shim\.zoho\.currentDate\(ctx\), -1, ctx\)/);
+  check(server.source, 'for-each-form.mjs');
+});
+
+test('prefetch embeds the profile field grant and the report record filter', () => {
+  const g = generate(
+    app({
+      reports: [
+        {
+          name: 'Mine',
+          type: 'list',
+          modifiers: [],
+          form: 'Orders',
+          criteria: 'Owner == zoho.loginuser',
+          flags: [],
+          properties: [],
+          columns: [],
+          customActions: [],
+          conditionalFormats: [],
+          filters: [],
+          groupBy: [],
+          sortBy: [],
+          blocks: [],
+          views: [],
+          span: Z,
+        },
+      ],
+      profiles: [
+        {
+          name: 'Staff',
+          type: 'Users_Permissions',
+          properties: [],
+          modules: [
+            {
+              component: 'Orders',
+              properties: [{ key: 'allFieldsVisible', value: 'false', span: Z }],
+              reports: [{ key: 'Mine', value: '{"View"}', span: Z }],
+              fields: [
+                { field: 'Status', flags: { visibility: 'true' }, span: Z },
+                { field: 'Secret', flags: { visibility: 'false' }, span: Z },
+              ],
+              span: Z,
+            },
+          ],
+          span: Z,
+        },
+      ],
+      roles: [{ name: 'Librarian', properties: [], children: [], span: Z }],
+      workflows: [
+        workflow({
+          name: 'On load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: { text: 'if (Orders[Status == "Open"].count() > 0) { alert "open"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
+  assert.ok(prefetch);
+  const start = prefetch.source.indexOf('export const access = ');
+  const json = prefetch.source.slice(start + 'export const access = '.length, prefetch.source.indexOf(';\n', start));
+  const access = JSON.parse(json) as {
+    roles: string[];
+    profiles: { Staff: { Orders: { fields: string[]; recordFilter: { field: string; value: { __bind: string } } } } };
+  };
+  assert.deepEqual(access.roles, ['Librarian']);
+  assert.deepEqual(access.profiles.Staff.Orders.fields, ['Status']);
+  assert.equal(access.profiles.Staff.Orders.recordFilter.field, 'Owner');
+  assert.equal(access.profiles.Staff.Orders.recordFilter.value.__bind, 'loginUser');
+  assert.equal(JSON.stringify(access).includes('Secret'), false);
+  check(prefetch.source, 'prefetch-auth.mjs');
+});
+
+test('schedules generate deterministic Catalyst jobs: pool and cron metadata', () => {
+  const withCron = generate(
+    app({
+      name: 'Night_Run',
+      workflows: [
+        workflow({
+          name: 'Nightly',
+          container: 'schedule',
+          event: 'on schedule',
+          properties: [
+            { key: 'start', value: '"2024-01-01 02:00:00"', span: Z },
+            { key: 'frequency', value: 'daily', span: Z },
+            { key: 'time zone', value: '"UTC"', span: Z },
+          ],
+          deluge: { text: 'x = 1;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const job = withCron.files.find((f) => f.path.startsWith('functions/job/'));
+  assert.ok(job);
+  assert.match(stripComments(job.source), /jobPool = "NightRun"/);
+  assert.match(stripComments(job.source), /cron = \{"cron_name":"c2c_Nightly","cron_status":true,"cron_type":"CronExpression","cron_detail":\{"cron_expression":"0 2 \* \* \*"\}/);
+  assert.match(stripComments(job.source), /dryRun: !live/);
+  const pool = /jobPool = "([^"]*)"/.exec(job.source);
+  assert.ok(pool && !pool[1]!.includes('_'));
+  assert.match(stripComments(job.source), /0 2 \* \* \*/);
+  assert.match(stripComments(job.source), /Job function/);
+  assert.match(stripComments(job.source), /run as the application/);
+  assert.match(stripComments(job.source), /not an HTTP route/);
+  assert.doesNotMatch(stripComments(job.source), /export const endpoint/);
+  assert.doesNotMatch(stripComments(job.source), /function handler/);
+  assert.doesNotMatch(stripComments(job.source), /\breq\s*,\s*res\b/);
+  assert.equal([...job.source.matchAll(/path:\s*"/g)].length, 0);
+  check(job.source, 'job.mjs');
+
+  const bare = generate(
+    app({
+      workflows: [workflow({ name: 'Later', container: 'schedule', event: 'on schedule' })],
+    }),
+  );
+  const bareJob = bare.files.find((f) => f.path.startsWith('functions/job/'));
+  assert.ok(bareJob);
+  assert.match(stripComments(bareJob.source), /None is invented/);
+  assert.match(stripComments(bareJob.source), /export const cron = null;/);
+  assert.ok(bare.todos.some((t) => t.construct === 'schedule-start'));
+  assert.doesNotMatch(stripComments(bareJob.source), /cron:\s*"/);
+});
+
+test('approvals and blueprints are state machines, not Circuits, and do not double-emit', () => {
+  const approval = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'Leave approval',
+          container: 'approval',
+          form: 'Leave',
+          event: 'on approve',
+          approvers: [{ key: 'level', value: '1', span: Z }],
+          deluge: { text: 'x = 1;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const flow = approval.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(flow);
+  assert.match(stripComments(flow.source), /"circuits": false/);
+  assert.match(stripComments(flow.source), /\/approve/);
+  assert.match(stripComments(flow.source), /\/reject/);
+  assert.match(stripComments(flow.source), /\/transition/);
+  assert.match(stripComments(flow.source), /Status/);
+  assert.equal(approval.files.filter((f) => f.path.includes('leave-approval') || f.path.includes('functions/flow')).length, 1);
+  check(flow.source, 'approval.mjs');
+
+  const blueprint = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Amount')])],
+      workflows: [
+        workflow({
+          name: 'Order flow',
+          container: 'schedule',
+          form: 'Orders',
+          event: 'blueprint',
+          deluge: { text: 'y = 2;', span: Z },
+          blueprint: {
+            start: { name: 'Draft', properties: [], blocks: [], items: [], span: Z },
+            stages: [
+              { name: 'Draft', properties: [], blocks: [], items: [], span: Z },
+              { name: 'Review', properties: [], blocks: [], items: [], span: Z },
+              { name: 'Done', properties: [], blocks: [], items: [], span: Z },
+            ],
+            transitions: [
+              {
+                name: 'Send',
+                fromStage: 'Draft',
+                toStage: 'Review',
+                properties: [],
+                phases: [{ phase: 'before', properties: [{ key: 'transition criteria', value: '(Amount > 100)', span: Z }], blocks: [], deluge: [], span: Z }],
+                span: Z,
+              },
+              {
+                name: 'Ship',
+                fromStage: 'Review',
+                toStage: 'Done',
+                properties: [],
+                phases: [{ phase: 'before', properties: [], blocks: [], deluge: [{ text: 'z = 3;', span: { start: 10, end: 16 } }], span: Z }],
+                span: Z,
+              },
+            ],
+          },
+        }),
+      ],
+    }),
+  );
+  assert.equal(blueprint.files.filter((f) => f.path.startsWith('functions/job/')).length, 0);
+  const machine = blueprint.files.find((f) => f.path.startsWith('functions/flow/'));
+  const form = blueprint.files.find((f) => f.path.startsWith('functions/aio/'));
+  assert.ok(machine);
+  assert.ok(form);
+  assert.match(stripComments(machine.source), /not available in the IN/);
+  assert.match(stripComments(machine.source), /return \(shim\.input\.get\(ctx, "Amount"\) > 100\);/);
+  assert.match(stripComments(machine.source), /script_transition_0_condition/);
+  assert.match(stripComments(machine.source), /z = 3/);
+  assert.match(stripComments(form.source), /y = 2/);
+  assert.equal(blueprint.files.filter((f) => f.path.startsWith('functions/aio/') && f.path !== 'functions/aio/_lib.mjs').length, 1);
+  check(machine.source, 'blueprint.mjs');
+  assert.doesNotMatch(stripComments(machine.source), /body\.record/);
+  assert.doesNotMatch(stripComments(machine.source), /body\.old/);
+  assert.match(stripComments(machine.source), /dry-run-record/);
+  const hiddenAt = machine.source.indexOf('if (isHidden(formName))');
+  const authAt = machine.source.indexOf('const principal = principalFromRequest(req)');
+  const readAt = machine.source.indexOf('authorizeRead(access, principal');
+  assert.ok(hiddenAt >= 0 && hiddenAt < authAt && authAt < readAt);
+});
+
+/**
+ * A blueprint's `type = Blueprint` declaration has no `on ...` event block of
+ * its own, so the IR's event-fallback path used to scan the whole workflow
+ * body for the first raw Deluge group and attach it to the workflow as a
+ * second, phantom `deluge` script — the same statements already parsed into
+ * `blueprint.transitions[].phases[].deluge`. Nothing in `generate()` reads
+ * that phantom field for a blueprint (routing is by `workflowKind`, which
+ * checks `blueprint` first), so it never duplicated output. But the
+ * silent-drop audit's `scriptUnits()` does list every workflow's `deluge`,
+ * and a blueprint's `cov` label there falls through unset — so the phantom
+ * unit's statements could never find their real coverage rows and were
+ * reported as a generator bug, even though the transition was fully emitted.
+ * RED (pre-fix): `flow.deluge` held a duplicate `RawDeluge` instead of null.
+ * GREEN (post-fix): the blueprint's structured transitions carry the script
+ * and the workflow's own `deluge` field stays null.
+ */
+test('a blueprint workflow carries its transition scripts only once, not also as a phantom top-level deluge', () => {
+  const parsed = deriveIr(parse(`application "Flow App"
+{
+form Request
+{
+Title
+(
+type = text
+)
+}
+workflow
+{
+blueprint
+{
+Approval_Flow as "Approval Flow"
+{
+type = Blueprint
+form = Request
+start
+{
+start stage = "Stage1"
+}
+stages
+{
+"Stage1"
+{
+}
+"Stage2"
+{
+}
+}
+transitions
+{
+Submit as "Submit"
+{
+type = normal
+from stage = "Stage1"
+to stage = "Stage2"
+before
+{
+}
+after
+{
+actions
+{
+custom deluge script
+(
+input.Title = "submitted";
+info "done";
+)
+}
+}
+}
+}
+}
+}
+}
+}`));
+  const [flow] = parsed.workflows.filter((w) => w.name === 'Approval_Flow');
+  assert.equal(flow.deluge, null, `expected no phantom top-level deluge, got ${JSON.stringify(flow.deluge)}`);
+  const [transition] = flow.blueprint!.transitions;
+  const after = transition.phases.find((p) => p.phase === 'after')!;
+  assert.equal(after.deluge.length, 1);
+  assert.match(after.deluge[0]!.text, /input\.Title = "submitted"/);
+});
+
+/** Orders form read by profile Staff; `pb`/`prop` are shorthand for blueprint fixtures. */
+const ordersStaff = {
+  name: 'Staff',
+  type: 'Users_Permissions',
+  properties: [],
+  modules: [
+    {
+      component: 'Orders',
+      properties: [{ key: 'enabled', value: 'viewall', span: Z }],
+      reports: [] as { key: string; value: string; span: typeof Z }[],
+      fields: [] as { field: string; flags: Record<string, string>; span: typeof Z }[],
+      span: Z,
+    },
+  ],
+  span: Z,
+};
+const prop = (key: string, value: string): Property => ({ key, value, span: Z });
+const pb = (name: string, properties: Property[] = [], blocks: PropertyBlock[] = []): PropertyBlock => ({ name, properties, blocks, items: [], span: Z });
+
+/** Orders blueprint app: `Draft → Review` via `Send`, criteria per call. */
+function orderBlueprint(fields: App['forms'][number]['fields'], send: Pick<BlueprintTransition, 'name'> & Partial<BlueprintTransition>): App {
+  return app({
+    profiles: [ordersStaff as App['profiles'][number]],
+    forms: [plainForm('Orders', fields)],
+    workflows: [
+      workflow({
+        name: 'Order flow',
+        container: 'schedule',
+        form: 'Orders',
+        event: 'blueprint',
+        blueprint: {
+          start: pb('Draft'),
+          stages: [pb('Draft'), pb('Review'), pb('Done')],
+          transitions: [{ fromStage: 'Draft', toStage: 'Review', properties: [], phases: [], span: Z, ...send }],
+        },
+      }),
+    ],
+  });
+}
+
+/** env live + injected mock store preloaded with Orders rows; restore() in finally. */
+async function liveOrders(rows: Record<string, unknown>[]): Promise<{ restore: () => void }> {
+  const { datastore } = mockDatastore({});
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  if (rows.length) await datastore.insert('Orders', rows);
+  return {
+    restore() {
+      if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+      else process.env.C2C_DEPLOY_MODE = realMode;
+      if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+      else process.env.C2C_APP_TIMEZONE = realZone;
+      if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+      else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+    },
+  };
+}
+
+test('blueprint criteria failure is not "no such transition"; dry run reports criteria unevaluated', async () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      phases: [{ phase: 'before', properties: [prop('transition criteria', 'Amount > 100')], blocks: [], deluge: [], span: Z }],
+    }),
+  );
+  const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  const mod = await loadModule(machine.source, 'flow.mjs');
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+
+  // Dry run: the placeholder stage still picks the transition, and the reply
+  // says the criteria were not evaluated — the client record is never trusted.
+  const dry = await invoke(mod.transition, { ...caller, body: { status: 'Review', record: { Amount: 1 } } });
+  assert.equal(dry.status, 200, JSON.stringify(dry.body));
+  assert.equal(dry.body.dryRun, true);
+  assert.equal(dry.body.status, 'Review');
+  assert.equal(dry.body.criteria, 'not evaluated in dry run');
+
+  const live = await liveOrders([
+    { Amount: '150', Status: 'Draft' },
+    { Amount: '50', Status: 'Draft' },
+  ]);
+  try {
+    const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1001', status: 'Review' } });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error, 'transition criteria not met', 'a real transition whose criterion fails is not "no such transition"');
+    const nowhere = await invoke(mod.transition, { ...caller, body: { ROWID: '1001', status: 'Nowhere' } });
+    assert.equal(nowhere.status, 403);
+    assert.equal(nowhere.body.error, 'status is not a transition of this stage');
+    const ok = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.dryRun, false);
+    assert.equal(ok.body.status, 'Review');
+  } finally {
+    live.restore();
+  }
+});
+
+test('criteria at transition level and in any case gate, and repeated keys emit no duplicate function', async () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      properties: [prop('transition criteria', 'Amount > 100'), prop('transition criteria', 'Amount < 1000')],
+      phases: [
+        { phase: 'before', properties: [prop('Transition Criteria', 'Amount != 500')], blocks: [], deluge: [], span: Z },
+        { phase: 'during', properties: [prop('transition criteria', 'Amount >= 100'), prop('transition criteria', 'Amount >= 100')], blocks: [], deluge: [], span: Z },
+      ],
+    }),
+  );
+  const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  // Before the fix every criterion emitted `transition_0_condition`, a
+  // duplicate declaration that failed module load with a SyntaxError.
+  const mod = await loadModule(machine.source, 'flow.mjs');
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+  const live = await liveOrders([
+    { Amount: '150', Status: 'Draft' },
+    { Amount: '500', Status: 'Draft' },
+    { Amount: '2000', Status: 'Draft' },
+    { Amount: '50', Status: 'Draft' },
+  ]);
+  try {
+    assert.equal((await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } })).status, 200);
+    const under = await invoke(mod.transition, { ...caller, body: { ROWID: '1003', status: 'Review' } });
+    assert.equal(under.status, 403);
+    assert.equal(under.body.error, 'transition criteria not met');
+    const mid = await invoke(mod.transition, { ...caller, body: { ROWID: '1001', status: 'Review' } });
+    assert.equal(mid.status, 403);
+    assert.equal(mid.body.error, 'transition criteria not met');
+    const over = await invoke(mod.transition, { ...caller, body: { ROWID: '1002', status: 'Review' } });
+    assert.equal(over.status, 403);
+    assert.equal(over.body.error, 'transition criteria not met');
+  } finally {
+    live.restore();
+  }
+});
+
+test('an unparseable transition criterion fails closed and is listed as a todo', async () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      phases: [{ phase: 'before', properties: [prop('transition criteria', 'Amount >')], blocks: [], deluge: [], span: Z }],
+    }),
+  );
+  assert.ok(g.todos.length, 'the unparseable criterion is reported, not dropped');
+  const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  const mod = await loadModule(machine.source, 'flow.mjs');
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+  const live = await liveOrders([{ Amount: '150', Status: 'Draft' }]);
+  try {
+    const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error, 'transition criteria not met');
+  } finally {
+    live.restore();
+  }
+});
+
+test('a transition criterion on a removed field fails closed with 403 and is listed as a todo', async () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      phases: [{ phase: 'before', properties: [prop('transition criteria', 'Deleted_Field > 100')], blocks: [], deluge: [], span: Z }],
+    }),
+  );
+  assert.ok(g.todos.length > 0, 'the unresolvable field is reported, not dropped');
+  assert.ok(
+    g.todos.some((t) => t.construct === 'blueprint-transition-criteria'),
+    `expected a blueprint-transition-criteria todo, got ${JSON.stringify(g.todos.map((t) => t.construct))}`,
+  );
+  const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  const mod = await loadModule(machine.source, 'flow.mjs');
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+  const live = await liveOrders([{ Amount: '150', Status: 'Draft' }]);
+  try {
+    const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+    assert.equal(denied.status, 403, JSON.stringify(denied.body));
+    assert.equal(denied.body.error, 'transition criteria reference an unknown field or function');
+  } finally {
+    live.restore();
+  }
+});
+
+test('a removed-field transition criterion both denies and is a visible report row, beside the migrated translation', async () => {
+  // Fail closed and nothing silently dropped hold together: the criterion
+  // the generator cannot evaluate is denied at run time AND counted in the
+  // migration report, and the app's translation block ships in the client
+  // i18n table instead of a warning. The `input.`
+  // spelling is the one only the record-root check catches.
+  const base = orderBlueprint([plainField('Amount')], {
+    name: 'Send',
+    phases: [{ phase: 'before', properties: [prop('transition criteria', 'input.Deleted_Field > 100')], blocks: [], deluge: [], span: Z }],
+  });
+  const g = generate({
+    ...base,
+    translations: [{ json: '{"de":{"FormField.Orders.Amount":" Betrag "}}', data: { de: { 'FormField.Orders.Amount': ' Betrag ' } }, span: Z }],
+  });
+  assert.equal(workflowKind(base.workflows[0]!), 'blueprint');
+  const report = JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as {
+    deterministic: boolean;
+    todoCount: number;
+    untranslated: { construct: string; count: number }[];
+    warnings?: { construct: string; name: string }[];
+  };
+  assert.equal(report.deterministic, false);
+  assert.ok(report.todoCount > 0);
+  assert.ok(
+    report.untranslated.some((u) => u.construct === 'blueprint-transition-criteria'),
+    `expected a blueprint-transition-criteria row, got ${JSON.stringify(report.untranslated)}`,
+  );
+  assert.deepEqual(
+    (report.warnings ?? []).filter((w) => w.construct === 'translation-not-migrated').map((w) => w.name),
+    [],
+  );
+  const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  const mod = await loadModule(machine.source, 'flow.mjs');
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+  const live = await liveOrders([{ Amount: '150', Status: 'Draft' }]);
+  try {
+    const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+    assert.equal(denied.status, 403, JSON.stringify(denied.body));
+    assert.equal(denied.body.error, 'transition criteria reference an unknown field or function');
+  } finally {
+    live.restore();
+  }
+});
+
+test('a transition criterion reading a removed field through input. or old. fails closed too', async () => {
+  // `input.X`/`old.X` spellings translate unconditionally, so the bare-name
+  // scan never sees them; the member root is validated against the form.
+  for (const criteria of ['input.Deleted == null', 'old.Deleted == null', 'input.Deleted != "x"', 'input.Deleted.foo == 1']) {
+    const g = generate(
+      orderBlueprint([plainField('Amount')], {
+        name: 'Send',
+        phases: [{ phase: 'before', properties: [prop('transition criteria', criteria)], blocks: [], deluge: [], span: Z }],
+      }),
+    );
+    assert.ok(
+      g.todos.some((t) => t.construct === 'blueprint-transition-criteria'),
+      `expected a blueprint-transition-criteria todo for ${criteria}, got ${JSON.stringify(g.todos.map((t) => t.construct))}`,
+    );
+    const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+    assert.ok(machine);
+    const mod = await loadModule(machine.source, 'flow.mjs');
+    const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+    const live = await liveOrders([{ Amount: '150', Status: 'Draft' }]);
+    try {
+      const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+      assert.equal(denied.status, 403, `${criteria}: ${JSON.stringify(denied.body)}`);
+      assert.equal(denied.body.error, 'transition criteria reference an unknown field or function');
+    } finally {
+      live.restore();
+    }
+  }
+
+  // The same spellings on a field that exists still gate normally; `Status`
+  // is the machine's own status column, not a form field.
+  const ok = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      phases: [{ phase: 'before', properties: [prop('transition criteria', 'input.Amount > 100 && old.Status == "Draft"')], blocks: [], deluge: [], span: Z }],
+    }),
+  );
+  assert.ok(!ok.todos.some((t) => t.construct === 'blueprint-transition-criteria'));
+  const machine = ok.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  const mod = await loadModule(machine.source, 'flow.mjs');
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+  const live = await liveOrders([
+    { Amount: '150', Status: 'Draft' },
+    { Amount: '50', Status: 'Draft' },
+  ]);
+  try {
+    const allow = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+    assert.equal(allow.status, 200, JSON.stringify(allow.body));
+    const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1001', status: 'Review' } });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error, 'transition criteria not met');
+  } finally {
+    live.restore();
+  }
+});
+
+test('a transition criterion reading a removed field through .get or .toMap fails closed too', async () => {
+  // `input.get("X")`, `old.get("X")`, and `input.toMap().get("X")` are record
+  // reads exactly like `input.X`, so a removed key is the same closed gate.
+  for (const criteria of [
+    'input.get("Deleted") == null',
+    'old.get("Deleted") == null',
+    'input.toMap().get("Deleted") == null',
+    'old.toMap().get("Deleted") == null',
+    'input.get("Deleted.Sub") == null',
+    'input.containsKey("Deleted")',
+    'input.keys().contains("Deleted")',
+    'Amount > 100 && input.get("Deleted") == null',
+  ]) {
+    const g = generate(
+      orderBlueprint([plainField('Amount')], {
+        name: 'Send',
+        phases: [{ phase: 'before', properties: [prop('transition criteria', criteria)], blocks: [], deluge: [], span: Z }],
+      }),
+    );
+    assert.ok(
+      g.todos.some((t) => t.construct === 'blueprint-transition-criteria'),
+      `expected a blueprint-transition-criteria todo for ${criteria}, got ${JSON.stringify(g.todos.map((t) => t.construct))}`,
+    );
+    const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+    assert.ok(machine);
+    const mod = await loadModule(machine.source, 'flow.mjs');
+    const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+    const live = await liveOrders([{ Amount: '150', Status: 'Draft' }]);
+    try {
+      const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+      assert.equal(denied.status, 403, `${criteria}: ${JSON.stringify(denied.body)}`);
+      assert.equal(denied.body.error, 'transition criteria reference an unknown field or function');
+    } finally {
+      live.restore();
+    }
+  }
+
+  // The same spellings on a field that exists still gate normally.
+  for (const criteria of [
+    'input.get("Amount") > 100',
+    'input.toMap().get("Amount") > 100',
+    'old.get("Status") == "Draft" && input.containsKey("Amount") && input.get("Amount") > 100',
+    'input.keys().contains("Amount") && input.get("Amount") > 100',
+  ]) {
+    const ok = generate(
+      orderBlueprint([plainField('Amount')], {
+        name: 'Send',
+        phases: [{ phase: 'before', properties: [prop('transition criteria', criteria)], blocks: [], deluge: [], span: Z }],
+      }),
+    );
+    assert.ok(!ok.todos.some((t) => t.construct === 'blueprint-transition-criteria'), `unexpected todo for ${criteria}`);
+    const machine = ok.files.find((f) => f.path.startsWith('functions/flow/'));
+    assert.ok(machine);
+    const mod = await loadModule(machine.source, 'flow.mjs');
+    const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+    const live = await liveOrders([
+      { Amount: '150', Status: 'Draft' },
+      { Amount: '50', Status: 'Draft' },
+    ]);
+    try {
+      const allow = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+      assert.equal(allow.status, 200, `${criteria}: ${JSON.stringify(allow.body)}`);
+      const denied = await invoke(mod.transition, { ...caller, body: { ROWID: '1001', status: 'Review' } });
+      assert.equal(denied.status, 403, `${criteria}: ${JSON.stringify(denied.body)}`);
+      assert.equal(denied.body.error, 'transition criteria not met');
+    } finally {
+      live.restore();
+    }
+  }
+});
+
+test('a transition criterion may name the status column and ROWID bare, like input.X', async () => {
+  // Bare `Status`/`ROWID` read the same record as `input.Status`/`input.ROWID`;
+  // a genuinely unknown bare name still fails closed.
+  const cases: { criteria: string; pass1000: boolean }[] = [
+    { criteria: 'Status == "Draft"', pass1000: true },
+    { criteria: 'Status == "Done"', pass1000: false },
+    { criteria: 'ROWID != null', pass1000: true },
+    { criteria: 'Bogus == 1', pass1000: false },
+  ];
+  for (const { criteria, pass1000 } of cases) {
+    const g = generate(
+      orderBlueprint([plainField('Amount')], {
+        name: 'Send',
+        phases: [{ phase: 'before', properties: [prop('transition criteria', criteria)], blocks: [], deluge: [], span: Z }],
+      }),
+    );
+    const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+    assert.ok(machine);
+    const mod = await loadModule(machine.source, 'flow.mjs');
+    const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+    const live = await liveOrders([{ Amount: '150', Status: 'Draft' }]);
+    try {
+      const res = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+      if (criteria === 'Bogus == 1') {
+        assert.ok(g.todos.some((t) => t.construct === 'blueprint-transition-criteria'));
+        assert.equal(res.status, 403, `${criteria}: ${JSON.stringify(res.body)}`);
+        assert.equal(res.body.error, 'transition criteria reference an unknown field or function');
+      } else {
+        assert.ok(!g.todos.some((t) => t.construct === 'blueprint-transition-criteria'), `unexpected todo for ${criteria}`);
+        assert.equal(res.status, pass1000 ? 200 : 403, `${criteria}: ${JSON.stringify(res.body)}`);
+        if (!pass1000) assert.equal(res.body.error, 'transition criteria not met');
+      }
+    } finally {
+      live.restore();
+    }
+  }
+});
+
+test('a criterion that emits no verdict is closed by an explicit return false', async () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      phases: [{ phase: 'before', properties: [prop('transition criteria', 'Amount >')], blocks: [], deluge: [], span: Z }],
+    }),
+  );
+  const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  // The todo call yields undefined; the appended return keeps the gate closed
+  // even though the `// Deluge:` line and the todo string mention `return`.
+  assert.match(stripComments(machine.source), /shim\.todo\(ctx, "task:return"[^)]*\);\s*\n\s*return false;/);
+});
+
+test('a subscript read, an ifnull-wrapped record, or an untranslated call in a criterion fails closed', async () => {
+  // `deny` = 403 unknown field or function plus a listed todo on both rows;
+  // `data` = no todo, row 1000 (Amount 150) passes and row 1001 (Amount 50)
+  // is "not met".
+  const cases: { criteria: string; expect: 'deny' | 'data' }[] = [
+    { criteria: 'input["Deleted"] == null', expect: 'deny' },
+    { criteria: 'old["Deleted"] == null', expect: 'deny' },
+    { criteria: 'input.toMap()["Deleted"] == null', expect: 'deny' },
+    { criteria: 'input.toMap().toMap()["Deleted"] == null', expect: 'deny' },
+    { criteria: '(input)["Deleted"] == null', expect: 'deny' },
+    { criteria: 'input["Dele" + "ted"] == null', expect: 'deny' },
+    { criteria: 'input[Amount] == null', expect: 'deny' },
+    { criteria: 'input.GET("Deleted") == null', expect: 'deny' },
+    { criteria: '!input.GET("Deleted")', expect: 'deny' },
+    { criteria: 'input.Get("Deleted") == null', expect: 'deny' },
+    { criteria: 'input.Keys().contains("Deleted")', expect: 'deny' },
+    { criteria: 'input.getAll("Deleted") == null', expect: 'deny' },
+    { criteria: 'ifnull(input, input).get("Deleted") == null', expect: 'deny' },
+    { criteria: 'ifnull(input.toMap(), input.toMap()).get("Deleted") == null', expect: 'deny' },
+    { criteria: 'ifnull(input.Deleted, "") == ""', expect: 'deny' },
+    { criteria: 'ifnull(input.get("Deleted"), "") == ""', expect: 'deny' },
+    { criteria: 'input["Amount"] > 100', expect: 'data' },
+    { criteria: 'input.toMap()["Amount"] > 100', expect: 'data' },
+    { criteria: 'input["Amount"] > 100 && old["Status"] == "Draft"', expect: 'data' },
+    { criteria: 'ifnull(input.Amount, 0) > 100', expect: 'data' },
+    { criteria: 'ifnull(input.get("Amount"), 0) > 100', expect: 'data' },
+    { criteria: 'ifnull(input.toMap(), input.toMap()).get("Amount") > 100', expect: 'data' },
+    { criteria: '(input || old)["Deleted"] == null', expect: 'deny' },
+    { criteria: '(old || input)["Deleted"] == null', expect: 'deny' },
+    { criteria: '(input || old).Deleted == null', expect: 'deny' },
+    { criteria: '(input || old).get("Deleted") == null', expect: 'deny' },
+    { criteria: 'if(Amount > 0, input, old)["Deleted"] == null', expect: 'deny' },
+    { criteria: 'if(Amount > 0, input, old).Deleted == null', expect: 'deny' },
+    { criteria: 'if(Amount > 0, input, old).get("Deleted") == null', expect: 'deny' },
+    { criteria: '(input && input)["Deleted"] == null', expect: 'deny' },
+    { criteria: '(input.toMap() || old)["Deleted"] == null', expect: 'deny' },
+    { criteria: '(ifnull(input, old) || old)["Deleted"] == null', expect: 'deny' },
+    { criteria: 'Amount > 0 && (input || old)["Deleted"] == null', expect: 'deny' },
+    { criteria: '(input || old)["Amount"] > 100', expect: 'data' },
+    { criteria: '(input || old).Amount > 100', expect: 'data' },
+    { criteria: '(input || old).get("Amount") > 100', expect: 'data' },
+    { criteria: 'if(Amount > 0, input, old)["Amount"] > 100', expect: 'data' },
+    { criteria: 'if(Amount > 0, input, old).Amount > 100', expect: 'data' },
+    { criteria: 'if(Amount > 0, input, old).get("Amount") > 100', expect: 'data' },
+    // Escape check rows (records in container literals)
+    { criteria: '{input}.get(0).get("Deleted") == null', expect: 'deny' },
+    { criteria: '{input}.get(0).Deleted == null', expect: 'deny' },
+    { criteria: '{input, old}.get(1)["Deleted"] == null', expect: 'deny' },
+    { criteria: '{"k": input}.get("k").get("Deleted") == null', expect: 'deny' },
+    { criteria: '{"k": input}.get("k")["Deleted"] == null', expect: 'deny' },
+    { criteria: '{input}.get(0).get("Amount") > 100', expect: 'deny' }, // known false-deny due to escape check
+    // Mixed receiver false-denies
+    { criteria: 'ifnull(input, {"a":1}).get("Amount") > 100', expect: 'deny' },
+    { criteria: '(input || {"a":1})["Amount"] > 100', expect: 'deny' },
+    { criteria: 'if(Amount > 0, input, {"Amount":0}).Amount > 100', expect: 'deny' },
+    { criteria: '(Amount > 0 && input)["Amount"] > 100', expect: 'deny' },
+    // A record in the condition of if() / ?: is not a value arm.
+    { criteria: 'if({input}.get(0).get("Deleted") == null, input, old).Amount > 100', expect: 'deny' },
+    { criteria: '(input || if({input}.get(0).Deleted == null, input, old)).Amount > 100', expect: 'deny' },
+    { criteria: 'if(input == null, input, old).Amount > 100', expect: 'deny' },
+  ];
+  for (const { criteria, expect } of cases) {
+    const g = generate(
+      orderBlueprint([plainField('Amount')], {
+        name: 'Send',
+        phases: [{ phase: 'before', properties: [prop('transition criteria', criteria)], blocks: [], deluge: [], span: Z }],
+      }),
+    );
+    const listed = g.todos.some((t) => t.construct === 'blueprint-transition-criteria');
+    assert.equal(listed, expect === 'deny', `${criteria}: ${JSON.stringify(g.todos.map((t) => t.construct))}`);
+    const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+    assert.ok(machine);
+    const mod = await loadModule(machine.source, 'flow.mjs');
+    const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+    const live = await liveOrders([
+      { Amount: '150', Status: 'Draft' },
+      { Amount: '50', Status: 'Draft' },
+    ]);
+    try {
+      const first = await invoke(mod.transition, { ...caller, body: { ROWID: '1000', status: 'Review' } });
+      const second = await invoke(mod.transition, { ...caller, body: { ROWID: '1001', status: 'Review' } });
+      if (expect === 'deny') {
+        for (const res of [first, second]) {
+          assert.equal(res.status, 403, `${criteria}: ${JSON.stringify(res.body)}`);
+          assert.equal(res.body.error, 'transition criteria reference an unknown field or function');
+        }
+      } else {
+        assert.equal(first.status, 200, `${criteria}: ${JSON.stringify(first.body)}`);
+        assert.equal(second.status, 403, `${criteria}: ${JSON.stringify(second.body)}`);
+        assert.equal(second.body.error, 'transition criteria not met');
+      }
+    } finally {
+      live.restore();
+    }
+  }
+});
+
+test('condition scripts see rowId as ID and compare lookups by member value', async () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount'), plainField('Manager', 'lookup')], {
+      name: 'Send',
+      properties: [prop('transition criteria', 'ID == 4242'), prop('transition criteria', 'Manager == "Ada"')],
+    }),
+  );
+  const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(machine);
+  const mod = (await loadModule(machine.source, 'flow.mjs')) as {
+    handle: (ctx: ReturnType<ReturnType<typeof createRuntime>['context']>) => Promise<unknown>;
+  };
+  const runtime = createRuntime({ dryRun: true });
+  const run = (script: string, record: Record<string, unknown>, rowId?: string) =>
+    mod.handle(runtime.context({ record, old: {}, rowId, transition: { action: 'transition', from: 'Draft', to: 'Review', script } }));
+  // Bare ID resolves to the transition request's rowId.
+  assert.equal(await run('transition_0_condition', { Amount: '1' }, '4242'), true);
+  assert.equal(await run('transition_0_condition', { Amount: '1' }, '9'), false);
+  // A lookup {id,label} equals its label or id, not object identity.
+  assert.equal(await run('transition_0_condition_2', { Manager: { id: '7', label: 'Ada' } }), true);
+  assert.equal(await run('transition_0_condition_2', { Manager: { id: '9', label: 'Bob' } }), false);
+});
+
+test('stage and start blocks such as chart data surface as todos, not silent drops', () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      phases: [],
+    }),
+  );
+  const withBlocks = generate(
+    app({
+      profiles: [ordersStaff as App['profiles'][number]],
+      forms: [plainForm('Orders', [plainField('Amount')])],
+      workflows: [
+        workflow({
+          name: 'Order flow',
+          container: 'schedule',
+          form: 'Orders',
+          event: 'blueprint',
+          blueprint: {
+            start: pb('Draft', [prop('start stage', 'Draft'), prop('theme', 'dark')], [pb('chart data')]),
+            stages: [pb('Draft', [], [pb('chart data')]), pb('Review'), pb('Done')],
+            transitions: [{ name: 'Send', fromStage: 'Draft', toStage: 'Review', properties: [], phases: [], span: Z }],
+          },
+        }),
+      ],
+    }),
+  );
+  assert.ok(withBlocks.todos.some((t) => t.construct === 'blueprint-stage-block-chart data'));
+  assert.ok(withBlocks.todos.some((t) => t.construct === 'blueprint-start-block-chart data'));
+  assert.ok(withBlocks.todos.some((t) => t.construct === 'blueprint-start-property-theme'));
+  assert.ok(!withBlocks.todos.some((t) => t.construct === 'blueprint-start-property-start stage'), 'the supported start-stage property is not a todo');
+  assert.equal(g.todos.filter((t) => t.construct.startsWith('blueprint-stage-') || t.construct.startsWith('blueprint-start-')).length, 0);
+});
+
+test('a transition\'s own chart data block is one todo, not one per coordinate property', () => {
+  const g = generate(
+    orderBlueprint([plainField('Amount')], {
+      name: 'Send',
+      phases: [
+        {
+          phase: 'chart data',
+          properties: [prop('from port', 'L1'), prop('to port', 'T3'), prop('path', '[0,0,1,1]')],
+          blocks: [],
+          deluge: [],
+          span: Z,
+        },
+      ],
+    }),
+  );
+  const chartDataTodos = g.todos.filter((t) => t.construct.startsWith('blueprint-') && t.construct.includes('chart data'));
+  assert.equal(chartDataTodos.length, 1, JSON.stringify(g.todos.map((t) => t.construct)));
+  assert.ok(
+    !g.todos.some((t) => t.construct === 'blueprint-phase-property-from port' || t.construct === 'blueprint-phase-property-to port' || t.construct === 'blueprint-phase-property-path'),
+    'the from/to port and path coordinates are not counted as separate unsupported properties',
+  );
+});
+
+test('no HTTP route maps to a schedule handler', () => {
+  const g = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'Nightly',
+          container: 'schedule',
+          event: 'on schedule',
+          deluge: { text: 'x = 1;', span: Z },
+        }),
+        workflow({
+          name: 'On add',
+          form: 'Orders',
+          event: 'on success',
+          deluge: { text: 'y = 2;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const jobs = g.files.filter((file) => file.path.startsWith('functions/job/'));
+  assert.equal(jobs.length, 1);
+  const routes = g.files.flatMap((file) => [...file.source.matchAll(/path:\s*"([^"]+)"/g)].map((match) => match[1]!));
+  assert.ok(routes.length > 0);
+  for (const job of jobs) {
+    assert.equal([...job.source.matchAll(/path:\s*"/g)].length, 0);
+    assert.doesNotMatch(stripComments(job.source), /export const endpoint/);
+  }
+  for (const route of routes) {
+    assert.doesNotMatch(stripComments(route), /\/job\/|nightly|schedule/i);
+  }
+});
+
+test('approval and custom-function gates ignore the client record', async () => {
+  const view = {
+    component: 'Leave',
+    properties: [{ key: 'enabled', value: 'viewall', span: Z }],
+    reports: [] as { key: string; value: string; span: typeof Z }[],
+    fields: [] as { field: string; flags: Record<string, string>; span: typeof Z }[],
+    span: Z,
+  };
+  const staff = {
+    name: 'Staff',
+    type: 'Users_Permissions',
+    properties: [],
+    modules: [view],
+    span: Z,
+  };
+  const approval = generate(
+    app({
+      profiles: [staff],
+      sections: [
+        {
+          name: 'Hidden',
+          hidden: true,
+          components: [{ kind: 'form', name: 'SecretLeave' }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Leave approval',
+          container: 'approval',
+          form: 'Leave',
+          event: 'on approve',
+          approvers: [{ key: 'users', value: 'a@example.com', span: Z }],
+          deluge: { text: 'x = 1;', span: Z },
+        }),
+        workflow({
+          name: 'Hidden approval',
+          container: 'approval',
+          form: 'SecretLeave',
+          event: 'on approve',
+          approvers: [{ key: 'users', value: 'a@example.com', span: Z }],
+          deluge: { text: 'x = 1;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const visible = approval.files.find((file) => file.path === 'functions/flow/leave-approval.mjs');
+  const hidden = approval.files.find((file) => file.path === 'functions/flow/hidden-approval.mjs');
+  assert.ok(visible);
+  assert.ok(hidden);
+  const visibleMod = await loadModule(visible.source, 'leave.mjs');
+  const hiddenMod = await loadModule(hidden.source, 'hidden.mjs');
+  const caller = { user: { profile: 'Staff', email: 'a@example.com' } };
+  const leak = { record: { Secret: 'nope' }, old: { Secret: 'previous' }, status: 'Approved' };
+  assert.equal((await invoke(hiddenMod.approve, { ...caller, body: leak })).status, 403);
+  assert.equal((await invoke(visibleMod.approve, { body: leak })).status, 401);
+  const stranger = await invoke(visibleMod.approve, { user: { profile: 'Staff', email: 'eve@example.test' }, body: leak });
+  assert.equal(stranger.status, 403);
+  assert.equal(JSON.stringify(stranger.body).includes('nope'), false);
+  assert.equal(JSON.stringify(stranger.body).includes('previous'), false);
+  const badStatus = await invoke(visibleMod.approve, { ...caller, body: { status: 'Hacked', record: { Secret: 'nope' } } });
+  assert.equal(badStatus.status, 403);
+  assert.equal(JSON.stringify(badStatus.body).includes('nope'), false);
+  const rejected = await invoke(visibleMod.reject, { ...caller, body: { status: 'Rejected' } });
+  assert.equal(rejected.status, 403);
+  const ok = await invoke(visibleMod.approve, { ...caller, body: leak });
+  assert.equal(ok.status, 200);
+  assert.equal(JSON.stringify(ok.body).includes('nope'), false);
+  assert.equal(JSON.stringify(ok.body).includes('previous'), false);
+
+  const custom = generate(
+    app({
+      profiles: [staff],
+      functions: [
+        {
+          name: 'sumRows',
+          kind: 'creator',
+          signature: 'int sumRows(int limit)',
+          form: 'Leave',
+          properties: [{ key: 'execution', value: 'for each record', span: Z }],
+          deluge: [{ text: 'total = rec.Amount;', span: Z }],
+          span: Z,
+        },
+      ],
+    }),
+  );
+  const fn = custom.files.find((file) => file.path.startsWith('functions/custom/'));
+  assert.ok(fn);
+  // No api block publishes sumRows, so it is not an HTTP route at all: no
+  // endpoint export, and the default handler refuses every request.
+  assert.doesNotMatch(stripComments(fn.source), /export const endpoint/);
+  assert.doesNotMatch(stripComments(fn.source), /req\.body\.(record|old|row|args)/);
+  const mod = await loadModule(fn.source, 'fn.mjs');
+  const called = await invoke(mod.default, {
+    ...caller,
+    body: { record: { Secret: 'nope' }, old: { Secret: 'previous' }, row: { Secret: 'row-secret' }, args: [2] },
+  });
+  assert.equal(called.status, 404);
+});
+
+// The generated-host body reader, loaded from the real runtime asset: when a
+// test hands a request object with `body` but no `rawBody`, the body's wire
+// text is pushed through the same readBody the deployed c2c_api entry runs —
+// a stream is decoded, req.rawBody captures the bytes, and JSON.parse under
+// quoteUnsafeIntegers produces req.body. rawBody is never synthesized from an
+// already-parsed object.
+const hostReadBody = (() => {
+  const req = createRequire(new URL('../../../packages/deploy/fn/read-body.cjs', import.meta.url));
+  return req('./read-body.cjs') as { readBody(stream: unknown): Promise<unknown> };
+})().readBody;
+
+interface HostStream extends Readable {
+  method: string;
+  headers: Record<string, string>;
+  rawBody?: string;
+}
+
+/** A request stream carrying `wire` bytes, as a Catalyst host would deliver. */
+function hostStream(wire: string | Buffer): HostStream {
+  const stream = Readable.from([Buffer.isBuffer(wire) ? wire : Buffer.from(wire, 'utf8')]) as HostStream;
+  stream.method = 'POST';
+  stream.headers = { 'content-type': 'application/json' };
+  return stream;
+}
+
+async function hostRequest(req: unknown): Promise<unknown> {
+  if (!req || typeof req !== 'object' || 'rawBody' in req) return req;
+  const body = (req as Record<string, unknown>).body;
+  if (body === undefined || typeof body === 'string' || Buffer.isBuffer(body)) return req;
+  const stream = hostStream(JSON.stringify(body));
+  const parsed = await hostReadBody(stream);
+  return { ...(req as Record<string, unknown>), body: parsed, rawBody: stream.rawBody };
+}
+
+async function invoke(handler: (req: unknown, res: unknown) => unknown, req: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+  let status = 0;
+  let raw = '';
+  const res = {
+    writeHead(code: number) {
+      status = code;
+    },
+    end(body: string) {
+      raw = body;
+    },
+  };
+  const request = await hostRequest(req);
+  return Promise.resolve(handler(request, res)).then(() => ({ status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} }));
+}
+
+async function invokeRaw(handler: (req: unknown, res: unknown) => unknown, req: unknown): Promise<{ status: number; raw: string }> {
+  let status = 0;
+  let raw = '';
+  const res = {
+    writeHead(code: number) {
+      status = code;
+    },
+    end(body: string) {
+      raw = body;
+    },
+  };
+  const request = await hostRequest(req);
+  return Promise.resolve(handler(request, res)).then(() => ({ status, raw }));
+}
+
+async function loadModule(source: string, name: string, storeSource?: string): Promise<Record<string, (req: unknown, res: unknown) => unknown>> {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-gate-'));
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+  mkdirSync(join(dir, 'node_modules'), { recursive: true });
+  symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+  const file = join(dir, name);
+  mkdirSync(dirname(file), { recursive: true });
+  const hasAioLibrary = source.includes('from "../_lib.mjs"');
+  writeFileSync(file, hasAioLibrary ? source.replaceAll('"../_lib.mjs"', '"./_lib.mjs"') : source);
+  if (hasAioLibrary) writeFileSync(join(dirname(file), '_lib.mjs'), aioLibraryModule());
+  if (storeSource) writeFileSync(join(dir, 'c2c-store.mjs'), storeSource);
+  try {
+    return (await import(pathToFileURL(file).href)) as Record<string, (req: unknown, res: unknown) => unknown>;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Write every generated `functions/*` file at its real path so sibling imports (`../thisapp.mjs`) resolve. */
+async function loadTree(g: ReturnType<typeof generate>, entry: string): Promise<Record<string, unknown>> {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-tree-'));
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+  mkdirSync(join(dir, 'node_modules'), { recursive: true });
+  symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+  for (const file of g.files.filter((f) => f.path.startsWith('functions/'))) {
+    const dest = join(dir, file.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, file.source);
+  }
+  try {
+    return (await import(pathToFileURL(join(dir, entry)).href)) as Record<string, unknown>;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Keep a generated functions tree alive while a callback runs lazy registry imports. */
+async function withTree<T>(g: ReturnType<typeof generate>, entry: string, run: (mod: Record<string, unknown>, dir: string) => Promise<T> | T): Promise<T> {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-tree-'));
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+  mkdirSync(join(dir, 'node_modules'), { recursive: true });
+  symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+  for (const file of g.files.filter((f) => f.path.startsWith('functions/'))) {
+    const dest = join(dir, file.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, file.source);
+  }
+  try {
+    return await run((await import(pathToFileURL(join(dir, entry)).href)) as Record<string, unknown>, dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('a bare app-function call resolves by declaration and executes through the thisapp registry', async () => {
+  const g = generate(app({
+    functions: [
+      {
+        name: 'twice', kind: 'deluge', signature: 'int twice(int n)',
+        deluge: [{ text: 'return n * 2;', span: Z }], properties: [], span: Z,
+      },
+      {
+        name: 'twicePlus', kind: 'deluge', signature: 'int twicePlus(int n)',
+        deluge: [{ text: 'return twice(n) + 1;', span: Z }], properties: [], span: Z,
+      },
+    ],
+  }));
+  assert.equal(g.todos.some((todo) => todo.construct === 'call:twice'), false);
+  const caller = g.files.find((file) => file.path === 'functions/custom/twiceplus.mjs');
+  assert.ok(caller);
+  assert.match(stripComments(caller.source), /shim\.thisapp\.call\(ctx, \["twice"\], \[n\]\)/);
+
+  const value = await withTree(g, 'functions/thisapp.mjs', async (registryModule, dir) => {
+    const registry = registryModule.functions as NonNullable<Parameters<typeof createRuntime>[0]>['functions'];
+    const runtime = createRuntime({ dryRun: false, settingsTimeZone: 'Asia/Kolkata', functions: registry });
+    const ctx = runtime.context({ record: {}, old: {} });
+    const callerModule = await import(pathToFileURL(join(dir, 'functions/custom/twiceplus.mjs')).href) as {
+      twicePlus(ctx: ReturnType<ReturnType<typeof createRuntime>['context']>, n: number): Promise<number>;
+    };
+    return callerModule.twicePlus(ctx, 4);
+  });
+  assert.equal(value, 9);
+});
+
+test('custom functions get a deterministic thisapp registry and live dispatch stays in-process', async () => {
+  const build = () =>
+    app({
+      functions: [
+        {
+          name: 'Helpers.twice',
+          kind: 'deluge',
+          signature: 'int Helpers.twice(int n)',
+          deluge: [{ text: 'return n * 2;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+        {
+          name: 'Helpers.twicePlus',
+          kind: 'deluge',
+          signature: 'int Helpers.twicePlus(int n)',
+          deluge: [{ text: 'return thisapp.Helpers.twice(n) + 1;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+    });
+  const g = generate(build());
+  const registry = g.files.find((f) => f.path === 'functions/thisapp.mjs');
+  assert.ok(registry, 'functions/thisapp.mjs is generated');
+  // Entries dispatch through a lazy in-process import so a callee module
+  // that fails to parse only fails the call that reaches it, not every
+  // module importing the registry.
+  assert.doesNotMatch(stripComments(registry.source), /^import /m);
+  assert.match(stripComments(registry.source), /"Helpers\.twice": \{ call: async \(\.\.\.a\) => \(await import\("\.\/custom\/helpers-twice\.mjs"\)\)\.Helpers_twice\(\.\.\.a\), params: \["n"\] \}/);
+  assert.match(stripComments(registry.source), /"Helpers\.twicePlus": \{ call: async \(\.\.\.a\) => \(await import\("\.\/custom\/helpers-twiceplus\.mjs"\)\)\.Helpers_twicePlus\(\.\.\.a\), params: \["n"\] \}/);
+  const again = generate(build());
+  assert.equal(again.files.find((f) => f.path === 'functions/thisapp.mjs')!.source, registry.source, 'registry is deterministic');
+
+  // Custom functions are not HTTP routes — no `endpoint` export means no
+  // routes.json entry — and the callee needs no `functions` import: the shim
+  // dispatches on the caller's runtime.
+  const caller = g.files.find((f) => f.path === 'functions/custom/helpers-twiceplus.mjs');
+  const callee = g.files.find((f) => f.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(caller && callee);
+  assert.doesNotMatch(stripComments(caller.source), /export const endpoint/);
+  assert.doesNotMatch(stripComments(callee.source), /export const endpoint/);
+
+  // In-process dispatch: the generated callee runs inside the caller's
+  // runtime and returns its value — no HTTP surface involved.
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-tree-'));
+  try {
+    writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+    mkdirSync(join(dir, 'node_modules'), { recursive: true });
+    symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+    for (const file of g.files.filter((f) => f.path.startsWith('functions/'))) {
+      const dest = join(dir, file.path);
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, file.source);
+    }
+    const registry = (await import(pathToFileURL(join(dir, 'functions/thisapp.mjs')).href)) as {
+      functions: Readonly<Record<string, { call(ctx: unknown, ...a: unknown[]): Promise<unknown> }>>;
+    };
+    const runtime = createRuntime({ dryRun: false, settingsTimeZone: 'Asia/Kolkata', functions: registry.functions });
+    const ctx = runtime.context({ record: {}, old: {} });
+    const result = await ctx.shim.thisapp.call(ctx, ['Helpers', 'twicePlus'], [4]);
+    assert.equal(result, 9, 'thisapp.Helpers.twice(4) + 1');
+    assert.ok(runtime.transcript.some((entry) => entry.op === 'thisapp' && entry.performed === true));
+    // HTTP is not an entry point: the module's default handler refuses.
+    const mod = (await import(pathToFileURL(join(dir, 'functions/custom/helpers-twiceplus.mjs')).href)) as {
+      default(req: unknown, res: unknown): unknown;
+    };
+    const refused = await invoke(mod.default, { user: { profile: 'Administrator' }, body: { args: [4] } });
+    assert.equal(refused.status, 404);
+    const dryRuntime = createRuntime({ dryRun: true, settingsTimeZone: 'Asia/Kolkata', functions: registry.functions });
+    const dryCtx = dryRuntime.context({ record: {}, old: {} });
+    const dry = (await dryCtx.shim.thisapp.call(dryCtx, ['Helpers', 'twicePlus'], [4])) as { dryRun?: boolean };
+    assert.equal(dry.dryRun, true);
+    assert.ok(dryRuntime.transcript.some((entry) => entry.op === 'thisapp' && entry.performed === false), 'the thisapp call is recorded, not run');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** An `api` block whose actions call `thisapp.<fn>` — the .ds way to mark a function HTTP-exposed. */
+function apiBlock(
+  name: string,
+  actions: string,
+  extra: { key: string; value: string }[] = [],
+  method: string | null = 'GET',
+) {
+  return {
+    name,
+    properties: [
+      ...(method === null ? [] : [{ key: 'method', value: method, span: Z }]),
+      ...extra.map((p) => ({ ...p, span: Z })),
+    ],
+    blocks: [
+      { name: 'actions', properties: [], blocks: [], items: [], deluge: [{ text: actions, span: Z }], span: Z },
+    ],
+    items: [],
+    span: Z,
+  };
+}
+
+const ADMIN = {
+  name: 'Administrator',
+  type: 'Users_Permissions',
+  properties: [],
+  modules: [],
+  span: Z,
+};
+
+function twiceFn() {
+  return {
+    name: 'Helpers.twice',
+    kind: 'deluge' as const,
+    signature: 'int Helpers.twice(int n)',
+    deluge: [{ text: 'return n * 2;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+}
+
+test('a read-only thisapp callee becomes an event-time client call and endpoint', async () => {
+  const build = () =>
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Util.Ok',
+          kind: 'deluge',
+          signature: 'bool Util.Ok(int n)',
+          deluge: [{ text: 'return n > 1;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+        {
+          name: 'Util.Unused',
+          kind: 'deluge',
+          signature: 'int Util.Unused()',
+          deluge: [{ text: 'return 1;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Orders',
+          event: 'on user input',
+          deluge: { text: 'if(thisapp.Util.Ok(input.Hours)) { alert "ok"; }', span: Z },
+        }),
+      ],
+    });
+  const g = generate(build());
+  const again = generate(build());
+  assert.deepEqual(
+    again.files.map((f) => [f.path, f.source]),
+    g.files.map((f) => [f.path, f.source]),
+    'generated files are deterministic',
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+  const endpoint = g.files.find((f) => f.path === 'functions/custom/util-ok-call.mjs')!;
+  assert.ok(client && endpoint);
+  assert.match(stripComments(client.source), /await shim\.client\.call\(ctx, "Util\.Ok", \[shim\.input\.get\(ctx, "Hours"\)\]\)/);
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/util-unused-call.mjs'), false, 'unused read-only functions do not get a route');
+  check(endpoint.source, 'call.mjs');
+  check(client.source, 'client.mjs');
+
+  const mod = (await loadTree(g, 'functions/custom/util-ok-call.mjs')) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const called = await invoke(mod.default, { user: { profile: 'Administrator' }, body: { nonce: 'n1', args: [3] } });
+  assert.equal(called.status, 200);
+  assert.equal(called.body.ok, true);
+  assert.equal(called.body.dryRun, true);
+  assert.equal(called.body.nonce, 'n1');
+  assert.equal(called.body.value, null, 'a dry run reports a falsy value, never a truthy placeholder');
+
+  const live = await liveOrders([]);
+  try {
+    const liveCall = await withTree(g, 'functions/custom/util-ok-call.mjs', (liveMod) =>
+      invoke(liveMod.default as (req: unknown, res: unknown) => unknown, { user: { profile: 'Administrator' }, body: { nonce: 'n2', args: [3] } }),
+    );
+    assert.equal(liveCall.status, 200);
+    assert.equal(liveCall.body.ok, true);
+    assert.equal(liveCall.body.dryRun, false);
+    assert.equal(liveCall.body.nonce, 'n2');
+    assert.equal(liveCall.body.value, true);
+  } finally {
+    live.restore();
+  }
+
+  const clientMod = (await loadModule(client.source, 'client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const okRuntime = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce, request) => {
+      assert.equal(path, '/functions/util-ok/call');
+      assert.equal(request?.args?.[0], 3);
+      return { ok: true, nonce, value: true };
+    },
+  });
+  const okActions = await clientMod.clientActions!(okRuntime.context({ record: { Hours: 3 }, formNonce: 'n1' }));
+  assert.deepEqual(okActions, [{ op: 'alert', message: 'ok' }]);
+  const staleRuntime = createRuntime({
+    dryRun: true,
+    clientPrefetch: () => ({ ok: true, nonce: 'old', value: true }),
+  });
+  const stale = await clientMod.clientActions!(staleRuntime.context({ record: { Hours: 3 }, formNonce: 'n1' }));
+  assert.deepEqual(stale.map((a) => a.op), ['info'], 'a stale nonce fails closed');
+  const blockedRuntime = createRuntime({
+    dryRun: true,
+    clientPrefetch: (_path, nonce) => ({ ok: false, nonce, error: 'denied' }),
+  });
+  const blocked = await clientMod.clientActions!(blockedRuntime.context({ record: { Hours: 3 }, formNonce: 'n1' }));
+  assert.deepEqual(blocked.map((a) => a.op), ['info'], 'a failed call fails closed and discards queued actions');
+});
+
+test('a read-only thisapp callee accepts a pure form-field expression', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [{
+        name: 'Util.Ok', kind: 'deluge', signature: 'bool Util.Ok(int n)',
+        deluge: [{ text: 'return n > 1;', span: Z }], properties: [], span: Z,
+      }],
+      workflows: [workflow({
+        name: 'Hours check', form: 'Orders', event: 'on user input',
+        deluge: { text: 'if(thisapp.Util.Ok(input.Hours + 1)) { alert "ok"; }', span: Z },
+      })],
+    }),
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+  assert.match(stripComments(client.source), /shim\.client\.call\(ctx, "Util\.Ok", \[\(shim\.input\.get\(ctx, "Hours"\) \+ 1\)\]\)/);
+});
+
+test('a server-bound local shadowing a form field is not client-bound', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [{
+        name: 'Util.Ok', kind: 'deluge', signature: 'bool Util.Ok(int n)',
+        deluge: [{ text: 'return n > 1;', span: Z }], properties: [], span: Z,
+      }],
+      workflows: [workflow({
+        name: 'Hours shadow check', form: 'Orders', event: 'on user input',
+        deluge: { text: 'Hours = Orders[ID == 1].count(); if(thisapp.Util.Ok(Hours + 1)) { alert "ok"; }', span: Z },
+      })],
+    }),
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), true);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs');
+  assert.ok(!client || !/shim\.client\.call\(ctx, "Util\.Ok"/.test(stripComments(client.source)));
+});
+
+test('a client condition needing server data compiles to a c2cCond_* call through the client-call route', async () => {
+  // Two loop elements plus a server read is past the element round-trip cap:
+  // the condition becomes a read-only server function on the existing
+  // /functions/<name>/call route instead of a counted todo.
+  const build = () =>
+    app({
+      forms: [
+        plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Check_Out', 'date')]),
+        plainForm('Pods', [plainField('Pod_No')]),
+      ],
+      profiles: [ADMIN, { name: 'Guest', type: 'Users_Permissions', properties: [], modules: [], span: Z }],
+      workflows: [
+        workflow({
+          name: 'Overlap check',
+          form: 'Reservation',
+          event: 'on user input',
+          deluge: {
+            text: 'for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(a == b && Reservation[ID != 0].count() > 0) { alert "overlap"; } else { alert "free"; } } }',
+            span: Z,
+          },
+        }),
+      ],
+    });
+  const g = generate(build());
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const condMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path) && !f.path.endsWith('-call.mjs'));
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path));
+  assert.ok(condMod && callMod, g.files.map((f) => f.path).join('\n'));
+  assert.match(stripComments(condMod.source), /async function c2cCond_[0-9a-f]+\(ctx, shim, a, b\)/);
+  assert.match(stripComments(condMod.source), /return \{ value: Boolean\(await/);
+  check(condMod.source, 'cond.mjs');
+  check(callMod.source, 'cond-call.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
+  check(client.source, 'cond-client.mjs');
+  assert.match(stripComments(client.source), /await Promise\.resolve\(\)\.then\(\(\) => shim\.client\.condition\(ctx, "c2cCond_[0-9a-f]+", \[a, b\], \{"securityRelevant":false,"safeDefault":"hidden"\}, ctx && ctx\.control\)\)/);
+  // The registry routes the dotted name to the condition module.
+  const registry = g.files.find((f) => f.path === 'functions/thisapp.mjs')!;
+  assert.match(registry.source, /"c2cCond_[0-9a-f]+": \{ call: async \(\.\.\.a\) => \(await import\("\.\/custom\/c2ccond-[0-9a-f]+\.mjs"\)\)\.call/);
+
+  // Endpoint gates: unauthenticated callers get 401; a profile with no read
+  // grant on the forms the body reads is denied; the success envelope is
+  // exactly { ok, nonce, value }.
+  const mod = (await loadTree(g, callMod.path)) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const anon = await invoke(mod.default, { body: { nonce: 'n1', args: [1, 1] } });
+  assert.equal(anon.status, 401);
+  assert.equal(anon.body.ok, false);
+  const denied = await invoke(mod.default, { user: { profile: 'Guest', loginUser: 'g@t' }, body: { nonce: 'n1', args: [1, 1] } });
+  assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  assert.equal(denied.body.ok, false);
+  const dry = await invoke(mod.default, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n1', args: [1, 1] } });
+  assert.equal(dry.status, 200, JSON.stringify(dry.body));
+  assert.equal(dry.body.ok, true);
+  assert.equal(dry.body.nonce, 'n1');
+  assert.equal(dry.body.value, null, 'dry run never reports a truthy condition value');
+  const { datastore } = mockDatastore({});
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  try {
+    await datastore.insert('Reservation', [{ ID: 7 }]);
+    const res = await withTree(g, callMod.path, (liveMod) =>
+      invoke(liveMod.default as (req: unknown, res: unknown) => unknown, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n2', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(Object.keys(res.body).sort(), ['nonce', 'ok', 'value'], 'success body is exactly {ok, nonce, value}');
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.nonce, 'n2');
+    assert.deepEqual(res.body.value, { value: true });
+    const miss = await withTree(g, callMod.path, (liveMod) =>
+      invoke(liveMod.default as (req: unknown, res: unknown) => unknown, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n3', args: ['9A', '7C'] } }),
+    );
+    assert.deepEqual(miss.body.value, { value: false }, 'unequal elements take the false branch');
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+    if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+  }
+
+  // The client branches on .value; a tampered or stale nonce fails closed and
+  // the failed call discards the handler's queued actions.
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const rt = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce, request) => {
+      if (String(path).endsWith('/call')) {
+        assert.deepEqual(request?.args, ['9A', '9A']);
+        return { ok: true, nonce, value: { value: true } };
+      }
+      return { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } };
+    },
+  });
+  const hit = await clientMod.clientActions!(rt.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(hit, [{ op: 'alert', message: 'free' }]);
+  const stale = createRuntime({ dryRun: true, clientPrefetch: (path, nonce) => (String(path).endsWith('/call') ? { ok: true, nonce: 'old', value: { value: true } } : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } }) });
+  const staleActions = await clientMod.clientActions!(stale.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(staleActions.map((a) => a.op), ['info'], 'a tampered nonce fails closed');
+  const deniedCall = createRuntime({ dryRun: true, clientPrefetch: (path, nonce) => (String(path).endsWith('/call') ? { ok: false, nonce, error: 'denied' } : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } }) });
+  const deniedActions = await clientMod.clientActions!(deniedCall.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(deniedActions.map((a) => a.op), ['info'], 'a non-200 or refused call evaluates false and shows the call-failure message');
+});
+
+test('a counted server condition replays an input binding through the c2c client call', () => {
+  const member = plainField('Member', 'lookup');
+  member.lookup = { form: 'Members' };
+  const g = generate(
+    app({
+      forms: [plainForm('Members', [plainField('Tier')]), plainForm('Pods', [plainField('Pod_No')]), plainForm('Bookings', [member])],
+      workflows: [
+        workflow({
+          name: 'Tier overlap check',
+          form: 'Bookings',
+          event: 'on user input',
+          deluge: {
+            text: 'n = Members[Tier == input.Member.Tier].count();\nfor each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if (a == b && n > 0) { alert "hit"; } } }',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  const condMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path) && !f.path.endsWith('-call.mjs'));
+  const client = g.files.find((f) => f.path === 'client/handlers/bookings/on-user-input.mjs');
+  assert.ok(condMod && client, g.files.map((f) => f.path).join('\n'));
+  assert.match(stripComments(condMod.source), /async function c2cCond_[0-9a-f]+\(ctx, shim, a, b, Member\)/);
+  assert.match(stripComments(condMod.source), /shim\.datastore\.aggregate[\s\S]*field: "Tier"[\s\S]*Member/);
+  assert.match(stripComments(client.source), /shim\.client\.condition\(ctx, "c2cCond_[0-9a-f]+", \[a, b, shim\.input\.get\(ctx, "Member", "Tier"\)\], \{"securityRelevant":false,"safeDefault":"hidden"\}, ctx && ctx\.control\)/);
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+});
+
+test('a compiled server condition declares its fail-closed meta at the call site and on its module', () => {
+  // Golden: the emitted metadata is the compile-time contract the browser
+  // coordinator enforces. A condition gating an exposure or mutation is
+  // securityRelevant and denies on an unverified reply; a condition whose
+  // only dangerous side is the else resolves the safe `true`; danger on both
+  // sides declares no safeDefault and the generated failure handler aborts
+  // (no CONDITION_UNVERIFIED substitution).
+  const build = (body: string) =>
+    generate(
+      app({
+        forms: [plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Check_Out', 'date')]), plainForm('Pods', [plainField('Pod_No')])],
+        profiles: [ADMIN],
+        workflows: [
+          workflow({
+            name: 'Gate',
+            form: 'Reservation',
+            event: 'on user input',
+            deluge: {
+              text: `for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(a == b && Reservation[ID != 0].count() > 0) { ${body} } } }`,
+              span: Z,
+            },
+          }),
+        ],
+      }),
+    );
+  const emitted = (body: string) => {
+    const g = build(body);
+    const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
+    const condMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path) && !f.path.endsWith('-call.mjs'));
+    assert.ok(client && condMod, g.files.map((f) => f.path).join('\n'));
+    const meta = /\{"securityRelevant":(?:true|false)(?:,"safeDefault":"(?:hidden|shown)")?\}/.exec(client.source)?.[0];
+    assert.ok(meta, client.source);
+    const unverified = /e\.code === "CONDITION_UNVERIFIED"\) return (true|false)/.exec(client.source)?.[1];
+    const modMeta = /conditionMeta = (\{[^;]*\});/.exec(condMod.source)?.[1];
+    assert.equal(modMeta, meta, 'module export and call site declare the same meta');
+    check(condMod.source, 'cond-meta.mjs');
+    check(client.source, 'cond-meta-client.mjs');
+    return { meta, unverified };
+  };
+  assert.deepEqual(emitted('alert "x"; } else { alert "y";'), { meta: '{"securityRelevant":false,"safeDefault":"hidden"}', unverified: 'false' });
+  assert.deepEqual(emitted('show Check_Out; } else { hide Check_Out;'), { meta: '{"securityRelevant":true,"safeDefault":"hidden"}', unverified: 'false' });
+  assert.deepEqual(emitted('alert "x"; } else { show Check_Out;'), { meta: '{"securityRelevant":false,"safeDefault":"shown"}', unverified: 'true' });
+  const both = emitted('show Check_Out; } else { delete from Reservation[ID != 0];');
+  assert.equal(both.meta, '{"securityRelevant":true}');
+  assert.equal(both.unverified, undefined, 'no safe side: an unverified reply aborts instead of guessing');
+});
+
+/** The overlap-check app behind the server-condition failure-split tests. */
+function overlapBuild() {
+  return app({
+    forms: [
+      plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Check_Out', 'date')]),
+      plainForm('Pods', [plainField('Pod_No')]),
+    ],
+    profiles: [ADMIN, { name: 'Guest', type: 'Users_Permissions', properties: [], modules: [], span: Z }],
+    workflows: [
+      workflow({
+        name: 'Overlap check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: {
+          text: 'for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(a == b && Reservation[ID != 0].count() > 0) { alert "overlap"; } else { alert "free"; } } }',
+          span: Z,
+        },
+      }),
+    ],
+  });
+}
+
+function overlapClientSource(): { client: { path: string; source: string }; callPath: string } {
+  const g = generate(overlapBuild());
+  const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  assert.ok(client && callMod);
+  return { client, callPath: callMod.path };
+}
+
+test('the same server condition replayed from two form events is emitted once, not twice', () => {
+  // "on load" and "on user input" are different handler groups (separate
+  // translateInApp scopes), but the same workflow name on the same form
+  // hashes to the identical c2cCond_* name on both when the condition sits
+  // at the same line. The cross-group dedupe must still catch it: one
+  // condition module and one -call module, not a path collision
+  // (functions/custom/c2ccond-<hash>-call.mjs renamed to -call-2.mjs) with
+  // two files that both declare the same route.
+  const sharedDeluge = {
+    text: 'for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(a == b && Reservation[ID != 0].count() > 0) { alert "overlap"; } else { alert "free"; } } }',
+    span: Z,
+  };
+  const build = () =>
+    app({
+      forms: [
+        plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Check_Out', 'date')]),
+        plainForm('Pods', [plainField('Pod_No')]),
+      ],
+      profiles: [ADMIN, { name: 'Guest', type: 'Users_Permissions', properties: [], modules: [], span: Z }],
+      workflows: [
+        workflow({ name: 'Overlap check', form: 'Reservation', event: 'on user input', deluge: sharedDeluge }),
+        workflow({ name: 'Overlap check', form: 'Reservation', event: 'on load', deluge: sharedDeluge }),
+      ],
+    });
+  const g = generate(build());
+  const condModules = g.files.filter((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path));
+  const callModules = g.files.filter((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path));
+  assert.equal(condModules.length, 1, `expected one condition module, got ${condModules.map((f) => f.path).join(', ')}`);
+  assert.equal(callModules.length, 1, `expected one call module, got ${callModules.map((f) => f.path).join(', ')}`);
+  // No file was pushed through put()'s collision-rename path.
+  assert.ok(g.files.every((f) => !/-call-\d+\.mjs$/.test(f.path)), g.files.map((f) => f.path).join('\n'));
+});
+
+test('a server-condition reply with a missing nonce aborts the handler', async () => {
+  // Integrity failure: the reply carries no nonce at all, so it cannot be
+  // the form state the caller sent. The handler discards its queued actions
+  // instead of taking either branch.
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const missing = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: true, value: { value: true } }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(missing.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions.map((a) => a.op), ['info'], 'a missing nonce aborts instead of taking a branch');
+});
+
+test('an unknown server-condition function aborts the handler', async () => {
+  // Integrity failure: the endpoint answers 403 with the uniform READ_DENIED
+  // body when its name resolves to no registry entry (unknown or case-folded),
+  // and the client rethrows a coded integrity failure instead of taking a branch.
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  await withTree(g, callMod.path, async (mod, dir) => {
+    const registry = (await import(pathToFileURL(join(dir, 'functions/thisapp.mjs')).href)) as { functions: Record<string, unknown> };
+    const key = Object.keys(registry.functions).find((k) => k.startsWith('c2cCond_'));
+    assert.ok(key, 'the condition registry key exists');
+    delete registry.functions[key];
+    const unknown = await invoke(mod.default as (req: unknown, res: unknown) => unknown, {
+      user: { profile: 'Administrator', loginUser: 'a@t' },
+      body: { nonce: 'n1', args: ['9A', '9A'] },
+    });
+    assert.equal(unknown.status, 403, JSON.stringify(unknown.body));
+    assert.equal(unknown.body.ok, false);
+    assert.equal(unknown.body.code, 'READ_DENIED');
+  });
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const unknownCall = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: false, code: 'UNKNOWN_FUNCTION', nonce, error: 'client call: target did not resolve to its declared name' }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(unknownCall.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions.map((a) => a.op), ['info'], 'an unknown function aborts instead of taking a branch');
+});
+
+test('a scope-denied server-condition read evaluates false', async () => {
+  // Read failure (Creator's no-record path): the endpoint refuses with 403
+  // code READ_DENIED, and the client takes the false branch instead of
+  // discarding the run.
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const mod = (await loadTree(g, callMod.path)) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const denied = await invoke(mod.default, { user: { profile: 'Guest', loginUser: 'g@t' }, body: { nonce: 'n1', args: ['9A', '9A'] } });
+  assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  assert.equal(denied.body.ok, false);
+  assert.equal(denied.body.code, 'READ_DENIED');
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const deniedCall = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: false, code: 'READ_DENIED', nonce, error: 'record access: Reservation row is not visible' }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(deniedCall.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions, [{ op: 'alert', message: 'free' }], 'a denied read takes the false branch');
+});
+
+/** Captures the generated endpoint's one-line-per-call structured log. */
+function captureCallLog() {
+  const logged: string[] = [];
+  const original = console.log;
+  console.log = (...parts: unknown[]) => {
+    logged.push(parts.map(String).join(' '));
+  };
+  return {
+    lines() {
+      return logged.filter((line) => line.includes('"c2c_client_call"')).map((line) => JSON.parse(line) as Record<string, unknown>);
+    },
+    raw() {
+      return logged.filter((line) => line.includes('"c2c_client_call"'));
+    },
+    all() {
+      return [...logged];
+    },
+    restore() {
+      console.log = original;
+    },
+  };
+}
+
+/** A live mode install whose query adapter also counts what it returned, for cross-checking the metered reads. */
+async function liveCountedTables(tables: Record<string, Record<string, unknown>[]>) {
+  const { datastore, calls } = mockDatastore({});
+  const seen = { forms: new Set<string>(), rows: 0, bytes: 0, writes: 0 };
+  const counted = Object.assign({}, datastore, {
+    async query(form: string, where: string, limit: number, offset = 0, orderBy = '') {
+      const rows = await datastore.query(form, where, limit, offset, orderBy);
+      seen.forms.add(form);
+      seen.rows += rows.length;
+      seen.bytes += Buffer.byteLength(JSON.stringify(rows), 'utf8');
+      return rows;
+    },
+    async insert(form: string, rows: Record<string, unknown>[]) {
+      seen.writes += rows.length;
+      return datastore.insert(form, rows);
+    },
+    async update(form: string, rows: Record<string, unknown>[]) {
+      seen.writes += rows.length;
+      return datastore.update(form, rows);
+    },
+    async delete(form: string, ids: readonly unknown[]) {
+      seen.writes += ids.length;
+      return datastore.delete(form, ids);
+    },
+  });
+  for (const [form, rows] of Object.entries(tables)) {
+    if (rows.length) await datastore.insert(form, rows);
+  }
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = counted;
+  return {
+    seen,
+    calls,
+    restore() {
+      if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+      else process.env.C2C_DEPLOY_MODE = realMode;
+      if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+      else process.env.C2C_APP_TIMEZONE = realZone;
+      if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+      else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+    },
+  };
+}
+
+const CALLER = { user: { profile: 'Administrator', loginUser: 'a@t' } };
+
+/** An app whose server condition counts rows on two forms in one call. */
+function twoFormBuild() {
+  return app({
+    forms: [
+      plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Check_Out', 'date')]),
+      plainForm('Pods', [plainField('Pod_No')]),
+    ],
+    profiles: [ADMIN, { name: 'Guest', type: 'Users_Permissions', properties: [], modules: [], span: Z }],
+    workflows: [
+      workflow({
+        name: 'Two-form check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: {
+          text: 'for each a in Pods[ID != 0].Pod_No { if(a == "9A" && Reservation[ID != 0].count() > 0 && Pods[ID != 0].count() > 1) { alert "both"; } else { alert "not both"; } }',
+          span: Z,
+        },
+      }),
+    ],
+  });
+}
+
+test('a server-condition call logs one structured line counting the reads it performed', async () => {
+  const g = generate(twoFormBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  assert.ok(callMod, 'the two-form condition compiled to a server call');
+  const live = await liveCountedTables({
+    Pods: [
+      { ID: '1', Pod_No: '9A' },
+      { ID: '2', Pod_No: '7B' },
+      { ID: '3', Pod_No: '2C' },
+    ],
+    Reservation: [
+      { ID: '5', Check_In: '2026-01-01', Check_Out: '2026-01-02' },
+      { ID: '6', Check_In: '2026-02-01', Check_Out: '2026-02-02' },
+    ],
+  });
+  const log = captureCallLog();
+  try {
+    const res = await withTree(g, callMod.path, (mod) =>
+      invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'n2', args: ['9A'] } }),
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.ok, true);
+  } finally {
+    log.restore();
+    live.restore();
+  }
+  const lines = log.lines();
+  assert.equal(lines.length, 1, 'exactly one structured line per call');
+  const line = lines[0]!;
+  assert.equal(line.event, 'c2c_client_call');
+  assert.match(String(line.cid), /^[0-9a-f-]{36}$/i, 'server-minted correlation id');
+  assert.match(String(line.fn), /^c2cCond_[0-9a-f]+$/, 'the signature id is the compiled condition name');
+  const reads = line.reads as { forms: number; rows: number; bytes: number };
+  assert.equal(reads.forms, live.seen.forms.size, 'counted forms match the adapter reads');
+  assert.equal(reads.rows, live.seen.rows, 'counted rows match the adapter reads');
+  assert.equal(reads.bytes, live.seen.bytes, 'counted bytes match the adapter reads');
+  assert.equal(live.seen.writes, 0, 'a read call writes nothing');
+  assert.equal(line.status, 'OK');
+  assert.equal(line.nonceLen, 2);
+  assert.equal(typeof line.ms, 'number');
+  assert.equal(line.cap, undefined, 'no cap field on an uncapped call');
+  assert.deepEqual([...live.seen.forms].sort(), ['Pods', 'Reservation'], 'the condition read both forms');
+  assert.ok(live.seen.rows >= 5, 'both count() reads returned their rows');
+});
+
+test('a server-condition call over no rows logs zero reads', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const live = await liveCountedTables({});
+  const log = captureCallLog();
+  try {
+    const res = await withTree(g, callMod.path, (mod) =>
+      invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+  } finally {
+    log.restore();
+    live.restore();
+  }
+  const line = log.lines()[0]!;
+  const reads = line.reads as { forms: number; rows: number; bytes: number };
+  assert.equal(reads.rows, 0);
+  assert.equal(reads.bytes, live.seen.bytes);
+  assert.equal(reads.forms, live.seen.forms.size);
+  assert.equal(line.status, 'OK');
+});
+
+test('a refused or malformed call logs the sanitized code and leaks no argument values', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const live = await liveCountedTables({ Pods: [{ ID: '1', Pod_No: '9A' }], Reservation: [{ ID: '5', Check_In: '2026-01-01' }] });
+  const log = captureCallLog();
+  try {
+    await withTree(g, callMod.path, async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const denied = await invoke(handler, { user: { profile: 'Guest', loginUser: 'g@t' }, body: { nonce: 'nd', args: ['9A', '9A'] } });
+      assert.equal(denied.status, 403);
+      assert.equal(denied.body.code, 'READ_DENIED');
+      assert.equal(JSON.stringify(denied.body).includes('9A'), false, 'the refusal body carries no argument value');
+      const malformed = await invoke(handler, { ...CALLER, body: { nonce: 'nm', args: 'ARGS-SECRET' } });
+      assert.equal(malformed.status, 403);
+      assert.equal(malformed.body.code, 'READ_DENIED');
+      const oversized = await invoke(handler, { ...CALLER, body: { nonce: 'no', args: ['9A'.repeat(40000)] } });
+      assert.equal(oversized.status, 403);
+      assert.equal(oversized.body.code, 'READ_DENIED');
+      const unauth = await invoke(handler, { body: { nonce: 'nx', args: ['9A', '9A'] } });
+      assert.equal(unauth.status, 401);
+    });
+  } finally {
+    log.restore();
+    live.restore();
+  }
+  const lines = log.lines();
+  assert.equal(lines.length, 4, 'every refused call still logs its one line');
+  assert.deepEqual(lines.map((line) => line.status), ['READ_DENIED', 'READ_DENIED', 'READ_DENIED', 'READ_DENIED']);
+  for (const raw of log.raw()) {
+    assert.doesNotMatch(raw, /9A|ARGS-SECRET|g@t|a@t/, 'the log line carries no argument value, row id, or caller identity');
+    assert.doesNotMatch(raw, /"nonce"\s*:\s*"n/, 'the nonce is never echoed');
+  }
+  assert.equal(live.seen.writes, 0, 'a refused call writes nothing');
+});
+
+test('the row-read budget returns the sanitized failure and logs the cap', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const live = await liveCountedTables({
+    Pods: [{ ID: '1', Pod_No: '9A' }],
+    Reservation: [{ ID: '5', Check_In: '2026-01-01' }, { ID: '6', Check_In: '2026-02-01' }],
+  });
+  const realBudget = process.env.C2C_CALL_ROW_BUDGET;
+  process.env.C2C_CALL_ROW_BUDGET = '1';
+  const log = captureCallLog();
+  try {
+    const res = await withTree(g, callMod.path, (mod) =>
+      invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 500, JSON.stringify(res.body));
+    assert.equal(res.body.ok, false);
+    assert.equal(res.body.code, 'CALL_FAILED', 'a tripped cap is the same sanitized code as any failed call');
+    assert.equal(res.body.error, 'request failed');
+    assert.equal(JSON.stringify(res.body).includes('9A'), false, 'the cap failure leaks no argument or row content');
+  } finally {
+    log.restore();
+    live.restore();
+    if (realBudget === undefined) delete process.env.C2C_CALL_ROW_BUDGET;
+    else process.env.C2C_CALL_ROW_BUDGET = realBudget;
+  }
+  const line = log.lines()[0]!;
+  assert.equal(line.status, 'CALL_FAILED');
+  assert.equal(line.cap, 'rows');
+  assert.equal(live.seen.writes, 0);
+});
+
+test('the response-byte cap withholds the oversized body and logs the cap', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const live = await liveCountedTables({ Pods: [{ ID: '1', Pod_No: '9A' }], Reservation: [{ ID: '5' }] });
+  const realCap = process.env.C2C_CALL_RESPONSE_BYTES;
+  process.env.C2C_CALL_RESPONSE_BYTES = '40';
+  const log = captureCallLog();
+  try {
+    const res = await withTree(g, callMod.path, (mod) =>
+      invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 500, JSON.stringify(res.body));
+    assert.equal(res.body.code, 'CALL_FAILED');
+    assert.equal(res.body.error, 'request failed');
+    assert.equal(res.body.value, undefined, 'nothing of the oversized response is written');
+  } finally {
+    log.restore();
+    live.restore();
+    if (realCap === undefined) delete process.env.C2C_CALL_RESPONSE_BYTES;
+    else process.env.C2C_CALL_RESPONSE_BYTES = realCap;
+  }
+  const line = log.lines()[0]!;
+  assert.equal(line.status, 'CALL_FAILED');
+  assert.equal(line.cap, 'bytes');
+});
+
+test('call cap environment values parse strictly; malformed values fall back to the default with one sanitized warning', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const realBudget = process.env.C2C_CALL_ROW_BUDGET;
+  // Each entry: [env value (undefined = unset), expected status, warns].
+  // The condition's counted reads return 3 rows, so a budget of 2 trips while
+  // the 128 default (and the 1048576 maximum) stays clear of every read.
+  const cases: [string | undefined, number, boolean][] = [
+    [undefined, 200, true],
+    ['', 200, true],
+    [' ', 200, true],
+    ['abc', 200, true],
+    ['128abc', 200, true],
+    ['12e3', 200, true],
+    ['0x10', 200, true],
+    ['-5', 200, true],
+    ['0', 200, true],
+    ['1.5', 200, true],
+    ['999999999999999999999', 200, true],
+    ['1048577', 200, true],
+    [' 128 ', 200, false],
+    ['128', 200, false],
+    ['2', 500, false],
+    [' 2 ', 500, false],
+    ['02', 500, false],
+    ['2abc', 200, true],
+    ['2.0', 200, true],
+    ['2e0', 200, true],
+    ['+2', 200, true],
+  ];
+  try {
+    for (const [value, want, wantWarn] of cases) {
+      const live = await liveCountedTables({
+        Pods: [
+          { ID: '1', Pod_No: '9A' },
+          { ID: '2', Pod_No: '9B' },
+          { ID: '3', Pod_No: '9C' },
+          { ID: '4', Pod_No: '9D' },
+          { ID: '5', Pod_No: '9E' },
+        ],
+        Reservation: [
+          { ID: '5', Check_In: '2026-01-01' },
+          { ID: '6', Check_In: '2026-02-01' },
+          { ID: '7', Check_In: '2026-03-01' },
+        ],
+      });
+      if (value === undefined) delete process.env.C2C_CALL_ROW_BUDGET;
+      else process.env.C2C_CALL_ROW_BUDGET = value;
+      const log = captureCallLog();
+      let res: { status: number; body: Record<string, unknown> };
+      try {
+        res = await withTree(g, callMod.path, (mod) =>
+          invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'] } }),
+        );
+      } finally {
+        log.restore();
+        live.restore();
+      }
+      assert.equal(res!.status, want, `env ${JSON.stringify(value)}`);
+      const envLines = log.all().filter((l) => l.includes('"c2c_client_call_env"') && l.includes('"C2C_CALL_ROW_BUDGET"'));
+      if (wantWarn) {
+        assert.equal(envLines.length, 1, `env ${JSON.stringify(value)} logs exactly one warning`);
+        const warn = JSON.parse(envLines[0]!) as Record<string, unknown>;
+        assert.equal(warn.event, 'c2c_client_call_env');
+        assert.equal(warn.name, 'C2C_CALL_ROW_BUDGET');
+        assert.equal(warn.invalid, true);
+        if (value && value.trim()) assert.equal(envLines[0]!.includes(value.trim()), false, 'the raw env value is never echoed');
+      } else {
+        assert.equal(envLines.length, 0, `env ${JSON.stringify(value)} logs no warning`);
+      }
+      const call = log.lines()[0]!;
+      assert.equal(call.status, want === 200 ? 'OK' : 'CALL_FAILED');
+      if (want === 200) {
+        const reads = call.reads as { rows: number };
+        assert.ok(reads.rows > 0, 'the request is still metered after a bad value fell back');
+      }
+    }
+  } finally {
+    if (realBudget === undefined) delete process.env.C2C_CALL_ROW_BUDGET;
+    else process.env.C2C_CALL_ROW_BUDGET = realBudget;
+  }
+});
+
+test('a malformed response-byte cap falls back to the default and warns once', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const live = await liveCountedTables({ Pods: [{ ID: '1', Pod_No: '9A' }], Reservation: [{ ID: '5' }] });
+  const realCap = process.env.C2C_CALL_RESPONSE_BYTES;
+  process.env.C2C_CALL_RESPONSE_BYTES = 'not-a-number';
+  const log = captureCallLog();
+  try {
+    const res = await withTree(g, callMod.path, (mod) =>
+      invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 200, 'a malformed cap restores the default, it never disables the cap');
+    const envLines = log.all().filter((l) => l.includes('"c2c_client_call_env"') && l.includes('"C2C_CALL_RESPONSE_BYTES"'));
+    assert.equal(envLines.length, 1);
+    const warn = JSON.parse(envLines[0]!) as Record<string, unknown>;
+    assert.equal(warn.name, 'C2C_CALL_RESPONSE_BYTES');
+    assert.equal(envLines[0]!.includes('not-a-number'), false);
+  } finally {
+    log.restore();
+    live.restore();
+    if (realCap === undefined) delete process.env.C2C_CALL_RESPONSE_BYTES;
+    else process.env.C2C_CALL_RESPONSE_BYTES = realCap;
+  }
+});
+
+test('the response-byte cap measures serialized body bytes: at cap passes, cap+1 fails, UTF-8 counts bytes not characters', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const live = await liveCountedTables({ Pods: [{ ID: '1', Pod_No: '9A' }], Reservation: [{ ID: '5', Check_In: '2026-01-01' }] });
+  const realCap = process.env.C2C_CALL_RESPONSE_BYTES;
+  const log = captureCallLog();
+  try {
+    await withTree(g, callMod.path, async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const call = (nonce: string) => invokeRaw(handler, { ...CALLER, body: { nonce, args: ['9A', '9A'] } });
+      delete process.env.C2C_CALL_RESPONSE_BYTES;
+      const base = await call('n');
+      assert.equal(base.status, 200, base.raw);
+      const bodyBytes = Buffer.byteLength(base.raw, 'utf8');
+      process.env.C2C_CALL_RESPONSE_BYTES = String(bodyBytes);
+      const atCap = await call('n');
+      assert.equal(atCap.status, 200, 'a body exactly at the cap is written');
+      assert.equal(atCap.raw, base.raw);
+      process.env.C2C_CALL_RESPONSE_BYTES = String(bodyBytes - 1);
+      const over = await call('n');
+      assert.equal(over.status, 500, 'a body one byte over the cap is withheld');
+      assert.equal((JSON.parse(over.raw) as Record<string, unknown>).code, 'CALL_FAILED');
+      // 'é' is one JS character but two UTF-8 bytes, so a cap between the
+      // body's char length and byte length separates the two accountings.
+      delete process.env.C2C_CALL_RESPONSE_BYTES;
+      const wide = await call('é');
+      assert.equal(wide.status, 200, wide.raw);
+      const wideBytes = Buffer.byteLength(wide.raw, 'utf8');
+      assert.equal(wideBytes, wide.raw.length + 1);
+      process.env.C2C_CALL_RESPONSE_BYTES = String(wideBytes - 1);
+      const wideOver = await call('é');
+      assert.equal(wideOver.status, 500, 'bytes, not characters, decide the cap');
+      process.env.C2C_CALL_RESPONSE_BYTES = String(wideBytes);
+      const wideAt = await call('é');
+      assert.equal(wideAt.status, 200);
+    });
+  } finally {
+    log.restore();
+    live.restore();
+    if (realCap === undefined) delete process.env.C2C_CALL_RESPONSE_BYTES;
+    else process.env.C2C_CALL_RESPONSE_BYTES = realCap;
+  }
+});
+
+test('a failed log write never breaks the response and a dry run logs nothing sensitive', async () => {
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const throwing = console.log;
+  console.log = () => {
+    throw new Error('log sink down');
+  };
+  try {
+    const dry = await withTree(g, callMod.path, (mod) =>
+      invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'ndry', args: ['9A', 'DRY-SECRET'] } }),
+    );
+    assert.equal(dry.status, 200, JSON.stringify(dry.body));
+    assert.equal(dry.body.ok, true);
+  } finally {
+    console.log = throwing;
+  }
+  const log = captureCallLog();
+  try {
+    const dry = await withTree(g, callMod.path, (mod) =>
+      invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { nonce: 'ndry', args: ['9A', 'DRY-SECRET'] } }),
+    );
+    assert.equal(dry.status, 200);
+    const line = log.lines()[0]!;
+    assert.equal(line.status, 'OK');
+    const reads = line.reads as { forms: number; rows: number; bytes: number };
+    assert.deepEqual([reads.forms, reads.rows, reads.bytes], [0, 0, 0], 'a dry run performs no store reads');
+    assert.equal(line.nonceLen, 4);
+    for (const raw of log.raw()) assert.doesNotMatch(raw, /9A|DRY-SECRET|ndry/, 'a dry-run line carries no argument value or nonce');
+  } finally {
+    log.restore();
+  }
+});
+
+test('a server condition over no record evaluates false', async () => {
+  // Read failure (Creator's no-record path): with no stored rows the live
+  // endpoint answers value false, and the client takes the false branch.
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const { datastore } = mockDatastore({});
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  try {
+    const res = await withTree(g, callMod.path, (liveMod) =>
+      invoke(liveMod.default as (req: unknown, res: unknown) => unknown, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n2', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.ok, true);
+    assert.deepEqual(res.body.value, { value: false }, 'no stored rows take the false branch');
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+    if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+  }
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const miss = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: true, nonce, value: { value: false } }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(miss.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions, [{ op: 'alert', message: 'free' }], 'a false value takes the false branch');
+});
+
+test('a client condition on a record element or an unreadable local stays a counted todo', () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Reservation', [plainField('Check_In', 'date')]),
+        plainForm('Pods', [plainField('Pod_No')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'Row check',
+          form: 'Reservation',
+          event: 'on user input',
+          deluge: { text: 'for each r in Pods[ID != 0] { if(r.Pod_No == "9A" && Reservation[ID != 0].count() > 0) { alert "x"; } }', span: Z },
+        }),
+        workflow({
+          name: 'Write check',
+          form: 'Reservation',
+          event: 'on user input',
+          deluge: { text: 'x = insert into Pods [Pod_No = "1A"];\nif(x == 1) { alert "x"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length >= 1, true, 'record-element and write conditions keep their counted todo');
+  assert.equal(g.files.some((f) => /c2ccond/.test(f.path)), false, 'no condition endpoint is emitted for a refused condition');
+});
+
+test('a callee that mutates a parameter list or map is not a read-only client call', () => {
+  const generateWith = (body: string) =>
+    generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Hours')])],
+        profiles: [ADMIN],
+        functions: [
+          {
+            name: 'Util.Ok',
+            kind: 'deluge',
+            signature: 'bool Util.Ok(list ids, map m, int n)',
+            deluge: [{ text: `${body}\nreturn n > 1;`, span: Z }],
+            properties: [],
+            span: Z,
+          },
+        ],
+        workflows: [
+          workflow({
+            name: 'Hours check',
+            form: 'Orders',
+            event: 'on user input',
+            deluge: { text: 'ids = {1, 2};\nm = {"a": 1};\nif(thisapp.Util.Ok(ids, m, input.Hours)) { alert "ok"; }', span: Z },
+          }),
+        ],
+      }),
+    );
+  const readOnly = (g: ReturnType<typeof generate>) => g.files.some((f) => f.path === 'functions/custom/util-ok-call.mjs');
+  // Every method in the shared mutator set, on a parameter, an alias, an
+  // element, a map value, `input.<param>` and an index assignment.
+  for (const body of [
+    'ids.add(3);',
+    'ids.addAll({3});',
+    'ids.insert(3);',
+    'ids.insertAll({3});',
+    'ids.remove(0);',
+    'ids.removeAll({1});',
+    'ids.removeElement(1);',
+    'ids.retainAll({1});',
+    'ids.clear();',
+    'ids.sort();',
+    'ids.delete(1);',
+    'ids.deleteItem(1);',
+    'ids.deleteAll({1});',
+    'ids.update(0, 5);',
+    'm.put("b", 2);',
+    'm.putAll({"b": 2});',
+    'm.remove("a");',
+    'm.deleteKey("a");',
+    'm.deleteKeys({"a"});',
+    'm.clear();',
+    'x = ids;\nx.add(3);',
+    'x = m;\ny = x;\ny.put("b", 2);',
+    'ids.get(0).put("b", 2);',
+    'for each e in ids { e.put("b", 2); }',
+    'v = m.get("a");\nv.add(3);',
+    'holder = List();\nholder.add(m);\nholder.get(0).put("b", 2);',
+    'input.ids.add(3);',
+    'ids[0] = 3;',
+    'ids.ADD(3);',
+  ]) {
+    const g = generateWith(body);
+    assert.equal(readOnly(g), false, body);
+    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1, body);
+  }
+  // Writes to a fresh local, reads of a parameter and a scalar parameter stay read-only.
+  for (const body of [
+    'l = List();\nl.add(n);\nl.sort();',
+    'l = {n, 2};\nl.removeElement(n);\nl.insert(n);\nl.clear();',
+    'out = List();\nout.add(ids.get(0));',
+    'l = List();\nl.addAll(ids);',
+    'k = ids.size() + m.keys().size();',
+    'n = n + 1;',
+  ]) {
+    const g = generateWith(body);
+    assert.equal(readOnly(g), true, body);
+    assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false, body);
+  }
+});
+
+test('case-folded duplicate function names are never read-only client calls', () => {
+  // The runtime registry resolves a call exact-name-first, then the first
+  // case-folded declaration. Two declared names that fold alike cannot be
+  // told apart at a call site, so neither may be proved read-only — a proof
+  // keyed on the folded name would mark one body while dispatch reaches the
+  // other (a read-only proof for `Util.Ok` must not open a client-call path
+  // that lands on the `Util.OK` writer).
+  const reader: FunctionDef = {
+    name: 'Util.Ok',
+    kind: 'deluge',
+    signature: 'bool Util.Ok(int n)',
+    deluge: [{ text: 'return n > 1;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  const writer: FunctionDef = {
+    name: 'Util.OK',
+    kind: 'deluge',
+    signature: 'bool Util.OK(int n)',
+    deluge: [{ text: 'insert into Orders [ Hours = n ];\nreturn true;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  for (const functions of [[reader, writer], [writer, reader]]) {
+    for (const call of ['thisapp.Util.Ok(input.Hours)', 'thisapp.Util.OK(input.Hours)', 'thisapp.util.ok(input.Hours)']) {
+      const label = `${functions[0]!.name} then ${functions[1]!.name}, call ${call}`;
+      const g = generate(
+        app({
+          forms: [plainForm('Orders', [plainField('Hours')])],
+          profiles: [ADMIN],
+          functions,
+          workflows: [
+            workflow({
+              name: 'Hours check',
+              form: 'Orders',
+              event: 'on user input',
+              deluge: { text: `if(${call}) { alert "ok"; }`, span: Z },
+            }),
+          ],
+        }),
+      );
+      assert.equal(g.files.some((f) => f.path.endsWith('-call.mjs')), false, label);
+      const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs');
+      assert.equal(client !== undefined && /shim\.client\.call\(/.test(stripComments(client.source)), false, label);
+      assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), true, label);
+    }
+  }
+});
+
+test('repeated declarations of one function name are never read-only client calls', () => {
+  // The generated registry keeps the first declaration of a name; a later
+  // same-name declaration is unreachable through dispatch. The read-only
+  // proof must not mark the folded name from either body.
+  const writer: FunctionDef = {
+    name: 'Util.Ok',
+    kind: 'deluge',
+    signature: 'bool Util.Ok(int n)',
+    deluge: [{ text: 'insert into Orders [ Hours = n ];\nreturn true;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  const reader: FunctionDef = {
+    name: 'Util.Ok',
+    kind: 'deluge',
+    signature: 'bool Util.Ok(int n)',
+    deluge: [{ text: 'return n > 1;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  for (const functions of [[writer, reader], [reader, writer]]) {
+    const label = `${functions[0]!.deluge[0]!.text.split('\n')[0]} first`;
+    const g = generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Hours')])],
+        profiles: [ADMIN],
+        functions,
+        workflows: [
+          workflow({
+            name: 'Hours check',
+            form: 'Orders',
+            event: 'on user input',
+            deluge: { text: 'if(thisapp.Util.Ok(input.Hours)) { alert "ok"; }', span: Z },
+          }),
+        ],
+      }),
+    );
+    assert.equal(g.files.some((f) => f.path.endsWith('-call.mjs')), false, label);
+    const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs');
+    assert.equal(client !== undefined && /shim\.client\.call\(/.test(stripComments(client.source)), false, label);
+    assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), true, label);
+  }
+});
+
+test('a folded-name collision does not hide an unrelated read-only function', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Util.Ok',
+          kind: 'deluge',
+          signature: 'bool Util.Ok(int n)',
+          deluge: [{ text: 'return n > 1;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+        {
+          name: 'Util.OK',
+          kind: 'deluge',
+          signature: 'bool Util.OK(int n)',
+          deluge: [{ text: 'insert into Orders [ Hours = n ];\nreturn true;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+        {
+          name: 'Util.Solo',
+          kind: 'deluge',
+          signature: 'bool Util.Solo(int n)',
+          deluge: [{ text: 'return n > 2;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Orders',
+          event: 'on user input',
+          deluge: { text: 'if(thisapp.Util.Solo(input.Hours)) { alert "ok"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  assert.ok(g.files.some((f) => f.path === 'functions/custom/util-solo-call.mjs'), 'the unique callee keeps its endpoint');
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/util-ok-call.mjs'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+  assert.match(stripComments(client.source), /await shim\.client\.call\(ctx, "Util\.Solo"/);
+});
+
+test('fresh collections may contain parameter values without aliasing the parameters', () => {
+  const params = [
+    { type: 'list', name: 'ids' },
+    { type: 'map', name: 'm' },
+    { type: 'int', name: 'n' },
+  ];
+  for (const body of [
+    'r = Map();\nr.put("k", input.Hours);',
+    'out = List();\nout.add(ids.get(0));',
+    'l = List();\nl.addAll(ids);',
+  ]) {
+    assert.equal(mutatesParameters([body], params), false, body);
+  }
+});
+
+test('containment propagates through aliases, loop elements, and compound assignments', () => {
+  const params = [{ type: 'list', name: 'ids' }];
+  for (const body of [
+    'r.add(ids); for each e in r { e.add(1); }',
+    'r.add(ids); x = r; x.get(0).add(1);',
+    'h.k = ids; y = h.k; y.add(1);',
+    'h.k = ids; h.k.add(1);',
+  ]) {
+    assert.equal(mutatesParameters([body], params), true, body);
+  }
+});
+
+test('a read-only thisapp call on a server-bound local compiles to a server condition call', async () => {
+  for (const text of [
+    'n = Orders[Hours == input.Hours].count();\nif(thisapp.Util.F(n)) { alert "x"; }',
+    'n = Orders[Hours == input.Hours].count();\nif(thisapp.Util.F(input.Hours) && n > 0) { alert "x"; }',
+  ]) {
+    const g = generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Hours')])],
+        profiles: [ADMIN],
+        functions: [
+          {
+            name: 'Util.F',
+            kind: 'deluge',
+            signature: 'bool Util.F(int n)',
+            deluge: [{ text: 'return n > 0;', span: Z }],
+            properties: [],
+            span: Z,
+          },
+        ],
+        workflows: [
+          workflow({
+            name: 'Hours check',
+            form: 'Orders',
+            event: 'on user input',
+            deluge: { text, span: Z },
+          }),
+        ],
+      }),
+    );
+    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 0, text);
+    const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+    assert.match(stripComments(client.source), /shim\.client\.condition\(ctx, "c2cCond_[0-9a-f]+"/, text);
+    assert.doesNotMatch(stripComments(client.source), /shim\.todo\(/, text);
+    const clientMod = (await loadModule(client.source, 'server-bound-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+    const runtime = createRuntime({ dryRun: true });
+    const actions = await clientMod.clientActions!(runtime.context({ record: { Hours: 3 }, formNonce: 'n1' }));
+    assert.ok(Array.isArray(actions), 'the client handler runs without a ReferenceError');
+  }
+});
+
+test('a local collection mutated with server data keeps the manual condition', async () => {
+  const calls = [
+    { name: 'Util.F', signature: 'bool Util.F(int n)', body: 'return n > 0;' },
+    { name: 'Util.L', signature: 'bool Util.L(collection items)', body: 'return items.size() > 0;' },
+  ].map((f) => ({ name: f.name, kind: 'deluge' as const, signature: f.signature, deluge: [{ text: f.body, span: Z }], properties: [], span: Z }));
+  for (const text of [
+    'm = Map();\nm.put("k", Orders[Hours == input.Hours].count());\nif(thisapp.Util.F(m.get("k"))) { alert "x"; }',
+    // Map mutators must not be replayed inside a read-only condition endpoint.
+    // This shape uses the map-specific shim path, rather than list.remove's
+    // collection path, and must remain a counted condition TODO.
+    'm = Map();\nm.put("k", Orders[Hours == input.Hours].count());\nif(thisapp.Util.F(m.put("x", 1))) { alert "x"; }',
+    'm = Map();\nfor each r in Orders[Hours == input.Hours] { m.put("k", r.Hours); }\nif(thisapp.Util.F(m.get("k"))) { alert "x"; }',
+    'l = List();\nl.add(Orders[Hours == input.Hours].count());\nif(thisapp.Util.L(l)) { alert "x"; }',
+    'l = List();\nfor each r in Orders[Hours == input.Hours] { l.add(r.Hours); }\nif(thisapp.Util.L(l)) { alert "x"; }',
+  ]) {
+    const g = generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Hours')])],
+        profiles: [ADMIN],
+        functions: calls,
+        workflows: [
+          workflow({
+            name: 'Hours check',
+            form: 'Orders',
+            event: 'on user input',
+            deluge: { text, span: Z },
+          }),
+        ],
+      }),
+    );
+    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1, text);
+    const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+    assert.doesNotMatch(stripComments(client.source), /shim\.client\.call\(/, text);
+    assert.match(stripComments(client.source), /shim\.todo\(ctx, "client-condition-uses-server"\)/, text);
+    const clientMod = (await loadModule(client.source, 'server-mutated-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+    const runtime = createRuntime({ dryRun: true });
+    const actions = await clientMod.clientActions!(runtime.context({ record: { Hours: 3 }, formNonce: 'n1' }));
+    assert.ok(Array.isArray(actions), 'the client handler runs without a ReferenceError');
+  }
+});
+
+test('a client-fed mutation of a local collection still becomes a client call', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Util.L',
+          kind: 'deluge',
+          signature: 'bool Util.L(collection items)',
+          deluge: [{ text: 'return items.size() > 0;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Orders',
+          event: 'on user input',
+          deluge: { text: 'l = List();\nl.add(input.Hours);\nif(thisapp.Util.L(l)) { alert "x"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+  assert.match(stripComments(client.source), /await shim\.client\.call\(ctx, "Util\.L", \[l\]\)/);
+});
+
+test('a writing or transitively writing thisapp callee keeps the manual condition and no endpoint', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Util.Close',
+          kind: 'deluge',
+          signature: 'void Util.Close(int n)',
+          deluge: [{ text: 'row = insert into Orders [ Hours = n ];', span: Z }],
+          properties: [],
+          span: Z,
+        },
+        {
+          name: 'Util.Wrap',
+          kind: 'deluge',
+          signature: 'void Util.Wrap(int n)',
+          deluge: [{ text: 'return thisapp.Util.Close(n);', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Orders',
+          event: 'on user input',
+          deluge: { text: 'if(thisapp.Util.Wrap(input.Hours)) { alert "ok"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.files.some((f) => f.path.endsWith('-call.mjs')), false);
+  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+  assert.match(stripComments(client.source), /shim\.todo\(ctx, "client-condition-uses-server"\)/);
+});
+
+test('a read-only thisapp call in a ui.add argument becomes an event-time client call', async () => {
+  const build = () =>
+    app({
+      forms: [plainForm('Orders', [plainField('Choice')])],
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Choices',
+          kind: 'deluge',
+          signature: 'list Choices()',
+          deluge: [{ text: 'return {"A", "B"};', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'load',
+          form: 'Orders',
+          event: 'on load',
+          deluge: { text: 'input.Choice:ui.add(thisapp.Choices());', span: Z },
+        }),
+      ],
+    });
+  const g = generate(build());
+  assert.deepEqual(
+    generate(build()).files.map((f) => [f.path, f.source]),
+    g.files.map((f) => [f.path, f.source]),
+    'generated files are deterministic',
+  );
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+  const endpoint = g.files.find((f) => f.path === 'functions/custom/choices-call.mjs');
+  assert.ok(endpoint, 'the read-only callee gets its call endpoint');
+  assert.match(stripComments(client.source), /args: \[await shim\.client\.call\(ctx, "Choices", \[\]\)\]/);
+  assert.doesNotMatch(stripComments(client.source), /shim\.todo\(/);
+  check(client.source, 'client.mjs');
+
+  const clientMod = (await loadModule(client.source, 'ui-add-call-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string; args?: unknown[] }[]>>;
+  const okRuntime = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) => {
+      assert.equal(path, '/functions/choices/call');
+      return { ok: true, nonce, value: ['A', 'B'] };
+    },
+  });
+  const ok = await clientMod.clientActions!(okRuntime.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(ok, [{ op: 'ui', method: 'add', target: ['Choice'], args: [['A', 'B']] }]);
+  const blockedRuntime = createRuntime({
+    dryRun: true,
+    clientPrefetch: (_path, nonce) => ({ ok: false, nonce, error: 'denied' }),
+  });
+  const blocked = await clientMod.clientActions!(blockedRuntime.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(blocked.map((a) => a.op), ['info'], 'a failed call fails closed and adds no options');
+});
+
+test('a ui.add argument calling a writing callee or a server-bound local keeps the manual todo', () => {
+  const fns = [
+    { name: 'Choices', signature: 'list Choices(int n)', body: 'return {"A", "B"};' },
+    { name: 'Stamp', signature: 'list Stamp()', body: 'row = insert into Orders [ Choice = "x" ];\nreturn {"A"};' },
+  ].map((f) => ({ name: f.name, kind: 'deluge' as const, signature: f.signature, deluge: [{ text: f.body, span: Z }], properties: [], span: Z }));
+  for (const text of [
+    'input.Choice:ui.add(thisapp.Stamp());',
+    'n = Orders[Choice == "A"].count();\ninput.Choice:ui.add(thisapp.Choices(n));',
+  ]) {
+    const g = generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Choice')])],
+        profiles: [ADMIN],
+        functions: fns,
+        workflows: [workflow({ name: 'load', form: 'Orders', event: 'on load', deluge: { text, span: Z } })],
+      }),
+    );
+    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1, text);
+    const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+    assert.match(stripComments(client.source), /shim\.todo\(ctx, "client-condition-uses-server"\)/, text);
+    assert.doesNotMatch(stripComments(client.source), /shim\.client\.call\(/, text);
+  }
+});
+
+test('a read call endpoint authorizes each form it reads and rejects branded arguments', async () => {
+  const reader = {
+    name: 'Util.Booked',
+    kind: 'deluge' as const,
+    signature: 'bool Util.Booked(int id)',
+    deluge: [{ text: 'return Orders[ID == id].count() > 0;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [reader],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Orders',
+          event: 'on user input',
+          deluge: { text: 'if(thisapp.Util.Booked(input.ID)) { alert "booked"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const endpoint = g.files.find((f) => f.path === 'functions/custom/util-booked-call.mjs')!;
+  assert.ok(endpoint);
+  assert.match(stripComments(endpoint.source), /readForms = \["Orders"\]/);
+  assert.match(stripComments(endpoint.source), /authorizeRead\(access, principal, form/);
+  check(endpoint.source, 'call.mjs');
+  const mod = (await loadTree(g, 'functions/custom/util-booked-call.mjs')) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const denied = await invoke(mod.default, { user: { profile: 'Staff' }, body: { nonce: 'n1', args: [1] } });
+  assert.equal(denied.status, 403);
+  const injected = await invoke(mod.default, {
+    user: { profile: 'Administrator' },
+    body: { nonce: 'n1', args: [{ __row: true, form: 'Orders', values: { ID: 1 } }] },
+  });
+  assert.equal(injected.status, 403);
+  assert.equal(injected.body.code, 'READ_DENIED');
+  const oversized = await invoke(mod.default, { user: { profile: 'Administrator' }, body: { nonce: 'n1', args: ['x'.repeat(70000)] } });
+  assert.equal(oversized.status, 403, 'a call argument over the byte cap is refused');
+  // The cap counts encoded bytes, not UTF-16 code units: ~120 KB of UTF-8 is refused.
+  const wide = await invoke(mod.default, { user: { profile: 'Administrator' }, body: { nonce: 'n1', args: ['é'.repeat(60000)] } });
+  assert.equal(wide.status, 403, 'a call argument over the byte cap in UTF-8 is refused');
+  // A single string argument is capped at 256 UTF-8 bytes even when the
+  // serialized args total is under the 65536-byte envelope cap.
+  const underWide = await invoke(mod.default, { user: { profile: 'Administrator' }, body: { nonce: 'n1', args: ['é'.repeat(20000)] } });
+  assert.equal(underWide.status, 403, 'a single string argument over 256 UTF-8 bytes is refused');
+});
+
+/** The uniform denial body every client-call refusal must answer with. */
+const READ_DENIAL_BODY = { ok: false, code: 'READ_DENIED', message: 'Unable to read requested data' };
+
+function overlapCallPath(g: ReturnType<typeof generate>): string {
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  assert.ok(callMod, 'the server condition compiled to a client-call endpoint');
+  return callMod.path;
+}
+
+test('a client call request carries only nonce, args and editRecordId; wrong shapes are denied before any datastore read', async () => {
+  const g = generate(overlapBuild());
+  const live = await liveCountedTables({ Pods: [{ ID: '1', Pod_No: '9A' }], Reservation: [{ ID: '5', Check_In: '2026-01-01' }] });
+  try {
+    await withTree(g, overlapCallPath(g), async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      // A well-shaped control call proves the reads this endpoint performs.
+      const control = await invoke(handler, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'], editRecordId: '5' } });
+      assert.equal(control.status, 200, JSON.stringify(control.body));
+      assert.ok(live.seen.forms.size > 0, 'the control call did read the datastore');
+      const reads = { forms: live.seen.forms.size, rows: live.seen.rows, writes: live.seen.writes };
+      const denied = async (body: unknown, label: string) => {
+        const res = await invoke(handler, { ...CALLER, body });
+        assert.equal(res.status, 403, label);
+        assert.deepEqual(res.body, READ_DENIAL_BODY, label);
+        assert.equal(live.seen.forms.size, reads.forms, `${label}: no datastore read`);
+        assert.equal(live.seen.rows, reads.rows, `${label}: no datastore read`);
+        assert.equal(live.seen.writes, reads.writes, `${label}: no datastore write`);
+      };
+      await denied({ args: ['9A', '9A'], tenant: 'x' }, 'an unknown body key');
+      await denied({ args: ['9A'] }, 'a short args array is never null-padded');
+      await denied({ args: ['9A', '9A', 'extra'] }, 'an extra arg');
+      await denied({ nonce: 'n' }, 'a missing args array');
+      await denied({ args: '9A' }, 'args that are not an array');
+      await denied({ args: ['9A', '9A'], nonce: 7 }, 'a non-string nonce');
+      await denied({ args: ['9A', '9A'], nonce: '' }, 'an empty nonce');
+      await denied({ args: ['9A', '9A'], editRecordId: 5 }, 'a non-string editRecordId');
+      await denied({ args: ['9A', '9A'], editRecordId: '' }, 'an empty editRecordId');
+      // A non-object body is refused by the host body reader with a 400 before
+      // the endpoint runs at all — denied before any datastore read, like the
+      // endpoint-level refusals above.
+      for (const [wire, label] of [
+        ['["9A","9A"]', 'a body that is not a plain object'],
+        ['null', 'a null body'],
+      ] as const) {
+        const err = await hostReadBody(hostStream(wire)).then(
+          () => null,
+          (e: unknown) => e as { status?: number },
+        );
+        assert.equal(err?.status, 400, label);
+        assert.equal(live.seen.rows, reads.rows, `${label}: no datastore read`);
+      }
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('record and element handles validate exactly; branded, non-plain and malformed shapes are denied', async () => {
+  const g = generate(overlapBuild());
+  await withTree(g, overlapCallPath(g), async (mod) => {
+    const handler = mod.default as (req: unknown, res: unknown) => unknown;
+    const ok = async (arg: unknown, label: string) => {
+      const res = await invoke(handler, { ...CALLER, body: { args: [arg, 'b'] } });
+      assert.equal(res.status, 200, `${label}: ${JSON.stringify(res.body)}`);
+    };
+    const denied = async (arg: unknown, label: string) => {
+      const res = await invoke(handler, { ...CALLER, body: { args: [arg, 'b'] } });
+      assert.equal(res.status, 403, label);
+      assert.deepEqual(res.body, READ_DENIAL_BODY, label);
+    };
+    await ok({ kind: 'record', form: 'Reservation', recordId: '1' }, 'an exact record handle');
+    await ok({ kind: 'element', form: 'Reservation', subform: 'Line', rowId: 'r1' }, 'an exact element handle');
+    await ok([{ kind: 'record', form: 'Reservation', recordId: '1' }, { kind: 'element', form: 'Reservation', subform: 'G', rowId: 'r2' }], 'handles nested in a list');
+    await ok({ kind: 'record', form: 'Reservation', recordId: 'x'.repeat(256) }, 'a 256-byte handle field');
+    await denied({ kind: 'record', form: 'Reservation', recordId: '1', extra: 1 }, 'a record handle with an extra key');
+    await denied({ kind: 'record', form: 'Reservation' }, 'a record handle missing recordId');
+    await denied({ kind: 'element', form: 'Reservation', subform: 'Line' }, 'an element handle missing rowId');
+    await denied({ kind: 'element', form: 'Reservation', subform: 'Line', rowId: 'r', recordId: '1' }, 'an element handle with a record key');
+    await denied({ kind: 'query', form: 'Reservation', recordId: '1' }, 'an unknown handle kind');
+    await denied({ kind: 'record', form: 'Reservation', recordId: 1 }, 'a non-string handle field');
+    await denied({ kind: 'record', form: 'Reservation', recordId: '' }, 'an empty handle field');
+    await denied({ kind: 'record', form: 'Reservation', recordId: 'x'.repeat(257) }, 'a 257-byte handle field');
+    await denied(JSON.parse('{"kind":"record","form":"Pods","recordId":"1","__proto__":{"admin":true}}'), 'a __proto__ key');
+    await denied({ kind: 'record', form: 'Reservation', recordId: '1', constructor: 'x' }, 'a constructor key');
+    await denied({ kind: 'record', form: 'Reservation', recordId: '1', __brand: 'x' }, 'a runtime-branded key');
+    await denied('x'.repeat(257), 'a 257-byte string arg');
+    // 17 nested arrays: past the plainJsonArg depth limit, on real wire bytes.
+    let deep: unknown = ['9A'];
+    for (let k = 0; k < 16; k++) deep = [deep];
+    await denied(deep, 'a payload nested deeper than 16 levels');
+  });
+});
+
+test('a handle naming a form the call did not compile is denied before any datastore read', async () => {
+  const g = generate(overlapBuild());
+  const live = await liveCountedTables({ Pods: [{ ID: '1', Pod_No: '9A' }], Reservation: [{ ID: '5', Check_In: '2026-01-01' }] });
+  try {
+    await withTree(g, overlapCallPath(g), async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const res = await invoke(handler, {
+        ...CALLER,
+        body: { args: [[{ kind: 'record', form: 'Secret', recordId: '1' }], 'x'] },
+      });
+      assert.equal(res.status, 403, JSON.stringify(res.body));
+      assert.deepEqual(res.body, READ_DENIAL_BODY);
+      assert.equal(live.seen.forms.size, 0, 'an uncompiled form never reaches the datastore');
+      assert.equal(live.seen.rows, 0);
+      assert.equal(live.seen.writes, 0);
+      // A handle for a compiled form is admitted through validation and
+      // resolves to the seeded row (the mock assigns ROWIDs in insert order:
+      // Pods is 1000, the seeded Reservation row is 1001)...
+      const handled = await invoke(handler, {
+        ...CALLER,
+        body: { args: [[{ kind: 'record', form: 'Reservation', recordId: '1001' }], 'x'] },
+      });
+      assert.equal(handled.status, 200, JSON.stringify(handled.body));
+      // ...while a handle naming no stored record denies like any other miss.
+      const missing = await invoke(handler, {
+        ...CALLER,
+        body: { args: [[{ kind: 'record', form: 'Reservation', recordId: '1' }], 'x'] },
+      });
+      assert.equal(missing.status, 403);
+      assert.deepEqual(missing.body, READ_DENIAL_BODY);
+      // ...and a well-shaped control call proves this spy sees real reads.
+      const control = await invoke(handler, { ...CALLER, body: { args: ['9A', '9A'] } });
+      assert.equal(control.status, 200, JSON.stringify(control.body));
+      assert.ok(live.seen.forms.size > 0, 'the control call read the datastore');
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('client call argument limits hold at their exact boundaries', async () => {
+  const g = generate(overlapBuild());
+  await withTree(g, overlapCallPath(g), async (mod) => {
+    const handler = mod.default as (req: unknown, res: unknown) => unknown;
+    const run = (body: unknown) => invoke(handler, { ...CALLER, body });
+    const ok = async (body: unknown, label: string) => assert.equal((await run(body)).status, 200, label);
+    const denied = async (body: unknown, label: string) => {
+      const res = await run(body);
+      assert.equal(res.status, 403, label);
+      assert.deepEqual(res.body, READ_DENIAL_BODY, label);
+    };
+    // Strings: 256 UTF-8 bytes pass, 257 fail — counted in bytes, not code units.
+    await ok({ args: ['x'.repeat(256), 'b'] }, 'a 256-byte string');
+    await denied({ args: ['x'.repeat(257), 'b'] }, 'a 257-byte string');
+    await ok({ args: ['é'.repeat(128), 'b'] }, 'a 256-byte UTF-8 string');
+    await denied({ args: ['é'.repeat(129), 'b'] }, 'a 258-byte UTF-8 string');
+    await denied({ args: ['', 'b'] }, 'an empty string');
+    // Nonce: 128 bytes pass, 129 fail.
+    await ok({ args: ['9A', '9A'], nonce: 'n'.repeat(128) }, 'a 128-byte nonce');
+    await denied({ args: ['9A', '9A'], nonce: 'n'.repeat(129) }, 'a 129-byte nonce');
+    // Serialized args: exactly 65536 bytes pass, 65537 fail. Padding is an
+    // array of 256-byte strings plus one exact tail — every element still
+    // satisfies the per-string cap, so only the envelope limit decides.
+    const sized = (tail: number) => ['x'.repeat(256), [...Array.from({ length: 252 }, () => 'y'.repeat(256)), 'z'.repeat(tail)]];
+    assert.equal(Buffer.byteLength(JSON.stringify(sized(3)), 'utf8'), 65536);
+    assert.equal(Buffer.byteLength(JSON.stringify(sized(4)), 'utf8'), 65537);
+    await ok({ args: sized(3) }, 'args serialized to exactly 65536 bytes');
+    await denied({ args: sized(4) }, 'args serialized to 65537 bytes');
+    // Depth: 16 nested containers pass, the 17th fails.
+    let edge: unknown = 'x';
+    for (let i = 0; i < 16; i++) edge = [edge];
+    await ok({ args: [edge, 'b'] }, 'an argument nested 16 deep');
+    await denied({ args: [[edge], 'b'] }, 'an argument nested 17 deep');
+    // Handles: 32 pass, the 33rd fails.
+    const recs = (n: number, form = 'Reservation') => Array.from({ length: n }, (_, i) => ({ kind: 'record', form, recordId: `r${i}` }));
+    await ok({ args: [recs(32), 'b'] }, '32 record handles');
+    await denied({ args: [recs(33), 'b'] }, '33 record handles');
+    // Element rows per form: 16 pass, the 17th fails. The 128-rows-per-request
+    // cap is unreachable here — every element is also a handle and the handle
+    // cap denies first — so 33 elements assert the dominated boundary.
+    const els = (n: number) => Array.from({ length: n }, (_, i) => ({ kind: 'element', form: 'Reservation', subform: 'S', rowId: `r${i}` }));
+    await ok({ args: [els(16), 'b'] }, '16 element rows on one form');
+    await denied({ args: [els(17), 'b'] }, '17 element rows on one form');
+    await denied({ args: [els(33), 'b'] }, 'element rows past the 32-handle ceiling');
+  });
+});
+
+test('client call handle fan-out caps: 8 forms pass, the 9th is denied', async () => {
+  const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'India'];
+  const nine = app({
+    forms: names.map((n) => plainForm(n, [plainField('Code')])),
+    profiles: [ADMIN],
+    functions: [
+      {
+        name: 'Util.Nine',
+        kind: 'deluge',
+        signature: 'int Util.Nine(int x)',
+        deluge: [{ text: `return ${names.map((n) => `${n}[ID != 0].count()`).join(' + ')};`, span: Z }],
+        properties: [],
+        span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'Nine check',
+        form: 'Alpha',
+        event: 'on user input',
+        deluge: { text: 'if(thisapp.Util.Nine(input.ID) > 0) { alert "nine"; }', span: Z },
+      }),
+    ],
+  });
+  const g = generate(nine);
+  const endpoint = g.files.find((f) => f.path === 'functions/custom/util-nine-call.mjs')!;
+  assert.ok(endpoint, 'the client condition compiled the function call endpoint');
+  assert.match(stripComments(endpoint.source), /readForms = \[.*"Alpha".*"India".*\]/, 'all nine forms compiled');
+  const mod = (await loadTree(g, endpoint.path)) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const recs = (fs: string[]) => fs.map((form, i) => ({ kind: 'record', form, recordId: `r${i}` }));
+  const eight = await invoke(mod.default, { ...CALLER, body: { args: [recs(names.slice(0, 8))] } });
+  assert.equal(eight.status, 200, JSON.stringify(eight.body));
+  const nineRes = await invoke(mod.default, { ...CALLER, body: { args: [recs(names)] } });
+  assert.equal(nineRes.status, 403);
+  assert.deepEqual(nineRes.body, READ_DENIAL_BODY);
+});
+
+test('every client call denial is the same status and the same byte-identical body', async () => {
+  const g = generate(overlapBuild());
+  const expected = JSON.stringify(READ_DENIAL_BODY);
+  await withTree(g, overlapCallPath(g), async (mod, dir) => {
+    const handler = mod.default as (req: unknown, res: unknown) => unknown;
+    const bodies = [
+      { args: ['9A', '9A'], extra: 1 },
+      { args: ['9A'] },
+      { nonce: 'n' },
+      { args: 'nope' },
+      { args: ['x'.repeat(257), '9A'] },
+      { args: ['9A', '9A'], nonce: 'n'.repeat(129) },
+      { args: [[{ kind: 'record', form: 'Secret', recordId: '1' }], '9A'] },
+      { args: [[{ kind: 'record', form: 'Reservation', recordId: '1', x: 1 }], '9A'] },
+      { args: [JSON.parse('['.repeat(17) + '1' + ']'.repeat(17)), '9A'] },
+      { args: [{ __row: true, form: 'Reservation', values: {} }, '9A'] },
+    ];
+    for (const [i, body] of bodies.entries()) {
+      const res = await invokeRaw(handler, { ...CALLER, body });
+      assert.equal(res.status, 403, `denial cause ${i}`);
+      assert.equal(res.raw, expected, `denial cause ${i} is byte-identical`);
+    }
+    // A scope-denied principal crosses the same boundary (403, same body).
+    const scoped = await invokeRaw(handler, { user: { profile: 'Guest', loginUser: 'g@t' }, body: { args: ['9A', '9A'] } });
+    assert.equal(scoped.status, 403);
+    assert.equal(scoped.raw, expected, 'a scope denial is byte-identical');
+    // An unresolved dispatch name denies identically — no existence oracle.
+    const registry = (await import(pathToFileURL(join(dir, 'functions/thisapp.mjs')).href)) as { functions: Record<string, unknown> };
+    const key = Object.keys(registry.functions).find((k) => k.startsWith('c2cCond_'));
+    assert.ok(key);
+    delete registry.functions[key];
+    const unknown = await invokeRaw(handler, { ...CALLER, body: { args: ['9A', '9A'] } });
+    assert.equal(unknown.status, 403);
+    assert.equal(unknown.raw, expected, 'an unknown function is byte-identical');
+  });
+});
+
+test('raw request duplicate JSON keys are denied at every nesting level', async () => {
+  const g = generate(overlapBuild());
+  await withTree(g, overlapCallPath(g), async (mod) => {
+    const handler = mod.default as (req: unknown, res: unknown) => unknown;
+    const expected = JSON.stringify(READ_DENIAL_BODY);
+    const denied = async (raw: string, body: unknown, label: string) => {
+      const res = await invokeRaw(handler, { ...CALLER, body, rawBody: raw });
+      assert.equal(res.status, 403, label);
+      assert.equal(res.raw, expected, label);
+    };
+    await denied('{"args":["9A","9A"],"args":["9A","9A"]}', { args: ['9A', '9A'] }, 'top-level duplicate');
+    await denied('{"args":[{"kind":"record","kind":"element","form":"Reservation","recordId":"1"},"9A"]}', { args: [{ kind: 'record', form: 'Reservation', recordId: '1' }, '9A'] }, 'handle duplicate');
+    await denied('{"args":[{"nested":{"x":1,"x":2}},"9A"]}', { args: [{ nested: { x: 2 } }, '9A'] }, 'nested duplicate');
+    await denied('{"\\u0061rgs":["9A","9A"],"args":["9A","9A"]}', { args: ['9A', '9A'] }, 'escaped duplicate');
+    await denied('{"args":["9A","9A"],"args":[]}', { args: ['9A', '9A'] }, 'different duplicate values');
+    const sibling = await invokeRaw(handler, { ...CALLER, body: { args: [{ a: 1 }, { a: 2 }] }, rawBody: '{"args":[{"a":1},{"a":2}]}' });
+    assert.notEqual(sibling.status, 403, 'same key in sibling objects is not a duplicate');
+    await denied('{"args":[1,2],}', { args: [1, 2] }, 'malformed JSON fails closed');
+  });
+});
+
+test('a host that cannot supply raw bytes fails closed with the same denial and zero function dispatch', async () => {
+  const g = generate(overlapBuild());
+  const expected = JSON.stringify(READ_DENIAL_BODY);
+  // Write the generated tree like withTree, but wrap the thisapp registry in a
+  // proxy that counts every access: a denial before dispatch never touches it,
+  // so no function (and therefore no datastore) is reached.
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-tree-'));
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+  mkdirSync(join(dir, 'node_modules'), { recursive: true });
+  symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+  for (const file of g.files.filter((f) => f.path.startsWith('functions/'))) {
+    const dest = join(dir, file.path === 'functions/thisapp.mjs' ? 'functions/thisapp-impl.mjs' : file.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, file.source);
+  }
+  writeFileSync(
+    join(dir, 'functions/thisapp.mjs'),
+    `import { functions as __impl } from "./thisapp-impl.mjs";
+let __touches = 0;
+export const functions = new Proxy(__impl, {
+  get(t, p) { __touches++; return Reflect.get(t, p); },
+  ownKeys(t) { __touches++; return Reflect.ownKeys(t); },
+});
+export const __functionTouches = () => __touches;
+`,
+  );
+  try {
+    const mod = (await import(pathToFileURL(join(dir, overlapCallPath(g))).href)) as Record<string, (req: unknown, res: unknown) => unknown>;
+    const registry = (await import(pathToFileURL(join(dir, 'functions/thisapp.mjs')).href)) as { __functionTouches(): number };
+    const handler = mod.default;
+    // A body the host already parsed but cannot supply bytes for — express.json()
+    // style — carries req.rawBody explicitly undefined and must be denied before
+    // any dispatch, exactly like a duplicate-key body.
+    const missing = await invokeRaw(handler, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'] }, rawBody: undefined });
+    assert.equal(missing.status, 403);
+    assert.equal(missing.raw, expected, 'missing rawBody is byte-identical READ_DENIED');
+    assert.equal(registry.__functionTouches(), 0, 'no function or datastore access before the denial');
+    // A host that captured the wrong bytes (a reserialized body) is denied too:
+    // the duplicate member it lost still trips the scanner.
+    const reserialized = await invokeRaw(handler, { ...CALLER, body: { args: ['9A', '9A'] }, rawBody: '{"args":["9A","9A"],"args":["9A","9A"]}' });
+    assert.equal(reserialized.status, 403);
+    assert.equal(reserialized.raw, expected);
+    assert.equal(registry.__functionTouches(), 0);
+    // The control call proves the spy counts: a valid call reaches dispatch.
+    const control = await invokeRaw(handler, { ...CALLER, body: { nonce: 'n', args: ['9A', '9A'] } });
+    assert.equal(control.status, 200, control.raw);
+    assert.ok(registry.__functionTouches() > 0, 'the control call reached dispatch');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A read-only app function with a form-typed record parameter, reachable through its client-call endpoint. */
+function recordHandleBuild() {
+  return app({
+    forms: [
+      plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Secret'), plainField('Lines', 'grid', ['Qty'])]),
+    ],
+    profiles: [
+      ADMIN,
+      // Desk's grant declares Check_In and Lines only; Secret stays hidden.
+      {
+        name: 'Desk',
+        type: 'Users_Permissions',
+        properties: [],
+        modules: [
+          {
+            component: 'Reservation',
+            properties: [{ key: 'enabled', value: 'viewall', span: Z }],
+            reports: [],
+            fields: [
+              { field: 'Check_In', flags: { visibility: 'true' }, span: Z },
+              { field: 'Lines', flags: { visibility: 'true' }, span: Z },
+              { field: 'Secret', flags: { visibility: 'false' }, span: Z },
+            ],
+            span: Z,
+          },
+        ],
+        span: Z,
+      },
+      // Guest's grant is the Mine report filter: rows with Owner = own login only.
+      {
+        name: 'Guest',
+        type: 'Users_Permissions',
+        properties: [],
+        modules: [
+          {
+            component: 'Reservation',
+            properties: [{ key: 'enabled', value: 'true', span: Z }],
+            reports: [{ key: 'Mine', value: '{"View"}', span: Z }],
+            fields: [],
+            span: Z,
+          },
+        ],
+        span: Z,
+      },
+      // Nobody has no Reservation grant at all.
+      { name: 'Nobody', type: 'Users_Permissions', properties: [], modules: [], span: Z },
+      // NoLines can read the parent but deliberately hides the subform field.
+      {
+        name: 'NoLines', type: 'Users_Permissions', properties: [],
+        modules: [{ component: 'Reservation', properties: [{ key: 'enabled', value: 'viewall', span: Z }], reports: [],
+          fields: [{ field: 'Lines', flags: { visibility: 'false' }, span: Z }], span: Z }], span: Z,
+      },
+    ],
+    reports: [
+      {
+        name: 'Mine',
+        type: 'list',
+        modifiers: [],
+        form: 'Reservation',
+        criteria: 'Owner == zoho.loginuser',
+        flags: [],
+        properties: [],
+        columns: [],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [],
+        views: [],
+        span: Z,
+      },
+    ],
+    functions: [
+      {
+        name: 'Util.See',
+        kind: 'deluge',
+        signature: 'string Util.See(Reservation res)',
+        deluge: [{ text: 'return res.Check_In + "/" + res.Secret;', span: Z }],
+        properties: [],
+        span: Z,
+      },
+      {
+        name: 'Util.Qty',
+        kind: 'deluge',
+        signature: 'string Util.Qty(Reservation res)',
+        deluge: [{ text: 'return res.Qty;', span: Z }],
+        properties: [],
+        span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'See check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: { text: 'if(thisapp.Util.See(input.Check_In) == "x" || thisapp.Util.Qty(input.Check_In) == "y") { alert "see"; }', span: Z },
+      }),
+    ],
+  });
+}
+
+/** A live-mode install that also exposes the mock store for mid-test row changes. */
+async function liveRows() {
+  const mock = mockDatastore({});
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = mock.datastore;
+  return {
+    mock,
+    swap(store: unknown) {
+      (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = store;
+    },
+    restore() {
+      if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+      else process.env.C2C_DEPLOY_MODE = realMode;
+      if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+      else process.env.C2C_APP_TIMEZONE = realZone;
+      if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+      else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+    },
+  };
+}
+
+async function invokeHeaders(handler: (req: unknown, res: unknown) => unknown, req: unknown): Promise<{ status: number; body: Record<string, unknown>; headers: Record<string, string> }> {
+  let status = 0;
+  let raw = '';
+  let headers: Record<string, string> = {};
+  const res = {
+    writeHead(code: number, h?: Record<string, string>) {
+      status = code;
+      headers = h ?? {};
+    },
+    end(body: string) {
+      raw = body;
+    },
+  };
+  const request = await hostRequest(req);
+  return Promise.resolve(handler(request, res)).then(() => ({ status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {}, headers }));
+}
+
+test('a record handle resolves to its scoped row; nonexistent, mismatched and out-of-scope rows deny identically', async () => {
+  const g = generate(recordHandleBuild());
+  const live = await liveRows();
+  try {
+    const [row] = await live.mock.datastore.insert('Reservation', [{ Check_In: '2026-01-01', Secret: 's3cr3t', Owner: 'g@t' }]);
+    const rid = row!.ROWID!;
+    await withTree(g, 'functions/custom/util-see-call.mjs', async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const handle = (recordId: string) => ({ kind: 'record', form: 'Reservation', recordId });
+      const call = (body: unknown, caller: unknown = CALLER) => invoke(handler, { ...(caller as object), body });
+      const queriesBefore = live.mock.calls.length;
+      // The authorised row resolves and the callee reads its fields.
+      const ok = await call({ args: [handle(rid)] });
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      assert.equal(ok.body.ok, true);
+      assert.match(String(ok.body.value), /2026-01-01\/s3cr3t/);
+      assert.equal(live.mock.calls.length, queriesBefore + 1, 'one scoped fetch, nothing more');
+      assert.match(live.mock.calls[queriesBefore]!.where, /ROWID/);
+      // Every denial cause: byte-identical READ_DENIED, no extra fetch.
+      const expected = JSON.stringify(READ_DENIAL_BODY);
+      for (const [label, body, caller, fetches] of [
+        // A scoped empty read still costs one fetch — never a second, wider one.
+        ['a nonexistent record', { args: [handle('999999999')] }, CALLER, 1],
+        ['an editRecordId mismatch', { args: [handle(rid)], editRecordId: '888888888' }, CALLER, 0],
+        ['a profile with no grant', { args: [handle(rid)] }, { user: { profile: 'Nobody', loginUser: 'n@t' } }, 0],
+        ["another user's record", { args: [handle(rid)] }, { user: { profile: 'Guest', loginUser: 'other@t' } }, 1],
+      ] as const) {
+        const before = live.mock.calls.length;
+        const res = await invokeRaw(handler, { ...(caller as object), body });
+        assert.equal(res.status, 403, label);
+        assert.equal(res.raw, expected, `${label} is byte-identical`);
+        assert.equal(live.mock.calls.length, before + fetches, `${label}: no fetch beyond the check`);
+      }
+      // A Guest's own row resolves through the same scoped read.
+      const [own] = await live.mock.datastore.insert('Reservation', [{ Check_In: '2026-02-02', Secret: 'own', Owner: 'g@t' }]);
+      const ownRes = await call({ args: [handle(own!.ROWID!)] }, { user: { profile: 'Guest', loginUser: 'g@t' } });
+      assert.equal(ownRes.status, 200, JSON.stringify(ownRes.body));
+      // The Guest-scoped query carried the record filter, not a bare ROWID.
+      const scoped = live.mock.calls[live.mock.calls.length - 1]!;
+      assert.match(scoped.where, /Owner/);
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('a resolved record exposes only the declared field grant to the callee', async () => {
+  const g = generate(recordHandleBuild());
+  const live = await liveRows();
+  try {
+    const [row] = await live.mock.datastore.insert('Reservation', [{ Check_In: '2026-01-01', Secret: 's3cr3t', Owner: 'g@t' }]);
+    const rid = row!.ROWID!;
+    await withTree(g, 'functions/custom/util-see-call.mjs', async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const body = { args: [{ kind: 'record', form: 'Reservation', recordId: rid }] };
+      const desk = await invoke(handler, { user: { profile: 'Desk', loginUser: 'd@t' }, body });
+      assert.equal(desk.status, 200, JSON.stringify(desk.body));
+      const value = String(desk.body.value);
+      assert.ok(value.startsWith('2026-01-01'), value);
+      assert.ok(!value.includes('s3cr3t'), `the hidden field never reaches the callee: ${value}`);
+      // The administrator's unrestricted grant still sees the whole row.
+      const admin = await invoke(handler, { ...CALLER, body });
+      assert.equal(admin.status, 200, JSON.stringify(admin.body));
+      assert.match(String(admin.body.value), /s3cr3t/);
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('an element handle proves membership: wrong subform, missing row, missing or denied parent all deny identically', async () => {
+  const g = generate(recordHandleBuild());
+  const live = await liveRows();
+  try {
+    const [parent] = await live.mock.datastore.insert('Reservation', [{ Check_In: '2026-01-01', Secret: 's3cr3t', Owner: 'g@t' }]);
+    const pid = parent!.ROWID!;
+    await withTree(g, 'functions/custom/util-qty-call.mjs', async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const links = (mod as { elementLinks?: Record<string, Record<string, { table: string; parentColumn: string }>> }).elementLinks!;
+      const link = links.Reservation!.Lines!;
+      const [child] = await live.mock.datastore.insert(link.table, [{ Qty: '7', [link.parentColumn]: pid }]);
+      const cid = child!.ROWID!;
+      const handle = (over: Record<string, string> = {}) => ({ kind: 'element', form: 'Reservation', subform: 'Lines', rowId: cid, ...over });
+      const ok = await invoke(handler, { ...CALLER, body: { args: [handle()] } });
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      assert.equal(String(ok.body.value), '7', 'the resolved subform row reaches the callee');
+      const expected = JSON.stringify(READ_DENIAL_BODY);
+      for (const [label, body, caller] of [
+        ['a subform the form does not declare', { args: [handle({ subform: 'Bogus' })] }, CALLER],
+        ['a nonexistent child row', { args: [handle({ rowId: '999999999' })] }, CALLER],
+        ['a child row of the wrong parent table', { args: [handle({ form: 'Pods' })] }, CALLER],
+        ['an element whose parent is out of scope', { args: [handle()] }, { user: { profile: 'Guest', loginUser: 'other@t' } }],
+        ['an editRecordId the parent does not own', { args: [handle()], editRecordId: '888888888' }, CALLER],
+        ['a profile hiding the subform field', { args: [handle()] }, { user: { profile: 'NoLines', loginUser: 'g@t' } }],
+        ['a non-numeric child ROWID', { args: [handle({ rowId: 'abc' })] }, CALLER],
+      ] as const) {
+        const res = await invokeRaw(handler, { ...(caller as object), body });
+        assert.equal(res.status, 403, label);
+        assert.equal(res.raw, expected, `${label} is byte-identical`);
+      }
+      // A child row that names no parent is not a member of anything.
+      const [orphan] = await live.mock.datastore.insert(link.table, [{ Qty: '1' }]);
+      const orphanRes = await invokeRaw(handler, { ...CALLER, body: { args: [handle({ rowId: orphan!.ROWID! })] } });
+      assert.equal(orphanRes.status, 403);
+      assert.equal(orphanRes.raw, expected, 'a parentless child is byte-identical');
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('a record changed between the check and the read is not served stale authorization', async () => {
+  const g = generate(recordHandleBuild());
+  const live = await liveRows();
+  try {
+    const [row] = await live.mock.datastore.insert('Reservation', [{ Check_In: '2026-01-01', Owner: 'g@t' }]);
+    const rid = row!.ROWID!;
+    // Wrap the store so the row's owner changes inside the first query of the
+    // call — the check and the read share one scoped fetch, so it sees the flip.
+    let flipped = false;
+    const inner = live.mock.datastore;
+    const wrapped = Object.assign({}, inner, {
+      async query(form: string, where: string, limit: number, offset = 0, orderBy = '') {
+        if (!flipped) {
+          flipped = true;
+          const list = live.mock.tables.get('Reservation')!;
+          list[0]!.Owner = 'other@t';
+        }
+        return inner.query(form, where, limit, offset, orderBy);
+      },
+    });
+    live.swap(wrapped);
+    await withTree(g, 'functions/custom/util-see-call.mjs', async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const res = await invokeRaw(handler, { user: { profile: 'Guest', loginUser: 'g@t' }, body: { args: [{ kind: 'record', form: 'Reservation', recordId: rid }] } });
+      assert.equal(res.status, 403, 'the flip is seen inside the same snapshot');
+      assert.equal(res.raw, JSON.stringify(READ_DENIAL_BODY));
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('a permission revoked between two calls denies the second — no cached authorization', async () => {
+  const g = generate(recordHandleBuild());
+  const live = await liveRows();
+  try {
+    const [row] = await live.mock.datastore.insert('Reservation', [{ Check_In: '2026-01-01', Owner: 'g@t' }]);
+    const rid = row!.ROWID!;
+    await withTree(g, 'functions/custom/util-see-call.mjs', async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const caller = { user: { profile: 'Guest', loginUser: 'g@t' }, body: { args: [{ kind: 'record', form: 'Reservation', recordId: rid }] } };
+      const first = await invoke(handler, caller);
+      assert.equal(first.status, 200, JSON.stringify(first.body));
+      live.mock.tables.get('Reservation')![0]!.Owner = 'other@t';
+      const second = await invoke(handler, caller);
+      assert.equal(second.status, 403);
+      assert.deepEqual(second.body, READ_DENIAL_BODY);
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('client-call success and denial replies carry no-store and no ETag', async () => {
+  const g = generate(recordHandleBuild());
+  const live = await liveRows();
+  try {
+    const [row] = await live.mock.datastore.insert('Reservation', [{ Check_In: '2026-01-01', Secret: 's3cr3t', Owner: 'g@t' }]);
+    await withTree(g, 'functions/custom/util-see-call.mjs', async (mod) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      for (const [label, res] of [
+        ['success', await invokeHeaders(handler, { ...CALLER, body: { args: [{ kind: 'record', form: 'Reservation', recordId: row!.ROWID! }] } })],
+        ['denial', await invokeHeaders(handler, { ...CALLER, body: { args: [{ kind: 'record', form: 'Reservation', recordId: '999999999' }] } })],
+      ] as const) {
+        assert.equal(res.headers['Cache-Control'], 'no-store', label);
+        assert.ok(!('ETag' in res.headers), `${label}: no ETag`);
+      }
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+/** Extract one top-level function declaration from emitted source (strings, comments, regexes aware). */
+function extractFunction(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  assert.ok(start >= 0, `${name} not found in generated source`);
+  let mode: 'code' | 'line' | 'block' | 'str' = 'code';
+  let quote = '';
+  let depth = 0;
+  for (let i = source.indexOf('{', start); i < source.length; i++) {
+    const c = source[i]!;
+    if (mode === 'line') {
+      if (c === '\n') mode = 'code';
+      continue;
+    }
+    if (mode === 'block') {
+      if (c === '/' && source[i - 1] === '*') mode = 'code';
+      continue;
+    }
+    if (mode === 'str') {
+      if (c === '\\') i++;
+      else if (c === quote) mode = 'code';
+      continue;
+    }
+    if (c === '/' && source[i + 1] === '/') { mode = 'line'; continue; }
+    if (c === '/' && source[i + 1] === '*') { mode = 'block'; continue; }
+    if (c === '"' || c === "'") { mode = 'str'; quote = c; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`${name}: unbalanced braces in generated source`);
+}
+
+/** The generated endpoint's rawJsonHasUniqueKeys scanner, evaluated standalone. */
+function scannerFrom(source: string): (raw: unknown) => boolean {
+  const fn = new Function(`${extractFunction(source, 'rawJsonHasUniqueKeys')}\nreturn rawJsonHasUniqueKeys;`) as () => (raw: unknown) => boolean;
+  return fn();
+}
+
+/** Reference oracle: does `raw` (known to JSON.parse) contain a duplicate object key? */
+function jsonDuplicateKeys(raw: string): boolean {
+  let i = 0;
+  const ws = () => { while (i < raw.length && /\s/.test(raw[i]!)) i++; };
+  const str = () => {
+    const start = i;
+    i++;
+    while (raw[i] !== '"') i += raw[i] === '\\' ? 2 : 1;
+    i++;
+    return raw.slice(start, i);
+  };
+  const val = (): boolean => {
+    ws();
+    if (raw[i] === '{') {
+      i++;
+      const keys = new Set<string>();
+      let dup = false;
+      ws();
+      if (raw[i] === '}') { i++; return false; }
+      for (;;) {
+        ws();
+        const key = JSON.parse(str()) as string;
+        if (keys.has(key)) dup = true;
+        else keys.add(key);
+        ws();
+        i++; // ':'
+        if (val()) dup = true;
+        ws();
+        if (raw[i] === '}') { i++; return dup; }
+        i++; // ','
+      }
+    }
+    if (raw[i] === '[') {
+      i++;
+      let dup = false;
+      ws();
+      if (raw[i] === ']') { i++; return false; }
+      for (;;) {
+        if (val()) dup = true;
+        ws();
+        if (raw[i] === ']') { i++; return dup; }
+        i++; // ','
+      }
+    }
+    if (raw[i] === '"') { str(); return false; }
+    while (i < raw.length && !/[\s,\]}]/.test(raw[i]!)) i++;
+    return false;
+  };
+  return val();
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test('the raw-body scanner matches JSON.parse on the attack matrix and stays iterative at any depth', () => {
+  const g = generate(overlapBuild());
+  const scan = scannerFrom(g.files.find((f) => f.path === overlapCallPath(g))!.source);
+  const cases: [string, boolean][] = [
+    // Escaped key names compare after JSON unescaping.
+    ['{"\\u0061rgs":[1],"args":[2]}', false],
+    ['{"\\u005f_proto__":1,"__proto__":2}', false],
+    ['{"\\u005f_proto__":1,"_proto__":2}', true],
+    ['{"\\u0061":1,"b":2}', true],
+    // Huge numbers are scalars, not structure.
+    ['{"n":1e999}', true],
+    ['{"n":-900719925474099312345678901234567890}', true],
+    ['{"n":9007199254740993}', true],
+    // A BOM is not JSON whitespace: JSON.parse throws, the scanner must reject.
+    ['\uFEFF{"a":1}', false],
+    // A raw NUL is a control character inside or outside a string.
+    ['{"a":1}\u0000', false],
+    ['{"a\u0000b":1}', false],
+    // Lone surrogates inside a string are legal JSON.
+    ['{"a":"\\ud800"}', true],
+    ['{"\\ud800":1,"\\ud800":2}', false],
+    // Escaped quotes and backslashes inside keys.
+    ['{"a\\"b":1,"a\\"b":2}', false],
+    ['{"a\\\\b":1,"a\\\\b":2}', false],
+    ['{"a\\/b":1,"c":2}', true],
+    // Comments, single quotes, trailing commas and garbage are not JSON.
+    ['{"a":1/* x */}', false],
+    ['// x\n{"a":1}', false],
+    ["{'a':1}", false],
+    ['{"a":1,}', false],
+    ['{"a":1,"b":2,}', false],
+    ['[1,]', false],
+    ['{"a":1} {"b":2}', false],
+    ['{"a":1} x', false],
+    ['true false', false],
+    // Boundary-valid documents stay accepted.
+    ['{}', true],
+    ['[]', true],
+    ['{"a":[{"b":[1,2,{"c":null}]}]}', true],
+    ['  {"a" : 1 }\r\n', true],
+    ['"x"', true],
+    ['123', true],
+    ['true', true],
+    ['null', true],
+    ['', false],
+    ['   ', false],
+    ['{', false],
+    ['{]', false],
+    ['{"a"}', false],
+    ['{"a":}', false],
+    ['{:1}', false],
+    ['[}', false],
+    ['nan', false],
+    ['NaN', false],
+    ['Infinity', false],
+    ['01', false],
+    ['-x', false],
+    ['1.', false],
+    ['1e', false],
+    ['{"a":01}', false],
+    ['{,}', false],
+    ['[,]', false],
+    ['{"a":1,,"b":2}', false],
+    ['[1,,2]', false],
+  ];
+  for (const [doc, expected] of cases) {
+    assert.equal(scan(doc), expected, `scanner verdict for ${JSON.stringify(doc.slice(0, 60))}`);
+    // Differential cross-check on every matrix row.
+    let parses = true;
+    try {
+      JSON.parse(doc);
+    } catch {
+      parses = false;
+    }
+    if (parses) assert.equal(jsonDuplicateKeys(doc) === false, expected, `oracle agrees for ${JSON.stringify(doc.slice(0, 60))}`);
+    else assert.equal(expected, false, `unparseable doc must be rejected: ${JSON.stringify(doc.slice(0, 60))}`);
+  }
+  // Depth without recursion: 64 KB of '[' returns false quickly and cannot
+  // overflow the call stack, and valid deep documents get the right verdict.
+  assert.equal(scan('['.repeat(65536)), false);
+  assert.equal(scan('{'.repeat(65536)), false);
+  const deep = '['.repeat(17) + '{"k":' + '['.repeat(40) + '1' + ']'.repeat(40) + '}' + ']'.repeat(17);
+  assert.equal(JSON.parse(deep) !== undefined, true);
+  assert.equal(scan(deep), true, 'a valid document past recursion-safe depths is accepted');
+  const deepDup = '['.repeat(17) + '{"k":1,"k":2}' + ']'.repeat(17);
+  assert.equal(scan(deepDup), false, 'a duplicate at depth 17 is still caught');
+  // Deeper than a recursive descent could survive: whatever JSON.parse's own
+  // limit is, the scanner gives the same verdict without relying on catching
+  // a recursion RangeError — it simply never recurses.
+  const deeper = '['.repeat(200000) + '1' + ']'.repeat(200000);
+  let deeperParses = true;
+  try {
+    JSON.parse(deeper);
+  } catch {
+    deeperParses = false;
+  }
+  assert.equal(scan(deeper), deeperParses, 'the scanner tracks JSON.parse at any depth');
+  const deeperDup = '['.repeat(200000) + '{"a":1,"a":2}' + ']'.repeat(200000);
+  assert.equal(scan(deeperDup), false, 'a duplicate at extreme depth is still caught');
+});
+
+test('the raw-body scanner matches JSON.parse on a seeded differential fuzz', () => {
+  const g = generate(overlapBuild());
+  const scan = scannerFrom(g.files.find((f) => f.path === overlapCallPath(g))!.source);
+  const rnd = mulberry32(0xc2c1a1);
+  const keys = ['a', 'b', 'c', 'k1', 'z', '_x', 'args', 'nonce'];
+  const esc = (k: string) => (rnd() < 0.2 ? `\\u${k.charCodeAt(0).toString(16).padStart(4, '0')}${k.slice(1)}` : k);
+  const value = (depth: number): string => {
+    const r = rnd();
+    if (depth > 4 || r < 0.45) {
+      const pick = rnd();
+      if (pick < 0.25) return JSON.stringify(`s${Math.floor(rnd() * 100)}`);
+      if (pick < 0.45) return String(Math.floor(rnd() * 1e9));
+      if (pick < 0.55) return String(rnd() * 1000);
+      if (pick < 0.7) return rnd() < 0.5 ? 'true' : 'false';
+      if (pick < 0.8) return 'null';
+      return JSON.stringify(`e${'x'.repeat(Math.floor(rnd() * 8))}`);
+    }
+    if (r < 0.75) {
+      const n = Math.floor(rnd() * 4);
+      return `[${Array.from({ length: n }, () => value(depth + 1)).join(',')}]`;
+    }
+    const n = Math.floor(rnd() * 4);
+    const members: string[] = [];
+    for (let k = 0; k < n; k++) {
+      const key = keys[Math.floor(rnd() * keys.length)]!;
+      members.push(`${JSON.stringify(esc(key))}:${value(depth + 1)}`);
+      // Occasionally emit the same member again as a true duplicate.
+      if (rnd() < 0.06) members.push(`${JSON.stringify(key)}:${value(depth + 1)}`);
+    }
+    const pad = () => (rnd() < 0.3 ? ' ' : '');
+    return `{${pad()}${members.join(`,${pad()}`)}${pad()}}`;
+  };
+  const mutate = (doc: string): string => {
+    const kind = Math.floor(rnd() * 6);
+    const at = Math.floor(rnd() * doc.length);
+    if (kind === 0 && doc.length > 2) return doc.slice(0, Math.max(1, at)); // truncate
+    if (kind === 1) return `${doc.slice(0, at)}${'{}[],:"xyz'.charAt(Math.floor(rnd() * 9))}${doc.slice(at)}`; // inject
+    if (kind === 2 && doc.length > 2) return doc.slice(0, at) + doc.slice(at + 1); // delete
+    if (kind === 3) return `${doc},`; // trailing comma
+    if (kind === 4) return `${doc} junk`; // trailing garbage
+    return `{"dup":1,${doc.slice(1, -1)},"dup":2}`; // wrap with duplicate member
+  };
+  const total = 3000;
+  for (let k = 0; k < total; k++) {
+    let doc = value(0);
+    if (rnd() < 0.4) doc = mutate(doc);
+    let parses = true;
+    try {
+      JSON.parse(doc);
+    } catch {
+      parses = false;
+    }
+    const expected = parses && !jsonDuplicateKeys(doc);
+    assert.equal(scan(doc), expected, `fuzz case ${k}: ${JSON.stringify(doc.slice(0, 120))}`);
+  }
+});
+
+test('an unauthenticated client call is 401 before any hidden-form 403', async () => {
+  const hidden = app({
+    forms: [plainForm('Orders', [plainField('Code')]), plainForm('Vault', [plainField('Code')])],
+    profiles: [ADMIN],
+    sections: [{ name: 'Hidden', hidden: true, components: [{ kind: 'form', name: 'Vault' }], properties: [], span: Z }],
+    functions: [
+      {
+        name: 'Util.Vaulted',
+        kind: 'deluge',
+        signature: 'bool Util.Vaulted(int id)',
+        deluge: [{ text: 'return Vault[ID == id].count() > 0;', span: Z }],
+        properties: [],
+        span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'Vault check',
+        form: 'Orders',
+        event: 'on user input',
+        deluge: { text: 'if(thisapp.Util.Vaulted(input.ID)) { alert "vaulted"; }', span: Z },
+      }),
+    ],
+  });
+  const g = generate(hidden);
+  const endpoint = g.files.find((f) => f.path === 'functions/custom/util-vaulted-call.mjs')!;
+  assert.ok(endpoint, 'the hidden-form read compiled to a client-call endpoint');
+  const mod = (await loadTree(g, endpoint.path)) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const anonymous = await invokeRaw(mod.default, { body: { args: [1] } });
+  assert.equal(anonymous.status, 401, 'authentication precedes the hidden-form denial');
+  assert.equal(anonymous.raw, JSON.stringify(READ_DENIAL_BODY), 'the 401 carries the same denial body');
+  const authed = await invokeRaw(mod.default, { ...CALLER, body: { args: [1] } });
+  assert.equal(authed.status, 403, 'an authenticated caller hits the hidden-form denial');
+  assert.equal(authed.raw, JSON.stringify(READ_DENIAL_BODY), 'the hidden-form denial leaks nothing more');
+});
+
+test('the compiled condition module itself serves no route: direct access is 404', async () => {
+  const g = generate(overlapBuild());
+  const cond = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path))!;
+  assert.ok(cond, 'the compiled condition module exists beside its -call endpoint');
+  const mod = await loadModule(cond.source, 'c2ccond.mjs');
+  const res = await invoke(mod.default as (req: unknown, res: unknown) => unknown, { ...CALLER, body: { args: ['9A', '9A'] } });
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'no such endpoint');
+});
+
+test('signed-in condition calls cannot turn caller-scoped reads or sibling modules into a record oracle', async () => {
+  const scoped = app({
+    forms: [
+      plainForm('Reservation', [plainField('Owner'), plainField('Check_In', 'date')]),
+      plainForm('Pods', [plainField('Pod_No')]),
+    ],
+    reports: [{
+      name: 'Mine', type: 'list', modifiers: [], form: 'Reservation', criteria: 'Owner == zoho.loginuser', flags: [],
+      properties: [], columns: [], customActions: [], conditionalFormats: [], filters: [], groupBy: [], sortBy: [],
+      blocks: [], views: [], span: Z,
+    }],
+    profiles: [ADMIN, {
+      name: 'Staff', type: 'Users_Permissions', properties: [], modules: [
+        { component: 'Reservation', properties: [{ key: 'enabled', value: 'true', span: Z }], reports: [{ key: 'Mine', value: '{"View"}', span: Z }], fields: [], span: Z },
+        { component: 'Pods', properties: [{ key: 'enabled', value: 'viewall', span: Z }], reports: [], fields: [], span: Z },
+      ], span: Z,
+    }, { name: 'NoAccess', type: 'Users_Permissions', properties: [], modules: [], span: Z }],
+    workflows: [workflow({
+      name: 'Scoped overlap', form: 'Reservation', event: 'on user input',
+      deluge: { text: 'for each pod in Pods[ID != 0].Pod_No { if(pod == "9A" && Reservation[ID != 0].count() > 0) { alert "busy"; } }', span: Z },
+    })],
+  });
+  const g = generate(scoped);
+  const endpoint = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const sibling = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path) && !f.path.endsWith('-call.mjs'))!;
+  assert.ok(endpoint && sibling, 'the condition emits one guarded endpoint and one non-route sibling');
+  const live = await liveRows();
+  try {
+    await live.mock.datastore.insert('Pods', [{ Pod_No: '9A' }]);
+    await live.mock.datastore.insert('Reservation', [
+      { Owner: 'owner@t', Check_In: '2026-01-01' },
+      { Owner: 'other@t', Check_In: '2026-01-02' },
+    ]);
+    await withTree(g, endpoint.path, async (mod, dir) => {
+      const handler = mod.default as (req: unknown, res: unknown) => unknown;
+      const call = async (profile: string, loginUser: string) => invokeRaw(handler, {
+        user: { profile, loginUser }, body: { args: ['9A'] },
+      });
+      const owner = await call('Staff', 'owner@t');
+      assert.equal(owner.status, 200, owner.raw);
+      assert.deepEqual(JSON.parse(owner.raw).value, { value: true }, 'the caller can observe their own matching row');
+      const absent = await call('Staff', 'nobody@t');
+      assert.equal(absent.status, 200, absent.raw);
+      assert.deepEqual(JSON.parse(absent.raw).value, { value: false }, "another user's rows do not satisfy the condition");
+      const denied = await call('NoAccess', 'nobody@t');
+      assert.equal(denied.status, 403);
+      assert.equal(denied.raw, JSON.stringify(READ_DENIAL_BODY), 'a signed-in scope denial exposes no reason');
+
+      const siblingMod = await import(pathToFileURL(join(dir, sibling.path)).href) as Record<string, (req: unknown, res: unknown) => unknown>;
+      const direct = await invokeRaw(siblingMod.default, { user: { profile: 'Staff', loginUser: 'owner@t' }, body: { args: ['9A'] } });
+      assert.equal(direct.status, 404, 'the implementation sibling is not an open endpoint');
+      assert.equal(direct.raw, JSON.stringify({ error: 'no such endpoint' }));
+    });
+  } finally {
+    live.restore();
+  }
+});
+
+test('a client call endpoint on a partly readable form reports a caller-scoped-read advisory', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Bookings', [plainField('Hours')])],
+      reports: [
+        {
+          name: 'Mine',
+          type: 'list',
+          modifiers: [],
+          form: 'Bookings',
+          criteria: 'Owner == zoho.loginuser',
+          flags: [],
+          properties: [],
+          columns: [],
+          customActions: [],
+          conditionalFormats: [],
+          filters: [],
+          groupBy: [],
+          sortBy: [],
+          blocks: [],
+          views: [],
+          span: Z,
+        },
+      ],
+      profiles: [
+        ADMIN,
+        {
+          name: 'Staff',
+          type: 'Users_Permissions',
+          properties: [],
+          modules: [
+            {
+              component: 'Bookings',
+              properties: [],
+              reports: [{ key: 'Mine', value: '{"View"}', span: Z }],
+              fields: [],
+              span: Z,
+            },
+          ],
+          span: Z,
+        },
+      ],
+      functions: [
+        {
+          name: 'Util.Free',
+          kind: 'deluge',
+          signature: 'bool Util.Free(int n)',
+          deluge: [{ text: 'return Bookings[Hours == n].count() == 0;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Bookings',
+          event: 'on user input',
+          deluge: { text: 'if(thisapp.Util.Free(input.Hours)) { alert "free"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const endpoint = g.files.find((f) => f.path === 'functions/custom/util-free-call.mjs');
+  assert.ok(endpoint);
+  const report = JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as {
+    warnings?: { construct: string; name: string; note: string }[];
+  };
+  const advisory = report.warnings?.find((w) => w.construct === 'client-call-caller-scoped-read');
+  assert.ok(advisory, 'the migration report names the caller-scoped read');
+  assert.equal(advisory!.name, 'Util.Free');
+  assert.match(advisory!.note, /Bookings/);
+  assert.match(advisory!.note, /caller/);
+
+  // A profile that reads the form in full produces no advisory.
+  const full = generate(
+    app({
+      forms: [plainForm('Bookings', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Util.Free',
+          kind: 'deluge',
+          signature: 'bool Util.Free(int n)',
+          deluge: [{ text: 'return Bookings[Hours == n].count() == 0;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Bookings',
+          event: 'on user input',
+          deluge: { text: 'if(thisapp.Util.Free(input.Hours)) { alert "free"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const fullReport = JSON.parse(full.files.find((f) => f.path === 'migration-report.json')!.source) as {
+    warnings?: { construct: string }[];
+  };
+  assert.equal(fullReport.warnings?.some((w) => w.construct === 'client-call-caller-scoped-read') ?? false, false);
+});
+
+test('an api block routes its function and the Administrator profile gates it', async () => {
+  const staff = {
+    name: 'Staff',
+    type: 'Users_Permissions',
+    properties: [],
+    modules: [
+      {
+        component: 'Leave',
+        properties: [{ key: 'enabled', value: 'viewall', span: Z }],
+        reports: [],
+        fields: [],
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      profiles: [ADMIN, staff],
+      apis: [apiBlock('Get_Twice', 'r = thisapp.Helpers.twice(4)', [{ key: 'scope', value: '"Admin only"' }])],
+      functions: [twiceFn()],
+    }),
+  );
+  const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(fn);
+  assert.match(stripComments(fn.source), /export const endpoint = \{ type: "advancedio", method: "GET", path: "\/functions\/helpers-twice"/);
+  assert.match(stripComments(fn.source), /HTTP-exposed by custom API: Get_Twice \(scope "Admin only"\)/);
+  const mod = await loadModule(fn.source, 'helpers-twice.mjs');
+  // Not authenticated, then authenticated but not an Administrator-preset profile.
+  assert.equal((await invoke(mod.default, { body: { args: [4] } })).status, 401);
+  const denied = await invoke(mod.default, { user: { profile: 'Staff', loginUser: 's@t' }, body: { args: [4] } });
+  assert.equal(denied.status, 403);
+  assert.match(stripComments(String(denied.body.error)), /Administrator/);
+  const ok = await invoke(mod.default, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { args: [4] } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.body.result, 8);
+  // An admin-scoped api is a determinable permission: no migration warning.
+  const report = g.files.find((file) => file.path === 'migration-report.json');
+  assert.equal(JSON.parse(report!.source).warnings, undefined);
+});
+
+/** An application whose `api` block publishes `Helpers.twice`. `methodLine` is a raw property line, or empty when the block omits `method`. */
+function apiApp(methodLine: string): App {
+  return deriveIr(parse(`application "Demo_App"
+{
+	functions
+	{
+		Deluge
+		{
+			int Helpers.twice(int n)
+			{
+				return n * 2;
+			}
+		}
+	}
+	api Get_Twice
+	{
+		${methodLine}
+		scope = "Admin only"
+		actions
+		(
+			demo-app.Helpers.twice(4)
+		)
+	}
+	share_settings
+	{
+		Administrator
+		{
+			type = Users_Permissions
+		}
+	}
+}
+`));
+}
+
+function customEndpoint(source: string): string {
+  return stripComments(source);
+}
+
+test('an api block method is the advanced-io endpoint method and the banner matches', () => {
+  for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'get']) {
+    const expected = method.toUpperCase();
+    const g = generate(apiApp(`method = ${method}`));
+    const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+    assert.ok(fn, method);
+    const source = customEndpoint(fn.source);
+    assert.match(source, new RegExp(`${expected} /functions/helpers-twice`), method);
+    assert.match(
+      source,
+      new RegExp(`export const endpoint = \\{ type: "advancedio", method: "${expected}", path: "/functions/helpers-twice"`),
+      method,
+    );
+  }
+  const quoted = generate(apiApp('method = "GET"'));
+  const quotedFn = quoted.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(quotedFn);
+  assert.match(customEndpoint(quotedFn.source), /export const endpoint = \{ type: "advancedio", method: "GET", path: "\/functions\/helpers-twice"/);
+});
+
+test('an api block with no method keeps the POST endpoint', () => {
+  const g = generate(apiApp(''));
+  const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(fn);
+  const source = customEndpoint(fn.source);
+  assert.match(source, /POST \/functions\/helpers-twice/);
+  assert.match(source, /export const endpoint = \{ type: "advancedio", method: "POST", path: "\/functions\/helpers-twice"/);
+});
+
+test('a GET api whose function changes state is routed as POST with a report warning', () => {
+  const bodies = [
+    'insert into Note [ Title = "x" ];',
+    'delete from Note[ID == n];',
+    'sendmail [ from: zoho.adminuserid to: "ops@example.com" subject: "s" message: "m" ];',
+    'r = zoho.crm.createRecord("Leads", {"Last_Name": "x"});',
+  ];
+  for (const body of bodies) {
+    const writer = { ...twiceFn(), deluge: [{ text: `${body}\nreturn n * 2;`, span: Z }] };
+    const g = generate(app({
+      profiles: [ADMIN],
+      apis: [apiBlock('Get_Twice', 'r = thisapp.Helpers.twice(4)', [{ key: 'scope', value: '"Admin only"' }], 'GET')],
+      functions: [writer],
+    }));
+    const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+    assert.ok(fn, body);
+    assert.match(stripComments(fn.source), /export const endpoint = \{ type: "advancedio", method: "POST", path: "\/functions\/helpers-twice"/, body);
+    const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as { construct: string; note: string }[];
+    assert.ok(warnings.some((w) => w.construct === 'custom-function-api-method' && /method GET is routed as POST/.test(w.note)), body);
+  }
+});
+
+test('disagreeing or unsupported api methods do not invent a route', () => {
+  const disagree = generate(app({
+    profiles: [ADMIN],
+    apis: [
+      apiBlock('Read_Twice', 'r = thisapp.Helpers.twice(4)', [{ key: 'scope', value: '"Admin only"' }], 'GET'),
+      apiBlock('Write_Twice', 'r = thisapp.Helpers.twice(4)', [{ key: 'scope', value: '"Admin only"' }], 'POST'),
+    ],
+    functions: [twiceFn()],
+  }));
+  const split = disagree.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(split);
+  assert.doesNotMatch(stripComments(split.source), /export const endpoint/);
+  const splitWarnings = JSON.parse(disagree.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
+    construct: string;
+    name: string;
+    note: string;
+  }[];
+  assert.ok(splitWarnings.some((w) => w.construct === 'custom-function-api-method' && w.name === 'Helpers.twice' && /GET/.test(w.note) && /POST/.test(w.note)));
+
+  const unsupported = generate(app({
+    profiles: [ADMIN],
+    apis: [apiBlock('Head_Twice', 'r = thisapp.Helpers.twice(4)', [{ key: 'scope', value: '"Admin only"' }], 'HEAD')],
+    functions: [twiceFn()],
+  }));
+  const head = unsupported.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(head);
+  assert.doesNotMatch(stripComments(head.source), /export const endpoint/);
+  assert.doesNotMatch(stripComments(head.source), /method: "POST"/);
+  const headWarnings = JSON.parse(unsupported.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
+    construct: string;
+    note: string;
+  }[];
+  assert.ok(headWarnings.some((w) => w.construct === 'custom-function-api-method' && w.note.includes('HEAD')));
+});
+
+/**
+ * The deployed Advanced I/O entry hands a generated handler this request shape
+ * (packages/deploy/fn/index.js): `url` is pathname + search, `method` the verb,
+ * `body` the parsed JSON body, `params` matched route segments, and
+ * `catalyst.user` the authenticated principal.
+ */
+function sdkRequest(init: { method?: string; search?: string; args?: unknown[]; path?: string } = {}) {
+  return {
+    url: `${init.path ?? '/functions/helpers-twice'}${init.search ?? ''}`,
+    method: init.method ?? 'GET',
+    headers: {},
+    body: init.args !== undefined ? { args: init.args } : {},
+    params: {},
+    catalyst: { user: { profile: 'Administrator', loginUser: 'admin-user' } },
+  };
+}
+
+test('a GET or DELETE custom api reads its arguments from the query string', async () => {
+  const g = generate(apiApp('method = GET'));
+  const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(fn);
+  const mod = await loadModule(fn.source, 'helpers-twice.mjs');
+
+  // The query parameter carries the argument exactly as body.args would.
+  const viaQuery = await invoke(mod.default, sdkRequest({ search: '?n=5' }));
+  assert.equal(viaQuery.status, 200, JSON.stringify(viaQuery.body));
+  assert.equal(viaQuery.body.result, 10);
+  const viaBody = await invoke(mod.default, sdkRequest({ method: 'POST', args: [5] }));
+  assert.equal(viaBody.status, 200, JSON.stringify(viaBody.body));
+  assert.equal(viaBody.body.result, viaQuery.body.result);
+
+  // DELETE takes the same query-string arguments; a query parameter is
+  // required and named in the 400.
+  const deleted = await invoke(mod.default, sdkRequest({ method: 'DELETE', search: '?n=7' }));
+  assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+  assert.equal(deleted.body.result, 14);
+  const missing = await invoke(mod.default, sdkRequest({ method: 'DELETE' }));
+  assert.equal(missing.status, 400);
+  assert.match(String(missing.body.error), /\bn\b/);
+
+  // A GET carries no usable body: args in the body are not read, so the
+  // declared parameter is missing rather than silently bound to null.
+  const bodyOnly = await invoke(mod.default, sdkRequest({ args: [9] }));
+  assert.equal(bodyOnly.status, 400);
+  assert.match(String(bodyOnly.body.error), /missing required parameter: n/);
+
+  // A value that cannot carry the declared type is a 400 naming the parameter,
+  // never a coerced default.
+  for (const search of ['?n=abc', '?n=', '?n=1.2.3']) {
+    const bad = await invoke(mod.default, sdkRequest({ search }));
+    assert.equal(bad.status, 400, search);
+    assert.match(String(bad.body.error), /n/, search);
+  }
+});
+
+test('a live custom api reply carries no transcript; a dry run still does', async () => {
+  // The transcript holds record values, table names and ops: a dry-run debug
+  // view only. A non-dry (live) reply must not carry it.
+  const g = generate(apiApp(''));
+  const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(fn);
+  const mod = await loadModule(fn.source, 'helpers-twice.mjs');
+  const post = {
+    url: '/functions/helpers-twice',
+    method: 'POST',
+    headers: {},
+    body: { args: [4] },
+    params: {},
+    catalyst: { user: { profile: 'Administrator', loginUser: 'a@t' } },
+  };
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  try {
+    // A live runtime requires the Creator app time zone; apiApp declares
+    // none, so it comes from the environment like the other live tests.
+    process.env.C2C_DEPLOY_MODE = 'live';
+    process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+    const live = await invoke(mod.default, post);
+    assert.equal(live.status, 200, JSON.stringify(live.body));
+    assert.equal(live.body.dryRun, false);
+    assert.equal('transcript' in live.body, false, `a live reply must not carry the transcript: ${JSON.stringify(live.body).slice(0, 200)}`);
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+  }
+  const dry = await invoke(mod.default, post);
+  assert.equal(dry.status, 200, JSON.stringify(dry.body));
+  assert.equal(dry.body.dryRun, true);
+  assert.ok(Array.isArray(dry.body.transcript), 'a dry run still returns its debug transcript');
+});
+
+test('query arguments coerce to the JSON values the body would carry', async () => {
+  const fnOf = (name: string, signature: string, returns: string) => ({
+    name,
+    kind: 'deluge' as const,
+    signature,
+    deluge: [{ text: returns, span: Z }],
+    properties: [],
+    span: Z,
+  });
+  const g = generate(
+    app({
+      profiles: [ADMIN],
+      functions: [
+        fnOf('Probe.flag', 'boolean Probe.flag(boolean flag, string s)', 'return flag;'),
+        fnOf('Probe.items', 'list Probe.items(list items)', 'return items;'),
+        fnOf('Probe.opts', 'map Probe.opts(map opts)', 'return opts;'),
+        fnOf('Probe.when', 'date Probe.when(date when)', 'return when;'),
+      ],
+      apis: [
+        apiBlock('Flag_Api', 'r = thisapp.Probe.flag(true, "x")', [{ key: 'scope', value: '"Admin only"' }], 'GET'),
+        apiBlock('Items_Api', 'r = thisapp.Probe.items(l)', [{ key: 'scope', value: '"Admin only"' }], 'GET'),
+        apiBlock('Opts_Api', 'r = thisapp.Probe.opts(m)', [{ key: 'scope', value: '"Admin only"' }], 'GET'),
+        apiBlock('When_Api', 'r = thisapp.Probe.when(d)', [{ key: 'scope', value: '"Admin only"' }], 'GET'),
+      ],
+    }),
+  );
+  const modOf = async (file: string) => {
+    const f = g.files.find((item) => item.path === `functions/custom/${file}`);
+    assert.ok(f, file);
+    return loadModule(f.source, file);
+  };
+
+  const flag = await modOf('probe-flag.mjs');
+  const path = '/functions/probe-flag';
+  const trueGet = await invoke(flag.default, sdkRequest({ path, search: '?flag=true&s=x' }));
+  const truePost = await invoke(flag.default, sdkRequest({ path, method: 'POST', args: [true, 'x'] }));
+  assert.strictEqual(trueGet.body.result, true, 'a boolean query value is the boolean the body would carry');
+  assert.equal(truePost.body.result, true);
+  const falseGet = await invoke(flag.default, sdkRequest({ path, search: '?flag=false&s=x' }));
+  assert.strictEqual(falseGet.body.result, false);
+  const badFlag = await invoke(flag.default, sdkRequest({ path, search: '?flag=yes&s=x' }));
+  assert.equal(badFlag.status, 400);
+  assert.match(String(badFlag.body.error), /flag/);
+
+  const items = await modOf('probe-items.mjs');
+  const itemsGet = await invoke(items.default, sdkRequest({ path: '/functions/probe-items', search: `?items=${encodeURIComponent('[1,"a",true]')}` }));
+  const itemsPost = await invoke(items.default, sdkRequest({ path: '/functions/probe-items', method: 'POST', args: [[1, 'a', true]] }));
+  assert.deepEqual(itemsGet.body.result, [1, 'a', true]);
+  assert.deepEqual(itemsGet.body.result, itemsPost.body.result);
+  for (const search of ['?items=notjson', `?items=${encodeURIComponent('{"a":1}')}`]) {
+    const bad = await invoke(items.default, sdkRequest({ path: '/functions/probe-items', search }));
+    assert.equal(bad.status, 400, search);
+    assert.match(String(bad.body.error), /items/, search);
+  }
+  // A parsed argument gets the same plain-JSON screening a body argument gets:
+  // a runtime-branded value is null on both paths.
+  const branded = encodeURIComponent('[{"__row":true}]');
+  const brandedGet = await invoke(items.default, sdkRequest({ path: '/functions/probe-items', search: `?items=${branded}` }));
+  const brandedPost = await invoke(items.default, sdkRequest({ path: '/functions/probe-items', method: 'POST', args: [[{ __row: true }]] }));
+  assert.equal(brandedGet.body.result, brandedPost.body.result, 'branded JSON is screened like body args');
+
+  const opts = await modOf('probe-opts.mjs');
+  const optsGet = await invoke(opts.default, sdkRequest({ path: '/functions/probe-opts', search: `?opts=${encodeURIComponent('{"a":1}')}` }));
+  assert.deepEqual(optsGet.body.result, { a: 1 });
+  const arrayOpts = await invoke(opts.default, sdkRequest({ path: '/functions/probe-opts', search: `?opts=${encodeURIComponent('[1]')}` }));
+  assert.equal(arrayOpts.status, 400);
+  assert.match(String(arrayOpts.body.error), /opts/);
+
+  const when = await modOf('probe-when.mjs');
+  const whenGet = await invoke(when.default, sdkRequest({ path: '/functions/probe-when', search: '?when=2026-03-04' }));
+  const whenPost = await invoke(when.default, sdkRequest({ path: '/functions/probe-when', method: 'POST', args: ['2026-03-04'] }));
+  assert.equal(whenGet.body.result, '2026-03-04');
+  assert.equal(whenGet.body.result, whenPost.body.result);
+  const badWhen = await invoke(when.default, sdkRequest({ path: '/functions/probe-when', search: '?when=not-a-date' }));
+  assert.equal(badWhen.status, 400);
+  assert.match(String(badWhen.body.error), /when/);
+});
+
+test('query arguments coerce by the normalised type, whatever spelling the signature uses', async () => {
+  // Every spelling the compiler's normalised-type table accepts must coerce on
+  // GET exactly as the JSON value the body carries on a POST — `bool` is the
+  // boolean `boolean` is, `integer` the number `int` is, `collection` the JSON
+  // list `list` is.
+  const cases: { type: string; search: string; arg: unknown }[] = [
+    { type: 'bool', search: '?v=TRUE', arg: true },
+    { type: 'boolean', search: '?v=false', arg: false },
+    { type: 'int', search: '?v=5', arg: 5 },
+    { type: 'integer', search: '?v=5', arg: 5 },
+    { type: 'long', search: '?v=-7', arg: -7 },
+    { type: 'bigint', search: '?v=42', arg: 42 },
+    { type: 'number', search: '?v=1.5', arg: 1.5 },
+    { type: 'float', search: '?v=1.5', arg: 1.5 },
+    { type: 'double', search: '?v=2.25', arg: 2.25 },
+    { type: 'decimal', search: '?v=1.10', arg: 1.1 },
+    { type: 'string', search: `?v=${encodeURIComponent('WO 42')}`, arg: 'WO 42' },
+    { type: 'text', search: `?v=${encodeURIComponent('WO 42')}`, arg: 'WO 42' },
+    { type: 'date', search: '?v=2026-03-04', arg: '2026-03-04' },
+    { type: 'datetime', search: `?v=${encodeURIComponent('2026-03-04 15:04:05')}`, arg: '2026-03-04 15:04:05' },
+    { type: 'date time', search: `?v=${encodeURIComponent('2026-03-04 15:04:05')}`, arg: '2026-03-04 15:04:05' },
+    { type: 'timestamp', search: `?v=${encodeURIComponent('2026-03-04 15:04:05')}`, arg: '2026-03-04 15:04:05' },
+    { type: 'list', search: `?v=${encodeURIComponent('[1,2]')}`, arg: [1, 2] },
+    { type: 'collection', search: `?v=${encodeURIComponent('[1,2]')}`, arg: [1, 2] },
+    { type: 'map', search: `?v=${encodeURIComponent('{"a":1}')}`, arg: { a: 1 } },
+  ];
+  const fnOf = (name: string, signature: string, returns: string) => ({
+    name,
+    kind: 'deluge' as const,
+    signature,
+    deluge: [{ text: returns, span: Z }],
+    properties: [],
+    span: Z,
+  });
+  const g = generate(
+    app({
+      profiles: [ADMIN],
+      functions: cases.map((c, i) => fnOf(`Probe.p${i}`, `string Probe.p${i}(${c.type} v)`, 'return v;')),
+      apis: cases.map((_c, i) =>
+        apiBlock(`Api_P${i}`, `r = thisapp.Probe.p${i}(x)`, [{ key: 'scope', value: '"Admin only"' }], 'GET'),
+      ),
+    }),
+  );
+  for (const [i, c] of cases.entries()) {
+    const file = `probe-p${i}.mjs`;
+    const f = g.files.find((item) => item.path === `functions/custom/${file}`);
+    assert.ok(f, `${file} (${c.type})`);
+    const mod = await loadModule(f.source, file);
+    const path = `/functions/probe-p${i}`;
+    const viaGet = await invoke(mod.default, sdkRequest({ path, search: c.search }));
+    assert.equal(viaGet.status, 200, `${c.type}: ${JSON.stringify(viaGet.body)}`);
+    const viaPost = await invoke(mod.default, sdkRequest({ path, method: 'POST', args: [c.arg] }));
+    assert.equal(viaPost.status, 200, `${c.type}: ${JSON.stringify(viaPost.body)}`);
+    assert.deepEqual(viaGet.body.result, viaPost.body.result, `${c.type}: GET coerces to the POST value`);
+    assert.deepEqual(viaGet.body.result, c.arg, `${c.type}: GET ${c.search} is ${JSON.stringify(c.arg)}`);
+  }
+});
+
+test('a query parameter of a type with no coercion is a 400 naming the parameter and the type', async () => {
+  const g = generate(
+    app({
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Probe.blob',
+          kind: 'deluge' as const,
+          signature: 'string Probe.blob(object v)',
+          deluge: [{ text: 'return "x";', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      apis: [apiBlock('Blob_Api', 'r = thisapp.Probe.blob(x)', [{ key: 'scope', value: '"Admin only"' }], 'GET')],
+    }),
+  );
+  const f = g.files.find((item) => item.path === 'functions/custom/probe-blob.mjs');
+  assert.ok(f);
+  const mod = await loadModule(f.source, 'probe-blob.mjs');
+  const res = await invoke(mod.default, sdkRequest({ path: '/functions/probe-blob', search: '?v=anything' }));
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.match(String(res.body.error), /v/);
+  assert.match(String(res.body.error), /object/);
+});
+
+test('a query key that names no parameter is ignored with a warning; other verbs keep body args', async () => {
+  const g = generate(apiApp('method = GET'));
+  const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(fn);
+  const mod = await loadModule(fn.source, 'helpers-twice.mjs');
+
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (msg: unknown) => warnings.push(String(msg));
+  try {
+    const ok = await invoke(mod.default, sdkRequest({ search: '?n=5&bogus=1' }));
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.result, 10);
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.ok(warnings.some((w) => w.includes('bogus')), 'the unknown key is warned about');
+
+  // POST, PUT and PATCH are unchanged: body.args only, query string ignored.
+  for (const method of ['POST', 'PUT', 'PATCH']) {
+    const viaBody = await invoke(mod.default, sdkRequest({ method, args: [5] }));
+    assert.equal(viaBody.body.result, 10, method);
+    const viaQuery = await invoke(mod.default, sdkRequest({ method, search: '?n=5' }));
+    assert.equal(viaQuery.body.result, 0, `${method} ignores the query string`);
+  }
+});
+
+test('a GET custom api binds a work-order-style string parameter end to end', async () => {
+  const g = generate(
+    deriveIr(
+      parse(`application "Demo_App"
+{
+	functions
+	{
+		Deluge
+		{
+			string fs.workOrderStatus(string woNumber)
+			{
+				return "status:" + woNumber;
+			}
+		}
+	}
+	api WorkOrder_Status
+	{
+		method = GET
+		scope = "Admin only"
+		actions
+		(
+			demo-app.fs.workOrderStatus(woNumber)
+		)
+	}
+	share_settings
+	{
+		Administrator
+		{
+			type = Users_Permissions
+		}
+	}
+}
+`),
+    ),
+  );
+  const fn = g.files.find((file) => file.path === 'functions/custom/fs-workorderstatus.mjs');
+  assert.ok(fn);
+  assert.match(stripComments(fn.source), /export const endpoint = \{ type: "advancedio", method: "GET", path: "\/functions\/fs-workorderstatus"/);
+  const mod = await loadModule(fn.source, 'fs-workorderstatus.mjs');
+  const ok = await invoke(mod.default, sdkRequest({ path: '/functions/fs-workorderstatus', search: `?woNumber=${encodeURIComponent('WO 42')}` }));
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.body.result, 'status:WO 42');
+  const missing = await invoke(mod.default, sdkRequest({ path: '/functions/fs-workorderstatus' }));
+  assert.equal(missing.status, 400);
+  assert.match(String(missing.body.error), /woNumber/);
+});
+
+test('API custom function checks hidden form before principal authentication', async () => {
+  const fn: FunctionDef = {
+    name: 'Secret.peek', kind: 'creator', form: 'SecretLeave',
+    signature: 'string Secret.peek()', properties: [],
+    deluge: [{ text: 'return "ok";', span: Z }], span: Z,
+  };
+  const g = generate(app({
+    profiles: [ADMIN], functions: [fn],
+    sections: [{ name: 'Hidden', hidden: true, components: [{ kind: 'form', name: 'SecretLeave' }], properties: [], span: Z }],
+    apis: [apiBlock('Peek_Secret', 'r = thisapp.Secret.peek()', [{ key: 'scope', value: '"Admin only"' }])],
+  }));
+  const file = g.files.find((item) => item.path === 'functions/custom/secret-peek.mjs');
+  assert.ok(file);
+  const mod = await loadModule(file.source, 'secret-peek.mjs');
+  const anonymous = await invoke(mod.default, {});
+  assert.equal(anonymous.status, 403);
+  assert.equal(anonymous.body.error, 'hidden form');
+  const hiddenAt = file.source.indexOf('if (isHidden(formName))');
+  const principalAt = file.source.indexOf('const principal = principalFromRequest(req)');
+  assert.ok(hiddenAt >= 0 && hiddenAt < principalAt);
+});
+
+test('an api with no determinable scope still routes but warns and gates to Administrator', async () => {
+  const g = generate(
+    app({
+      profiles: [ADMIN],
+      apis: [apiBlock('Get_Twice', 'r = thisapp.Helpers.twice(4)')],
+      functions: [twiceFn()],
+    }),
+  );
+  const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(fn);
+  assert.match(stripComments(fn.source), /export const endpoint/);
+  const mod = await loadModule(fn.source, 'helpers-twice.mjs');
+  assert.equal((await invoke(mod.default, { user: { profile: 'Member' }, body: { args: [1] } })).status, 403);
+  assert.equal((await invoke(mod.default, { user: { profile: 'Administrator' }, body: { args: [1] } })).status, 200);
+  const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
+    construct: string;
+    name: string;
+    note: string;
+  }[];
+  assert.ok(warnings.some((w) => w.construct === 'custom-function-api-scope' && w.name === 'Helpers.twice' && w.note.includes('Get_Twice')));
+});
+
+test('an app-name-qualified api action still publishes its function', () => {
+  const g = generate(
+    app({
+      name: 'demo-app',
+      profiles: [ADMIN],
+      apis: [apiBlock('Get_Twice', 'demo-app.Helpers.twice(4)', [{ key: 'scope', value: '"Admin only"' }])],
+      functions: [twiceFn()],
+    }),
+  );
+  const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+  assert.ok(fn);
+  assert.match(stripComments(fn.source), /export const endpoint/);
+});
+
+test('jobs and flows honour C2C_DEPLOY_MODE instead of a hard-coded dry run', () => {
+  const g = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'Nightly',
+          container: 'schedule',
+          event: 'on schedule',
+          deluge: { text: 'x = 1;', span: Z },
+        }),
+        workflow({
+          name: 'Leave approval',
+          container: 'approval',
+          form: 'Leave',
+          event: 'on approve',
+          approvers: [{ key: 'level', value: '1', span: Z }],
+          deluge: { text: 'x = 1;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const job = g.files.find((f) => f.path.startsWith('functions/job/'));
+  const flow = g.files.find((f) => f.path.startsWith('functions/flow/'));
+  assert.ok(job && flow);
+  for (const file of [job, flow]) {
+    assert.match(stripComments(file.source), /modeOverride\(\)/, file.path);
+    assert.match(stripComments(file.source), /deployConfig\(\)/, file.path);
+    assert.match(stripComments(file.source), /liveDatastore\(\)/, file.path);
+    assert.match(stripComments(file.source), /dryRun: !live/, file.path);
+    assert.doesNotMatch(stripComments(file.source), /createRuntime\(\{\s*dryRun: true/, file.path);
+    check(file.source, file.path.split('/').pop()!);
+  }
+  assert.match(stripComments(job.source), /import \{ createRuntime \}/);
+  // The flow loads the stored row in live mode before validating the transition.
+  assert.match(stripComments(flow.source), /a live transition needs body\.ROWID/);
+  assert.match(stripComments(flow.source), /shim\.datastore\.writeRow\(ctx, formName/);
+});
+
+test('payments stay not-supported and are not translated', () => {
+  const g = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'Checkout',
+          type: 'payment',
+          event: 'on success',
+          deluge: { text: 'charge = 1;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const stub = g.files.find((f) => f.path.startsWith('not-supported/payments-'));
+  assert.ok(stub);
+  assert.match(stub.source, /payments are not supported in this version \(counted\)/);
+  assert.doesNotMatch(stub.source, /out of scope/i);
+  assert.match(stripComments(stub.source), /not-supported/);
+  assert.doesNotMatch(stub.source, /on the roadmap/);
+  assert.doesNotMatch(stub.source, /payment workflows are out of scope/);
+  assert.doesNotMatch(stripComments(stub.source), /charge = 1/);
+  assert.equal(g.stats.statements, 0);
+  assert.equal(g.files.filter((f) => f.path.startsWith('functions/')).length, 0);
+  check(stub.source, 'pay.mjs');
+});
+
+test('for-each-record functions bind rec and every generated file parses', () => {
+  const fn: FunctionDef = {
+    name: 'sumRows',
+    kind: 'creator',
+    signature: 'int sumRows(int limit)',
+    form: 'Orders',
+    properties: [{ key: 'execution', value: 'for each record', span: Z }],
+    deluge: [{ text: 'total = rec.Amount;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ functions: [fn] }));
+  const custom = g.files.find((f) => f.path.startsWith('functions/custom/'));
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /const d_rec = ctx\.row/);
+  assert.doesNotMatch(stripComments(custom.source), /req\.body\.row/);
+  assert.doesNotMatch(stripComments(custom.source), /req\.body\.old/);
+  assert.doesNotMatch(stripComments(custom.source), /req\.body\.record/);
+  assert.match(stripComments(custom.source), /sumRows\(ctx, limit\)/);
+  // No api block publishes this function, so it is in-process only.
+  assert.doesNotMatch(stripComments(custom.source), /export const endpoint/);
+  for (const file of g.files.filter((f) => f.path.endsWith('.mjs'))) {
+    assert.doesNotMatch(stripComments(file.source), /\bfetch\s*\(/);
+    check(file.source, file.path.replace(/[^\w.]+/g, '_') || 'file.mjs');
+  }
+  const report = g.files.find((f) => f.path === 'migration-report.json');
+  assert.ok(report);
+  const parsed = JSON.parse(report.source) as { dryRun: boolean; statements: { statements: number } };
+  assert.equal(parsed.dryRun, true);
+  assert.equal(parsed.statements.statements, g.stats.statements);
+});
+
+test('a creator function with an empty body is still generated', () => {
+  const ir = snippet(`\tworkflow
+\t{
+\t\tfunctions
+\t\t{
+\t\t\tSchedule_Maintenance as "Schedule Maintenance"
+\t\t\t{
+\t\t\t\ttype = functions
+\t\t\t\tform = Raise_New_Complaint
+\t\t\t\texecution type = for each record
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  assert.equal(ir.functions.length, 1);
+  assert.equal(ir.functions[0].deluge.length, 0);
+  const generated = generate(ir);
+  const file = generated.files.find((item) => item.path === 'functions/custom/schedule-maintenance.mjs');
+  assert.ok(file);
+  assert.match(file.source, /Function Schedule_Maintenance/);
+  assert.match(file.source, /export async function Schedule_Maintenance/);
+  assert.match(file.source, /const d_rec = ctx\.row/);
+  const registry = generated.files.find((item) => item.path === 'functions/thisapp.mjs');
+  assert.ok(registry);
+  assert.match(registry.source, /Schedule_Maintenance/);
+  for (const item of generated.files.filter((entry) => entry.path.endsWith('.mjs'))) check(item.source, item.path.replace(/[^\w.]+/g, '_') || 'file.mjs');
+});
+
+test('a pre-success openUrl is a client handler, and an empty workflow is named in the report', () => {
+  const ir = snippet(`\tform Item
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tDirect as "Direct"
+\t\t\t{
+\t\t\t\ttype = presuccess
+\t\t\t\tform = Item
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\topenURL("#Report:Active","new window");
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tBlank as "Blank"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\ton success
+\t\t\t\t{
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  assert.match(ir.workflows.find((item) => item.name === 'Direct')?.deluge?.text ?? '', /openURL/);
+  const generated = generate(ir);
+  const client = generated.files.find((item) => item.path === 'client/handlers/item/on-start.mjs');
+  assert.ok(client);
+  assert.match(stripComments(client.source), /op: "openUrl"/);
+  const report = JSON.parse(generated.files.find((item) => item.path === 'migration-report.json')!.source) as {
+    warnings?: { construct: string; name: string; note: string }[];
+  };
+  assert.ok(report.warnings?.some((item) => item.construct === 'workflow-empty' && item.name === 'Blank'));
+  assert.equal(report.warnings?.some((item) => item.name === 'Direct'), false);
+});
+
+test('the submit-owning modules run the on start presuccess module; a field-change route does not', () => {
+  const ir = snippet(`\tform Item
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tStatus
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tStart as "Start"
+\t\t\t{
+\t\t\t\ttype = presuccess
+\t\t\t\tform = Item
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tinput.Status = "new";
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tDone as "Done"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\ton add
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\ton success
+\t\t\t\t\t(
+\t\t\t\t\t\tinput.Name = input.Name + "!";
+\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tChange as "Change"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\ton edit
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\ton update of Status
+\t\t\t\t\t(
+\t\t\t\t\t\tinput.Name = "changed";
+\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const byPath = (path: string) => generated.files.find((item) => new RegExp(`path: "${path}"`).test(item.source));
+  const start = byPath('/forms/Item/handler');
+  assert.ok(start);
+  assert.match(start.source, /^export const presuccess = true;$/m);
+  const success = byPath('/forms/Item/success');
+  assert.ok(success);
+  assert.match(success.source, /const presuccessAdd = \["\.\/on-start\.mjs"\];/);
+  const run = success.source.indexOf('presuccessSpecsFor(ctx.rowId)');
+  assert.ok(run > 0 && run < success.source.indexOf('validateSpecsFor(ctx.rowId)', run), 'presuccess runs before validate');
+  assert.match(success.source, /err\.code === "SUBMIT_REFUSED"/);
+  const change = byPath('/forms/Item/input');
+  assert.ok(change);
+  assert.match(change.source, /validateSpecsFor/, 'the field-change route is a live writer');
+  assert.doesNotMatch(change.source, /presuccess/);
+  assert.equal(generated.coverage?.find((entry) => entry.name === 'Start')?.serverInvoked, true);
+});
+
+test('a buffer-safe presuccess body marks its module deferEffects; unsafe bodies keep pre-commit effects and are counted', () => {
+  const appOf = (body: string) => snippet(`\tform Item
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tform Log
+\t{
+\t\tTitle
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tStart as "Start"
+\t\t\t{
+\t\t\t\ttype = presuccess
+\t\t\t\tform = Item
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+${body}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const startModule = (ir: App) =>
+    generate(ir).files.find((item) => new RegExp('path: "/forms/Item/handler"').test(item.source));
+
+  // Field sets plus mail and an other-form insert are all buffer-safe.
+  const safe = appOf('\t\t\t\t\t\tinput.Name = "ok";\n\t\t\t\t\t\tsendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "m"];\n\t\t\t\t\t\tinsert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: "done"\n\t\t\t\t\t\t];');
+  const safeMod = startModule(safe);
+  assert.ok(safeMod);
+  assert.match(safeMod.source, /^export const deferEffects = true;$/m);
+  const safeTodos = generate(safe).todos.filter((t) => t.construct === 'presuccess-effect-unbuffered');
+  assert.equal(safeTodos.length, 0);
+
+  // A bound-but-never-read call result is still buffer-safe: the call defers
+  // and nothing decided on the marker.
+  const unread = appOf('\t\t\t\t\t\tresp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tinput.Name = "ok";');
+  assert.match(startModule(unread)!.source, /^export const deferEffects = true;$/m);
+
+  for (const [label, body] of [
+    // A write to the submitted form is never deferred.
+    ['own-form insert', 'insert into Item\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tName: "x"\n\t\t\t\t\t\t];'],
+    // The script reads the deferred insert's id — the buffer cannot answer it.
+    ['insert id read', 'row = insert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: "x"\n\t\t\t\t\t\t];\n\t\t\t\t\t\tinfo row.ID;'],
+    // The body reads a form it also writes; the read could not see the buffered write.
+    ['read-own-write', 'existing = Log[Title == "x"];\n\t\t\t\t\t\tinsert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: existing.ID\n\t\t\t\t\t\t];'],
+    // The buffered invokeurl returns a marker; branching on it cancels on a
+    // value that is never the real response.
+    ['invokeurl result in if', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tif (resp.get("ok") != true)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tcancel submit;\n\t\t\t\t\t\t}'],
+    // The marker copied into a field stores a lie.
+    ['invokeurl result into field', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tinput.Name = resp.get("id");'],
+    // An alias of a bound call result carries the marker; reading it decides
+    // on the placeholder, not the response.
+    ['invokeurl result alias', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tother = resp;\n\t\t\t\t\t\tinfo other;'],
+    // Taint follows the chain: an alias of an alias still holds the marker.
+    ['invokeurl result alias chain', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tother = resp;\n\t\t\t\t\t\tthird = other;\n\t\t\t\t\t\tinfo third;'],
+    // A map built from a bound result holds the marker under its key.
+    ['invokeurl result through map', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tm = Map();\n\t\t\t\t\t\tm.put("k", resp);\n\t\t\t\t\t\tinfo m.get("k");'],
+    // A list built from a bound result holds the marker in its elements.
+    ['invokeurl result through list', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tl = List();\n\t\t\t\t\t\tl.add(resp);\n\t\t\t\t\t\tinfo l.get(0);'],
+    // A call whose argument is tainted returns a derived marker; reading the
+    // assigned result decides on it.
+    ['invokeurl result through call', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tderived = resp.get("id");\n\t\t\t\t\t\tinfo derived;'],
+    // A string built from a bound result interpolates the marker.
+    ['invokeurl result in concat', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\ttext = "got " + resp;\n\t\t\t\t\t\tinfo text;'],
+    // The call sits in the condition itself — the result is used at once.
+    ['invokeurl in condition', 'if (invokeurl[url: "https://example.test/check" type: GET].get("ok") != true)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tcancel submit;\n\t\t\t\t\t\t}'],
+    // A thisapp call is opaque: its own writes defer under the same buffer and
+    // its return may be a marker.
+    ['thisapp call', 'r = thisapp.notify(input.Name);\n\t\t\t\t\t\tinfo r;'],
+    // An unrecognised bare call may be an app function — same opacity.
+    ['custom function call', 'helper(input.Name);'],
+  ] as const) {
+    const generated = generate(appOf(body));
+    const mod = generated.files.find((item) => new RegExp('path: "/forms/Item/handler"').test(item.source));
+    assert.ok(mod, label);
+    assert.doesNotMatch(mod.source, /deferEffects/, label);
+    assert.ok(
+      generated.todos.some((t) => t.construct === 'presuccess-effect-unbuffered'),
+      `${label}: expected a counted presuccess-effect-unbuffered row, got ${JSON.stringify(generated.todos.map((t) => t.construct))}`,
+    );
+  }
+});
+
+test('field and reporting-level approvers deny explicitly and transitions use the placeholder stage', async () => {
+  const view = {
+    component: 'Item',
+    properties: [{ key: 'enabled', value: 'viewall', span: Z }],
+    reports: [] as { key: string; value: string; span: typeof Z }[],
+    fields: [] as { field: string; flags: Record<string, string>; span: typeof Z }[],
+    span: Z,
+  };
+  const staff = { name: 'Staff', type: 'Users_Permissions', properties: [], modules: [view], span: Z };
+  const generated = generate(
+    app({
+      profiles: [staff],
+      workflows: [
+        workflow({
+          name: 'Order flow',
+          form: 'Item',
+          event: 'blueprint',
+          blueprint: {
+            start: { name: 'Draft', properties: [], blocks: [], items: [], span: Z },
+            stages: [
+              { name: 'Draft', properties: [], blocks: [], items: [], span: Z },
+              { name: 'Review', properties: [], blocks: [], items: [], span: Z },
+              { name: 'Done', properties: [], blocks: [], items: [], span: Z },
+            ],
+            transitions: [
+              {
+                name: 'Send',
+                fromStage: 'Draft',
+                toStage: 'Review',
+                properties: [{ key: 'roles', value: 'Manager', span: Z }],
+                phases: [],
+                span: Z,
+              },
+              {
+                name: 'Finish',
+                fromStage: 'Review',
+                toStage: 'Done',
+                properties: [{ key: 'roles', value: 'Manager', span: Z }],
+                phases: [],
+                span: Z,
+              },
+            ],
+          },
+        }),
+        workflow({
+          name: 'Field approval',
+          container: 'approval',
+          form: 'Item',
+          event: 'on approve',
+          approvers: [{ key: 'approver field', value: 'Manager', span: { start: 4, end: 18 } }],
+        }),
+        workflow({
+          name: 'Level approval',
+          container: 'approval',
+          form: 'Item',
+          event: 'on approve',
+          approvers: [{ key: 'reporting level', value: '1', span: { start: 20, end: 36 } }],
+        }),
+      ],
+    }),
+  );
+  const report = generated.files.find((file) => file.path === 'migration-report.json');
+  assert.ok(report);
+  const parsed = JSON.parse(report.source) as { untranslated: { construct: string; count: number }[] };
+  assert.equal(parsed.untranslated.find((row) => row.construct === 'approver-field')?.count, 1);
+  assert.equal(parsed.untranslated.find((row) => row.construct === 'approver-reporting-level')?.count, 1);
+
+  const machine = generated.files.find((file) => file.path === 'functions/flow/order-flow.mjs');
+  const fieldFile = generated.files.find((file) => file.path === 'functions/flow/field-approval.mjs');
+  const levelFile = generated.files.find((file) => file.path === 'functions/flow/level-approval.mjs');
+  assert.ok(machine);
+  assert.ok(fieldFile);
+  assert.ok(levelFile);
+  assert.doesNotMatch(stripComments(machine.source), /body\.record/);
+  assert.match(stripComments(machine.source), /unsupported: form-field approver/);
+  assert.match(stripComments(machine.source), /unsupported: reporting-level approver/);
+  check(machine.source, 'machine.mjs');
+
+  const flow = await loadModule(machine.source, 'order-flow.mjs');
+  const manager = { user: { profile: 'Staff', role: 'Manager' } };
+  assert.equal((await invoke(flow.transition, { ...manager, body: { status: 'Review' } })).status, 200);
+  const skipped = await invoke(flow.transition, { ...manager, body: { status: 'Done' } });
+  assert.equal(skipped.status, 403);
+  assert.equal(skipped.body.error, 'status is not a transition of this stage');
+  assert.equal((await invoke(flow.transition, { ...manager, body: { status: 'Done', stage: 'Review' } })).status, 200);
+  const wrongStage = await invoke(flow.transition, { ...manager, body: { status: 'Review', stage: 'Done', record: { Secret: 'nope' } } });
+  assert.equal(wrongStage.status, 403);
+  assert.equal(JSON.stringify(wrongStage.body).includes('nope'), false);
+
+  const fieldMod = await loadModule(fieldFile.source, 'field-approval.mjs');
+  const fieldDenied = await invoke(fieldMod.approve, { ...manager, body: { status: 'Approved', record: { Secret: 'nope' } } });
+  assert.equal(fieldDenied.status, 403);
+  assert.equal(fieldDenied.body.error, 'unsupported: form-field approver');
+  assert.equal(JSON.stringify(fieldDenied.body).includes('nope'), false);
+
+  const levelMod = await loadModule(levelFile.source, 'level-approval.mjs');
+  const levelDenied = await invoke(levelMod.approve, { ...manager, body: { status: 'Approved' } });
+  assert.equal(levelDenied.status, 403);
+  assert.equal(levelDenied.body.error, 'unsupported: reporting-level approver');
+});
+
+test('an actions criteria gates the handler and a blank date still throws only when it runs', async () => {
+  const ir = deriveIr(
+    parse(`application "T"
+{
+	form Book_Transaction
+	{
+		Status
+		(
+			type = picklist
+		)
+		Return_date
+		(
+			type = date
+		)
+		Fine_Amount
+		(
+			type = number
+		)
+	}
+	workflow
+	{
+		form
+		{
+			Overdue as "Overdue"
+			{
+				type = form
+				form = Book_Transaction
+				record event = on add
+				on success
+				{
+					actions (Status == "Overdue")
+					{
+						custom deluge script
+						(
+							todayDate = zoho.currentdate;
+							returnDate = input.Return_date;
+							if(todayDate > returnDate)
+							{
+								input.Fine_Amount = 1;
+							}
+							else
+							{
+								input.Fine_Amount = 0;
+							}
+						)
+					}
+				}
+			}
+		}
+	}
+}
+`),
+  );
+  assert.equal(ir.workflows[0]?.actionCondition, 'Status == "Overdue"');
+  const generated = generate(ir);
+  const server = generated.files.find((file) => file.path === 'functions/aio/book-transaction/on-success.mjs');
+  assert.ok(server);
+  assert.match(stripComments(server.source), /if \(shim\.input\.get\(ctx, "Status"\) == "Overdue"\)/);
+  assert.doesNotMatch(stripComments(server.source), /if \(await shim\.todo/);
+  check(server.source, 'overdue.mjs');
+  const mod = (await loadModule(server.source, 'on-success.mjs')) as {
+    handle: (ctx: ReturnType<ReturnType<typeof createRuntime>['context']>) => Promise<unknown>;
+  };
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'Asia/Kolkata', now: new Date('2020-06-15T12:00:00Z') });
+  const issued = runtime.context({ record: { Status: 'Issued', Return_date: '' } });
+  await mod.handle(issued);
+  assert.equal(
+    runtime.transcript.some((entry) => entry.op === 'input.set' && Array.isArray(entry.path) && entry.path.includes('Fine_Amount')),
+    false,
+  );
+  const overdue = createRuntime({ dryRun: true, appTimeZone: 'Asia/Kolkata', now: new Date('2020-06-15T12:00:00Z') });
+  await assert.rejects(
+    () => mod.handle(overdue.context({ record: { Status: 'Overdue', Return_date: '' } })),
+    /UnParsable date/,
+  );
+  assert.equal(
+    overdue.transcript.some((entry) => entry.op === 'input.set' && Array.isArray(entry.path) && entry.path.includes('Fine_Amount')),
+    false,
+  );
+
+  const gap = generate(
+    app({
+      workflows: [
+        workflow({
+          name: 'On add',
+          form: 'Orders',
+          event: 'on success',
+          actionCondition: 'foo() == 1',
+          deluge: { text: 'input.Fine_Amount = 0;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const gapFile = gap.files.find((file) => file.path === 'functions/aio/orders/on-success.mjs');
+  assert.ok(gapFile);
+  assert.match(stripComments(gapFile.source), /await shim\.todo\(ctx, "workflow-action-condition"\)/);
+  assert.doesNotMatch(stripComments(gapFile.source), /Fine_Amount/);
+  assert.doesNotMatch(stripComments(gapFile.source), /if \(await shim\.todo/);
+  const report = JSON.parse(gap.files.find((file) => file.path === 'migration-report.json')!.source) as {
+    untranslated: { construct: string }[];
+  };
+  assert.equal(report.untranslated.some((row) => row.construct === 'workflow-action-condition'), true);
+});
+
+test('limits module quotes the measured Catalyst limits', () => {
+  const g = generate(app({}));
+  const limits = g.files.find((f) => f.path === 'runtime/limits.mjs');
+  assert.ok(limits);
+  assert.match(stripComments(limits.source), /255/);
+  assert.match(stripComments(limits.source), /200/);
+  assert.match(stripComments(limits.source), /300/);
+  check(limits.source, 'limits.mjs');
+});
+
+const CRITERIA_NOW = new Date('2020-06-15T20:00:00Z');
+const CRITERIA_ZONE = 'Asia/Kolkata';
+
+function snippet(body: string): App {
+  return deriveIr(parse(`application "T"\n{\n${body}\n}\n`));
+}
+
+async function runHandle(
+  source: string,
+  record: Record<string, unknown>,
+  opts: {
+    principal?: { profile: string; loginUser?: string; userId?: string };
+    adminUser?: string;
+    writeOp?: 'insert' | 'update';
+    rowId?: string;
+  } = {},
+): Promise<ReturnType<typeof createRuntime>> {
+  const mod = (await loadModule(source, 'handler.mjs')) as {
+    handle: (ctx: ReturnType<ReturnType<typeof createRuntime>['context']>) => Promise<unknown>;
+  };
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: CRITERIA_ZONE,
+    now: CRITERIA_NOW,
+    ...(opts.adminUser ? { adminUser: opts.adminUser } : {}),
+  });
+  await mod.handle(
+    runtime.context({
+      record,
+      ...(opts.principal ? { principal: opts.principal } : {}),
+      ...(opts.writeOp ? { writeOp: opts.writeOp } : {}),
+      ...(opts.rowId !== undefined ? { rowId: opts.rowId } : {}),
+    }),
+  );
+  return runtime;
+}
+
+async function runPrepared(
+  source: string,
+  record: Record<string, unknown>,
+  opts: {
+    principal: { profile: string; loginUser?: string; userId?: string };
+    rowId?: string;
+    writeOp?: 'insert' | 'update';
+    rows: Record<string, unknown>[];
+  },
+): Promise<{ runtime: ReturnType<typeof createRuntime>; where: string }> {
+  const mod = (await loadModule(source, 'prepared.mjs')) as unknown as {
+    handle: (ctx: ReturnType<ReturnType<typeof createRuntime>['context']>) => Promise<unknown>;
+    access: NonNullable<Parameters<typeof createRuntime>[0]>['access'];
+  };
+  let where = '';
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: CRITERIA_ZONE,
+    now: CRITERIA_NOW,
+    access: mod.access,
+    datastore: {
+      async query(_form: string, zcql: string) {
+        where = zcql;
+        const id = /ROWID = '([^']*)'/.exec(zcql)?.[1];
+        const row = opts.rows.find((item) => item.ROWID === id);
+        return row ? [row] : [];
+      },
+    },
+  });
+  await mod.handle(
+    runtime.context({
+      record,
+      principal: opts.principal,
+      ...(opts.rowId !== undefined ? { rowId: opts.rowId } : {}),
+      ...(opts.writeOp ? { writeOp: opts.writeOp } : {}),
+    }),
+  );
+  return { runtime, where };
+}
+
+function wroteFine(runtime: ReturnType<typeof createRuntime>): boolean {
+  return runtime.transcript.some(
+    (entry) => entry.op === 'input.set' && Array.isArray(entry.path) && entry.path.includes('Fine_Amount') && entry.value === 1,
+  );
+}
+
+test('is today and is tomorrow compile to shim.date.isDay and do not throw', async () => {
+  const ir = snippet(`\tform Plan
+\t{
+\t\tSchedule_Date
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t\tExpiry_Date
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t\tFine_Amount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tschedule
+\t\t{
+\t\t\tDue as "Due"
+\t\t\t{
+\t\t\t\ttype = schedule
+\t\t\t\tform = Plan
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions (Schedule_Date is today)
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tExpiry as "Expiry"
+\t\t\t{
+\t\t\t\ttype = schedule
+\t\t\t\tform = Plan
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions (Expiry_Date is tomorrow)
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const today = generated.files.find((file) => file.path === 'functions/job/due.mjs');
+  const tomorrow = generated.files.find((file) => file.path === 'functions/job/expiry.mjs');
+  assert.ok(today);
+  assert.ok(tomorrow);
+  assert.match(stripComments(today.source), /shim\.date\.isDay\(shim\.input\.get\(ctx, "Schedule_Date"\), "today", ctx\)/);
+  assert.match(stripComments(tomorrow.source), /shim\.date\.isDay\(shim\.input\.get\(ctx, "Expiry_Date"\), "tomorrow", ctx\)/);
+  assert.doesNotMatch(stripComments(today.source), /[^"'\\w]today\\b/);
+  assert.doesNotMatch(stripComments(tomorrow.source), /[^"'\\w]tomorrow\\b/);
+  assert.equal(measureActionCriteria(ir).unbound.length, 0);
+  assert.equal(measureActionCriteria(ir).guarded, 2);
+  const todayHit = await runHandle(today.source, { Schedule_Date: '16-Jun-2020' });
+  assert.equal(wroteFine(todayHit), true);
+  const todayMiss = await runHandle(today.source, { Schedule_Date: '15-Jun-2020' });
+  assert.equal(wroteFine(todayMiss), false);
+  const todayBlank = await runHandle(today.source, { Schedule_Date: '' });
+  assert.equal(wroteFine(todayBlank), false);
+  const tomorrowHit = await runHandle(tomorrow.source, { Expiry_Date: '17-Jun-2020' });
+  assert.equal(wroteFine(tomorrowHit), true);
+  const tomorrowMiss = await runHandle(tomorrow.source, { Expiry_Date: '16-Jun-2020' });
+  assert.equal(wroteFine(tomorrowMiss), false);
+});
+
+test('Added_User and Added_Time use system-field accessors', async () => {
+  const ir = snippet(`\tform Raise_Incident
+\t{
+\t\tFine_Amount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tform Maintenance_Block
+\t{
+\t\tBlock_From
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t\tFine_Amount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tNotify as "Notify"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Raise_Incident
+\t\t\t\ton success
+\t\t\t\t{
+\t\t\t\t\tactions (Added_User != zoho.adminuser)
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t\tschedule
+\t\t{
+\t\t\tBlock as "Block"
+\t\t\t{
+\t\t\t\ttype = schedule
+\t\t\t\tform = Maintenance_Block
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions (Added_Time < zoho.currentdate && Block_From == zoho.currentdate)
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const user = generated.files.find((file) => file.path === 'functions/aio/raise-incident/on-success.mjs');
+  const block = generated.files.find((file) => file.path === 'functions/job/block.mjs');
+  assert.ok(user);
+  assert.ok(block);
+  assert.match(stripComments(user.source), /shim\.record\.system\(ctx\.record, "Added_User"\) != shim\.zoho\.adminUser\(ctx\)/);
+  assert.doesNotMatch(stripComments(user.source), /[^"'\\w.]Added_User\\b/);
+  assert.match(stripComments(block.source), /shim\.record\.system\(ctx\.record, "Added_Time"\)/);
+  assert.match(stripComments(block.source), /shim\.date\.rel\(/);
+  assert.match(stripComments(block.source), /shim\.input\.get\(ctx, "Block_From"\)/);
+  assert.match(stripComments(block.source), /shim\.zoho\.currentDate\(ctx\)/);
+  assert.equal(measureActionCriteria(ir).unbound.length, 0);
+  const ran = await runHandle(user.source, { Added_User: 'ada' });
+  assert.equal(wroteFine(ran), true);
+  const before = await runHandle(block.source, { Added_Time: '01-Jan-2020', Block_From: '16-Jun-2020' });
+  assert.equal(wroteFine(before), true);
+  const after = await runHandle(block.source, { Added_Time: '31-Dec-2020', Block_From: '16-Jun-2020' });
+  assert.equal(wroteFine(after), false);
+});
+
+function numberForm(name: string): string {
+  return `\tform ${name}
+\t{
+\t\tFine_Amount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}`;
+}
+
+test('Added_User and Added_Time are set before the on-success guard', async () => {
+  const ir = snippet(`${numberForm('Raise_Incident')}
+${numberForm('Clock_Later')}
+${numberForm('Clock_Earlier')}
+${numberForm('Edit_Incident')}
+\tshare_settings
+\t{
+\t\t"Administrator"
+\t\t{
+\t\t\tname = "Administrator"
+\t\t\ttype = Users_Permissions
+\t\t\tdescription = "This profile will have all the permissions."
+\t\t}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tNotify as "Notify"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Raise_Incident
+\t\t\t\ton add
+\t\t\t\t{
+\t\t\t\t\tactions (Added_User == zoho.adminuser)
+\t\t\t\t\t{
+\t\t\t\t\t\ton success
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tLater as "Later"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Clock_Later
+\t\t\t\ton add
+\t\t\t\t{
+\t\t\t\t\tactions (Added_Time >= zoho.currentdate)
+\t\t\t\t\t{
+\t\t\t\t\t\ton success
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tEarlier as "Earlier"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Clock_Earlier
+\t\t\t\ton add
+\t\t\t\t{
+\t\t\t\t\tactions (Added_Time < zoho.currentdate)
+\t\t\t\t\t{
+\t\t\t\t\t\ton success
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tEdit as "Edit"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Edit_Incident
+\t\t\t\ton edit
+\t\t\t\t{
+\t\t\t\t\tactions (Added_User == zoho.loginuser)
+\t\t\t\t\t{
+\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const user = generated.files.find((file) => file.path === 'functions/aio/raise-incident/on-success.mjs');
+  const later = generated.files.find((file) => file.path === 'functions/aio/clock-later/on-success.mjs');
+  const earlier = generated.files.find((file) => file.path === 'functions/aio/clock-earlier/on-success.mjs');
+  const edit = generated.files.find((file) => file.path === 'functions/aio/edit-incident/on-edit.mjs');
+  assert.ok(user);
+  assert.ok(later);
+  assert.ok(earlier);
+  assert.ok(edit);
+  assert.match(stripComments(user.source), /shim\.record\.stamp\(ctx, "insert"\)/);
+  const handleAt = user.source.indexOf('export async function handle');
+  const stampAt = user.source.indexOf('shim.record.stamp', handleAt);
+  const guardAt = user.source.indexOf('if (', stampAt);
+  assert.ok(handleAt >= 0 && stampAt > handleAt && guardAt > stampAt);
+  const admin = 'app.owner';
+  const matching = await runHandle(user.source, {}, {
+    principal: { profile: 'Administrator', loginUser: admin },
+    adminUser: admin,
+  });
+  assert.equal(wroteFine(matching), true);
+  const another = await runHandle(user.source, { Added_User: admin }, {
+    principal: { profile: 'Administrator', loginUser: 'ada' },
+    adminUser: admin,
+  });
+  assert.equal(wroteFine(another), false);
+  assert.equal(wroteFine(await runHandle(later.source, {})), true);
+  assert.equal(wroteFine(await runHandle(earlier.source, {})), false);
+
+  assert.match(stripComments(edit.source), /await shim\.record\.prepare\(ctx, formName, "update"\)/);
+  assert.doesNotMatch(stripComments(edit.source), /shim\.record\.stamp\(ctx, "update"\)/);
+  const stored = [
+    { ROWID: '1001', Added_User: 'ada', Added_Time: '13-Apr-2023 17:21:24' },
+    { ROWID: '1002', Added_User: 'bob', Added_Time: '13-Apr-2023 17:21:24' },
+  ];
+  const adaEdit = { Fine_Amount: 1 };
+  const same = await runPrepared(edit.source, { ...adaEdit }, {
+    principal: { profile: 'Administrator', loginUser: 'ada' },
+    rowId: '1001',
+    rows: stored,
+  });
+  assert.equal(wroteFine(same.runtime), true);
+
+  const editMod = (await loadModule(edit.source, 'edit-incident-http.mjs')) as {
+    default: (req: unknown, res: unknown) => Promise<unknown>;
+  };
+
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  const storedRow = { ROWID: '1001', Added_User: 'ada', Added_Time: '13-Apr-2023 17:21:24' };
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
+    async query(_form: string, zcql: string) {
+      const id = /ROWID = '([^']*)'/.exec(zcql)?.[1];
+      return storedRow.ROWID === id ? [storedRow] : [];
+    },
+    async update() {
+      return {};
+    },
+  };
+  try {
+    const editShellWithoutRow = await invoke(editMod.default, {
+      user: { profile: 'Administrator', loginUser: 'ada' },
+      body: { record: adaEdit },
+    });
+    assert.equal(editShellWithoutRow.status, 400);
+    assert.match(String(editShellWithoutRow.body.error), /record needs body.ROWID/);
+
+    const editShellWithRow = await invoke(editMod.default, {
+      user: { profile: 'Administrator', loginUser: 'ada' },
+      body: { ROWID: '9999', record: adaEdit },
+    });
+    assert.equal(editShellWithRow.status, 404); // 9999 not in stored
+
+    const editShellWithRowValid = await invoke(editMod.default, {
+      user: { profile: 'Administrator', loginUser: 'ada' },
+      body: { ROWID: '1001', record: { Fine_Amount: 2 } },
+    });
+    assert.equal(editShellWithRowValid.status, 200, JSON.stringify(editShellWithRowValid.body));
+    const dryTranscript = editShellWithRowValid.body.transcript as { op: string; write?: string; path?: string[]; value?: unknown }[];
+    assert.equal(dryTranscript.some((entry) => entry.op === 'system-fields' && entry.write === 'update'), true);
+    // The script reads Added_User on the record, not old. Both modes must set Fine_Amount.
+    assert.equal(
+      dryTranscript.some((entry) => entry.op === 'input.set' && Array.isArray(entry.path) && entry.path.includes('Fine_Amount') && entry.value === 1),
+      true,
+    );
+
+    process.env.C2C_DEPLOY_MODE = 'live';
+    process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+    const liveEdit = await invoke(editMod.default, {
+      user: { profile: 'Administrator', loginUser: 'ada' },
+      body: { ROWID: '1001', record: { Fine_Amount: 2 } },
+    });
+    assert.equal(liveEdit.status, 200, JSON.stringify(liveEdit.body));
+    assert.equal(liveEdit.body.wrote, true);
+    const liveValues = liveEdit.body.values as Record<string, unknown>;
+    assert.equal(liveValues.Fine_Amount, 1);
+    assert.equal(liveValues.Added_User, 'ada');
+    assert.equal(liveValues.Added_Time, '13-Apr-2023 17:21:24');
+    assert.equal(liveValues.Modified_User, 'ada');
+
+    // A concurrent edit between prepare and updateRows is refused as
+    // C2C_STALE_WRITE (409), not a sanitized 500.
+    const updates: unknown[] = [];
+    (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
+      async query(_form: string, zcql: string, _limit?: number, _offset?: number, _orderBy?: string, columns?: readonly string[]) {
+        const id = /ROWID = '([^']*)'/.exec(zcql)?.[1];
+        if (storedRow.ROWID !== id) return [];
+        const recheck = Array.isArray(columns) && columns.length === 2 && columns.includes('MODIFIEDTIME');
+        return [{ ...storedRow, MODIFIEDTIME: recheck ? '2026-10-13 18:00:01:000' : '2026-10-13 18:00:00:000' }];
+      },
+      async update(...args: unknown[]) {
+        updates.push(args);
+        return {};
+      },
+    };
+    const staleEdit = await invoke(editMod.default, {
+      user: { profile: 'Administrator', loginUser: 'ada' },
+      body: { ROWID: '1001', record: { Fine_Amount: 2 } },
+    });
+    assert.equal(staleEdit.status, 409, JSON.stringify(staleEdit.body));
+    assert.equal(staleEdit.body.code, 'C2C_STALE_WRITE');
+    assert.equal(staleEdit.body.wrote, false);
+    assert.equal(updates.length, 0, 'the refused edit never reaches updateRows');
+    assert.match(
+      edit.source,
+      /A live edit captures Catalyst MODIFIEDTIME[^\n]*C2C_STALE_WRITE \(409\)/,
+    );
+    assert.match(
+      stripComments(edit.source),
+      /authorizeRead\(access, principal, formName, \{ op: "==", field: "ROWID", value: reqRowId \}, undefined, "modify"\)/,
+    );
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+    if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+  }
+  assert.equal(same.where.includes("ROWID = '1001'"), true);
+  const bobEdit: Record<string, unknown> = {};
+  const kept = await runPrepared(edit.source, bobEdit, {
+    principal: { profile: 'Administrator', loginUser: 'ada' },
+    rowId: '1002',
+    writeOp: 'insert',
+    rows: stored,
+  });
+  assert.equal(wroteFine(kept.runtime), false);
+  assert.equal(bobEdit.Added_User, 'bob');
+  assert.equal(kept.runtime.transcript.some((entry) => entry.op === 'system-fields' && entry.write === 'update'), true);
+
+  const mod = (await loadModule(user.source, 'gate.mjs')) as {
+    default: (req: unknown, res: unknown) => Promise<unknown>;
+  };
+  const forged = await invoke(mod.default, {
+    user: { profile: 'Administrator', loginUser: 'ada' },
+    body: { record: { Added_User: 'forged' } },
+  });
+  assert.equal(forged.status, 403);
+  const clean = await invoke(mod.default, {
+    user: { profile: 'Administrator', loginUser: admin },
+    body: { record: {} },
+  });
+  assert.equal(clean.status, 200);
+  const transcript = clean.body.transcript as { op: string; write?: string }[];
+  assert.equal(transcript.some((entry) => entry.op === 'system-fields' && entry.write === 'insert'), true);
+});
+
+test('an edit of a row the caller may read but not modify is refused before the script', async () => {
+  const ir = snippet(`${numberForm('Edit_Incident')}
+\tshare_settings
+\t{
+\t\t"Staff"
+\t\t{
+\t\t\tname = "Staff"
+\t\t\ttype = Customer_Portal
+\t\t\tModulePermissions
+\t\t\t{
+\t\t\t\tEdit_Incident
+\t\t\t\t{
+\t\t\t\t\tenabled = Viewall
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\tAll_Edit_Incidents = {"View","Edit"}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t\t"Clerk"
+\t\t{
+\t\t\tname = "Clerk"
+\t\t\ttype = Users_Permissions
+\t\t\tModulePermissions
+\t\t\t{
+\t\t\t\tEdit_Incident
+\t\t\t\t{
+\t\t\t\t\tenabled = Create
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tEdit as "Edit"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Edit_Incident
+\t\t\t\ton edit
+\t\t\t\t{
+\t\t\t\t\tactions (Added_User == zoho.loginuser)
+\t\t\t\t\t{
+\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const edit = generated.files.find((file) => file.path === 'functions/aio/edit-incident/on-edit.mjs');
+  assert.ok(edit);
+  const editMod = (await loadModule(edit.source, 'edit-modify-http.mjs')) as unknown as {
+    default: (req: unknown, res: unknown) => Promise<unknown>;
+    access: { profiles: Record<string, Record<string, { ownerScope?: string; read?: boolean }>> };
+  };
+  assert.equal(editMod.access.profiles.Staff?.Edit_Incident?.ownerScope, 'modify');
+  assert.equal(editMod.access.profiles.Clerk?.Edit_Incident?.read, false);
+  const table = [
+    { ROWID: '1001', Added_User: 'ada', Added_Time: '13-Apr-2023 17:21:24' },
+    { ROWID: '1002', Added_User: 'bob', Added_Time: '13-Apr-2023 17:21:24' },
+  ];
+  const queries: string[] = [];
+  const updates: unknown[] = [];
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
+    async query(_form: string, zcql: string) {
+      queries.push(zcql);
+      const id = /ROWID = '([^']*)'/.exec(zcql)?.[1];
+      const owner = /Added_User = '([^']*)'/.exec(zcql)?.[1];
+      return table.filter((row) => (id === undefined || row.ROWID === id) && (owner === undefined || row.Added_User === owner));
+    },
+    async update(_form: string, rows: unknown) {
+      updates.push(rows);
+      return {};
+    },
+  };
+  const staff = { profile: 'Staff', loginUser: 'ada' };
+  const posted = { Fine_Amount: 2 };
+  const scriptRan = (body: Record<string, unknown>): boolean => {
+    const transcript = body.transcript as { op: string; path?: string[]; value?: unknown }[] | undefined;
+    if (transcript?.some((entry) => entry.op === 'input.set' && Array.isArray(entry.path) && entry.path.includes('Fine_Amount'))) return true;
+    const values = body.values as Record<string, unknown> | undefined;
+    return values?.Fine_Amount === 1;
+  };
+  try {
+    const badId = await invoke(editMod.default, { user: staff, body: { ROWID: 'ada-row', record: posted } });
+    assert.equal(badId.status, 400);
+    assert.match(String(badId.body.error), /record needs body.ROWID/);
+    assert.equal(queries.length, 0);
+
+    const blindOwn = await invoke(editMod.default, {
+      user: { profile: 'Clerk', loginUser: 'ada' },
+      body: { ROWID: '1001', record: posted },
+    });
+    const blindMissing = await invoke(editMod.default, {
+      user: { profile: 'Clerk', loginUser: 'ada' },
+      body: { ROWID: '9999', record: posted },
+    });
+    assert.equal(blindOwn.status, 403);
+    assert.equal(blindMissing.status, 403);
+    assert.equal(blindOwn.body.error, blindMissing.body.error);
+    assert.match(String(blindOwn.body.error), /cannot read Edit_Incident/);
+    assert.equal(queries.length, 0);
+    assert.equal(updates.length, 0);
+
+    const missing = await invoke(editMod.default, { user: staff, body: { ROWID: '9999', record: posted } });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.error, 'no such row');
+    queries.length = 0;
+
+    const dryForeign = await invoke(editMod.default, { user: staff, body: { ROWID: '1002', record: posted } });
+    const dryForeignQueries = queries.slice();
+    queries.length = 0;
+    process.env.C2C_DEPLOY_MODE = 'live';
+    process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+    const liveForeign = await invoke(editMod.default, { user: staff, body: { ROWID: '1002', record: posted } });
+    assert.equal(dryForeign.status, liveForeign.status);
+    assert.equal(dryForeign.body.error, liveForeign.body.error);
+    assert.equal(dryForeign.status, 403);
+    assert.equal(dryForeign.body.error, 'record access: Edit_Incident row is not visible');
+    assert.equal(dryForeign.body.slots, null);
+    assert.equal(liveForeign.body.slots, null);
+    assert.equal(dryForeign.body.dryRun, true);
+    assert.equal(liveForeign.body.dryRun, false);
+    assert.equal(dryForeign.body.transcript, undefined);
+    assert.equal(liveForeign.body.transcript, undefined);
+    assert.equal(scriptRan(dryForeign.body), false);
+    assert.equal(scriptRan(liveForeign.body), false);
+    assert.equal(updates.length, 0);
+    assert.equal(dryForeignQueries.length > 0, true);
+    assert.equal(queries.length > 0, true);
+
+    queries.length = 0;
+    delete process.env.C2C_DEPLOY_MODE;
+    const dryOwn = await invoke(editMod.default, { user: staff, body: { ROWID: '1001', record: posted } });
+    assert.equal(dryOwn.status, 200, JSON.stringify(dryOwn.body));
+    assert.equal(scriptRan(dryOwn.body), true);
+    const ownTranscript = dryOwn.body.transcript as { op: string; path?: string[]; value?: unknown }[];
+    assert.equal(
+      ownTranscript.some((entry) => entry.op === 'input.set' && entry.value === 1 && Array.isArray(entry.path) && entry.path.includes('Fine_Amount')),
+      true,
+    );
+    process.env.C2C_DEPLOY_MODE = 'live';
+    const liveOwn = await invoke(editMod.default, { user: staff, body: { ROWID: '1001', record: posted } });
+    assert.equal(liveOwn.status, 200, JSON.stringify(liveOwn.body));
+    assert.equal(liveOwn.body.wrote, true);
+    const ownValues = liveOwn.body.values as Record<string, unknown>;
+    assert.equal(ownValues.Fine_Amount, 1);
+    assert.equal(ownValues.Added_User, 'ada');
+    assert.equal(ownValues.Added_Time, '13-Apr-2023 17:21:24');
+    assert.equal(scriptRan(liveOwn.body), true);
+
+    queries.length = 0;
+    const updatesBeforeForge = updates.length;
+    const forged = await invoke(editMod.default, {
+      user: staff,
+      body: { ROWID: '1001', record: { Fine_Amount: 2, Added_User: 'forged' } },
+    });
+    assert.equal(forged.status, 403);
+    assert.match(String(forged.body.error), /Added_User is not client-writable/);
+    assert.equal(updates.length, updatesBeforeForge);
+    assert.equal(scriptRan(forged.body), false);
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+    if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+  }
+});
+
+test('on add or edit follows body.ROWID and ignores the client op', async () => {
+  const ir = snippet(`${numberForm('Either')}
+\tshare_settings
+\t{
+\t\t"Administrator"
+\t\t{
+\t\t\tname = "Administrator"
+\t\t\ttype = Users_Permissions
+\t\t\tdescription = "This profile will have all the permissions."
+\t\t}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tSave as "Save"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Either
+\t\t\t\ton add or edit
+\t\t\t\t{
+\t\t\t\t\tactions (Added_User == zoho.loginuser)
+\t\t\t\t\t{
+\t\t\t\t\t\ton success
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const file = generated.files.find((item) => item.path === 'functions/aio/either/on-success.mjs');
+  assert.ok(file);
+  assert.match(stripComments(file.source), /await shim\.record\.prepare\(ctx, formName\);/);
+  assert.doesNotMatch(stripComments(file.source), /body\.op === "edit"/);
+  assert.match(stripComments(file.source), /rowId: reqRowId/);
+  check(file.source, 'either.mjs');
+  const inserted = await runHandle(file.source, { Added_User: 'eve' }, {
+    principal: { profile: 'Administrator', loginUser: 'ada' },
+  });
+  assert.equal(wroteFine(inserted), true);
+  assert.equal(inserted.transcript.some((entry) => entry.op === 'system-fields' && entry.write === 'insert'), true);
+  const spoofed = await runPrepared(file.source, { Added_User: 'eve' }, {
+    principal: { profile: 'Administrator', loginUser: 'ada' },
+    rowId: 'bob-row',
+    writeOp: 'insert',
+    rows: [{ ROWID: 'bob-row', Added_User: 'bob', Added_Time: '13-Apr-2023 17:21:24' }],
+  });
+  assert.equal(wroteFine(spoofed.runtime), false);
+  assert.equal(spoofed.runtime.transcript.some((entry) => entry.op === 'system-fields' && entry.write === 'update'), true);
+
+  const mod = (await loadModule(file.source, 'either-http.mjs')) as {
+    default: (req: unknown, res: unknown) => Promise<unknown>;
+  };
+  (globalThis as any).__c2cDatastore = {
+    async query(_form: string, zcql: string) {
+      if (zcql.includes("ROWID = '1009'")) return [{ ROWID: '1009', Added_User: 'old' }];
+      return [];
+    }
+  };
+  const editWithoutRow = await invoke(mod.default, {
+    user: { profile: 'Administrator', loginUser: 'ada' },
+    body: { op: 'edit', record: {} },
+  });
+  assert.equal(editWithoutRow.status, 200);
+  const editTranscript = editWithoutRow.body.transcript as { op: string; write?: string }[];
+  assert.equal(editTranscript.some((entry) => entry.op === 'system-fields' && entry.write === 'insert'), true);
+  const addWithRow = await invoke(mod.default, {
+    user: { profile: 'Administrator', loginUser: 'ada' },
+    body: { op: 'add', ROWID: '1009', record: {} },
+  });
+  assert.equal(addWithRow.status, 200);
+  const addTranscript = addWithRow.body.transcript as { op: string; write?: string }[];
+  assert.equal(addTranscript.some((entry) => entry.op === 'system-fields' && entry.write === 'update'), true);
+  delete (globalThis as any).__c2cDatastore;
+});
+
+test('a schedule form criteria is a datastore query and still runs the handler', async () => {
+  const ir = snippet(`\tform Create_New_Procurement_Plan
+\t{
+\t\tSchedule_Date
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t\tApproval_Status
+\t\t(
+\t\t\ttype = picklist
+\t\t)
+\t\tFine_Amount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tform Add_New_Subscription
+\t{
+\t\tExpiry_Date
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t\tStatus
+\t\t(
+\t\t\ttype = picklist
+\t\t)
+\t\tFine_Amount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tschedule
+\t\t{
+\t\t\tPlan as "Plan"
+\t\t\t{
+\t\t\t\ttype = schedule
+\t\t\t\tform = Create_New_Procurement_Plan[Approval_Status == "Scheduled"]
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions (Schedule_Date is today)
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tRenew as "Renew"
+\t\t\t{
+\t\t\t\ttype = schedule
+\t\t\t\tform = Add_New_Subscription[Status != "Cancelled"]
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions (Expiry_Date is today)
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const plan = generated.files.find((file) => file.path === 'functions/job/plan.mjs');
+  const renew = generated.files.find((file) => file.path === 'functions/job/renew.mjs');
+  assert.ok(plan);
+  assert.ok(renew);
+  const planQuery = 'shim.datastore.query(ctx, "Create_New_Procurement_Plan", {"op":"==","field":"Approval_Status","value":"Scheduled"})';
+  const renewQuery = 'shim.datastore.query(ctx, "Add_New_Subscription", {"op":"!=","field":"Status","value":"Cancelled"})';
+  assert.ok(plan.source.includes(planQuery));
+  assert.ok(renew.source.includes(renewQuery));
+  const planHandle = plan.source.slice(plan.source.indexOf('export async function handle'));
+  const renewHandle = renew.source.slice(renew.source.indexOf('export async function handle'));
+  assert.ok(planHandle.indexOf(planQuery) < planHandle.indexOf('if ('));
+  assert.ok(renewHandle.indexOf(renewQuery) < renewHandle.indexOf('if ('));
+  assert.equal(measureActionCriteria(ir).unbound.length, 0);
+  const ran = await runHandle(plan.source, { Schedule_Date: '16-Jun-2020' });
+  assert.equal(ran.transcript.some((entry) => entry.op === 'fetch' && entry.form === 'Create_New_Procurement_Plan'), true);
+  assert.equal(wroteFine(ran), true);
+});
+
+test('an unbound actions criteria is a coverage gap and omits the body', () => {
+  const ir = snippet(`\tform Orders
+\t{
+\t\tFine_Amount
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tOn_Add as "On add"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Orders
+\t\t\t\ton success
+\t\t\t\t{
+\t\t\t\t\tactions (NotAField == 1)
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine_Amount = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const file = generated.files.find((item) => item.path === 'functions/aio/orders/on-success.mjs');
+  assert.ok(file);
+  const handle = file.source.slice(file.source.indexOf('export async function handle'), file.source.indexOf('export default'));
+  assert.match(stripComments(handle), /await shim\.todo\(ctx, "workflow-action-condition"\)/);
+  assert.doesNotMatch(stripComments(handle), /NotAField/);
+  assert.doesNotMatch(stripComments(handle), /Fine_Amount/);
+  assert.doesNotMatch(stripComments(handle), /if \(/);
+  assert.doesNotMatch(stripComments(file.source), /NotAField/);
+  const report = JSON.parse(generated.files.find((item) => item.path === 'migration-report.json')!.source) as {
+    untranslated: { construct: string }[];
+  };
+  assert.equal(report.untranslated.some((row) => row.construct === 'workflow-action-condition'), true);
+  assert.equal(measureActionCriteria(ir).gap, 1);
+  assert.equal(measureActionCriteria(ir).guarded, 0);
+  assert.deepEqual(measureActionCriteria(ir).unbound, []);
+});
+
+test('field rules use input fields and omit a body whose condition is unbound', () => {
+  const ir = snippet(`\tform Shipment
+\t{
+\t\tSubmode
+\t\t(
+\t\t\ttype = picklist
+\t\t)
+\t\tVessel
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tRules as "Rules"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Shipment
+\t\t\t\tfield rules
+\t\t\t\t{
+\t\t\t\t\tactions (Submode == "Sea")
+\t\t\t\t\t{
+\t\t\t\t\t\tshow Vessel;
+\t\t\t\t\t}
+\t\t\t\t\tactions (NotAField == 1)
+\t\t\t\t\t{
+\t\t\t\t\t\thide Vessel;
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t\ton load
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const client = generated.files.find((file) => file.path === 'client/handlers/shipment/on-load.mjs');
+  assert.ok(client);
+  assert.match(stripComments(client.source), /if \(shim\.input\.get\(ctx, "Submode"\) == "Sea"\)/);
+  assert.match(stripComments(client.source), /op: "show"/);
+  assert.match(stripComments(client.source), /await shim\.todo\(ctx, "field-rule-condition"\)/);
+  assert.doesNotMatch(stripComments(client.source), /NotAField/);
+  assert.doesNotMatch(stripComments(client.source), /op: "hide"/);
+  assert.equal(measureActionCriteria(ir).unbound.length, 0);
+});
+
+test('guard extraction still finds the return past the provenance comment', async () => {
+  // Every translated statement carries a `// Deluge:` comment line ahead of
+  // it; an extraction that anchors `return` at the head degrades each guard
+  // to a todo. Both users of the extraction keep working.
+  assert.equal(emittedFieldRuleCondition('Amount > 100', ['Amount']), 'shim.input.get(ctx, "Amount") > 100');
+  const ir = app({
+    forms: [plainForm('Orders', [plainField('Amount')])],
+    workflows: [
+      workflow({
+        name: 'On add',
+        form: 'Orders',
+        event: 'on success',
+        actionCondition: 'Amount > 100',
+        deluge: { text: 'input.Fine_Amount = 1;', span: Z },
+      }),
+    ],
+  });
+  assert.equal(measureActionCriteria(ir).guarded, 1);
+  assert.equal(measureActionCriteria(ir).gap, 0);
+  assert.deepEqual(measureActionCriteria(ir).unbound, []);
+  const server = generate(ir).files.find((file) => file.path === 'functions/aio/orders/on-success.mjs');
+  assert.ok(server);
+  assert.match(stripComments(server.source), /if \(shim\.input\.get\(ctx, "Amount"\) > 100\)/);
+  assert.equal(wroteFine(await runHandle(server.source, { Amount: '150' })), true);
+  assert.equal(wroteFine(await runHandle(server.source, { Amount: '50' })), false);
+});
+
+test('same form event: one merged module runs every script in export order', async () => {
+  // Two on-success workflows share /forms/Item/success: a second module would
+  // never be routed, so both scripts land in one module in export order.
+  const ir = app({
+    forms: [plainForm('Item', [plainField('Name')])],
+    workflows: [
+      workflow({ name: 'First', form: 'Item', event: 'on success', deluge: { text: 'insert into First_Log[Note = "A"];', span: Z } }),
+      workflow({ name: 'Second', form: 'Item', event: 'on success', deluge: { text: 'insert into Second_Log[Note = "B"];', span: Z } }),
+    ],
+  });
+  const g = generate(ir);
+  const aio = g.files.filter((f) => f.path.startsWith('functions/aio/item/'));
+  assert.deepEqual(aio.map((f) => f.path), ['functions/aio/item/on-success.mjs']);
+  const src = aio[0]!.source;
+  assert.ok(src.indexOf('First_Log') < src.indexOf('Second_Log'), 'scripts run in export order');
+  const mod = (await loadModule(src, 'merged.mjs')) as unknown as { handle: (ctx: unknown) => Promise<unknown> };
+  const { datastore, tables } = mockDatastore({ First_Log: ['ROWID'], Second_Log: ['ROWID'] });
+  const runtime = createRuntime({ dryRun: false, appTimeZone: 'UTC', datastore: datastore as never });
+  await mod.handle(runtime.context({ record: {} }));
+  assert.equal((tables.get('First_Log') ?? []).length, 1, 'the first script ran');
+  assert.equal((tables.get('Second_Log') ?? []).length, 1, 'the second script ran');
+});
+
+test('a merged tail route runs only the script body.runEvent resolves through scriptEvents', async () => {
+  // Two on-user-input scripts share /forms/Work_Orders/input. The client run
+  // names its workflow by runEvent token; the route maps it to ctx.onlyScript
+  // through its exported scriptEvents and refuses a token it does not list.
+  const g = generate(
+    app({
+      forms: [plainForm('Work_Orders', [plainField('Name'), plainField('Mark_A'), plainField('Mark_B')])],
+      profiles: [
+        {
+          name: 'Staff',
+          type: 'Users_Permissions',
+          properties: [],
+          modules: [grantModule('Work_Orders', 'create, viewall')],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({ name: 'First', form: 'Work_Orders', event: 'on user input of Name', deluge: { text: 'input.Mark_A = "first";', span: Z } }),
+        workflow({ name: 'Second', form: 'Work_Orders', event: 'on user input of Mark_A', deluge: { text: 'input.Mark_B = "second";', span: Z } }),
+      ],
+    }),
+  );
+  const merged = g.files.find((f) => f.path === 'functions/aio/work-orders/input-handlers.mjs');
+  assert.ok(merged, g.files.map((f) => f.path).join('\n'));
+  const src = stripComments(merged.source);
+  assert.match(src, /export const scriptEvents = \{"on user input of Name":0,"on user input of Mark_A":1\};/);
+  assert.match(src, /ctx\.onlyScript = onlyScript/);
+  check(merged.source, 'merged-run.mjs');
+  const mod = (await loadModule(merged.source, 'merged-run.mjs')) as unknown as {
+    default: (req: unknown, res: unknown) => unknown;
+    scriptEvents: Record<string, number>;
+  };
+  assert.deepEqual(mod.scriptEvents, { 'on user input of Name': 0, 'on user input of Mark_A': 1 });
+  const caller = { user: { profile: 'Staff', loginUser: 's@t' } };
+  const marks = (body: Record<string, unknown>): string[] =>
+    (((body.transcript as { op: string; path?: string[] }[]) ?? []).filter((e) => e.op === 'input.set').map((e) => (e.path ?? []).join('.')) as string[]);
+
+  // Auth first: anonymous 401, a token the map does not list 404, and a caller
+  // may not run another event's script or reach ctx.onlyScript by index.
+  assert.equal((await invoke(mod.default, { body: { record: {}, runEvent: 'on user input of Name' } })).status, 401);
+  const foreign = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: 'on click' } });
+  assert.equal(foreign.status, 404, JSON.stringify(foreign.body));
+  assert.equal('transcript' in foreign.body, false);
+  const byIndex = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: '1' } });
+  assert.equal(byIndex.status, 404, JSON.stringify(byIndex.body));
+
+  const first = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: 'on user input of Name' } });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.deepEqual(marks(first.body), ['Mark_A']);
+  const second = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: 'on user input of Mark_A' } });
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  assert.deepEqual(marks(second.body), ['Mark_B']);
+  // No runEvent is the direct-call contract: every merged script runs.
+  const all = await invoke(mod.default, { ...caller, body: { record: {} } });
+  assert.equal(all.status, 200, JSON.stringify(all.body));
+  assert.deepEqual(marks(all.body).sort(), ['Mark_A', 'Mark_B']);
+});
+
+test('a single server-only tail script runs through a guarded client run', async () => {
+  // One on-load workflow with a server-only body: the route carries no
+  // scriptEvents map (a null ctx.onlyScript runs its one script) and the
+  // generated client module is nothing but the guarded client run.
+  const g = generate(
+    app({
+      forms: [plainForm('Visitors', [plainField('Name')])],
+      profiles: [
+        {
+          name: 'Staff',
+          type: 'Users_Permissions',
+          properties: [],
+          modules: [grantModule('Visitors', 'create, viewall')],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Stamp',
+          form: 'Visitors',
+          event: 'on load',
+          deluge: { text: 'input.Name = "seen";', span: Z },
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/visitors/on-load.mjs');
+  assert.ok(server, g.files.map((f) => f.path).join('\n'));
+  assert.doesNotMatch(server.source, /export const scriptEvents/);
+  const client = g.files.find((f) => f.path === 'client/handlers/visitors/on-load.mjs');
+  assert.ok(client);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.match(client.source, /ctx\.runPath = "\/forms\/Visitors\/load"/);
+  assert.doesNotMatch(client.source, /runEvent/);
+  check(server.source, 'single-run.mjs');
+  const mod = (await loadModule(server.source, 'single-run.mjs')) as unknown as {
+    default: (req: unknown, res: unknown) => unknown;
+  };
+  const caller = { user: { profile: 'Staff', loginUser: 's@t' } };
+  assert.equal((await invoke(mod.default, { body: { record: {} } })).status, 401);
+  const ok = await invoke(mod.default, { ...caller, body: { record: {} } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const sets = (((ok.body.transcript as { op: string; path?: string[] }[]) ?? []).filter((e) => e.op === 'input.set').map((e) => (e.path ?? []).join('.')));
+  assert.deepEqual(sets, ['Name']);
+  const entry = g.coverage.find((c) => c.name === 'Stamp');
+  assert.equal(entry?.serverInvoked, true);
+  assert.equal(g.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+});
+
+test('a merged client run without client.run blocks instead of skipping', async () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Work_Orders', [plainField('Name')])],
+      workflows: [
+        workflow({
+          name: 'First',
+          form: 'Work_Orders',
+          event: 'on user input of Name',
+          deluge: {
+            text: 'hide Name;\nsendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/work-orders/on-user-input-of-name.mjs');
+  assert.ok(client);
+  assert.match(client.source, /client\.run unavailable; server half not run/);
+  const mod = (await loadModule(client.source, 'missing-client-run.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: string }[]>;
+  };
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const actions = await mod.clientActions(runtime.context({ record: { Name: 'x' } }));
+  assert.deepEqual(actions, [{ op: 'info', message: 'client.run unavailable; server half not run' }]);
+});
+
+test('mixed record events in one merged module keep their add/edit/delete scopes', () => {
+  const ir = app({
+    forms: [plainForm('Item', [plainField('Name')])],
+    workflows: [
+      workflow({ name: 'AddOnly', form: 'Item', event: 'on success', recordEvent: 'on add', deluge: { text: 'x = 1;', span: Z } }),
+      workflow({ name: 'EditOnly', form: 'Item', event: 'on success', recordEvent: 'on edit', deluge: { text: 'y = 2;', span: Z } }),
+    ],
+  });
+  const g = generate(ir);
+  const server = g.files.find((f) => f.path === 'functions/aio/item/on-success.mjs');
+  assert.ok(server);
+  assert.match(stripComments(server.source), /export const recordEvents = \["on add","on edit"\];/);
+  assert.match(stripComments(server.source), /if \(!ctx\.rowId\) \{\n[\s\S]*?x = 1/);
+  assert.match(stripComments(server.source), /if \(ctx\.rowId(?: && !ctx\.deleting)?\) \{\n[\s\S]*?y = 2/);
+});
+
+test('actions criteria with show and on success emit both the client action and the server handler', () => {
+  const ir = snippet(`\tform Item
+\t{
+\t\tStatus
+\t\t(
+\t\t\ttype = picklist
+\t\t)
+\t\tNotes
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tFine
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tOpen_Notes as "Open notes"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\ton add
+\t\t\t\t{
+\t\t\t\t\tactions (Status == "Open")
+\t\t\t\t\t{
+\t\t\t\t\t\tshow Notes;
+\t\t\t\t\t\ton success
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Fine = 1;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  assert.equal(ir.workflows.filter((item) => item.actionCondition === 'Status == "Open"').length, 2);
+  const generated = generate(ir);
+  // The field rule under a record event lands on the load screen's client
+  // handler; the nested `on success` keeps its own server module.
+  const client = generated.files.find((file) => file.path === 'client/handlers/item/on-load.mjs');
+  const server = generated.files.find((file) => file.path === 'functions/aio/item/on-success.mjs');
+  assert.ok(client);
+  assert.ok(server);
+  assert.match(stripComments(client.source), /if \(shim\.input\.get\(ctx, "Status"\) == "Open"\)/);
+  assert.match(stripComments(client.source), /op: "show"/);
+  assert.match(stripComments(client.source), /"Notes"/);
+  assert.match(stripComments(server.source), /if \(shim\.input\.get\(ctx, "Status"\) == "Open"\)/);
+  assert.match(stripComments(server.source), /shim\.input\.set\(ctx, \["Fine"\], 1\)/);
+  assert.equal(measureActionCriteria(ir).guarded, 2);
+  assert.equal(measureActionCriteria(ir).unbound.length, 0);
+});
+
+function galleryDir(): string | undefined {
+  const fromEnv = process.env.C2C_GALLERY_DIR;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  const fixtures = process.env.C2C_FIXTURES_DIR;
+  if (!fixtures) return undefined;
+  const fallback = join(fixtures, 'gallery');
+  return existsSync(fallback) ? fallback : undefined;
+}
+
+function rawActionBraces(source: string, doc: ReturnType<typeof parse>): number {
+  let raw = 0;
+  walkStatements(doc, (statement) => {
+    if (headerWords(statement).map((token) => token.text).join(' ').toLowerCase() !== 'actions') return;
+    const items = sig(statement);
+    const paren = items.find((item) => isGroup(item) && item.open.text === '(');
+    const brace = items.find((item) => isGroup(item) && item.open.text === '{');
+    if (!paren || !isGroup(paren) || !brace || !isGroup(brace) || !brace.raw) return;
+    const criteria = source.slice(paren.open.start + paren.open.text.length, paren.close ? paren.close.start : paren.end).trim();
+    if (criteria) raw++;
+  });
+  return raw;
+}
+
+test('gallery action criteria are guarded or explicitly gapped and never raw', { skip: !galleryDir(), timeout: 180000 }, () => {
+  const root = galleryDir();
+  assert.ok(root);
+  const names = readdirSync(root).filter((name) => statSync(join(root, name)).isDirectory());
+  names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  let guarded = 0;
+  let gap = 0;
+  let raw = 0;
+  const unbound: string[] = [];
+  for (const name of names) {
+    const project = parseProject(join(root, name));
+    raw += project.files.reduce((count, file) => count + rawActionBraces(file.cst.source, file.cst), 0);
+    const measured = measureActionCriteria(project.ir);
+    guarded += measured.guarded;
+    gap += measured.gap;
+    unbound.push(...measured.unbound);
+  }
+  assert.equal(raw, 0, `guarded=${guarded} gap=${gap} raw=${raw}`);
+  assert.deepEqual(unbound, [], unbound.join(','));
+  console.log(`gallery criteria guarded=${guarded} gap=${gap} raw=${raw} apps=${names.length}`);
+});
+
+test('alert verdicts follow the innermost event header', () => {
+  const deluge = { text: 'x = 1;\nalert "hi";', span: Z };
+  interface Report {
+    alertDiagnostics: AlertDiagnostic[];
+    untranslated: { construct: string; count: number }[];
+  }
+  const report = (g: ReturnType<typeof generate>): Report =>
+    JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as Report;
+  const clientSource = (g: ReturnType<typeof generate>) =>
+    g.files.filter((f) => f.path.startsWith('client/handlers/')).map((f) => f.source).join('\n');
+
+  // Live-tested on Creator: these events run `alert`. A `/` inside a field
+  // name is not a path separator; only ` / ` joins event path segments.
+  for (const event of [
+    'on load',
+    'On Validate',
+    'on user input of Name',
+    'on change of Status',
+    'on change of Due/Paid',
+    'on click',
+    'on add row of Items',
+    'on delete row of Items',
+    'on add / on click',
+    'on success / on validate',
+  ]) {
+    const g = generate(app({
+      workflows: [workflow({ name: 'W', form: 'Orders', event, deluge })],
+    }));
+    assert.match(stripComments(clientSource(g)), /op: "alert"/, event);
+    assert.equal(report(g).alertDiagnostics.length, 0, event);
+    assert.equal(report(g).untranslated.filter((u) => u.construct.startsWith('alert-')).length, 0, event);
+  }
+
+  // Only the form-workflow on success is proven rejected at import.
+  for (const event of ['on success', 'On Success', 'on delete / on success']) {
+    const g = generate(app({
+      workflows: [workflow({ name: 'W', form: 'Orders', event, deluge })],
+    }));
+    assert.doesNotMatch(stripComments(clientSource(g)), /op: "alert"/, event);
+    const rep = report(g);
+    assert.equal(rep.alertDiagnostics.length, 1, event);
+    assert.equal(rep.alertDiagnostics[0].verdict, 'disallowed', event);
+    assert.equal(rep.alertDiagnostics[0].event, event);
+    assert.equal(rep.alertDiagnostics[0].form, 'Orders');
+    assert.equal(rep.untranslated.find((u) => u.construct === 'alert-outside-allowed-event')?.count, 1, event);
+  }
+
+  // Anything else is unverified, not proven disallowed. `on delete success`
+  // was never live-tested, so it must not count as disallowed.
+  for (const event of ['on add', 'On Delete Success', 'on add / on delete success', '']) {
+    const g = generate(app({
+      workflows: [workflow({ name: 'W', form: 'Orders', event, deluge })],
+    }));
+    assert.doesNotMatch(stripComments(clientSource(g)), /op: "alert"/, event);
+    const rep = report(g);
+    assert.equal(rep.alertDiagnostics.length, 1, event || '(empty)');
+    assert.equal(rep.alertDiagnostics[0].verdict, 'unverified', event);
+    assert.equal(rep.untranslated.find((u) => u.construct === 'alert-in-unverified-event')?.count, 1, event);
+  }
+});
+
+test('alert in subform add row unmasks client-condition-uses-server when condition depends on server query', async () => {
+  // volunteer-portal Add_Log / Run_Scripts_On_Always / on add row of Volunteered_Log:
+  // Unlocking alert on subform add row unmasks client-side condition evaluation for the enclosing
+  // if block. Because startingDate derives from a server database query (Create_Event), the client
+  // condition cannot be evaluated purely in the client and correctly records client-condition-uses-server.
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Add_Log', [plainField('Event_Name'), plainField('Volunteered_Log', 'grid', ['Event_Dates', 'Check_In', 'Check_Out'])]),
+        plainForm('Create_Event', [plainField('Starting_Time'), plainField('Till_Date')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'Run Scripts - On Always',
+          form: 'Add_Log',
+          event: 'on add row of Volunteered_Log',
+          deluge: {
+            text: [
+              'if (input.Event_Name != null) {',
+              '  getEventDate = Create_Event[ID == input.Event_Name];',
+              '  startingDate = getEventDate.Starting_Time.toDate();',
+              '  for each eachRow in input.Volunteered_Log {',
+              '    if (startingDate > zoho.currenttime) {',
+              '      alert "Sorry Logs cannot be added to Future Days";',
+              '    } else {',
+              '      if (startingDate <= getEventDate.Till_Date) {',
+              '        row.Event_Dates = startingDate;',
+              '        startingDate = startingDate.addDay(1);',
+              '      }',
+              '    }',
+              '  }',
+              '}',
+            ].join('\n'),
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+
+  const client = g.files.find((f) => f.path === 'client/handlers/add-log/on-add-row-of-volunteered-log.mjs');
+  assert.ok(client, 'client handler should be generated');
+  assert.match(stripComments(client.source), /actions\.push\(\{ op: "alert", message: "Sorry Logs cannot be added to Future Days" \}\)/);
+  assert.match(stripComments(client.source), /await shim\.todo\(ctx, "client-condition-uses-server"\)/);
+  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1);
+  assert.equal(g.todos.some((t) => t.construct.startsWith('alert-')), false);
+  const rep = JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as { alertDiagnostics: unknown[] };
+  assert.equal(rep.alertDiagnostics.length, 0);
+  check(client.source, 'on-add-row-of-volunteered-log.mjs');
+
+  const mod = (await loadModule(client.source, 'on-add-row-of-volunteered-log-run.mjs')) as unknown as Record<
+    string,
+    (ctx: unknown) => Promise<unknown[]>
+  >;
+  const runtime = createRuntime({ dryRun: true });
+  const actions = await mod.clientActions!(runtime.context({ record: { Event_Name: 'EVT1', Volunteered_Log: [{}] } }));
+  assert.ok(Array.isArray(actions));
+  assert.ok(runtime.transcript.some((t) => t.op === 'todo' && t.construct === 'client-condition-uses-server'));
+});
+
+test('real volunteer portal Add_Log validate handler alerts on future dates only', { skip: !process.env.C2C_FIXTURES_DIR && 'needs C2C_FIXTURES_DIR' }, async () => {
+  const fixtureRoot = process.env.C2C_FIXTURES_DIR;
+  const parsed = parseFile(join(fixtureRoot!, 'gallery/volunteer-portal/Volunteer_Portal.ds'));
+  const g = generate(parsed.ir);
+  const file = g.files.find((f) => f.path === 'client/handlers/add-log/on-validate.mjs');
+  assert.ok(file, 'real Add_Log / Run_Scripts_On_Always validate handler is generated');
+  const mod = await loadModule(file.source, 'volunteer-portal-add-log-validate.mjs') as unknown as {
+    clientActions(ctx: unknown): Promise<{ op: string; message?: string }[]>;
+  };
+  const makeRuntime = (date: string) => createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    now: new Date('2026-10-14T12:00:00.000Z'),
+    seed: { Add_Log: [] },
+  }).context({ record: { Volunteered_Log: [{ Event_Dates: date }] } });
+  const future = await mod.clientActions(makeRuntime('2026-10-15'));
+  assert.deepEqual(future, [
+    { op: 'alert', message: "Sorry Logs can't be added to Future Dates" },
+    { op: 'cancelSubmit' },
+  ]);
+  const past = await mod.clientActions(makeRuntime('2026-10-13'));
+  assert.deepEqual(past, []);
+});
+
+test('an alert after a comment line keeps its real verdict with a note', () => {
+  const rep = (text: string, event: string) =>
+    JSON.parse(
+      generate(app({ workflows: [workflow({ name: 'W', form: 'Orders', event, deluge: { text, span: Z } })] }))
+        .files.find((f) => f.path === 'migration-report.json')!.source,
+    ) as { alertDiagnostics: AlertDiagnostic[]; untranslated: { construct: string; count: number }[] };
+
+  // A `//` comment line never reaches the parser.
+  const plain = rep('//alert lst.Docket_No;\nx = 1;', 'on success');
+  assert.equal(plain.alertDiagnostics.length, 0);
+  assert.equal(plain.untranslated.filter((u) => u.construct.startsWith('alert-')).length, 0);
+
+  // An ordinary `//` line followed by a live `alert` is NOT a commented
+  // statement: the alert keeps its real verdict and carries an adjacency
+  // note. An empty `//` line (the closest export-wrap shape) is the same.
+  for (const text of ['// Tell the user it saved\nalert "Saved";', '//\nalert lst.Docket_No;\nx = 1;']) {
+    const g = generate(app({
+      workflows: [workflow({ name: 'W', form: 'Orders', event: 'on success', deluge: { text, span: Z } })],
+    }));
+    const r = rep(text, 'on success');
+    assert.equal(r.alertDiagnostics.length, 1, text);
+    assert.equal(r.alertDiagnostics[0].verdict, 'disallowed', text);
+    assert.equal(r.alertDiagnostics[0].note, 'follows-comment-line', text);
+    assert.equal(r.untranslated.find((u) => u.construct === 'alert-outside-allowed-event')?.count, 1, text);
+    assert.equal(r.untranslated.find((u) => u.construct === 'alert-in-commented-source'), undefined, text);
+    assert.doesNotMatch(stripComments(
+      g.files.filter((f) => f.path.startsWith('client/handlers/')).map((f) => f.source).join('\n')),
+      /op: "alert"/,
+      text,
+    );
+  }
+
+  // Without the preceding comment line there is no note.
+  const bare = rep('alert "Saved";', 'on success');
+  assert.equal(bare.alertDiagnostics[0].verdict, 'disallowed');
+  assert.equal(bare.alertDiagnostics[0].note, undefined);
+
+  // The adjacency note also applies in unverified placements.
+  const unv = rep('// Tell the user it saved\nalert "Saved";', 'on add');
+  assert.equal(unv.alertDiagnostics[0].verdict, 'unverified');
+  assert.equal(unv.alertDiagnostics[0].note, 'follows-comment-line');
+
+  // An alert inside a function body is always unverified — callers are not
+  // analysed — and is never blamed on the enclosing event.
+  const fn = rep('void f() { alert "x"; }', 'on success');
+  assert.equal(fn.alertDiagnostics.length, 1);
+  assert.equal(fn.alertDiagnostics[0].verdict, 'unverified');
+});
+
+test('alert diagnostics mark schedules, approvals, blueprints, and functions unverified at any position', () => {
+  const nested = { text: 'x = 1;\nif (x == 1) { alert "a"; }\nalert "b";', span: Z };
+  const g = generate(app({
+    workflows: [
+      workflow({ name: 'Sched', container: 'schedule', event: 'on schedule', deluge: nested }),
+      workflow({
+        name: 'Appr',
+        type: 'approval',
+        event: 'on approve',
+        deluge: { text: 'alert "hi";', span: Z },
+        approvers: [{ key: 'level 1 approver', value: 'zoho.loginuser', span: Z }],
+      }),
+      workflow({
+        name: 'Bp',
+        form: 'Orders',
+        event: 'blueprint',
+        blueprint: {
+          stages: [{ name: 'Draft', properties: [], blocks: [], items: [], span: Z }],
+          transitions: [{
+            name: 'Ship',
+            fromStage: 'Draft',
+            toStage: 'Done',
+            properties: [],
+            phases: [{ phase: 'before', properties: [], blocks: [], deluge: [{ text: 'alert "bp";', span: { start: 10, end: 20 } }], span: Z }],
+            span: Z,
+          }],
+        },
+        deluge: null,
+      }),
+    ],
+    functions: [{ name: 'Fn', kind: 'creator', deluge: [nested], properties: [], span: Z }],
+  }));
+  const rep = JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as
+    { alertDiagnostics: AlertDiagnostic[]; untranslated: { construct: string; count: number }[] };
+  assert.equal(rep.alertDiagnostics.length, 6);
+  const names = rep.alertDiagnostics.map((d) => d.name).sort();
+  assert.deepEqual(names, ['Appr', 'Fn', 'Fn', 'Sched', 'Sched', 'Ship / before']);
+  for (const d of rep.alertDiagnostics) assert.equal(d.verdict, 'unverified', d.name ?? '');
+  assert.equal(rep.untranslated.find((u) => u.construct === 'alert-in-unverified-event')?.count, 6);
+  assert.equal(rep.untranslated.find((u) => u.construct === 'alert-outside-allowed-event'), undefined);
+  for (const f of g.files) assert.doesNotMatch(stripComments(f.source), /op: "alert"/, f.path);
+});
+
+test('gallery alerts: no proven-disallowed placement', { skip: !galleryDir(), timeout: 180000 }, () => {
+  const root = galleryDir();
+  assert.ok(root);
+  const names = readdirSync(root).filter((name) => statSync(join(root, name)).isDirectory());
+  names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const byVerdict = { disallowed: 0, unverified: 0, commented: 0 };
+  const list: string[] = [];
+  for (const name of names) {
+    const project = parseProject(join(root, name));
+    const g = generate(project.ir);
+    const rep = JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as
+      { alertDiagnostics: AlertDiagnostic[] };
+    for (const d of rep.alertDiagnostics) {
+      byVerdict[d.verdict]++;
+      list.push(`${name} ${d.verdict} ${d.event ?? ''} ${d.name ?? ''}`);
+    }
+  }
+  console.log(`gallery alert verdicts ${JSON.stringify(byVerdict)}\n${list.join('\n')}`);
+  assert.equal(byVerdict.disallowed, 0, list.filter((l) => l.includes('disallowed')).join('\n'));
+});
+
+function plainField(name: string, type = 'text', subfields: string[] = []): App['forms'][number]['fields'][number] {
+  return {
+    name,
+    type,
+    modifiers: [],
+    required: false,
+    unique: false,
+    properties: [],
+    subfields: subfields.map((s) => plainField(s)),
+    annotations: [],
+    flags: [],
+    span: Z,
+  };
+}
+
+function plainForm(name: string, fields: App['forms'][number]['fields']): App['forms'][number] {
+  return { name, properties: [], fields, actions: [], blocks: [], span: Z };
+}
+
+test('a for-each-record function reads bare form fields and ID from rec', async () => {
+  const fn: FunctionDef = {
+    name: 'vote',
+    kind: 'creator',
+    form: 'Idea',
+    properties: [{ key: 'execution type', value: 'for each record', span: Z }],
+    deluge: [{ text: 'thisapp.Vote.vote(ID);\nreturn Title + ":" + ID;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Idea', [plainField('Title')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/vote.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /shim\.record\.get\(d_rec, "ID"\)/);
+  assert.match(stripComments(custom.source), /shim\.record\.get\(d_rec, "Title"\)/);
+  assert.doesNotMatch(stripComments(custom.source), /\(ID\)|\+ ID\b/);
+  check(custom.source, 'vote.mjs');
+  const mod = (await loadTree(g, 'functions/custom/vote.mjs')) as Record<string, (ctx: unknown) => Promise<unknown>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const ctx = runtime.context({ record: {}, row: { __row: true, form: 'Idea', values: { ID: '42', Title: 'T' } } });
+  assert.equal(await mod.vote!(ctx), 'T:42');
+});
+
+test('a for-each-record function runs only as its server module: no client twin', () => {
+  const fn: FunctionDef = {
+    name: 'approveTask',
+    kind: 'creator',
+    form: 'Tasks',
+    properties: [{ key: 'execution type', value: 'for each record', span: Z }],
+    deluge: [{ text: 'if (Audit_Require == false) { input.Status = "Closed"; } else { input.Status = "Approved"; }', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Tasks', [plainField('Audit_Require'), plainField('Status')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/approvetask.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /const d_rec = ctx\.row;/);
+  assert.match(stripComments(custom.source), /shim\.input\.set\(ctx, \["Status"\], "Approved"\)/);
+  check(custom.source, 'approvetask.mjs');
+  assert.equal(g.files.some((f) => f.path.startsWith('client/handlers/functions/')), false);
+  assert.deepEqual(g.todos, []);
+});
+
+test('subform row events bind row on the server and the client and write through shim.record', async () => {
+  const deluge = { text: 'if (row.Quantity != null) { row.Total = row.Price * row.Quantity; }', span: Z };
+  const forms = [plainForm('BOM', [plainField('Parts', 'grid', ['Price', 'Quantity', 'Total'])])];
+  const g = generate(
+    app({
+      forms,
+      workflows: [
+        workflow({ name: 'Qty', form: 'BOM', event: 'on user input of Parts.Quantity', deluge }),
+        workflow({ name: 'Add', form: 'BOM', event: 'on add row of Parts', deluge }),
+        workflow({ name: 'Plain', form: 'BOM', event: 'on user input of Parts', deluge: { text: 'x = 1;', span: Z } }),
+      ],
+    }),
+  );
+  // Both input scripts share /forms/BOM/input, so one merged server module
+  // carries them; each client module stays per workflow for the field filter.
+  const inputServer = g.files.find((f) => f.path === 'functions/aio/bom/input-handlers.mjs');
+  assert.ok(inputServer, 'bom/input-handlers');
+  assert.match(stripComments(inputServer.source), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
+  assert.match(stripComments(inputServer.source), /shim\.record\.set\(d_row, \["Total"\], /);
+  assert.match(stripComments(inputServer.source), /var x = 1;|x = 1;/);
+  assert.match(stripComments(inputServer.source), /subformRow: requestSubformRow\(req, "Parts", accepted\)/);
+  check(inputServer.source, 'aio.mjs');
+  for (const base of ['bom/on-user-input-of-parts-quantity', 'bom/on-add-row-of-parts']) {
+    const client = g.files.find((f) => f.path === `client/handlers/${base}.mjs`);
+    assert.ok(client, base);
+    assert.match(stripComments(client.source), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
+    assert.match(stripComments(client.source), /shim\.record\.set\(d_row, \["Total"\], /);
+    assert.doesNotMatch(stripComments(client.source), /\brow\.Quantity\b/);
+    check(client.source, 'client.mjs');
+  }
+  const addRowServer = g.files.find((f) => f.path === 'functions/aio/bom/on-add-row-of-parts.mjs');
+  assert.ok(addRowServer);
+  assert.match(stripComments(addRowServer.source), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
+  assert.match(stripComments(addRowServer.source), /subformRow: requestSubformRow\(req, "Parts", accepted\)/);
+  check(addRowServer.source, 'aio.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/bom/on-user-input-of-parts-quantity.mjs')!;
+  const mod = (await loadModule(client.source, 'qty.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<unknown>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const record = { Parts: [{ Price: 2, Quantity: 3 }, { Price: 5, Quantity: 1 }] };
+  await mod.clientActions!(runtime.context({ record, subformRow: { field: 'Parts', index: 1 } }));
+  assert.deepEqual(record.Parts, [{ Price: 2, Quantity: 3 }, { Price: 5, Quantity: 1, Total: 5 }]);
+  // No row named by the request: row is null, reads are null-safe and nothing is written.
+  const bare = { Parts: [{ Price: 2, Quantity: 3 }] };
+  await mod.clientActions!(runtime.context({ record: bare }));
+  assert.deepEqual(bare.Parts, [{ Price: 2, Quantity: 3 }]);
+});
+
+test('a subform row event prefetch binds row from body.subformRow', async () => {
+  const g = generate(
+    app({
+      forms: [plainForm('BOM', [plainField('Parts', 'grid', ['Course', 'Pct'])])],
+      workflows: [
+        workflow({
+          name: 'Pct',
+          form: 'BOM',
+          event: 'on user input of Parts.Pct',
+          deluge: { text: 'min = Rules[Course == row.Course].Min;\nif (row.Pct < min) { alert "low"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const pre = g.files.find((f) => f.path === 'functions/aio/bom/on-user-input-of-parts-pct-prefetch.mjs');
+  assert.ok(pre);
+  assert.match(stripComments(pre.source), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
+  assert.match(stripComments(pre.source), /subformRow: requestSubformRow\(req, "Parts", record\)/);
+  check(pre.source, 'pre.mjs');
+  const mod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC', seed: { Rules: [{ ROWID: '1', Course: 'X', Min: 50 }] } });
+  const record = { Parts: [{ Course: 'X', Pct: 40 }] };
+  const slots = await mod.prefetch!(runtime.context({ record, subformRow: { field: 'Parts', index: 0 } }));
+  assert.ok(Object.values(slots).includes(true));
+});
+
+test('a form-typed parameter reads and writes through shim.record: first record, null-safe', async () => {
+  // <collection_variable>.<field_link_name> is the first record of the collection
+  // (deluge-docs/pages/data-access__update-records.html).
+  const fn: FunctionDef = {
+    name: 'approve',
+    kind: 'creator',
+    form: 'Visa',
+    signature: 'void CustomAction.approve(Visa visaDetails, string note)',
+    properties: [],
+    deluge: [{ text: 'if (visaDetails.Status == "Requested") { visaDetails.Status = "Approved"; }\nreturn visaDetails.Employee.Name;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Visa', [plainField('Status'), plainField('Employee')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/approve.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /shim\.record\.get\(visaDetails, "Status"\)/);
+  assert.match(stripComments(custom.source), /shim\.record\.set\(visaDetails, \["Status"\], "Approved"\)/);
+  assert.match(stripComments(custom.source), /shim\.record\.get\(visaDetails, "Employee", "Name"\)/);
+  assert.doesNotMatch(stripComments(custom.source), /visaDetails\.Status/);
+  check(custom.source, 'approve.mjs');
+  const mod = (await loadModule(custom.source, 'approve.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const ctx = runtime.context({ record: {} });
+  // A null record: reads are null, the write has no record to update, nothing throws.
+  assert.equal(await mod.approve!(ctx, null, 'n'), null);
+  const first = { Status: 'Requested', Employee: { Name: 'Ada' } };
+  const second = { Status: 'Requested', Employee: { Name: 'Bea' } };
+  assert.equal(await mod.approve!(ctx, [first, second], 'n'), 'Ada');
+  assert.equal(first.Status, 'Approved');
+  assert.equal(second.Status, 'Requested');
+  assert.equal(await mod.approve!(ctx, [], 'n'), null);
+});
+
+test('a collection-of-records function names its selected records by the form and reads bare fields from the first', async () => {
+  const fn: FunctionDef = {
+    name: 'Approve2',
+    kind: 'creator',
+    form: 'Visa',
+    properties: [{ key: 'execution type', value: 'collection of records', span: Z }],
+    deluge: [{ text: 'thisapp.CustomAction.approve(Visa);\nVisa.Status = "Seen";\nreturn Status + ":" + ID;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Visa', [plainField('Status')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/approve2.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /const d_recs = ctx\.row;/);
+  assert.match(stripComments(custom.source), /\["CustomAction","approve"\], \[d_recs\]/);
+  assert.match(stripComments(custom.source), /shim\.record\.set\(d_recs, \["Status"\], "Seen"\)/);
+  assert.match(stripComments(custom.source), /shim\.record\.get\(d_recs, "ID"\)/);
+  assert.match(stripComments(custom.source), /collection of records/);
+  assert.doesNotMatch(stripComments(custom.source), /\[Visa\]|\bID\)|\+ ID\b/);
+  check(custom.source, 'approve2.mjs');
+  const mod = (await loadModule(custom.source, 'approve2.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<unknown>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const rows = [{ ID: '7', Status: 'Open' }, { ID: '8', Status: 'Open' }];
+  const ctx = runtime.context({ record: {}, row: rows as never });
+  assert.equal(await mod.Approve2!(ctx), 'Seen:7');
+  assert.equal(rows[1]!.Status, 'Open');
+});
+
+test('generator-owned identifiers are reserved: Deluge params named like them become d_*', () => {
+  // A Deluge parameter named like a generated local collided with the emitted
+  // `const`/`ctx` and produced "SyntaxError: Identifier 'shim' has already been
+  // declared" in the prefetch and client modules. All of them rename to d_*.
+  const fn: FunctionDef = {
+    name: 'Clash',
+    kind: 'creator',
+    form: 'Orders',
+    signature:
+      'void Clash(string ctx, string shim, string slots, string actions, string prefetched, string record, string principal, string runtime, string rec, string recs, string row)',
+    properties: [],
+    deluge: [
+      {
+        text: 'y = Orders[Code == shim].ID;\nif (Orders[Code == slots].count() > 0) { info actions + prefetched + record + principal + runtime + rec + recs + row + ctx; }',
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/clash.mjs');
+  assert.ok(custom);
+  // A function has no client half: the condition and its info run in the
+  // server module, so every renamed parameter is read there.
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/clash-prefetch.mjs' || f.path === 'client/handlers/functions/clash.mjs'), false);
+  const renamed = 'd_ctx, d_shim, d_slots, d_actions, d_prefetched, d_record, d_principal, d_runtime, d_rec, d_recs, d_row';
+  assert.match(stripComments(custom.source), new RegExp(`Clash\\(ctx, ${renamed}\\)`));
+  assert.match(stripComments(custom.source), /shim\.log\.info\(ctx, [^\n]*d_actions[^\n]*d_prefetched[^\n]*d_record[^\n]*d_principal[^\n]*d_runtime[^\n]*d_rec[^\n]*d_recs[^\n]*d_row[^\n]*d_ctx\)/);
+  for (const file of g.files.filter((f) => f.path.endsWith('.mjs'))) {
+    check(file.source, file.path.replace(/[^\w.]+/g, '_') || 'clash.mjs');
+  }
+});
+
+test('loop variables and locals named like generated bindings rename, so every module parses', () => {
+  // An on-load workflow carries the client loops: a function has no client half.
+  const deluge = {
+    text: [
+      'for each actions in {"a","b"} { info actions; }',
+      'for each slots in {"a","b"} { info slots; }',
+      'for each shim in {"a","b"} { info shim; }',
+      'for each index i ctx in {"a","b"} { info ctx; }',
+      'record = "r";',
+      'principal = "p";',
+      'runtime = "t";',
+      'prefetched = "s";',
+      'slots = list();',
+      'slots.add("s2");',
+    ].join('\n'),
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('F', [])], workflows: [workflow({ name: 'LoopClash', form: 'F', event: 'on load', deluge })] }));
+  const custom = g.files.find((f) => f.path === 'functions/aio/f/on-load.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/f/on-load.mjs');
+  assert.ok(custom && client);
+  assert.match(stripComments(client.source), /for \(var d_actions of shim\.each/);
+  assert.match(stripComments(client.source), /for \(var d_slots of shim\.each/);
+  assert.match(stripComments(client.source), /for \(var d_shim of shim\.each/);
+  assert.match(stripComments(client.source), /for \(var \[i, d_ctx\] of shim\.each/);
+  assert.match(stripComments(custom.source), /var d_record = "r";/);
+  assert.match(stripComments(custom.source), /var d_principal = "p";/);
+  assert.match(stripComments(custom.source), /var d_runtime = "t";/);
+  assert.match(stripComments(custom.source), /var d_prefetched = "s";/);
+  // A plain local named `slots` renames too: the generated prefetch binding is
+  // also `slots`, and a bare local collided with it (public-corpus Kimbo:
+  // "Identifier 'slots' has already been declared" in the prefetch modules).
+  assert.match(stripComments(custom.source), /var d_slots = \[\];/);
+  assert.match(stripComments(custom.source), /shim\.list\.add\(d_slots, "s2"\)/);
+  for (const file of g.files.filter((f) => f.path.endsWith('.mjs'))) {
+    check(file.source, file.path.replace(/[^\w.]+/g, '_') || 'loop.mjs');
+  }
+});
+
+test('a for-each loop variable named row does not collide with the subform row binding', () => {
+  // `for each index i row` emits `var [i, d_row]` — the binding check must see
+  // through the destructured pair, not only a bare `var row`.
+  const g = generate(
+    app({
+      forms: [plainForm('BOM', [plainField('Parts', 'grid', ['Quantity', 'Total'])])],
+      workflows: [
+        workflow({
+          name: 'Qty',
+          form: 'BOM',
+          event: 'on user input of Parts.Quantity',
+          deluge: { text: 'for each index i row in {"a","b"} { x = row; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/bom/on-user-input-of-parts-quantity.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/bom/on-user-input-of-parts-quantity.mjs');
+  assert.ok(server && client);
+  for (const src of [server.source, client.source]) check(src, 'subform-clash.mjs');
+});
+
+test('a for-each-record function parameter named rec does not collide with the row binding', () => {
+  const fn: FunctionDef = {
+    name: 'SumRec',
+    kind: 'creator',
+    form: 'Orders',
+    signature: 'string SumRec(string rec)',
+    properties: [{ key: 'execution type', value: 'for each record', span: Z }],
+    deluge: [{ text: 'return rec;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Orders', [])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/sumrec.mjs');
+  assert.ok(custom);
+  // `rec` is the row binding name; the parameter is d_rec and wins it.
+  assert.match(stripComments(custom.source), /SumRec\(ctx, d_rec\)/);
+  check(custom.source, 'sumrec.mjs');
+});
+
+test('for each over a form-typed parameter is a record loop: record.set and one flush', async () => {
+  // "update every record" on a collection parameter
+  // (deluge-docs/pages/data-access__update-records.html): v.Field = x is a
+  // record write on each row, not a raw property assignment that loses the value.
+  const fn: FunctionDef = {
+    name: 'Touch',
+    kind: 'creator',
+    form: 'Visa',
+    signature: 'void Touch(Visa visaDetails)',
+    properties: [],
+    deluge: [{ text: 'for each v in visaDetails { v.Status = "Touched"; }\nreturn visaDetails.Status;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Visa', [plainField('Status')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/touch.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /for \(var v of shim\.each\(ctx, visaDetails\)\)/);
+  assert.match(stripComments(custom.source), /shim\.record\.set\(v, \["Status"\], "Touched"\)/);
+  assert.match(stripComments(custom.source), /await shim\.datastore\.flush\(ctx\)/);
+  assert.doesNotMatch(stripComments(custom.source), /v\.Status = "Touched"|v\["Status"\] = "Touched"/);
+  check(custom.source, 'touch.mjs');
+  const mod = (await loadModule(custom.source, 'touch.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const rows = [{ Status: 'a' }, { Status: 'b' }];
+  const ctx = runtime.context({ record: {} });
+  assert.equal(await mod.Touch!(ctx, rows), 'Touched');
+  assert.deepEqual(rows, [{ Status: 'Touched' }, { Status: 'Touched' }]);
+});
+
+test('for each over the selected records — by binding or form name — is a record loop, and Form.count() counts the selection', async () => {
+  const fn: FunctionDef = {
+    name: 'Approve',
+    kind: 'creator',
+    form: 'Visa',
+    properties: [{ key: 'execution type', value: 'collection of records', span: Z }],
+    deluge: [
+      {
+        text: 'for each v in Visa { v.Status = "Seen"; }\nfor each w in recs { w.Status = "Done"; }\nreturn Visa.count();',
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Visa', [plainField('Status')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/approve.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /for \(var v of shim\.each\(ctx, d_recs\)\)/);
+  assert.match(stripComments(custom.source), /shim\.record\.set\(v, \["Status"\], "Seen"\)/);
+  assert.match(stripComments(custom.source), /for \(var w of shim\.each\(ctx, d_recs\)\)/);
+  assert.match(stripComments(custom.source), /shim\.record\.set\(w, \["Status"\], "Done"\)/);
+  // The selection's count — not a whole-table datastore.aggregate over Visa.
+  assert.match(stripComments(custom.source), /\(d_recs \? \(Array\.isArray\(d_recs\) \? d_recs\.length : 1\) : 0\)/);
+  assert.doesNotMatch(stripComments(custom.source), /datastore\.aggregate/);
+  check(custom.source, 'approve.mjs');
+  const mod = (await loadModule(custom.source, 'approve.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<unknown>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const rows = [{ Status: 'a' }, { Status: 'b' }, { Status: 'c' }];
+  const ctx = runtime.context({ record: {}, row: rows as never });
+  assert.equal(await mod.Approve!(ctx), 3);
+  assert.deepEqual(rows.map((row) => row.Status), ['Done', 'Done', 'Done']);
+});
+
+test('a function has no client half: no client module, prefetch or call endpoint, and no client-split todos', () => {
+  // Neither UI target loads client/handlers/functions/*, so a function's
+  // client half never runs. Its condition and loop run in the server module.
+  // A single raw openUrl(...) body is now classified by classifyClientOpenUrl
+  // (always either supported client navigation or a counted unsupported-target
+  // todo, never silently absent) — so this fixture, whose target form does not
+  // exist in the app below, uses a comment-only body to keep exercising the
+  // generic "no client/server/prefetch code produced" no-split path.
+  const fn: FunctionDef = {
+    name: 'OpenForm.Review',
+    kind: 'creator',
+    signature: 'void OpenForm.Review(int recID)',
+    properties: [],
+    deluge: [{ text: '// not yet implemented', span: Z }],
+    span: Z,
+  };
+  const reads: FunctionDef = {
+    name: 'Check',
+    kind: 'creator',
+    signature: 'void Check(int recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'for each o in Orders[Code == recID] { info o.Code; }',
+          'if (Orders[Code == recID].count() > 0) { openUrl("#Report:Orders", "same window"); }',
+          'if (Orders[Code == thisapp.Pick(recID)].count() > 0) { insert into Orders [ Code = "x" ]; }',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const pick: FunctionDef = { name: 'Pick', kind: 'creator', signature: 'string Pick(int recID)', properties: [], deluge: [{ text: 'return Orders[Code == recID].Code;', span: Z }], span: Z };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [fn, reads, pick] }));
+  assert.deepEqual(
+    g.files.filter((f) => f.path.startsWith('client/') || f.path.endsWith('-prefetch.mjs') || f.path.endsWith('-call.mjs')).map((f) => f.path),
+    [],
+  );
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/openform-review.mjs'), false);
+  const check = g.files.find((f) => f.path === 'functions/custom/check.mjs')!;
+  assert.ok(check);
+  assert.match(stripComments(check.source), /shim\.log\.info\(ctx, shim\.record\.get\(o, "Code"\)\)/);
+  assert.match(stripComments(check.source), /shim\.datastore\.insert\(/);
+  assert.doesNotMatch(check.source, /actions\.push|client-condition-uses-server|client-loop-uses-server/);
+  // OpenForm.Review's comment-only body produces no server, client, or
+  // prefetch code; the generator counts it as a todo instead of leaving it a
+  // silent drop.
+  assert.deepEqual(g.todos.map((t) => t.construct), ['function-untranslated']);
+});
+
+test('a function that reads a value then conditionally navigates is a counted manual item, not a silent drop', () => {
+  // The real-world Approval_Management gallery app shape: a function runs a
+  // server-only guard read, builds the target URL into a local, then
+  // conditionally calls openUrl. The guard read means `server` is never
+  // empty, so the whole-body openUrl classification used to never even run —
+  // the navigation vanished with no server code change and no todo.
+  const vote: FunctionDef = {
+    name: 'Vote.vote',
+    kind: 'creator',
+    signature: 'void Vote.vote(int record_id)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'user_count = Employees[Email_Id == zoho.loginuserid].count();',
+          'if(user_count == 1)',
+          '{',
+          '\turl = "#Page:Voting_Page?Idea=" + record_id;',
+          '\topenUrl(url,"new window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Employees', [plainField('Email_Id')])], functions: [vote] }));
+  const module = g.files.find((f) => f.path === 'functions/custom/vote-vote.mjs');
+  assert.ok(module, 'the guard read still produces a server module');
+  assert.match(module!.source, /shim\.datastore\.aggregate/);
+  assert.doesNotMatch(module!.source, /Client action openUrl/);
+  const todo = g.todos.find((t) => t.construct === 'openurl-dropped-with-server-logic');
+  assert.ok(todo, 'the dropped navigation is a counted manual item');
+  assert.match(todo!.manualStep ?? '', /Vote\.vote/);
+  assert.match(todo!.manualStep ?? '', /Voting_Page/);
+});
+
+test('an if/else of own-app openUrl on a form-typed param is client navigation, not function-untranslated', () => {
+  const rejectTravel: FunctionDef = {
+    name: 'CustomAction.rejectTravel',
+    kind: 'deluge',
+    signature: 'void CustomAction.rejectTravel(New_Travel_Request travelDetails)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'if(travelDetails.Status == "Requested")',
+          '{',
+          'openUrl("#Form:Add_Remarks?recID=" + travelDetails.ID + "&&OrginFrom=Travel&&Status=Rejected By Manager","popup window");',
+          '}',
+          'else if(travelDetails.Status == "InProgress")',
+          '{',
+          'openUrl("#Form:Add_Remarks?recID=" + travelDetails.ID + "&&OrginFrom=Travel&&Status=Rejected","popup window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const driverAssignments: FunctionDef = {
+    name: 'CustomAction.driverAssignments',
+    kind: 'deluge',
+    signature: 'void CustomAction.driverAssignments(Add_Vehicle vehicleDetails)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'if(vehicleDetails.Driver == null)',
+          '{',
+          'openUrl("#Form:Assign_Driver?Vehicle=" + vehicleDetails.ID,"Popup window");',
+          '}',
+          'else',
+          '{',
+          'openUrl("#Form:Unassign_Driver?Vehicle=" + vehicleDetails.ID,"Popup window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [
+        plainForm('New_Travel_Request', [plainField('Status')]),
+        plainForm('Add_Remarks', [plainField('recID'), plainField('OrginFrom'), plainField('Status')]),
+        plainForm('Add_Vehicle', [plainField('Driver')]),
+        plainForm('Assign_Driver', [plainField('Vehicle')]),
+        plainForm('Unassign_Driver', [plainField('Vehicle')]),
+      ],
+      functions: [rejectTravel, driverAssignments],
+    }),
+  );
+  const rejectMod = g.files.find((f) => f.path === 'functions/custom/customaction-rejecttravel.mjs');
+  const driverMod = g.files.find((f) => f.path === 'functions/custom/customaction-driverassignments.mjs');
+  assert.ok(rejectMod);
+  assert.ok(driverMod);
+  assert.match(rejectMod.source, /Client action openUrl: executed in client navigation/);
+  assert.match(driverMod.source, /Client action openUrl: executed in client navigation/);
+  assert.equal(g.todos.some((t) => t.construct === 'function-untranslated'), false);
+  assert.equal(g.todos.some((t) => t.construct === 'openurl-unsupported-target'), false);
+});
+
+test('a form workflow keeps its client half and its client-split todos', () => {
+  // The negative of the function rule: the same reads in a browser-run event
+  // stay a client module, a prefetch, and a counted client-split todo.
+  const deluge = {
+    text: [
+      'if (Orders[Code == input.Code].count() > 0) { openUrl("#Report:Orders", "same window"); }',
+      'if (thisapp.Write(input.Code)) { info "x"; }',
+    ].join('\n'),
+    span: Z,
+  };
+  const write: FunctionDef = { name: 'Write', kind: 'creator', signature: 'bool Write(string c)', properties: [], deluge: [{ text: 'insert into Orders [ Code = c ];\nreturn true;', span: Z }], span: Z };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [write], workflows: [workflow({ name: 'Load', form: 'Orders', event: 'on load', deluge })] }));
+  assert.ok(g.files.some((f) => f.path === 'client/handlers/orders/on-load.mjs'));
+  assert.ok(g.files.some((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs'));
+  assert.deepEqual(g.todos.map((t) => t.construct), ['client-condition-uses-server']);
+});
+
+test('a schedule has no client half: its server reads are not client-split todos', () => {
+  const deluge = {
+    text: [
+      'for each o in Orders[Code == "a"] { if (Orders[Code == o.Code].count() > 1) { info o.Code; } }',
+      'if (Orders[Code == "b"].count() > 0) { openUrl("#Report:Orders", "same window"); }',
+    ].join('\n'),
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Code')])],
+      workflows: [workflow({ name: 'Nightly', type: 'schedule', form: 'Orders', event: 'schedule', deluge })],
+    }),
+  );
+  const job = g.files.find((f) => f.path === 'functions/job/nightly.mjs');
+  assert.ok(job);
+  assert.match(stripComments(job.source), /shim\.log\.info\(ctx, shim\.record\.get\(o, "Code"\)\)/);
+  assert.equal(g.files.some((f) => f.path.startsWith('client/')), false);
+  // schedule-start is the missing start property, unrelated to the body.
+  assert.deepEqual(g.todos.map((t) => t.construct).filter((c) => c !== 'schedule-start'), []);
+});
+
+test('body.args are untrusted: plain JSON per parameter, never a forged row, query or binding', async () => {
+  // Same discipline as requestSubformRow: the client names values, the server decides what they are.
+  const reads: FunctionDef = {
+    name: 'Check',
+    kind: 'creator',
+    signature: 'void Check(int recID, string note)',
+    properties: [],
+    deluge: [{ text: 'if (Orders[Code == recID].count() > 0) { openUrl("#Report:Orders", "same window"); }', span: Z }],
+    span: Z,
+  };
+  const record: FunctionDef = {
+    name: 'Peek',
+    kind: 'creator',
+    signature: 'string Peek(Visa visaDetails)',
+    properties: [],
+    deluge: [{ text: 'return visaDetails.Status;', span: Z }],
+    span: Z,
+  };
+  // Peek is published by an admin-scoped `api` block, so it has an HTTP route (an
+  // unpublished custom function has none); the Administrator gate runs first.
+  const g = generate(
+    app({
+      forms: [plainForm('Visa', [plainField('Status')])],
+      functions: [reads, record],
+      profiles: [ADMIN],
+      apis: [apiBlock('Peek_Api', 'r = thisapp.Peek(null)', [{ key: 'scope', value: '"Admin only"' }])],
+    }),
+  );
+  const peek = g.files.find((f) => f.path === 'functions/custom/peek.mjs')!;
+  assert.ok(peek);
+  // A function has no client half, so Check has no prefetch: the published
+  // route is the one place body.args reach a function.
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/check-prefetch.mjs'), false);
+  assert.match(stripComments(peek.source), /argsList = requestArgs\(req, 1\);[\s\S]*Peek\(ctx, \.\.\.argsList\)/);
+  assert.doesNotMatch(stripComments(peek.source), /req\.body\.args|req\?\.body\?\.args/);
+  const helper = /function plainJsonArg\([\s\S]*?function requestArgs\([\s\S]*?\n}\n/.exec(peek.source)![0];
+  // A request body is JSON parsed in the handler's own realm.
+  const realm = vm.createContext({});
+  const requestArgs = vm.runInContext(`${helper} requestArgs`, realm) as (req: unknown, count: number) => unknown[];
+  const parse = vm.runInContext('JSON.parse', realm) as (text: string) => unknown;
+  const args = (body: unknown, count = 2) => JSON.stringify(requestArgs({ body: parse(JSON.stringify(body)) }, count));
+  assert.equal(args({ args: [5, 'x'] }), '[5,"x"]');
+  // One per declared parameter: extras are dropped, missing ones are null.
+  assert.equal(args({ args: [5, 'x', 'extra'] }), '[5,"x"]');
+  assert.equal(args({ args: [5] }), '[5,null]');
+  assert.equal(args({ args: 'nope' }), '[null,null]');
+  assert.equal(args(null), '[null,null]');
+  assert.equal(args({ args: [{ Status: 'ok', tags: ['a', 1, true, null] }] }, 1), '[{"Status":"ok","tags":["a",1,true,null]}]');
+  // Runtime brands, at any depth, are not data the client may send.
+  assert.equal(args({ args: [{ __row: true, form: 'Visa', values: { Status: 'Forged' } }] }, 1), '[null]');
+  assert.equal(args({ args: [{ __query: true, form: 'Payroll', criteria: { op: 'true' } }] }, 1), '[null]');
+  assert.equal(args({ args: [{ Code: { __bind: 'loginUser' } }] }, 1), '[null]');
+  assert.equal(args({ args: [[{ __c2c: 'dry-run-record' }]] }, 1), '[null]');
+  assert.equal(JSON.stringify(requestArgs({ body: parse('{"args":[{"__proto__":{"admin":true}}]}') }, 1)), '[null]');
+  // Non-JSON values (a non-plain object, a non-finite number) and runaway nesting.
+  assert.equal(JSON.stringify(requestArgs({ body: { args: [Number.NaN, new Date(0)] } }, 2)), '[null,null]');
+  let deep: unknown = 1;
+  for (let i = 0; i < 40; i++) deep = [deep];
+  assert.equal(args({ args: [deep] }, 1), '[null]');
+  // "deeper than 16 is null": 16 nested containers pass, the 17th rejects.
+  let edge: unknown = 'x';
+  for (let i = 0; i < 16; i++) edge = [edge];
+  assert.equal(args({ args: [edge] }, 1), JSON.stringify([edge]));
+  assert.equal(args({ args: [[edge]] }, 1), '[null]');
+
+  // End to end: a form-typed parameter cannot be handed a forged fetched row.
+  check(peek.source, 'peek.mjs');
+  const mod = await loadModule(peek.source, 'peek.mjs');
+  const caller = { user: { profile: 'Administrator', email: 'a@example.com' } };
+  const forged = await invoke(mod.default, { ...caller, body: { args: [{ __row: true, form: 'Visa', values: { Status: 'Forged' } }] } });
+  assert.equal(forged.status, 200);
+  assert.equal(forged.body.result, null);
+  assert.equal(JSON.stringify(forged.body).includes('Forged'), false);
+  const plain = await invoke(mod.default, { ...caller, body: { args: [{ Status: 'Client' }] } });
+  assert.equal(plain.body.result, 'Client');
+});
+
+test('approver.submitter in an approval script emits the submitter read, other approver.<x> emit todo', async () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Orders', [])
+      ],
+      workflows: [
+        workflow({
+          name: 'Order_Approval',
+          form: 'Orders',
+          event: 'on level 1 / on approve',
+          type: 'approval',
+          deluge: { text: 'if (approver.submitter == "userA") { sendmail [ from: zoho.adminuserid to: approver.submitter subject: "Approved" message: "ok" ]; } else { approver.manager; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  const flow = g.files.filter((f) => f.path.startsWith('functions/flow/') && f.path.endsWith('.mjs'));
+  assert.ok(flow.length);
+  for (const f of flow) {
+    assert.match(stripComments(f.source), /\(ctx\.approver\?\.submitter \?\? null\)/, f.path);
+    check(f.source, 'flow.mjs');
+  }
+  assert.ok(flow.some((f) => f.source.includes('shim.todo(ctx, "approval-approver")')));
+  assert.ok(g.todos.some((t) => t.construct === 'approval-approver'));
+});
+
+test('approver.submitter reads the newest submit history row for the record', async () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [])],
+      profiles: [
+        { name: 'Read', type: 'Users_Permissions', properties: [], modules: [], span: Z },
+      ],
+      workflows: [
+        workflow({
+          name: 'Order_Approval',
+          form: 'Orders',
+          event: 'on level 1 / on approve',
+          type: 'approval',
+          deluge: { text: 'return approver.submitter;', span: Z },
+        }),
+      ],
+    }),
+  );
+  const flowFile = g.files.find((f) => f.path === 'functions/flow/order-approval.mjs');
+  assert.ok(flowFile);
+  const mod = (await loadModule(flowFile.source, 'flow.mjs')) as Record<string, any>;
+  const historyTable = mod.machine.historyTable as string;
+  assert.ok(historyTable);
+  const historyRow = (rowid: string, recordId: string, actor: string, from = '') => ({
+    ROWID: rowid,
+    Machine: 'Order_Approval',
+    Form: 'Orders',
+    Record_ID: recordId,
+    Action: 'submit',
+    Name: '',
+    From_Status: from,
+    To_Status: 'Pending',
+    Actor: actor,
+  });
+  const store = mockDatastore({});
+  store.tables.set('Orders', [
+    { ROWID: '123', Status: 'Pending' },
+    { ROWID: '124', Status: 'Pending' },
+  ]);
+  // Two records, two submitters; record 123 also has an older submit row from
+  // before a rejection, so the resubmission (higher ROWID) is the submitter.
+  store.tables.set(historyTable, [
+    historyRow('10', '123', 'first_user'),
+    historyRow('11', '124', 'second_user'),
+    historyRow('12', '123', 'resub_user', 'Rejected'),
+  ]);
+  const caller = (rowid: string) => ({
+    // The caller's profile can read Orders but has no grant on the generated
+    // history table: the machine's own history read is what fills submitter.
+    user: { profile: 'Read', loginUser: 'approver1' },
+    url: '/flows/Order_Approval/approve',
+    body: { ROWID: rowid },
+  });
+  const globalStore = globalThis as { __c2cDatastore?: unknown };
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'UTC';
+  try {
+    globalStore.__c2cDatastore = store.datastore;
+    const resub = await invoke(mod.approve, caller('123'));
+    assert.equal(resub.status, 200, JSON.stringify(resub.body));
+    assert.equal(resub.body.result, 'resub_user');
+    const other = await invoke(mod.approve, caller('124'));
+    assert.equal(other.status, 200, JSON.stringify(other.body));
+    assert.equal(other.body.result, 'second_user');
+
+    // No submit row for the record: submitter is null, not an error.
+    store.tables.get('Orders')!.push({ ROWID: '125', Status: 'Pending' });
+    const none = await invoke(mod.approve, caller('125'));
+    assert.equal(none.status, 200, JSON.stringify(none.body));
+    assert.equal(none.body.result, null);
+
+    // A missing history table reads as no history; any other store error fails.
+    const boom = new Error('store unavailable');
+    const missing = {
+      ...store.datastore,
+      async query(form: string, where: string, limit: number, offset?: number, orderBy?: string) {
+        if (form === historyTable) {
+          const err = new Error(`Data Store query failed: table ${form} does not exist`) as Error & { statusCode?: number };
+          err.statusCode = 404;
+          throw err;
+        }
+        return store.datastore.query(form, where, limit, offset, orderBy);
+      },
+    };
+    const broken = {
+      ...store.datastore,
+      async query(form: string, where: string, limit: number, offset?: number, orderBy?: string) {
+        if (form === historyTable) throw boom;
+        return store.datastore.query(form, where, limit, offset, orderBy);
+      },
+    };
+    // A missing table and a failing read are checked on records that still
+    // sit at the start stage (an earlier approve moved their stage on).
+    store.tables.get('Orders')!.push({ ROWID: '126', Status: 'Pending' }, { ROWID: '127', Status: 'Pending' });
+    store.tables.get(historyTable)!.push(historyRow('13', '126', 'pending_user'), historyRow('14', '127', 'pending_user'));
+    globalStore.__c2cDatastore = missing;
+    const noTable = await invoke(mod.approve, caller('126'));
+    assert.equal(noTable.status, 200, JSON.stringify(noTable.body));
+    assert.equal(noTable.body.result, null);
+    globalStore.__c2cDatastore = broken;
+    const failed = await invoke(mod.approve, caller('127'));
+    assert.equal(failed.status, 500, JSON.stringify(failed.body));
+  } finally {
+    delete globalStore.__c2cDatastore;
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+  }
+});
+
+test('a reserved-word parameter and a reassigned for-each variable still parse', () => {
+  const fn: FunctionDef = {
+    name: 'indexCalculation',
+    kind: 'creator',
+    signature: 'int indexCalculation(string var)',
+    properties: [],
+    deluge: [{ text: 'n = 0;\nfor each text in var.toList(",") { text = text.trim(); if (text != "") { n = n + 1; } }\nreturn n;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/indexcalculation.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /export async function indexCalculation\(ctx, d_var\)/);
+  assert.match(stripComments(custom.source), /for \(var text of shim\.each\(/);
+  check(custom.source, 'index.mjs');
+});
+
+test('a for-each-record function names its current record by the form', async () => {
+  const fn: FunctionDef = {
+    name: 'Cancel',
+    kind: 'creator',
+    form: 'Application',
+    properties: [{ key: 'execution type', value: 'for each record', span: Z }],
+    deluge: [{ text: 'thisapp.Application.Cancel(Application);\nreturn Application.Status;', span: Z }],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Application', [plainField('Status')])], functions: [fn] }));
+  const custom = g.files.find((f) => f.path === 'functions/custom/cancel.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /\["Application","Cancel"\], \[d_rec\]/);
+  assert.match(stripComments(custom.source), /return shim\.record\.get\(d_rec, "Status"\);/);
+  check(custom.source, 'cancel.mjs');
+  const mod = (await loadModule(custom.source, 'cancel.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<unknown>>;
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const ctx = runtime.context({ record: {}, row: { __row: true, form: 'Application', values: { ID: '1', Status: 'Open' } } });
+  assert.equal(await mod.Cancel!(ctx), 'Open');
+});
+
+test('migration-report.json carries the deterministic flag, todoCount and fillLockEntries', async () => {
+  const { acceptTodo, collectTasks, readLock } = await import('../src/fill-todos.js');
+  type Flag = { deterministic: boolean; todoCount: number; fillLockEntries: number; untranslated: { construct: string; count: number }[] };
+  const flagOf = (g: ReturnType<typeof generate>) => JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as Flag;
+  const text = 'x = unknownCall().getDay();';
+  const dirty = app({ workflows: [workflow({ name: 'On add', form: 'Orders', event: 'on success', deluge: { text, span: { start: 0, end: text.length } } })] });
+  const clean = flagOf(generate(app({})));
+  assert.deepEqual([clean.deterministic, clean.todoCount, clean.fillLockEntries], [true, 0, 0]);
+  const plain = flagOf(generate(dirty));
+  assert.equal(plain.deterministic, false);
+  assert.equal(plain.todoCount, plain.untranslated.reduce((sum, kind) => sum + kind.count, 0));
+  assert.ok(plain.todoCount > 0);
+  assert.equal(plain.fillLockEntries, 0);
+  const task = collectTasks(dirty).find((item) => item.role !== 'note');
+  assert.ok(task);
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-flag-lock-'));
+  try {
+    const lockPath = join(dir, 'c2c.lock.json');
+    await acceptTodo({ app: dirty, taskId: task.id, fill: 'shim.input.get(ctx, "A")', lockPath });
+    const filled = flagOf(generate(dirty, { lock: readLock(lockPath), stale: [] }));
+    assert.equal(filled.fillLockEntries, 1);
+    assert.equal(filled.deterministic, false);
+    assert.equal(filled.todoCount, plain.todoCount);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('on add row is a subform form event: no record insert, no submit route, script runs without a write', () => {
+  // Creator lists "Subform on add row" beside On Load and On User input, apart from
+  // On Validate and On Success (deluge-docs/pages/miscellaneous__access-subform-fields.html).
+  const forms = [plainForm('BOM', [plainField('Parts', 'grid', ['Price', 'Quantity', 'Total']), plainField('Name')])];
+  const g = generate(
+    app({
+      forms,
+      workflows: [
+        workflow({ name: 'Add', form: 'BOM', event: 'on add row of Parts', deluge: { text: 'row.Total = 1;', span: Z } }),
+        workflow({ name: 'Del', form: 'BOM', event: 'on delete row of Parts', deluge: { text: 'row.Total = 0;', span: Z } }),
+        workflow({ name: 'Save', form: 'BOM', recordEvent: 'on add', event: 'on success', deluge: { text: 'x = input.Name;', span: Z } }),
+      ],
+    }),
+  );
+  const src = (path: string) => g.files.find((f) => f.path === path)?.source ?? '';
+  const addRow = src('functions/aio/bom/on-add-row-of-parts.mjs');
+  assert.ok(addRow);
+  assert.doesNotMatch(stripComments(addRow), /writeLive|shim\.record\.stamp\(ctx, "insert"\)|record\.prepare/);
+  assert.match(stripComments(addRow), /path: "\/forms\/BOM\/addrow"/);
+  assert.match(stripComments(src('functions/aio/bom/on-delete-row-of-parts.mjs')), /path: "\/forms\/BOM\/deleterow"/);
+  // The record's own save still inserts; no row event takes a record route (/submit, /delete).
+  assert.match(stripComments(src('functions/aio/bom/on-success.mjs')), /writeLive/);
+  const routes = g.files.filter((f) => f.path.startsWith('functions/aio/bom/')).map((f) => /path: "([^"]+)"/.exec(f.source)?.[1]);
+  assert.deepEqual(routes.filter((r) => r === '/forms/BOM/submit' || r === '/forms/BOM/delete'), []);
+  // The client handler is not a submit or record-delete handler either.
+  assert.match(stripComments(src('client/handlers/bom/on-add-row-of-parts.mjs')), /"when":"addrow"/);
+  assert.match(stripComments(src('client/handlers/bom/on-delete-row-of-parts.mjs')), /"when":"deleterow"/);
+});
+
+test('requestSubformRow names only a row of this event subform in the screened record', async () => {
+  const g = generate(
+    app({
+      forms: [plainForm('BOM', [plainField('Parts', 'grid', ['Quantity', 'Total']), plainField('Other', 'grid', ['Quantity'])])],
+      workflows: [workflow({ name: 'Qty', form: 'BOM', event: 'on user input of Parts.Quantity', deluge: { text: 'row.Total = row.Quantity;', span: Z } })],
+    }),
+  );
+  for (const path of ['functions/aio/bom/on-user-input-of-parts-quantity.mjs']) {
+    const source = g.files.find((f) => f.path === path)!.source;
+    assert.match(stripComments(source), /subformRow: requestSubformRow\(req, "Parts", accepted\)/);
+    const helper = /function requestSubformRow\([\s\S]*?\n}\n/.exec(source)![0];
+    const requestSubformRow = vm.runInNewContext(`(${helper})`) as (req: unknown, subform: string, record: unknown) => unknown;
+    const record = { Parts: [{ Quantity: 1 }, { Quantity: 2 }], Other: [{ Quantity: 3 }, { Quantity: 4 }, { Quantity: 5 }] };
+    const at = (field: unknown, index: unknown) => requestSubformRow({ body: { subformRow: { field, index } } }, 'Parts', record);
+    assert.equal(JSON.stringify(at('Parts', 1)), '{"field":"Parts","index":1}');
+    // Another subform of the same form is not this event's row.
+    assert.equal(at('Other', 0), undefined);
+    assert.equal(at('Other', 2), undefined);
+    // An index that is not a row of the screened Parts array.
+    assert.equal(at('Parts', 2), undefined);
+    assert.equal(at('Parts', -1), undefined);
+    assert.equal(requestSubformRow({ body: { subformRow: { field: 'Parts', index: 0 } } }, 'Parts', { Parts: ['x'] }), undefined);
+    assert.equal(requestSubformRow({ body: { subformRow: { field: 'Parts', index: 0 } } }, 'Parts', {}), undefined);
+  }
+});
+
+test('translation blocks migrate to the client i18n table; a string-less block with carried settings is no manual step', () => {
+  const g = generate(
+    app({
+      translations: [
+        {
+          json: '{"de":{"FormField.Orders.Title":" Titel ","ReportField.Orders.Status":" Status "}}',
+          data: { de: { 'FormField.Orders.Title': ' Titel ', 'ReportField.Orders.Status': ' Status ' } },
+          span: { start: 0, end: 10 },
+        },
+        {
+          json: '{"fr":{"Language Properties":{"Status":true}}}',
+          data: { fr: { 'Language Properties': { Status: true } } },
+          span: { start: 20, end: 30 },
+        },
+      ],
+    }),
+  );
+  const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
+    construct: string;
+    name: string;
+    note: string;
+  }[];
+  // Both blocks migrate: the de labels land in the i18n table and the fr
+  // block's `Language Properties` are honored in place (an enabled language
+  // with no labels renders the default text the client already shows), so
+  // neither is a warning or a todo.
+  const rows = (warnings ?? []).filter((w) => w.construct === 'translation-not-migrated');
+  assert.equal(rows.length, 0);
+  assert.deepEqual(g.todos.filter((todo) => todo.construct === 'translation'), []);
+});
+
+test('Language_Settings-only translation migrates: the language pick lands on the model', () => {
+  const g = generate(
+    app({
+      translations: [
+        {
+          json: '{"Language_Settings":{"LANGAGUE_WITH_LOGIN":"browser"}}',
+          data: { Language_Settings: { LANGAGUE_WITH_LOGIN: 'browser' } },
+          span: { start: 10, end: 80 },
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(g.todos.filter((todo) => todo.construct === 'translation'), []);
+  const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
+    construct: string;
+  }[];
+  assert.equal((warnings ?? []).filter((w) => w.construct === 'translation-not-migrated').length, 0);
+});
+
+test('an enabled language\'s Auto Translate machine translation stays a counted manual step', () => {
+  const g = generate(
+    app({
+      translations: [
+        {
+          json: '{"fr":{"Language Properties":{"Status":true,"Auto Translate":true}}}',
+          data: { fr: { 'Language Properties': { Status: true, 'Auto Translate': true } } },
+          span: { start: 10, end: 80 },
+        },
+        {
+          json: '{"es":{"Language Properties":{"Status":false,"Auto Translate":true}}}',
+          data: { es: { 'Language Properties': { Status: false, 'Auto Translate': true } } },
+          span: { start: 90, end: 120 },
+        },
+      ],
+    }),
+  );
+  const todos = g.todos.filter((todo) => todo.construct === 'translation');
+  // The enabled fr language's machine translation has no client equivalent;
+  // the disabled es language ships nothing in either app.
+  assert.equal(todos.length, 1);
+  assert.equal(todos[0]!.start, 10);
+  assert.equal(todos[0]!.end, 80);
+  assert.match(todos[0]!.manualStep ?? '', /Auto Translate/);
+  assert.match(todos[0]!.manualStep ?? '', /not migrated/);
+});
+
+test('an unrecognized Language_Settings entry stays a counted manual step', () => {
+  const g = generate(
+    app({
+      translations: [
+        {
+          json: '{"Language_Settings":{"LANGAGUE_WITH_LOGIN":"browser","UNKNOWN_FLAG":true}}',
+          data: { Language_Settings: { LANGAGUE_WITH_LOGIN: 'browser', UNKNOWN_FLAG: true } },
+          span: { start: 10, end: 80 },
+        },
+      ],
+    }),
+  );
+  const todos = g.todos.filter((todo) => todo.construct === 'translation');
+  assert.equal(todos.length, 1);
+  assert.match(todos[0]!.manualStep ?? '', /UNKNOWN_FLAG/);
+  assert.match(todos[0]!.manualStep ?? '', /not migrated/);
+});
+
+test('a translation block with no migratable strings is listed as a manual step, not only a warning', () => {
+  const g = generate(
+    app({
+      translations: [
+        {
+          json: '{"de":{"Language Properties":{"Status":true}},"fr":{"Language Properties":{"Status":true},"Custom Actions":{"Add":{}}}}',
+          data: { de: { 'Language Properties': { Status: true } }, fr: { 'Language Properties': { Status: true }, 'Custom Actions': { Add: {} } } },
+          span: { start: 10, end: 200 },
+        },
+      ],
+    }),
+  );
+  const report = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source) as {
+    deterministic: boolean;
+    untranslated: { construct: string; count: number }[];
+  };
+  const rows = report.untranslated.filter((u) => u.construct === 'translation');
+  assert.deepEqual(rows, [{ construct: 'translation', count: 1 }]);
+  assert.equal(report.deterministic, false);
+  const todo = g.todos.find((item) => item.construct === 'translation');
+  assert.ok(todo);
+  // Only the fr `Custom Actions` entry has no generated equivalent: de's
+  // `Language Properties` are honored in place.
+  assert.match(todo.manualStep ?? '', /the "fr" entry "Custom Actions"/);
+  assert.match(todo.manualStep ?? '', /not migrated/);
+  const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
+    construct: string;
+    name: string;
+    note: string;
+  }[];
+  const warning = (warnings ?? []).find((w) => w.construct === 'translation-not-migrated');
+  assert.ok(warning);
+  assert.equal(warning!.name, 'translation block');
+  assert.match(warning!.note, /the "fr" entry "Custom Actions"/);
+  assert.match(warning!.note, /not migrated/);
+});
+
+test('a submit claim is per machine: two machines on one form write one submit history row', async () => {
+  const machine = (name: string) =>
+    workflow({
+      name,
+      container: 'approval',
+      form: 'Request',
+      event: 'on approve',
+      approvers: [{ key: 'level', value: '1', span: Z }],
+      deluge: { text: 'x = 1;', span: Z },
+    });
+  const submit = async (machines: string[]) => {
+    const g = generate(
+      app({ forms: [{ name: 'Request', properties: [], fields: [], actions: [], blocks: [], span: Z }], workflows: machines.map(machine) }),
+    );
+    const flows = g.files.filter((f) => f.path.startsWith('functions/flow/')).map((f) => f.path);
+    assert.equal(flows.length, machines.length);
+    const writes: { table: string; row: Record<string, unknown> }[] = [];
+    const ctx = {
+      record: {} as Record<string, unknown>,
+      shim: {
+        datastore: {
+          insertRow: async (_ctx: unknown, table: string, row: Record<string, unknown>) => {
+            writes.push({ table, row });
+          },
+        },
+      },
+    };
+    type Flow = { begin(c: unknown): Promise<void>; commit(c: unknown): Promise<void> };
+    const mods = (await Promise.all(flows.map((path) => loadTree(g, path)))) as unknown as Flow[];
+    for (const mod of mods) await mod.begin(ctx);
+    for (const mod of mods) await mod.commit(ctx);
+    return writes;
+  };
+  const two = await submit(['Flow One', 'Flow Two']);
+  assert.equal(two.length, 1, JSON.stringify(two));
+  assert.equal(two[0]!.row.Action, 'submit');
+  const one = await submit(['Flow One']);
+  assert.equal(one.length, 1, JSON.stringify(one));
+  assert.equal(one[0]!.row.Action, 'submit');
+});
+
+/**
+ * The element round-trip tests run their script as an on-load workflow of a
+ * form that declares the fields it reads. A standalone function has no client
+ * half, so it cannot carry client prefetch mechanics.
+ */
+const GUEST_DESK = plainForm('Guest_Desk', [plainField('Guest_Name'), plainField('Guest_Email')]);
+
+function onLoad(fn: FunctionDef): Workflow {
+  return workflow({ name: fn.name, form: 'Guest_Desk', event: 'on load', deluge: fn.deluge[0]! });
+}
+
+test('a non-record loop element round-trips per element through the prefetch endpoint', async () => {
+  const fn: FunctionDef = {
+    name: 'Check',
+    kind: 'creator',
+    signature: 'void Check(string recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'for each room in Booking_Form[Status == "Reserved"].Choose_Room.getAll() {',
+          '  if (Bookings[Room == room && Guest == input.Guest_Name].count() > 0) { openUrl("#Report:Bookings?room=" + room, "same window"); }',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [
+        GUEST_DESK,
+        plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]),
+        plainForm('Bookings', [plainField('Room'), plainField('Guest')]),
+      ],
+      workflows: [onLoad(fn)],
+      profiles: [ADMIN],
+    }),
+  );
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
+  assert.ok(pre && client);
+  assert.match(stripComments(pre.source), /element: requestElement\(req\)/);
+  assert.match(stripComments(pre.source), /function requestElement\(req\)/);
+  assert.match(stripComments(pre.source), /if \(ctx\.element !== undefined && ctx\.element\.name === "room"\)/);
+  assert.match(stripComments(client.source), /await shim\.client\.element\(ctx, "room", room, "c0"\)/);
+  check(pre.source, 'pre.mjs');
+  check(client.source, 'check.mjs');
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const elementCalls: unknown[] = [];
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: 'A' },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: 'B' },
+        { ROWID: '3', Status: 'Reserved', Choose_Room: 'C' },
+        { ROWID: '4', Status: 'Cancelled', Choose_Room: 'D' },
+      ],
+      Bookings: [
+        { ROWID: '9', Room: 'A', Guest: 'Gita' },
+        { ROWID: '8', Room: 'C', Guest: 'Gita' },
+        { ROWID: '7', Room: 'B', Guest: 'Ravi' },
+      ],
+    },
+    clientPrefetch: async (_path, nonce, request) => {
+      if (request?.element) elementCalls.push(request.element.value);
+      return { nonce, slots: await preMod.prefetch!(seeded.context({ record: { Guest_Name: 'Gita' }, args: request?.args, element: request?.element })) };
+    },
+  });
+  const actions = (await cmod.clientActions!(seeded.context({ record: { Guest_Name: 'Gita' } }), 'x')) as { op: string; args?: unknown[] }[];
+  // One round trip per iterated element, in loop order; matching elements open their report in order.
+  assert.deepEqual(elementCalls, ['A', 'B', 'C']);
+  assert.deepEqual(
+    actions.filter((a) => a.op === 'openUrl').map((a) => a.args![0]),
+    ['#Report:Bookings?room=A', '#Report:Bookings?room=C'],
+  );
+});
+
+test('per-element round trips stop at the cap and an empty collection makes none', async () => {
+  const fn: FunctionDef = {
+    name: 'Check',
+    kind: 'creator',
+    signature: 'void Check(string recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'for each room in Booking_Form[Status == "Reserved"].Choose_Room.getAll() {',
+          '  if (Bookings[Room == room].count() > 0) { openUrl("#Report:Bookings?room=" + room, "same window"); }',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [GUEST_DESK, plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]), plainForm('Bookings', [plainField('Room')])], workflows: [onLoad(fn)], profiles: [ADMIN] }));
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const rooms = Array.from({ length: 120 }, (_, i) => ({ ROWID: String(i + 1), Status: 'Reserved', Choose_Room: `R${i}` }));
+  let calls = 0;
+  const capped = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: { Booking_Form: rooms, Bookings: rooms.map((r, i) => ({ ROWID: String(500 + i), Room: r.Choose_Room })) },
+    clientPrefetch: async (_path, nonce, request) => {
+      if (request?.element) calls += 1;
+      return { nonce, slots: await preMod.prefetch!(capped.context({ record: {}, args: request?.args, element: request?.element })) };
+    },
+  });
+  const actions = (await cmod.clientActions!(capped.context({ record: {} }), 'x')) as { op: string }[];
+  assert.equal(calls, 100);
+  // Hitting the cap aborts the run: the 100 actions already queued are
+  // discarded rather than partially applied.
+  assert.equal(actions.filter((a) => a.op === 'openUrl').length, 0);
+  assert.equal(actions.filter((a) => a.op === 'info').length, 1);
+  const todos = capped.transcript.filter((n) => n.op === 'todo' && n.construct === 'client-condition-uses-server');
+  assert.ok(todos.some((n) => String(n.detail).includes('element round-trip cap')));
+
+  let emptyCalls = 0;
+  const empty = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: { Booking_Form: [{ ROWID: '1', Status: 'Cancelled', Choose_Room: 'A' }] },
+    clientPrefetch: async (_path, nonce, request) => {
+      if (request?.element) emptyCalls += 1;
+      return { nonce, slots: await preMod.prefetch!(empty.context({ record: {}, args: request?.args, element: request?.element })) };
+    },
+  });
+  const noActions = (await cmod.clientActions!(empty.context({ record: {} }), 'x')) as { op: string }[];
+  assert.equal(emptyCalls, 0);
+  assert.deepEqual(noActions, []);
+});
+
+test('a refused per-element round trip shows nothing', async () => {
+  const fn: FunctionDef = {
+    name: 'Check',
+    kind: 'creator',
+    signature: 'void Check(string recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'for each room in Booking_Form[Status == "Reserved"].Choose_Room.getAll() {',
+          '  if (Bookings[Room == room].count() > 0) { openUrl("#Report:Bookings?room=" + room, "same window"); }',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [GUEST_DESK, plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]), plainForm('Bookings', [plainField('Room')])], workflows: [onLoad(fn)], profiles: [ADMIN] }));
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const denied = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: { Booking_Form: [{ ROWID: '1', Status: 'Reserved', Choose_Room: 'A' }], Bookings: [{ ROWID: '2', Room: 'A' }] },
+    clientPrefetch: async (_path, nonce, request) =>
+      request?.element
+        ? { ok: false, error: 'denied', nonce }
+        : { nonce, slots: await preMod.prefetch!(denied.context({ record: {}, args: request?.args })) },
+  });
+  const actions = (await cmod.clientActions!(denied.context({ record: {} }), 'x')) as { op: string }[];
+  assert.deepEqual(actions.filter((a) => a.op === 'openUrl'), []);
+});
+
+function elementLoopFixture(condition = 'if (Bookings[Room == room].count() > 0) { openUrl("#Report:Bookings?room=" + room, "same window"); }') {
+  const fn: FunctionDef = {
+    name: 'Check',
+    kind: 'creator',
+    signature: 'void Check(string recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'for each room in Booking_Form[Status == "Reserved"].Choose_Room.getAll() {',
+          `  ${condition}`,
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [
+        GUEST_DESK,
+        plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]),
+        plainForm('Bookings', [plainField('Room'), plainField('Guest')]),
+      ],
+      workflows: [onLoad(fn)],
+      profiles: [ADMIN],
+    }),
+  );
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
+  assert.ok(pre && client);
+  return { g, pre, client };
+}
+
+test('the prefetch endpoint refuses an element value outside the iterated collection or past the cap', async () => {
+  const { pre } = elementLoopFixture();
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: 'A' },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: 'B' },
+      ],
+      Bookings: [{ ROWID: '9', Room: 'A', Guest: 'Gita' }],
+    },
+  });
+  // A member evaluates its slot; a non-member is refused, nothing evaluated.
+  const member = await preMod.prefetch!(seeded.context({ record: {}, element: { name: 'room', value: 'A' } }));
+  assert.equal(member['c0'], true);
+  await assert.rejects(
+    preMod.prefetch!(seeded.context({ record: {}, element: { name: 'room', value: 'Z' } })),
+    /not in the iterated collection or is past the element cap/,
+  );
+  // The cap is enforced server-side: an element whose position in the
+  // collection is past the cap is refused even if the client keeps POSTing.
+  const rooms = Array.from({ length: 120 }, (_, i) => ({ ROWID: String(i + 1), Status: 'Reserved', Choose_Room: `R${i}` }));
+  const big = createRuntime({ dryRun: true, appTimeZone: 'UTC', seed: { Booking_Form: rooms, Bookings: [] } });
+  const inCap = await preMod.prefetch!(big.context({ record: {}, element: { name: 'room', value: 'R99' } }));
+  assert.ok('c0' in inCap);
+  await assert.rejects(
+    preMod.prefetch!(big.context({ record: {}, element: { name: 'room', value: 'R105' } })),
+    /not in the iterated collection or is past the element cap/,
+  );
+});
+
+test('element membership compares type-strictly against the stored collection', async () => {
+  const { pre } = elementLoopFixture();
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  // A numeric collection: the number 1 is a member, the text "1" is not.
+  const numeric = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: 1 },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: 2 },
+      ],
+      Bookings: [{ ROWID: '9', Room: 1 }],
+    },
+  });
+  const member = await preMod.prefetch!(numeric.context({ record: {}, element: { name: 'room', value: 1 } }));
+  assert.equal(member['c0'], true);
+  await assert.rejects(
+    preMod.prefetch!(numeric.context({ record: {}, element: { name: 'room', value: '1' } })),
+    /not in the iterated collection or is past the element cap/,
+  );
+  // A text collection: "1" is a genuine member and evaluates.
+  const text = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: '1' },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: '2' },
+      ],
+      Bookings: [{ ROWID: '9', Room: '1' }],
+    },
+  });
+  const textMember = await preMod.prefetch!(text.context({ record: {}, element: { name: 'room', value: '1' } }));
+  assert.equal(textMember['c0'], true);
+});
+
+test('a use-before-binding alias serves no truthy element slot on a direct prefetch', async () => {
+  // `a = b` before `b = s` reads a name with no binding yet: the element
+  // condition on `a` is refused, so the endpoint emits no element guard and
+  // a direct element post cannot buy a truthy slot out of the alias.
+  const fn: FunctionDef = {
+    name: 'Check',
+    kind: 'creator',
+    signature: 'void Check(string recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          's = sendmail [ to: input.Guest_Email, subject: "s", message: "m" ];',
+          'a = b;',
+          'b = s;',
+          'if (b == Bookings[Guest == input.Guest_Name].Guest) { openUrl("#one", "same window"); }',
+          'for each room in Booking_Form[Status == "Reserved"].Choose_Room.getAll() {',
+          '  if (a && Bookings[Room == room].count() > 0) { openUrl("#x?room=" + room, "same window"); }',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [
+        GUEST_DESK,
+        plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]),
+        plainForm('Bookings', [plainField('Room'), plainField('Guest')]),
+      ],
+      workflows: [onLoad(fn)],
+      profiles: [ADMIN],
+    }),
+  );
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
+  assert.ok(pre && client);
+  assert.doesNotMatch(stripComments(pre.source), /ctx\.element/);
+  assert.doesNotMatch(stripComments(client.source), /shim\.client\.element/);
+  check(pre.source, 'pre.mjs');
+  check(client.source, 'check.mjs');
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: 'A' },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: 'B' },
+      ],
+      Bookings: [{ ROWID: '9', Room: 'A', Guest: 'Gita' }],
+    },
+  });
+  // A direct post of a real member returns no truthy slot.
+  const member = await preMod.prefetch!(seeded.context({ record: { Guest_Name: 'Gita' }, element: { name: 'room', value: 'A' } }));
+  assert.equal(Object.values(member).some((v) => v === true), false);
+  // The mail call is a non-read. The prefetch must not replay it, not even as
+  // a dry-run one-shot for the straight-line condition that reads the alias.
+  assert.doesNotMatch(stripComments(pre.source), /mail\.send/);
+  assert.equal(seeded.transcript.some((n) => n.op === 'sendmail'), false);
+});
+
+test('a refused element value mid-loop leaves no partial client actions', async () => {
+  const { pre, client } = elementLoopFixture();
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const calls: unknown[] = [];
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: 'A' },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: 'B' },
+        { ROWID: '3', Status: 'Reserved', Choose_Room: 'C' },
+      ],
+      Bookings: [
+        { ROWID: '9', Room: 'A', Guest: 'Gita' },
+        { ROWID: '8', Room: 'B', Guest: 'Gita' },
+        { ROWID: '7', Room: 'C', Guest: 'Gita' },
+      ],
+    },
+    clientPrefetch: async (_path, nonce, request) => {
+      if (request?.element) calls.push(request.element.value);
+      return { nonce, slots: await preMod.prefetch!(seeded.context({ record: { Guest_Name: 'Gita' }, args: request?.args, element: request?.element })) };
+    },
+  });
+  // The middle element's POST is denied; A already succeeded before it.
+  const shimmed = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: 'A' },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: 'B' },
+        { ROWID: '3', Status: 'Reserved', Choose_Room: 'C' },
+      ],
+      Bookings: [
+        { ROWID: '9', Room: 'A', Guest: 'Gita' },
+        { ROWID: '8', Room: 'B', Guest: 'Gita' },
+        { ROWID: '7', Room: 'C', Guest: 'Gita' },
+      ],
+    },
+    clientPrefetch: async (_path, nonce, request) => {
+      if (request?.element?.value === 'B') return { ok: false, error: 'denied', nonce };
+      return { nonce, slots: await preMod.prefetch!(shimmed.context({ record: { Guest_Name: 'Gita' }, args: request?.args, element: request?.element })) };
+    },
+  });
+  const actions = (await cmod.clientActions!(shimmed.context({ record: { Guest_Name: 'Gita' } }), 'x')) as { op: string }[];
+  // A's action was queued before B failed; the run discards it wholesale.
+  assert.deepEqual(actions.filter((a) => a.op === 'openUrl'), []);
+  assert.equal(actions.filter((a) => a.op === 'info').length, 1);
+  const allOk = (await cmod.clientActions!(seeded.context({ record: { Guest_Name: 'Gita' } }), 'x')) as { op: string }[];
+  assert.equal(allOk.filter((a) => a.op === 'openUrl').length, 3);
+});
+
+test('a stale nonce on a mid-loop element discards queued client actions', async () => {
+  const { pre, client } = elementLoopFixture();
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [
+        { ROWID: '1', Status: 'Reserved', Choose_Room: 'A' },
+        { ROWID: '2', Status: 'Reserved', Choose_Room: 'B' },
+        { ROWID: '3', Status: 'Reserved', Choose_Room: 'C' },
+      ],
+      Bookings: [
+        { ROWID: '9', Room: 'A', Guest: 'Gita' },
+        { ROWID: '8', Room: 'B', Guest: 'Gita' },
+        { ROWID: '7', Room: 'C', Guest: 'Gita' },
+      ],
+    },
+    clientPrefetch: async (_path, nonce, request) => {
+      if (request?.element?.value === 'B') return { nonce: 'other-nonce', slots: { c0: true } };
+      return { nonce, slots: await preMod.prefetch!(seeded.context({ record: { Guest_Name: 'Gita' }, args: request?.args, element: request?.element })) };
+    },
+  });
+  const actions = (await cmod.clientActions!(seeded.context({ record: { Guest_Name: 'Gita' } }), 'x')) as { op: string }[];
+  assert.deepEqual(actions.filter((a) => a.op === 'openUrl'), []);
+  assert.equal(actions.filter((a) => a.op === 'info').length, 1);
+});
+
+test('a dry-run placeholder element slot is never truthy to the client', async () => {
+  const { pre, client } = elementLoopFixture();
+  const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
+  const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const seeded = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    seed: {
+      Booking_Form: [{ ROWID: '1', Status: 'Reserved', Choose_Room: 'A' }],
+      Bookings: [{ ROWID: '9', Room: 'A', Guest: 'Gita' }],
+    },
+    clientPrefetch: async (_path, nonce, request) => {
+      if (request?.element) return { nonce, slots: { c0: { dryRun: true, performed: false, path: ['isAvailable'] } } };
+      return { nonce, slots: await preMod.prefetch!(seeded.context({ record: { Guest_Name: 'Gita' }, args: request?.args })) };
+    },
+  });
+  const actions = (await cmod.clientActions!(seeded.context({ record: { Guest_Name: 'Gita' } }), 'x')) as { op: string }[];
+  assert.deepEqual(actions.filter((a) => a.op === 'openUrl'), []);
+});
+
+test('unconditional field rules become server write denials; conditional rules are a counted gap', () => {
+  const ir = snippet(`\tform Shipment
+\t{
+\t\tSubmode
+\t\t(
+\t\t\ttype = picklist
+\t\t)
+\t\tVessel
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tSecret
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tLocked
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tRules as "Rules"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Shipment
+\t\t\t\trecord event = on add
+\t\t\t\tfield rules
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\thide Secret;
+\t\t\t\t\t\tdisable Locked;
+\t\t\t\t\t}
+\t\t\t\t\tactions (Submode == "Sea")
+\t\t\t\t\t{
+\t\t\t\t\t\tshow Vessel;
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  // Static rules deny only the covered op: `on add` is insert, so an update
+  // may still write them. The conditional rule is a counted fidelity gap.
+  assert.deepEqual(fieldRuleDenials(ir, 'Shipment'), [
+    { field: 'Locked', action: 'disable', ops: ['insert'] },
+    { field: 'Secret', action: 'hide', ops: ['insert'] },
+  ]);
+  assert.equal(conditionalFieldRules(ir, 'Shipment'), 1);
+});
+
+test('fieldRuleDenials scopes by record event and lets a later static rule win', () => {
+  const ir = app({
+    forms: [plainForm('Item', [plainField('A'), plainField('B'), plainField('C')])],
+    workflows: [
+      workflow({
+        name: 'add', form: 'Item', event: 'on load', recordEvent: 'on add',
+        fieldRules: [{ actions: [{ action: 'hide', fields: ['A'] }, { action: 'disable', fields: ['B'] }], span: Z }],
+      }),
+      workflow({
+        name: 'edit', form: 'Item', event: 'on load', recordEvent: 'on edit',
+        fieldRules: [{ actions: [{ action: 'show', fields: ['A'] }, { action: 'hide', fields: ['C'] }], span: Z }],
+      }),
+    ],
+  });
+  // A is hidden on insert but shown on edit: the show is scoped to the edit
+  // context and does not cancel the insert hide. B is insert-disabled; C is
+  // update-hidden.
+  assert.deepEqual(fieldRuleDenials(ir, 'Item'), [
+    { field: 'A', action: 'hide', ops: ['insert'] },
+    { field: 'B', action: 'disable', ops: ['insert'] },
+    { field: 'C', action: 'hide', ops: ['update'] },
+  ]);
+});
+
+test('an unscoped rule denies both ops; a conditional rule denies neither', () => {
+  const ir = app({
+    forms: [plainForm('Item', [plainField('A'), plainField('B'), plainField('C')])],
+    workflows: [
+      workflow({
+        name: 'load', form: 'Item', event: 'on load',
+        fieldRules: [
+          { actions: [{ action: 'hide', fields: ['A'] }], span: Z },
+          { condition: 'B == 1', actions: [{ action: 'hide', fields: ['C'] }], span: Z },
+        ],
+      }),
+    ],
+  });
+  assert.deepEqual(fieldRuleDenials(ir, 'Item'), [{ field: 'A', action: 'hide' }]);
+});
+
+test('a field a form script fills or enables on the open form is not denied for that op', () => {
+  const script = (text: string) => ({ text, span: Z });
+  const ir = app({
+    forms: [plainForm('Item', [plainField('A'), plainField('B'), plainField('C'), plainField('D'), plainField('E'), plainField('F')])],
+    workflows: [
+      workflow({
+        name: 'rules', form: 'Item', event: 'on load',
+        fieldRules: [{ actions: [{ action: 'hide', fields: ['A', 'B', 'C', 'F'] }, { action: 'disable', fields: ['D', 'E'] }], span: Z }],
+      }),
+      // On load fills A (Creator posts it); on user input of A fills B; an
+      // add-only on load selects D. E is enabled by a script.
+      workflow({ name: 'load', container: 'form', type: 'form', form: 'Item', event: 'on load', deluge: script('input.A = zoho.loginuserid;') }),
+      workflow({ name: 'input', container: 'form', type: 'form', form: 'Item', event: 'on user input of A', deluge: script('if(input.A != null)\n{\n\tinput.B = input.A;\n}') }),
+      workflow({ name: 'addLoad', container: 'form', type: 'form', form: 'Item', event: 'on load', recordEvent: 'on add', deluge: script('D.select(1);\nenable E;') }),
+      // On validate runs on the server: its write never comes from the form.
+      workflow({ name: 'validate', container: 'form', type: 'form', form: 'Item', event: 'on validate', deluge: script('input.C = "x";') }),
+    ],
+  });
+  assert.deepEqual(fieldRuleDenials(ir, 'Item'), [
+    { field: 'C', action: 'hide' },
+    { field: 'D', action: 'disable', ops: ['update'] },
+    { field: 'E', action: 'disable', ops: ['update'] },
+    { field: 'F', action: 'hide' },
+  ]);
+});
+
+test('a schedule, approval or container-less workflow wrapping on load does not unlock a hidden field', () => {
+  const script = (text: string) => ({ text, span: Z });
+  const ir = app({
+    forms: [plainForm('Booking', [plainField('Status'), plainField('Note'), plainField('Owner'), plainField('Filled')])],
+    workflows: [
+      workflow({ name: 'rules', form: 'Booking', event: 'on load', fieldRules: [{ actions: [{ action: 'hide', fields: ['Status', 'Note', 'Owner', 'Filled'] }], span: Z }] }),
+      // A schedule's actions wrap `on load`: it runs on the server, never on the open form.
+      workflow({ name: 'sweep', container: 'schedule', type: 'schedule', form: 'Booking', event: 'on start / on load', deluge: script('input.Status = "Forgotten";') }),
+      workflow({ name: 'approve', container: 'approval', type: 'approval', form: 'Booking', event: 'on level 1 / on approve / on load', deluge: script('input.Note = "ok";') }),
+      // No container: not provably a form script.
+      workflow({ name: 'bare', form: 'Booking', event: 'on load', deluge: script('input.Owner = zoho.loginuserid;') }),
+      workflow({ name: 'fill', container: 'form', type: 'form', form: 'Booking', event: 'on load', deluge: script('input.Filled = zoho.loginuserid;') }),
+    ],
+  });
+  assert.deepEqual(fieldRuleDenials(ir, 'Booking'), [
+    { field: 'Note', action: 'hide' },
+    { field: 'Owner', action: 'hide' },
+    { field: 'Status', action: 'hide' },
+  ]);
+});
+
+test('a workflow aio module embeds the form field-rule denials and passes them to authorizeWrite', () => {
+  const ir = app({
+    forms: [plainForm('Orders', [plainField('Status'), plainField('Secret')])],
+    workflows: [
+      workflow({
+        name: 'Rules', form: 'Orders', event: 'on load', recordEvent: 'on add',
+        fieldRules: [{ actions: [{ action: 'hide', fields: ['Secret'] }], span: Z }],
+      }),
+      workflow({
+        name: 'On success', form: 'Orders', event: 'on success', recordEvent: 'on add or edit',
+        deluge: { text: 'x = 1;', span: Z },
+      }),
+    ],
+  });
+  const g = generate(ir);
+  const server = g.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
+  assert.ok(server);
+  assert.match(server.source, /export const fieldRuleDenied = \[\{"field":"Secret","action":"hide","ops":\["insert"\]\}\];/);
+  assert.match(server.source, /const importWrite = req && req\.body && req\.body\.import === true && canImport\(principal, access\);/);
+  assert.match(server.source, /authorizeWrite\(access, principal, formName, record, \{ readonlyFields, fieldNames, fields, ruleDenied: importWrite \? \[\] : fieldRuleDenied \}/);
+});
+
+test('handler wrappers inside a button or success actions block generate their scripts, not a task TODO', () => {
+  const ir = snippet(`\tform Item
+\t{
+\t\tFine
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tworkflow
+\t{
+\tform
+\t{
+\t\tAdd_Click as "Add click"
+\t\t{
+\t\t\ttype = form
+\t\t\tform = Item
+\t\t\tbutton = Add
+\t\t\ton click
+\t\t\t{
+\t\t\t\tactions
+\t\t\t\t{
+\t\t\t\ton click
+\t\t\t\t(
+\t\t\t\t\tinput.Fine = 1;
+\t\t\t\t)
+\t\t\t\t\topenURL("#Script:page.close","new window");
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t\tAfter_Add as "After add"
+\t\t{
+\t\t\ttype = form
+\t\t\tform = Item
+\t\t\trecord event = on add
+\t\t\ton success
+\t\t\t{
+\t\t\t\tactions
+\t\t\t\t{
+\t\t\t\t\topenURL("#Form:Item","new window");
+\t\t\t\t\tcustom deluge script
+\t\t\t\t\t(
+\t\t\t\t\t\topenUrl("#Script:page.refresh","same window");
+\t\t\t\t\t)
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+\t}`);
+  const generated = generate(ir);
+  const clickWorkflow = ir.workflows.find((workflow) => workflow.event.toLowerCase().includes('click'));
+  assert.ok(clickWorkflow);
+  assert.deepEqual(generated.todos, []);
+  const sources = generated.files.map((file) => file.source).join('\n');
+  assert.doesNotMatch(sources, /shim\.todo\(ctx, "task:(on|custom)"/);
+  const click = generated.files.find((file) => file.path === 'functions/aio/item/on-click.mjs');
+  assert.ok(click);
+  assert.match(stripComments(click.source), /shim\.input\.set\(ctx, \["Fine"\], 1\)/);
+  const clientOpens = generated.files
+    .filter((file) => file.path.startsWith('client/handlers/item/'))
+    .flatMap((file) => [...file.source.matchAll(/op: "openUrl", args: \["([^"]+)"/g)].map((m) => m[1]))
+    .sort();
+  assert.deepEqual(clientOpens, ['#Form:Item', '#Script:page.close', '#Script:page.refresh']);
+});
+
+test('generated prefetch handler for app.users and app.userEmailIds refuses low-privilege callers and admits admin', async () => {
+  const script = [
+    'u = app.users();',
+    'e = app.userEmailIds();',
+    'if (u.length > 0 && e.length > 0) {',
+    '  alert "found";',
+    '}',
+  ].join('\n');
+  const employeeProfile = {
+    name: 'Employee',
+    type: 'Users_Permissions',
+    properties: [],
+    modules: [grantModule('Orders', 'create, edit, viewall')],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Status')])],
+      profiles: [ADMIN, employeeProfile],
+      workflows: [workflow({ name: 'on load', form: 'Orders', event: 'on load', deluge: { text: script, span: Z } })],
+    }),
+  );
+  const prefetch = g.files.find((f) => f.path.endsWith('-prefetch.mjs'));
+  assert.ok(prefetch, 'prefetch module generated');
+  const mod = (await loadModule(prefetch.source, 'orders-prefetch.mjs')) as Record<string, (req: unknown, res: unknown) => unknown>;
+  assert.ok(typeof mod.default === 'function', 'handler is default export');
+
+  // Low-privilege caller (Employee) -> 403 refusal
+  const lowPriv = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Employee', email: 'emp@example.test' },
+    body: { record: {} },
+  });
+  assert.equal(lowPriv.status, 403);
+  assert.match(String(lowPriv.body.error), /record access: profile Employee cannot list users/);
+  // No emails or IDs leaked in error text
+  assert.equal(JSON.stringify(lowPriv.body).includes('example.test'), false);
+
+  for (const profile of [
+    'Non-Admin', 'Admin Assistant', 'Developer Support',
+    'administrator', 'ADMINISTRATOR', 'Administrator ', ' Administrator',
+    'Developer', 'developer',
+  ]) {
+    const lookalike = await invoke(mod.default, {
+      method: 'POST', user: { profile }, body: { record: {} },
+    });
+    assert.equal(lookalike.status, 403, `${profile} must not list users`);
+  }
+
+  // A caller-controlled body or header claiming admin is refused: the
+  // principal comes only from the verified request user.
+  const spoof = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Employee' },
+    headers: { 'x-profile': 'Administrator' },
+    body: { record: {}, profile: 'Administrator' },
+  });
+  assert.equal(spoof.status, 403, 'a body or header claiming admin must be refused');
+
+  // Unauthenticated caller -> 401
+  const unauth = await invoke(mod.default, {
+    method: 'POST',
+    body: { record: {} },
+  });
+  assert.equal(unauth.status, 401);
+
+  // Administrator caller with users -> 200 and slot is true
+  const admin = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Administrator', email: 'admin@example.test' },
+    appUsers: [{ user_id: '100', email: 'admin@example.test' }],
+    body: { record: {} },
+  });
+  assert.equal(admin.status, 200);
+  assert.deepEqual(admin.body.slots, { c0: true });
+
+  // Administrator caller without users -> 200 and slot is false
+  const adminEmpty = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Administrator', email: 'admin@example.test' },
+    appUsers: [],
+    body: { record: {} },
+  });
+  assert.equal(adminEmpty.status, 200);
+  assert.deepEqual(adminEmpty.body.slots, { c0: false });
+});
+
+test('a client condition reading a field through one lookup hop emits client code with no todo', async () => {
+  const lookupField = plainField('Member', 'lookup');
+  lookupField.lookup = { form: 'Members' };
+  const ir = app({
+    forms: [
+      plainForm('Members', [plainField('Tier')]),
+      plainForm('Bookings', [lookupField]),
+    ],
+    workflows: [
+      workflow({
+        name: 'VIP Check',
+        form: 'Bookings',
+        event: 'on user input',
+        deluge: { text: 'if (input.Member.Tier == "VIP") { alert "Welcome VIP"; }', span: Z },
+      }),
+    ],
+  });
+  const g = generate(ir);
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/bookings/on-user-input.mjs');
+  assert.ok(client);
+  assert.match(stripComments(client.source), /shim\.input\.get\(ctx, "Member", "Tier"\)/);
+  assert.doesNotMatch(stripComments(client.source), /client-condition-uses-server/);
+  const clientMod = (await loadModule(client.source, 'lookup-condition-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string; message?: string }[]>>;
+  const runtime = createRuntime({ dryRun: true });
+  const actions = await clientMod.clientActions!(runtime.context({ record: { Member: { Tier: 'VIP' } } }));
+  assert.deepEqual(actions, [{ op: 'alert', message: 'Welcome VIP' }]);
+});
+
+test('a client condition calling a read-only app function on a server-bound value compiles to a c2cCond_* call', () => {
+  const g = generate(app({
+    forms: [plainForm('Pods', [plainField('Pod_No')]), plainForm('Reservation', [plainField('Code')])],
+    functions: [
+      {
+        name: 'podCount', kind: 'deluge', signature: 'int podCount(int n)',
+        deluge: [{ text: 'return Pods[ID != 0].count() + n;', span: Z }], properties: [], span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'Capacity check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: {
+          text: 'total = Pods[ID != 0].count(); if(thisapp.podCount(total) > 3) { alert "full"; } else { alert "free"; }',
+          span: Z,
+        },
+      }),
+    ],
+  }));
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false, JSON.stringify(g.todos));
+  const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
+  assert.match(stripComments(client.source), /shim\.client\.condition\(ctx, "c2cCond_[0-9a-f]+"/);
+  const condMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path))!;
+  assert.match(stripComments(condMod.source), /shim\.thisapp\.call\(ctx, \["podCount"\]/);
+});
+
+test('a client condition calling a read-only app function through a case-folded name compiles to a c2cCond_* call', () => {
+  // The call site spells the callee differently than its declaration
+  // (`podcount` vs `PodCount`); the runtime registry dispatches that the
+  // same way it dispatches the exact-case spelling, so the emit-time reads
+  // lookup must resolve to the declared name too, not the call-site spelling.
+  const g = generate(app({
+    forms: [plainForm('Pods', [plainField('Pod_No')]), plainForm('Reservation', [plainField('Code')])],
+    functions: [
+      {
+        name: 'PodCount', kind: 'deluge', signature: 'int PodCount(int n)',
+        deluge: [{ text: 'return Pods[ID != 0].count() + n;', span: Z }], properties: [], span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'Capacity check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: {
+          text: 'total = Pods[ID != 0].count(); if(thisapp.podcount(total) > 3) { alert "full"; } else { alert "free"; }',
+          span: Z,
+        },
+      }),
+    ],
+  }));
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false, JSON.stringify(g.todos));
+  const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
+  assert.match(stripComments(client.source), /shim\.client\.condition\(ctx, "c2cCond_[0-9a-f]+"/);
+  const condMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path))!;
+  assert.match(stripComments(condMod.source), /shim\.thisapp\.call\(ctx, \["podcount"\]/);
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path));
+  assert.notEqual(callMod, undefined, 'the call endpoint for the resolved condition must still be emitted');
+});
+
+test('a client condition calling a case-folded ambiguous app function keeps its todo', () => {
+  // Two declared names fold alike (`PodCount` and `PODCOUNT`); dispatch can
+  // never be pinned to one body from `thisapp.podcount(...)`, so the read-only
+  // reads lookup must stay unresolved and the condition must keep its todo
+  // rather than guess which body the call reaches.
+  const g = generate(app({
+    forms: [plainForm('Pods', [plainField('Pod_No')]), plainForm('Reservation', [plainField('Code')])],
+    functions: [
+      {
+        name: 'PodCount', kind: 'deluge', signature: 'int PodCount(int n)',
+        deluge: [{ text: 'return Pods[ID != 0].count() + n;', span: Z }], properties: [], span: Z,
+      },
+      {
+        name: 'PODCOUNT', kind: 'deluge', signature: 'int PODCOUNT(int n)',
+        deluge: [{ text: 'return Pods[ID != 0].count() + n + 1;', span: Z }], properties: [], span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'Capacity check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: {
+          text: 'total = Pods[ID != 0].count(); if(thisapp.podcount(total) > 3) { alert "full"; }',
+          span: Z,
+        },
+      }),
+    ],
+  }));
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), true, JSON.stringify(g.todos));
+  assert.equal(g.files.some((f) => /c2ccond-/.test(f.path)), false);
+});
+
+test('a client condition calling a writing app function on a server-bound value keeps its todo', () => {
+  const g = generate(app({
+    forms: [plainForm('Pods', [plainField('Pod_No')]), plainForm('Reservation', [plainField('Code')])],
+    functions: [
+      {
+        name: 'bump', kind: 'deluge', signature: 'int bump(int n)',
+        deluge: [{ text: 'insert into Pods [ Pod_No = n ]; return n;', span: Z }], properties: [], span: Z,
+      },
+    ],
+    workflows: [
+      workflow({
+        name: 'Capacity check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: { text: 'total = Pods[ID != 0].count(); if(thisapp.bump(total) > 3) { alert "full"; }', span: Z },
+      }),
+    ],
+  }));
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), true);
+  assert.equal(g.files.some((f) => /c2ccond-/.test(f.path)), false);
+});

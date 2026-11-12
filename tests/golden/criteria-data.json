@@ -1,0 +1,39 @@
+{
+  "app": "c2c-golden-criteria",
+  "notApp": "sample-app",
+  "listCompare": "deepEqual",
+  "forms": {
+    "GoldenRow": {
+      "csv": "tests/golden/criteria-goldenrow.csv",
+      "rows": [
+        { "Name": "Ada", "Qty": 2, "Status": "Open" },
+        { "Name": "Bea", "Qty": 0, "Status": "Open" },
+        { "Name": "Ada", "Qty": 5, "Status": "Hold" },
+        { "Name": "Cy", "Qty": -1, "Status": "Open" }
+      ]
+    },
+    "FlagRow": {
+      "csv": "tests/golden/criteria-flagrow.csv",
+      "rows": [
+        { "Name": "Cy", "Qty": 5, "Status": "Hold", "Billable": true, "Approved": true },
+        { "Name": "Ada", "Qty": 2, "Status": "Open", "Billable": true, "Approved": true },
+        { "Name": "Bea", "Qty": 0, "Status": "Open", "Billable": true, "Approved": false },
+        { "Name": "Dee", "Qty": 1, "Status": "Open", "Billable": false, "Approved": true }
+      ]
+    }
+  },
+  "dropped": {
+    "criteria.left-member": "GoldenRow and FlagRow have no lookup field. A map local on the left is MAP == TEXT and Creator rejects the function at save. A lookup CSV needs parent record ids that do not exist at import.",
+    "criteria.member-rhs": "dropped: does not save in Creator. Name is text and .ID is a numeric record id, so one bad criteria line rejects the function. Do not move the map to the left. A lookup CSV needs parent record ids that do not exist at import."
+  },
+  "expected": {
+    "sort.by-asc": ["Ada", "Ada", "Bea", "Cy"],
+    "sort.by-desc": ["Cy", "Bea", "Ada", "Ada"],
+    "sort.by-desc-range": [5],
+    "sort.foreach-desc": "Cy,Bea,Ada,Ada,",
+    "criteria.bare-and": ["Ada"],
+    "criteria.bare-false": ["Dee"],
+    "criteria.var-ne": ["Cy", "Bea"],
+    "getall.bare-field": ["Ada", "Bea", "Cy"]
+  }
+}

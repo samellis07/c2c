@@ -1,0 +1,85 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { generateSchema } from '../../schema/src/generator.js';
+import { generateUi } from '../../ui/src/generate.js';
+import { generateReactApp } from '../../ui-react/src/generate.js';
+import { DEFAULT_EQUIVALENCE } from '../src/default-equivalence.js';
+import { collectOutputs, coverageLedger } from '../src/no-silent-drop.js';
+
+const TYPE: Record<string, string> = { image: 'image', file: 'upload file', address: 'address' };
+
+function dsApp(type: string, lines: string[]): App {
+  const props = lines.map((line) => `\t\t\t${line}\n`).join('');
+  return deriveIr(parse(`application "Demo"\n{\n\tform Profile\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tAttachment\n\t\t(\n\t\t\ttype = ${type}\n${props}\t\t)\n\t}\n}\n`));
+}
+
+const bytes = (data: string | Buffer): string => (typeof data === 'string' ? data : data.toString('base64'));
+
+/** Every generated artifact for the app: schema plan, static UI bundle, React app. */
+function generated(source: App): string {
+  const ui = generateUi(source);
+  return JSON.stringify({
+    schema: generateSchema(source),
+    ui: ui.files.map((file) => [file.path, bytes(file.data)]),
+    react: generateReactApp(source).map((file) => [file.path, bytes(file.data)]),
+  });
+}
+
+function status(source: App, key: string): string | undefined {
+  return coverageLedger(source, collectOutputs(source)).find((row) => row.name === `Profile.Attachment property ${key}`)?.status;
+}
+
+for (const row of DEFAULT_EQUIVALENCE) {
+  const type = TYPE[row.widget]!;
+  test(`${row.key} = ${row.value} on a ${row.widget} field generates the default output and is emitted`, () => {
+    const withValue = dsApp(type, [`${row.key} = ${row.value}`]);
+    const without = dsApp(type, []);
+    assert.equal(generated(withValue), generated(without));
+    const field = collectOutputs(withValue).model.forms[0]!.fields.find((f) => f.name === 'Attachment')!;
+    assert.equal(field.widget, row.widget);
+    assert.equal(field.accept, row.accept);
+    assert.equal(status(withValue, row.key), 'emitted');
+  });
+}
+
+test('a non-default value of a listed property stays a drop', () => {
+  assert.equal(status(dsApp('image', ['camera = secondary']), 'camera'), 'dropped');
+  assert.equal(status(dsApp('image', ['switch camera = false']), 'switch camera'), 'dropped');
+  assert.equal(status(dsApp('image', ['show gallery = false']), 'show gallery'), 'dropped');
+  assert.equal(status(dsApp('upload file', ['browse = unknown_cloud']), 'browse'), 'dropped');
+});
+
+test('browse with uncarried cloud document sources emits a counted UI todo', () => {
+  assert.equal(status(dsApp('upload file', ['browse = local_drive, google_docs, zoho_docs']), 'browse'), 'counted');
+});
+
+test('preview duration = 3 on an image field is generated as an auto-dismiss timer, not a todo', () => {
+  const withValue = dsApp('image', ['preview duration = 3']);
+  assert.equal(status(withValue, 'preview duration'), 'emitted');
+  const field = collectOutputs(withValue).model.forms[0]!.fields.find((f) => f.name === 'Attachment')!;
+  assert.equal(field.previewDuration, 3);
+});
+
+test('a fixed aspect ratio on an image field emits a counted UI todo', () => {
+  assert.equal(status(dsApp('image', ['aspect ratio = square']), 'aspect ratio'), 'counted');
+});
+
+test('adjust_using_map = true on an address field is generated, not a todo', () => {
+  assert.equal(status(dsApp('address', ['adjust_using_map = true']), 'adjust_using_map'), 'emitted');
+});
+
+test('a listed value on a widget the row does not name stays a drop', () => {
+  assert.equal(status(dsApp('image', ['browse = local_drive']), 'browse'), 'dropped');
+});
+
+test('generated presentation that differs from the Creator value is not in the table', () => {
+  const keys = DEFAULT_EQUIVALENCE.map((row) => row.key);
+  assert.ok(!keys.includes('timedisplayoptions'));
+  assert.ok(!keys.includes('toolbar'));
+  // A seconds-showing format is not byte-equivalent to the generated input's
+  // default (no seconds step), so it stays off this table — on a time field
+  // it is carried as a counted manual step instead (packages/ui/src/model.ts), not generated.
+  const time = deriveIr(parse('application "Demo"\n{\n\tform Profile\n\t{\n\t\tWhen\n\t\t(\n\t\t\ttype = time\n\t\t\ttimedisplayoptions = "hh:mm:ss"\n\t\t)\n\t}\n}\n'));
+  assert.equal(coverageLedger(time, collectOutputs(time)).find((row) => row.name === 'Profile.When property timedisplayoptions')?.status, 'counted');
+});

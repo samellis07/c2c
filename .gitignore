@@ -1,0 +1,12 @@
+node_modules
+dist/
+plugin/vendor/
+c2c-out/
+.cache/
+fixtures-local/
+c2c-fixtures-local/
+*.local.ds
+.env*
+*.log
+.DS_Store
+*.tsbuildinfo

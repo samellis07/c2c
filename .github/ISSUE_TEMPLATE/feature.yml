@@ -1,0 +1,33 @@
+name: Feature request
+description: A construct to translate, a mapping, or a new command
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What it should do
+      description: The Creator behaviour or the generated output you need, in product terms
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How you imagine it working — syntax, IR shape, CLI flag, or generated output
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: Native mobile / MDM output is not supported in this version (counted; on the roadmap — the installable client is the Slate PWA). Permanently out of scope are only marketplace publishing, the Zia AI builder, and on-prem Data Bridge.
+      options:
+        - label: This is not a request for marketplace publishing, the Zia AI builder, or on-prem Data Bridge (not applicable — out of scope)
+          required: true

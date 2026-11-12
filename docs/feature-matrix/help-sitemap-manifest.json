@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "source": "https://www.zoho.com/creator/help/",
+  "complete": true,
+  "minIntervalMs": 2000,
+  "robotsRespected": true,
+  "requests": 5,
+  "note": "Crawled 187 Creator help URLs into 22 sections.",
+  "sections": [
+    {
+      "id": "newhelp/account-setup",
+      "url": "https://www.zoho.com/creator/newhelp/account-setup/",
+      "title": "newhelp/account-setup",
+      "count": 25,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/app-settings",
+      "url": "https://www.zoho.com/creator/newhelp/app-settings/",
+      "title": "newhelp/app-settings",
+      "count": 81,
+      "rowIds": [
+        164,
+        156
+      ]
+    },
+    {
+      "id": "newhelp/application-sharing",
+      "url": "https://www.zoho.com/creator/newhelp/application-sharing/",
+      "title": "newhelp/application-sharing",
+      "count": 14,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/overview",
+      "url": "https://www.zoho.com/creator/newhelp/overview/",
+      "title": "newhelp/overview",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/calendar",
+      "url": "https://www.zoho.com/creator/newhelp/reports/calendar/",
+      "title": "newhelp/reports/calendar",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/calendar/phone",
+      "url": "https://www.zoho.com/creator/newhelp/reports/calendar/phone/",
+      "title": "newhelp/reports/calendar/phone",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/kanban/phone",
+      "url": "https://www.zoho.com/creator/newhelp/reports/kanban/phone/",
+      "title": "newhelp/reports/kanban/phone",
+      "count": 2,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/kanban/tablet",
+      "url": "https://www.zoho.com/creator/newhelp/reports/kanban/tablet/",
+      "title": "newhelp/reports/kanban/tablet",
+      "count": 2,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/list/phone",
+      "url": "https://www.zoho.com/creator/newhelp/reports/list/phone/",
+      "title": "newhelp/reports/list/phone",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/list/web",
+      "url": "https://www.zoho.com/creator/newhelp/reports/list/web/",
+      "title": "newhelp/reports/list/web",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/map",
+      "url": "https://www.zoho.com/creator/newhelp/reports/map/",
+      "title": "newhelp/reports/map",
+      "count": 3,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/map/phone",
+      "url": "https://www.zoho.com/creator/newhelp/reports/map/phone/",
+      "title": "newhelp/reports/map/phone",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/map/tablet",
+      "url": "https://www.zoho.com/creator/newhelp/reports/map/tablet/",
+      "title": "newhelp/reports/map/tablet",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/timeline",
+      "url": "https://www.zoho.com/creator/newhelp/reports/timeline/",
+      "title": "newhelp/reports/timeline",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/reports/timeline/phone",
+      "url": "https://www.zoho.com/creator/newhelp/reports/timeline/phone/",
+      "title": "newhelp/reports/timeline/phone",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/script",
+      "url": "https://www.zoho.com/creator/newhelp/script/",
+      "title": "newhelp/script",
+      "count": 12,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/workflow/approval",
+      "url": "https://www.zoho.com/creator/newhelp/workflow/approval/",
+      "title": "newhelp/workflow/approval",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/workflow/button",
+      "url": "https://www.zoho.com/creator/newhelp/workflow/button/",
+      "title": "newhelp/workflow/button",
+      "count": 1,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/workflows",
+      "url": "https://www.zoho.com/creator/newhelp/workflows/",
+      "title": "newhelp/workflows",
+      "count": 14,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/workflows/approval",
+      "url": "https://www.zoho.com/creator/newhelp/workflows/approval/",
+      "title": "newhelp/workflows/approval",
+      "count": 6,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/workflows/button",
+      "url": "https://www.zoho.com/creator/newhelp/workflows/button/",
+      "title": "newhelp/workflows/button",
+      "count": 14,
+      "rowIds": []
+    },
+    {
+      "id": "newhelp/workflows/formworkflows",
+      "url": "https://www.zoho.com/creator/newhelp/workflows/formworkflows/",
+      "title": "newhelp/workflows/formworkflows",
+      "count": 2,
+      "rowIds": []
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "schema": "c2c-fixture-migration-report/1",
+  "fixture": "dialects/d1-minimal",
+  "app": "Synthetic_Dialect_App",
+  "scope": [
+    {
+      "feature": "Payments",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Offline",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Form Email",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "C8 dialect",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Cliq bots",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Native mobile / MDM",
+      "label": "not supported in this version (counted; on the roadmap)"
+    },
+    {
+      "feature": "Marketplace publishing",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "Zia AI builder",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "On-prem Data Bridge",
+      "label": "not applicable (out of scope)"
+    }
+  ],
+  "converted": {
+    "forms": 1,
+    "reports": 1,
+    "pages": 0,
+    "functions": 0,
+    "catalyst": {
+      "tables": 1,
+      "nosqlCollections": 0,
+      "functions": 1,
+      "cronJobs": 0,
+      "slatePages": 2
+    },
+    "deluge": {
+      "statements": 0,
+      "translated": 0,
+      "shimmed": 0
+    }
+  },
+  "todoCount": 0,
+  "todoKinds": [],
+  "fieldGaps": [],
+  "manualSteps": [],
+  "hiddenParts": [],
+  "todoSteps": [],
+  "humanSteps": [
+    "Accept invite: accept the app invite mail",
+    "Sign in once: sign in to the deployed app once",
+    "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
+    "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
+  ],
+  "silentDrops": 0,
+  "residuals": []
+}

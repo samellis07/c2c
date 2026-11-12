@@ -1,0 +1,315 @@
+/**
+ * Reading and checking a form's record from its controls. Controls are
+ * uncontrolled and named by path: `Field`, `Field.part` for a composite part,
+ * `Field[2].Column` for a subform cell. Reading happens once, at submit.
+ *
+ * Empty fields: on add (`data-mode="add"`) an empty field is left out of the
+ * record. On edit (`data-mode="edit"`) a rendered field that is now empty is
+ * sent as a clear, so the stored value is emptied: typed fields (number,
+ * decimal, percent, currency, date, datetime, time, lookup) send null, a
+ * multi-select sends [], and text-family fields send "". A field with no
+ * control on the form is never sent, so a value the user cannot see is never
+ * cleared. A subform row whose every field is empty is left out. The generated
+ * subform grid always sends its list: the server replaces the stored child
+ * rows with it, so removing every row deletes them all.
+ */
+import type { FieldSpec, FormRecord, FormSpec, RecordValue } from '../types.js';
+import { isEmptyRow, subformRows } from '../subform/rows.js';
+
+/** Typed fields whose empty value is null, not "": the store rejects "" for these columns. */
+const BLANK_IS_NULL = new Set(['number', 'decimal', 'percent', 'currency', 'date', 'datetime', 'time', 'lookup', 'lookup-multi']);
+const NOT_SENT = new Set(['section', 'notes', 'formula', 'autonumber', 'zia', 'barcode', 'unsupported', 'integration']);
+export const FILE_WIDGETS = new Set(['file', 'image', 'audio', 'video', 'signature']);
+
+type Control = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
+function controls(formEl: HTMLFormElement): Control[] {
+  return Array.from(formEl.elements).filter((el): el is Control => 'name' in el && typeof (el as Control).name === 'string' && (el as Control).name !== '');
+}
+
+/** A custom widget mirrors its answer into a named hidden input; that input carries the posted value. */
+const isValueCarrier = (el: Control) => el.tagName === 'INPUT' && (el as HTMLInputElement).type === 'hidden';
+
+function scalar(list: Control[], widget: string): RecordValue | undefined {
+  if (!list.length) return undefined;
+  const first = list[0]!;
+  if (widget === 'decision') return isValueCarrier(first) ? first.value === 'true' : (first as HTMLInputElement).checked;
+  if (widget === 'multiselect' || widget === 'lookup-multi') {
+    // An empty multi-select renders one blank carrier so the field still counts as on the form.
+    return list.flatMap((el) => (el.tagName === 'SELECT' ? Array.from((el as HTMLSelectElement).selectedOptions, (o) => o.value) : isValueCarrier(el) ? (el.value === '' ? [] : [el.value]) : (el as HTMLInputElement).checked ? [el.value] : []));
+  }
+  if (widget === 'radio') {
+    const picked = (list as HTMLInputElement[]).find((el) => !isValueCarrier(el) && el.checked);
+    if (picked) return picked.value;
+    const carrier = list.find(isValueCarrier);
+    // An `others option` group hands the field name to its free-text box
+    // while Others is chosen, leaving no carrier; the box is the value.
+    return carrier ? carrier.value : first.value;
+  }
+  return first.value;
+}
+
+/** True when the form draws the generated grid of this subform. */
+function hasGrid(formEl: HTMLFormElement, name: string): boolean {
+  return Array.from(formEl.querySelectorAll('[data-subform]')).some((el) => el.getAttribute('data-subform') === name);
+}
+
+/** The record to post: writable fields only, composite and subform values nested, files left for the upload step. */
+export function readRecord(formEl: HTMLFormElement, form: FormSpec): FormRecord {
+  const edit = formEl.getAttribute('data-mode') === 'edit';
+  const all = controls(formEl);
+  const named = (name: string) => all.filter((el) => el.name === name);
+  const record: FormRecord = {};
+  for (const field of form.fields) {
+    if (field.readonly || field.visibility === false || NOT_SENT.has(field.widget)) continue;
+    if (FILE_WIDGETS.has(field.widget)) {
+      if (edit && named(`${field.name}_cleared`).length > 0) {
+        const el = formEl.elements.namedItem(field.name);
+        const picked = el && 'files' in el ? (el as HTMLInputElement).files?.[0] : undefined;
+        const newSig = field.widget === 'signature' && el && 'tagName' in el && el.tagName === 'INPUT' && (el as HTMLInputElement).value !== '';
+        if (!picked && !newSig) record[field.name] = null;
+      }
+      continue;
+    }
+    if (field.widget === 'subform') {
+      // Rows in grid order; a row with no value in any cell is not sent. The
+      // generated grid always sends its list, even empty: the server replaces
+      // the stored rows with it, so removing every row deletes them all. A
+      // custom subform widget that draws no grid sends nothing, which leaves
+      // the stored rows alone.
+      const kept = subformRows(formEl, field).filter((row) => !isEmptyRow(row)).map((row) => row.values);
+      // On edit a kept row's blank cells post the same clears a top-level
+      // field does: typed cells null, text cells "".
+      if (edit) {
+        for (const row of kept) {
+          for (const column of field.subfields ?? []) {
+            const value = row[column.name];
+            if (value === '' || (Array.isArray(value) && !value.length)) {
+              row[column.name] = Array.isArray(value) ? [] : BLANK_IS_NULL.has(column.widget) ? null : '';
+            }
+          }
+        }
+      }
+      if (kept.length || (field.generated && hasGrid(formEl, field.name))) record[field.name] = kept;
+      continue;
+    }
+    if (field.subfields?.length) {
+      const parts: Record<string, RecordValue> = {};
+      for (const part of field.subfields) {
+        const value = scalar(named(`${field.name}.${part.name}`), part.widget);
+        if (value === undefined) continue;
+        const blank = value === '' || (Array.isArray(value) && !value.length);
+        if (!blank) {
+          parts[part.name] = value;
+        } else if (edit) {
+          parts[part.name] = Array.isArray(value) ? [] : BLANK_IS_NULL.has(part.widget) ? null : '';
+        }
+      }
+      if (Object.keys(parts).length) record[field.name] = parts;
+      continue;
+    }
+    const value = scalar(named(field.name), field.widget);
+    if (value === undefined) continue;
+    const blank = value === '' || (Array.isArray(value) && !value.length);
+    if (!blank) record[field.name] = value;
+    else if (edit) record[field.name] = Array.isArray(value) ? [] : BLANK_IS_NULL.has(field.widget) ? null : '';
+  }
+  return record;
+}
+
+/** File controls with a chosen file, by field name. The signature pad has no file input; its hidden input's stroke JSON uploads as the file. */
+export function chosenFiles(formEl: HTMLFormElement, form: FormSpec): Map<FieldSpec, File> {
+  const out = new Map<FieldSpec, File>();
+  for (const field of form.fields) {
+    if (!FILE_WIDGETS.has(field.widget)) continue;
+    const el = formEl.elements.namedItem(field.name);
+    const picked = el && 'files' in el ? (el as HTMLInputElement).files?.[0] : undefined;
+    if (picked) {
+      out.set(field, picked);
+      continue;
+    }
+    // A `source = …,camera` field's capture input posts under `<name>__camera`
+    // when the dropzone mirror could not copy the pick (no DataTransfer).
+    const cam = formEl.elements.namedItem(`${field.name}__camera`);
+    const shot = cam && 'files' in cam ? (cam as HTMLInputElement).files?.[0] : undefined;
+    if (shot) {
+      out.set(field, shot);
+      continue;
+    }
+    if (field.widget === 'signature' && el && 'tagName' in el && el.tagName === 'INPUT') {
+      const strokes = (el as HTMLInputElement).value;
+      if (strokes) out.set(field, new File([strokes], `${field.name}.json`, { type: 'application/json' }));
+    }
+  }
+  return out;
+}
+
+/**
+ * Largest file a field uploads: 100 MiB — the repo's file-bytes cap,
+ * packages/shims/src/files.ts MAX_FILE_BYTES. The template cannot import it,
+ * so the generator re-stamps this line from that definition when it emits an
+ * app (see stampUploadCap); the repo's tests assert the two stay equal. The
+ * file picker, camera capture, and public_url fetch all enforce this one
+ * bound.
+ */
+export const UPLOAD_SOURCE_MAX_BYTES = 100 * 1024 * 1024;
+
+/** image/svg+xml and any image/*+xml type can carry active script; they are never an upload. */
+function refusedImageType(mime: string): boolean {
+  const type = mime.split(';')[0]!.trim().toLowerCase();
+  return type === 'image/svg+xml' || /^image\/[a-z0-9!#$&^_.+-]*\+xml$/.test(type);
+}
+
+/** A picked file answer too big or too active to upload, or null. */
+function uploadFileError(field: FieldSpec, file: File): string | null {
+  if (file.size > UPLOAD_SOURCE_MAX_BYTES) return `${field.label} is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB file limit.`;
+  if (field.widget === 'image' && refusedImageType(file.type)) return `${field.label} cannot be an SVG image.`;
+  return null;
+}
+
+/**
+ * The file picker's `accept` rule applied to a fetched MIME: an `image/*`
+ * field only uploads image/* bytes. A field without an accept list behaves
+ * like the picker: any declared type is fine, but a missing or opaque
+ * Content-Type is still a refusal.
+ */
+function uploadSourceTypeOk(mime: string, accept?: string): boolean {
+  const wanted = (accept ?? '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.includes('/'));
+  const type = mime.split(';')[0]!.trim().toLowerCase();
+  if (!wanted.length) return type !== '' && type !== 'application/octet-stream';
+  return wanted.some((token) => (token.endsWith('/*') ? type.startsWith(token.slice(0, -1)) : type === token));
+}
+
+/** Read a fetched upload-source body under UPLOAD_SOURCE_MAX_BYTES: the declared length and the read length both must fit. */
+async function uploadSourceBlob(res: Response): Promise<Blob> {
+  const declared = Number(res.headers?.get('content-length'));
+  if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+  const reader = res.body?.getReader?.();
+  if (reader) {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value?.byteLength ?? 0;
+        if (size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+        chunks.push(value!);
+      }
+    } catch (err) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* the read already failed */
+      }
+      throw err;
+    }
+    return new Blob(chunks as BlobPart[]);
+  }
+  const blob = await res.blob();
+  if (blob.size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+  return blob;
+}
+
+/**
+ * `source = …,public_url` fields: the `<name>__url` input's address is fetched
+ * in the page and uploaded like a picked file — bounded to the shared
+ * file-size cap, refused when it is an SVG or script-bearing image type, and
+ * checked against the field's `accept` type before the bytes reach
+ * the signed upload. Errors come back per field so the form can flag them;
+ * only http(s) URLs are fetched, and a failed check stores nothing.
+ */
+export async function resolveUrlSources(formEl: HTMLFormElement, form: FormSpec, files: Map<FieldSpec, File>): Promise<Record<string, string>> {
+  const errors: Record<string, string> = {};
+  for (const field of form.fields) {
+    if (!FILE_WIDGETS.has(field.widget) || field.widget === 'signature' || files.has(field)) continue;
+    if (!field.uploadSources?.includes('public_url')) continue;
+    const el = formEl.elements.namedItem(`${field.name}__url`);
+    const typed = el && 'value' in el ? String((el as { value: string }).value).trim() : '';
+    if (!typed) continue;
+    try {
+      const target = new URL(typed);
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('scheme');
+      const res = await fetch(target.href);
+      if (!res.ok) throw new Error('fetch');
+      const contentType = res.headers?.get('content-type') ?? '';
+      if (!uploadSourceTypeOk(contentType, field.accept)) throw new Error('type');
+      if (refusedImageType(contentType)) throw new Error('svg');
+      const blob = await uploadSourceBlob(res);
+      const type = blob.type || contentType.split(';')[0]!.trim().toLowerCase();
+      if (!uploadSourceTypeOk(type, field.accept)) throw new Error('type');
+      if (refusedImageType(type)) throw new Error('svg');
+      files.set(field, new File([blob], target.pathname.split('/').pop() || 'file', { type }));
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : '';
+      errors[field.name] =
+        code === 'svg'
+          ? `${field.label} cannot be an SVG image.`
+          : code === 'size'
+            ? `${field.label} is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB file limit.`
+            : `Enter a reachable public http(s) URL for ${field.label}.`;
+    }
+  }
+  return errors;
+}
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const URL_RE = /^https?:\/\/\S+$/i;
+const NUMBER = /^-?\d+(\.\d+)?$/;
+
+/** Browser-side checks: mandatory, type shape, maximum length and the Creator regex. Unique stays a server check. */
+export function validate(form: FormSpec, record: FormRecord, files: Map<FieldSpec, File>): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const field of form.fields) {
+    if (field.readonly || field.visibility === false || NOT_SENT.has(field.widget)) continue;
+    if (FILE_WIDGETS.has(field.widget)) {
+      const picked = files.get(field);
+      const refused = picked ? uploadFileError(field, picked) : null;
+      if (refused) {
+        errors[field.name] = refused;
+        continue;
+      }
+    }
+    const value = record[field.name];
+    const empty = FILE_WIDGETS.has(field.widget) ? !files.has(field) : value === undefined || value === null || value === '' || value === false || (Array.isArray(value) && !value.length);
+    if (field.required && empty) {
+      errors[field.name] = `Enter ${field.label}.`;
+      continue;
+    }
+    if (typeof value !== 'string' || value === '') continue;
+    if (field.widget === 'email' && !EMAIL.test(value)) errors[field.name] = `Enter a valid email address for ${field.label}.`;
+    else if (field.widget === 'url' && !URL_RE.test(value)) errors[field.name] = `Enter a web address starting with http:// or https:// for ${field.label}.`;
+    else if (['number', 'decimal', 'percent', 'currency'].includes(field.widget) && !NUMBER.test(value)) errors[field.name] = `Enter a number for ${field.label}.`;
+    else if (field.maxLength && value.length > field.maxLength) errors[field.name] = `${field.label} can be at most ${field.maxLength} characters.`;
+    else if (field.pattern) {
+      try {
+        if (!new RegExp(field.pattern).test(value)) errors[field.name] = `${field.label} is not in the expected format.`;
+      } catch {
+        // A Creator pattern the browser cannot compile is left to the server check.
+      }
+    }
+  }
+  return errors;
+}
+
+const FOCUSABLE = 'input:not([type="hidden"]), select:not([hidden]), textarea, button:not([disabled])';
+
+/**
+ * The control the first error should focus. Keys are field names and subform
+ * cell names (`Field[i].Column`); a grid's own error is skipped when one of its
+ * cells has an error, so focus lands on the cell to fix.
+ */
+export function firstErrorControl(formEl: HTMLFormElement, errors: Record<string, string>): HTMLElement | null {
+  const keys = Object.keys(errors);
+  const boxes = Array.from(formEl.querySelectorAll<HTMLElement>('[data-field], [data-cell]'));
+  for (const key of keys) {
+    if (keys.some((other) => other.startsWith(`${key}[`))) continue;
+    const box = boxes.find((el) => el.getAttribute('data-cell') === key) ?? boxes.find((el) => el.getAttribute('data-field') === key);
+    const control = box?.querySelector<HTMLElement>(FOCUSABLE);
+    if (control) return control;
+  }
+  return null;
+}

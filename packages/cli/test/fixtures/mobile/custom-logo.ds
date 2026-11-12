@@ -1,0 +1,27 @@
+application "Custom Logo Mobile"
+{
+	forms
+	{
+		form Item
+		{
+			Name ( type = text )
+		}
+	}
+	phone
+	{
+		customize
+		{
+			layout = onecolumn
+			font = "default"
+			style = "3"
+			color options
+			{
+				color = chryslerpurple
+			}
+			logo
+			{
+				preference = "custom"
+			}
+		}
+	}
+}

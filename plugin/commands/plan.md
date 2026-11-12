@@ -1,0 +1,11 @@
+---
+description: Build the full offline migration plan for a Creator app (schema, budgets, functions, Slate, auth, integrations, provisioning steps). No account access.
+argument-hint: "<path/to/app.ds>"
+---
+Load `c2c-migrate`, then the sub-skills the plan touches (`c2c-schema-and-data`, `c2c-logic`, `c2c-ui`, `c2c-auth-and-access`, `c2c-integrations`). Input: $ARGUMENTS
+
+1. Choose a stable app directory under `c2c-out/`, then run `"${CLAUDE_PLUGIN_ROOT}/bin/c2c" plan $ARGUMENTS --out c2c-out/<app-link> --dc <dc>`. This is an offline dry run; it needs no project id, org, or `--confirm`. The data centre can instead come from `"dc"` in `c2c-deploy.json`; omit `--dc` only when that file already sets it.
+2. Walk the user through `c2c-out/<app-link>/plan.md` section by section. Resolve every budget decision (unique fields over the cap, side tables, async workflows, degraded views) and record them in `decisions.json`; re-plan until budgets pass.
+3. Run `"${CLAUDE_PLUGIN_ROOT}/bin/c2c" report $ARGUMENTS --out c2c-out/<app-link> --dc <dc>` and give the user `migration-report.md`: the plain-language list of what converted, the guided human steps, unsupported items with workarounds, data checks and the go-live checklist.
+4. State the doctor status in the summary. If doctor is red, say clearly that nothing past this plan can run until it is green.
+5. Re-export after a change in Creator: add `--previous <deployed .ds>` so the plan compares the new export with the deployed model and writes `schema-change/delta.md`. Added fields and forms plan with no extra flag. A dropped, renamed, or altered column is refused with the next steps: export the deployed rows with `c2c rollback-export --ds <deployed .ds> --out <backup-dir> --confirm`, name a Creator rename with `--rename Form.Old=New` (a re-export carries no rename record, so it otherwise reads as a drop plus an add), then re-plan with `--allow-destructive --backup <backup-dir>`. `c2c deploy --previous` still refuses a rename, alter, or drop: the live table step only adds.

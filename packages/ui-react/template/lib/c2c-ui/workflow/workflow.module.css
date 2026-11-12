@@ -1,0 +1,176 @@
+/* Workflow surfaces — the approval inbox and the record stage bar. */
+.group {
+  margin-bottom: var(--space-6);
+}
+
+.group h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  min-width: 0;
+  flex: 1;
+}
+
+.field {
+  display: inline-flex;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fieldLabel {
+  color: var(--text-secondary);
+}
+
+.stage {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.stage[data-done] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.stage[data-rejected] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.itemActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.editLink {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.editLink:hover {
+  text-decoration: underline;
+}
+
+.bar {
+  margin: 0 auto var(--space-5);
+  max-width: var(--c2c-content-width);
+  padding: var(--space-4) var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-resting);
+}
+
+.bar + .bar {
+  margin-top: var(--space-4);
+}
+
+.barHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.flowName {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.stageActions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.events {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.events h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.detail {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.comments {
+  margin: 0 0 var(--space-4);
+}
+
+.commentList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.commentItem {
+  min-width: 0;
+}
+
+.commentMeta {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.note {
+  color: var(--text-secondary);
+}
+
+.loading {
+  color: var(--text-secondary);
+}

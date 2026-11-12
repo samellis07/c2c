@@ -1,0 +1,2607 @@
+/**
+ * No-silent-drop audit: every declared construct is either generated or listed.
+ *
+ * For every construct the `.ds` declares — forms, fields, reports, pages,
+ * workflows, schedules, approvals, integrations, permissions, translations —
+ * this checks the real generator outputs for either a produced artifact or an
+ * explicit manual item / fidelity note, and reports every construct that is
+ * neither. A caller can fail on any such silent drop.
+ *
+ * Produced-vs-listed per kind (each cites where the generator emits it):
+ * - form: a `role: 'form'` table in generateSchema (packages/schema/src/generator.ts,
+ *   one table per form). Listed: a severity 'unsupported' schema issue for the form.
+ * - field: a schema field outcome with status other than 'unsupported'
+ *   (supported and partial outcomes always store a column, a child table, or a
+ *   junction table), or a generated UI widget (packages/ui/src/model.ts).
+ *   Listed: an 'unsupported' schema issue or outcome, or a UI field todo.
+ *   A field property, modifier, annotation, flag, choice list, lookup, initial
+ *   value, required, or unique is emitted only when that setting is on the
+ *   generated field or its schema column. A counted field counts every
+ *   property. A dropped field adds no property rows.
+ *   `toolbar = enable` is emitted as the generated field's `toolbar` flag,
+ *   and an explicit disabled value matches the generated plain editor;
+ *   `enable linkname` has a real equivalent (the generated field's
+ *   `linkName` flag), so it is listed only when that flag is actually set,
+ *   same as `defaultrow = N` with the generated field's `defaultRowCount`
+ *   (an unparseable value falls back to a UI todo).
+ *   A field's own min/max-char or regex validation rule is produced only when
+ *   the generated runtime re-checks it server-side (nothing does today);
+ *   listed by a UI field note naming the gap ("browser only"), never a
+ *   generic validation note that could mask a second, different rule.
+ * - report / page: a 'generated' UI model entry (packages/ui/src/model.ts
+ *   buildReport/buildPage). Listed: a UI todo naming the report, or the page,
+ *   or one of its ZML elements. buildReport/buildPage always push a todo when
+ *   the status is 'todo'.
+ *   A report feature (column, filter, custom action, conditional format, sort,
+ *   group, criteria, view, block) is emitted only when that construct is on
+ *   the generated report model. A counted report counts every feature.
+ *   A page element is emitted only when the generated page tree contains that
+ *   ZML node and the behaviour the export asked for. A `todo` element counts it.
+ * - workflow / schedule / approval / payment: the generate() branch for the
+ *   workflow (packages/deluge/src/generate.ts workflowKind) emitted its file:
+ *   a handler module, a job module with a planned cron or sweep
+ *   (packages/deluge/src/schedules.ts planSchedules), a flow machine module
+ *   (flowSpecs), or a payment stub for an unimplemented gateway. A merged form-event route
+ *   is one module (`input-handlers.mjs`, `handler-handlers.mjs`) for every
+ *   event in the group, so the per-event slug is not the file name.
+ *   generate() records each workflow that wrote a non-empty part, and the
+ *   paths that part landed in, on WorkflowCoverage. The audit treats that
+ *   list as the produced artifact only when the server body is actually
+ *   invoked: the generated client posts the route, or the submit/delete
+ *   runtime calls it. A prefetch URL is not that call. When `serverInvoked`
+ *   is false the workflow is not credited, even if its client file exists;
+ *   it is listed by the `form-event-server-uninvoked` todo instead.
+ *   The per-event slug still counts when the file is named for that one event
+ *   and the server half is not an uninvoked one. A workflow with no script
+ *   and no field rules declares no behaviour, so there is nothing to migrate.
+ *   An empty sibling that shares the route is not credited with the group's
+ *   file. Listed: a Deluge todo whose span sits inside the workflow span
+ *   (translate todos are shifted into the script span; gap todos use the
+ *   workflow span).
+ * - integration: a `zoho.<service>.<task>()` call or an `invokeurl` is
+ *   produced when the translator evaluates it locally (date/time/app env
+ *   roots in packages/deluge/src/dispatch.ts ZOHO_ENV, or a `local` adapter
+ *   in packages/shims/src/zoho-adapters.ts), and otherwise listed when the
+ *   connections analysis surfaces it (packages/deluge/src/connections.ts
+ *   entries, unsupported, or diagnostics, all rendered to CONNECTIONS.md).
+ *   Payment-task calls are listed through the 'payments' Deluge todo.
+ * - permission: a raw `permissions = {...}` literal is migrated when its
+ *   owner is a profile or role (packages/auth/src/plan.ts turns profiles and
+ *   hierarchy roles into Catalyst roles with table grants). On a
+ *   `connections` block the literal is the connection's granted scope list,
+ *   listed by the connections analysis diagnostic that names the declared
+ *   scopes. Anything else has no consumer and must be listed.
+ * - device: a phone/tablet device's `forms { form X { ... } }` properties
+ *   (e.g. a mobile offline sync scope) are never produced — only the web
+ *   device's `label placement` is consumed, by
+ *   packages/ui/src/decorations/layout.ts. Listed: a
+ *   'device-form-setting-not-migrated' warning naming the device and form
+ *   (packages/deluge/src/generate.ts deviceFormWarning).
+ * - translation: a block's string labels are produced when they all land in
+ *   the generated client's i18n table (buildModel → UiModel.i18n →
+ *   slate/assets/model.js, read by the client's language switch), and its
+ *   `Language_Settings` are produced when they land on the model
+ *   (`UiModel.languageWithLogin`, read by the client's language pick). A
+ *   block whose remaining pieces have no generated equivalent must be listed
+ *   as an explicit manual step (a todo inside its span). The migration-report
+ *   warning (construct 'translation-not-migrated') is not a counted manual
+ *   item: a warning-only block is a drop.
+ *
+ * A construct labelled 'manual' that the generator actually produces is a
+ * false listing, not coverage: the produced check runs first and wins.
+ */
+
+import vm from 'node:vm';
+
+import type { App, Field, Property, PropertyBlock, Report, ReportView, Workflow } from '../../core/src/ir.js';
+import { formLink, translationLeftovers, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
+import { authPlan, type AuthPlan } from '../../auth/src/plan.js';
+import { analyzeConnections, memberChain, permissionScopes, walk, type ConnectionsReport } from '../../deluge/src/connections.js';
+import type { Expr } from '../../deluge/src/ast.js';
+import { dispatchGet, ZOHO_ENV, ZOHO_PAYMENT } from '../../deluge/src/dispatch.js';
+import { flowSpecs, generate, slug, translationLanguage, workflowKind, type CoverageEntry, type FlowSpec, type GeneratedFile, type GenerateResult, type GenerateWarning, type WorkflowCoverage } from '../../deluge/src/generate.js';
+import { parse } from '../../deluge/src/parser.js';
+import type { Stmt } from '../../deluge/src/ast.js';
+import { planSchedules, type SchedulePlan } from '../../deluge/src/schedules.js';
+import { reportCriteria, type TodoItem } from '../../deluge/src/translate.js';
+import { criteriaHasTodo } from '../../shims/src/criteria.js';
+import { adapterFor } from '../../shims/src/zoho-adapters.js';
+import { multiValueDefault } from '../../shims/src/multi-value.js';
+import { generateSchema, schemaIdent, type SchemaColumn, type SchemaPlan } from '../../schema/src/generator.js';
+import { normalizeType } from '../../schema/src/mapping.js';
+import { buildModel, labelWidthOption, recordsPerRowOption, reportPageSizeOption, reportRadiusOption, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
+import { buildUi, clientRuntimeSource, lookupOrderMap } from '../../ui/src/generate.js';
+import { displayChoice, type DisplayTerm } from '../../ui/src/decorations/lookups.js';
+import type { UiElement } from '../../ui/src/pages.js';
+import { decodeXmlEntities } from '../../ui/src/htmlpage.js';
+import { defaultEquivalent } from './default-equivalence.js';
+
+export type DropKind =
+  | 'form'
+  | 'field'
+  | 'field-property'
+  | 'report'
+  | 'report-feature'
+  | 'page'
+  | 'page-element'
+  | 'workflow'
+  | 'schedule'
+  | 'approval'
+  | 'function'
+  | 'statement'
+  | 'integration'
+  | 'permission'
+  | 'translation'
+  | 'device';
+
+export interface SilentDrop {
+  kind: DropKind;
+  /** Construct identity without the app name (form, Form.Field, workflow, ...). */
+  name: string;
+  /** What is missing and what the user must do instead. */
+  note: string;
+  /** The declaring form, when the construct belongs to one. */
+  form?: string;
+  /** The field, for a field or field-property drop. */
+  field?: string;
+  /** The field setting, for a field-property drop. */
+  property?: string;
+}
+
+/**
+ * The generation-time coverage ledger (C3): one row per construct the `.ds`
+ * declares, resolved to exactly one status.
+ * - `emitted`: the construct produced a traceable generated artifact.
+ * - `counted`: the construct is recorded as an explicit TODO / manual step.
+ * - `dropped`: neither — a silent drop. Generation fails on these.
+ */
+export interface CoverageRow {
+  kind: DropKind;
+  name: string;
+  status: 'emitted' | 'counted' | 'dropped';
+  /** What covers the construct: a generated artifact path, or the listing surface (`todo`, `schema issue`, `migration-report warning`, ...). */
+  via: string;
+  /** Dropped rows only: what is missing and what to do instead. */
+  note?: string;
+  form?: string;
+  field?: string;
+  property?: string;
+}
+
+/** The generator outputs one audit run reads. Tests may fabricate these to prove a direction. */
+export interface AuditOutputs {
+  schema: SchemaPlan;
+  model: UiModel;
+  files: GeneratedFile[];
+  todos: TodoItem[];
+  warnings: GenerateWarning[];
+  auth: AuthPlan;
+  connections: ConnectionsReport;
+  schedules: Map<Workflow, SchedulePlan>;
+  specs: FlowSpec[];
+  /**
+   * Form workflows emitFormHandler wrote into a module. Absent when a test
+   * fabricates outputs that predate this field. A merged route names one
+   * file for several events; each entry lists only the files that workflow
+   * contributed.
+   */
+  coverage?: WorkflowCoverage[];
+  /** Statement coverage ledger rows the generators emitted (generate().statementCoverage, absolute spans). */
+  statementCoverage: CoverageEntry[];
+  /** The generated UI bundle files (buildUi), when the caller produced them — the audit reads the emitted lookup query from here. */
+  uiFiles?: readonly { path: string; data: string | Buffer }[];
+}
+
+/** Run every generator over the app and bundle the outputs the audit reads. `parts` reuses already-computed results (analyze runs the same generators). */
+export function collectOutputs(app: App, parts?: { schema?: SchemaPlan; gen?: GenerateResult; model?: UiModel; uiFiles?: readonly { path: string; data: string | Buffer }[] }): AuditOutputs {
+  const schema = parts?.schema ?? generateSchema(app);
+  const gen = parts?.gen ?? generate(app);
+  const ui = parts === undefined ? buildUi(app, { schema }) : undefined;
+  const model = parts?.model ?? ui?.model ?? buildModel(app, gen.files);
+  const auth = authPlan(app);
+  const connections = analyzeConnections(app);
+  const schedules = planSchedules(
+    app,
+    app.workflows.filter((w) => workflowKind(w) === 'schedule'),
+    formLink,
+    (src) => {
+      const criteria = reportCriteria(src, app.functions);
+      return criteriaHasTodo(criteria) ? null : criteria;
+    },
+  );
+  let warnings: GenerateWarning[] = [];
+  try {
+    warnings = (JSON.parse(gen.files.find((f) => f.path === 'migration-report.json')?.source ?? '{}') as { warnings?: GenerateWarning[] }).warnings ?? [];
+  } catch {
+    warnings = [];
+  }
+  return { schema, model, files: gen.files, todos: gen.todos, warnings, auth, connections, schedules, specs: flowSpecs(app), coverage: gen.coverage, statementCoverage: gen.statementCoverage, uiFiles: parts === undefined ? ui?.files : parts.uiFiles };
+}
+
+function within(inner: { start: number; end: number }, outer: { start: number; end: number }): boolean {
+  return inner.start >= outer.start && inner.end <= outer.end;
+}
+
+/** Deluge todos that sit inside the workflow: its listed manual items. */
+function listedTodos(todos: readonly TodoItem[], w: Workflow): TodoItem[] {
+  return todos.filter((t) => within(t, w.span));
+}
+
+function auditForm(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  for (const form of app.forms) {
+    const produced = out.schema.tables.some((t) => t.form === form.name && t.role !== 'system');
+    if (produced) {
+      rows.push({ kind: 'form', name: form.name, status: 'emitted', via: 'schema table' });
+      continue;
+    }
+    const listed = out.schema.issues.some((i) => i.severity === 'unsupported' && i.form === form.name && i.field === undefined);
+    if (listed) {
+      rows.push({ kind: 'form', name: form.name, status: 'counted', via: 'schema issue' });
+      continue;
+    }
+    rows.push({
+      kind: 'form',
+      name: form.name,
+      status: 'dropped',
+      via: 'none',
+      form: form.name,
+      note: `Form ${form.name} has no generated table and no fidelity note. Add one: either migrate the form or record why it cannot be migrated.`,
+    });
+  }
+}
+
+/** Every field of a form, subfields included (subforms, composite parts). */
+function eachField(
+  app: App,
+  visit: (form: string, field: App['forms'][number]['fields'][number], path: string[]) => void,
+): void {
+  const walk = (form: string, fields: App['forms'][number]['fields'], path: string[]): void => {
+    for (const field of fields) {
+      visit(form, field, path);
+      walk(form, field.subfields, [...path, field.name]);
+    }
+  };
+  for (const form of app.forms) walk(form.name, form.fields, []);
+}
+
+function auditField(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  for (const form of app.forms) {
+    const uiFields = out.model.forms.find((f) => f.name === form.name)?.fields ?? [];
+    for (const field of form.fields) {
+      const outcome = out.schema.fields.find((o) => o.form === form.name && o.field === field.name);
+      const uiGenerated = uiFields.some((u) => u.name === field.name && u.status === 'generated');
+      if ((outcome && outcome.status !== 'unsupported') || uiGenerated) {
+        rows.push({ kind: 'field', name: `${form.name}.${field.name}`, status: 'emitted', via: outcome ? 'schema field outcome' : 'UI widget' });
+        continue;
+      }
+      const listed =
+        (outcome && outcome.status === 'unsupported') ||
+        out.schema.issues.some((i) => i.severity === 'unsupported' && i.form === form.name && i.field === field.name) ||
+        out.model.todos.some((t) => t.area === 'field' && t.name === `${form.name}.${field.name}`);
+      if (listed) {
+        rows.push({ kind: 'field', name: `${form.name}.${field.name}`, status: 'counted', via: 'schema issue / UI todo' });
+        continue;
+      }
+      rows.push({
+        kind: 'field',
+        name: `${form.name}.${field.name}`,
+        status: 'dropped',
+        via: 'none',
+        form: form.name,
+        field: field.name,
+        note: `Field ${form.name}.${field.name} has no generated column and no fidelity note. Add one: either migrate the field or record what the user must re-enter.`,
+      });
+    }
+  }
+}
+
+/**
+ * Does a field's raw export declare a min/max length rule, or a regex
+ * pattern, under any of Creator's property-key spellings? Mirrors the keys
+ * `intProp`/`patternOf` read in packages/ui/src/model.ts.
+ */
+function declaredValidation(field: Field): { minOrMax: boolean; pattern: boolean } {
+  const key = (p: Property) => p.key.trim().toLowerCase();
+  const minOrMax = field.properties.some((p) => ['maxchar', 'max char', 'max length', 'minchar', 'min char', 'min length'].includes(key(p)));
+  const pattern = field.properties.some((p) => {
+    const k = key(p);
+    return k === 'regex' || k === 'pattern' || k.includes('regex');
+  });
+  return { minOrMax, pattern };
+}
+
+/**
+ * A field-validation setting the generated function does not re-check (none
+ * of the write rules in packages/shims/src/runtime.ts cover regex or Creator
+ * min/max char; only required, unique, decimal scale, and the Data Store
+ * varchar byte limit are enforced server-side) must carry a note that names
+ * the gap specifically — not a generic 'validation' note that would also
+ * hide an unrelated rule being silently dropped alongside it.
+ */
+function auditFieldValidation(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  const fieldRow = new Map(rows.filter((r) => r.kind === 'field').map((r) => [r.name, r.status]));
+  eachField(app, (formName, field, path) => {
+    const status = fieldRow.get(`${formName}.${field.name}`);
+    if (status !== 'emitted' && status !== 'counted') return;
+    const declared = declaredValidation(field);
+    if (!declared.minOrMax && !declared.pattern) return;
+    const ui = findUiField(out.model, formName, field.name, path);
+    const name = `${formName}.${field.name} server-check note`;
+    const flagged = /browser only/i.test(ui?.note ?? '');
+    if ((declared.minOrMax || (declared.pattern && ui?.pattern)) && !flagged) {
+      rows.push({
+        kind: 'field-property',
+        name,
+        status: 'dropped',
+        via: 'none',
+        form: formName,
+        field: field.name,
+        property: 'server-check note',
+        note: `Field ${formName}.${field.name} declares a length or pattern validation rule with no note that the server does not re-check it. Name the gap, or enforce the rule server-side.`,
+      });
+    } else {
+      rows.push({ kind: 'field-property', name, status: 'emitted', via: 'UI note' });
+    }
+  });
+}
+
+/**
+ * Field-level settings are emitted only when the generated field or its schema
+ * column carries that setting. A counted field (or a field whose whole span is
+ * a manual item) counts every setting. A field that is itself dropped is
+ * reported once by auditField; its properties add no rows of their own.
+ */
+function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  const fieldRow = new Map(rows.filter((r) => r.kind === 'field').map((r) => [r.name, r.status]));
+  eachField(app, (formName, field, path) => {
+    const status = fieldRow.get(`${formName}.${field.name}`);
+    if (status !== 'emitted' && status !== 'counted') return;
+    const items = fieldSettingItems(field, app, formName, out);
+    if (status === 'counted' || fieldListed(out, formName, field)) {
+      for (const item of items) {
+        rows.push({ kind: 'field-property', name: `${formName}.${field.name} ${item.label}`, status: 'counted', via: 'field manual item' });
+      }
+      return;
+    }
+    // A subform field can share its name with the top-level field (or a field
+    // in a sibling subform) the coverage ledger names it after, since the
+    // ledger name carries no subform path. Resolve the UI field and schema
+    // columns along this field's own subform path first, so a nested field's
+    // settings are proved against its own generated widget rather than a
+    // same-named field elsewhere in the form.
+    const ui = findUiField(out.model, formName, field.name, path);
+    const columns = findColumns(out.schema, formName, field.name, path);
+    for (const item of items) {
+      const name = `${formName}.${field.name} ${item.label}`;
+      const propertyTodo = out.model.todos.find(
+        (t) =>
+          t.area === 'field' &&
+          (t.name === name ||
+            t.name === `${formName}.${field.name}.${item.label}` ||
+            privacyPropertyListed(t, formName, field.name, item.label)),
+      );
+      if (propertyTodo || spanCovered(out, item.start, item.end)) {
+        rows.push({ kind: 'field-property', name, status: 'counted', via: propertyTodo ? 'UI todo' : 'todo' });
+        continue;
+      }
+      if (item.proved(ui, columns)) {
+        rows.push({ kind: 'field-property', name, status: 'emitted', via: 'field setting' });
+        continue;
+      }
+      rows.push({
+        kind: 'field-property',
+        name,
+        status: 'dropped',
+        via: 'none',
+        form: formName,
+        field: field.name,
+        property: item.label.trim(),
+        note: `Field ${formName}.${field.name} ${item.label} is not in the generated field. Add one: either emit the setting or record the manual step.`,
+      });
+    }
+  });
+}
+
+interface FieldSetting {
+  label: string;
+  start: number;
+  end: number;
+  proved: (ui: UiField | undefined, columns: SchemaColumn[]) => boolean;
+}
+
+function fieldSettingItems(field: Field, app: App, formName: string, out: AuditOutputs): FieldSetting[] {
+  const span = field.span;
+  const items: FieldSetting[] = [];
+  for (const p of field.properties) {
+    const bidirectional = p.key.trim().toLowerCase() === 'bidirectional';
+    items.push({
+      label: `property ${p.key}`,
+      start: p.span.start,
+      end: p.span.end,
+      proved: (ui, columns) => (bidirectional ? bidirectionalProved(p, field, formName, app, out.schema) : propertyProved(p, field, ui, columns, app, out)),
+    });
+  }
+  for (const modifier of field.modifiers) {
+    items.push({
+      label: `modifier ${modifier}`,
+      start: span.start,
+      end: span.end,
+      proved: (ui, columns) => modifierProved(modifier, ui, columns),
+    });
+  }
+  for (const annotation of field.annotations) {
+    items.push({
+      label: `annotation ${annotation.name}`,
+      start: annotation.span?.start ?? span.start,
+      end: annotation.span?.end ?? span.end,
+      proved: (ui) => annotationProved(annotation, ui),
+    });
+  }
+  for (const flag of field.flags) {
+    items.push({
+      label: `flag ${flag}`,
+      start: span.start,
+      end: span.end,
+      proved: (ui) => flagProved(flag, ui, field),
+    });
+  }
+  if (field.choices) {
+    items.push({ label: 'choices', start: span.start, end: span.end, proved: (ui) => choicesProved(field, ui) });
+  }
+  if (field.optionGroups?.length) {
+    // A select carries the headers on the generated field (`optionGroups` in
+    // model.ts, drawn as `<optgroup>`s), so the row is emitted through that
+    // proof; any other widget lists the members flat and stays counted through
+    // its `… option groups` UI todo, dropped when the todo is absent.
+    items.push({ label: 'option groups', start: span.start, end: span.end, proved: (ui) => optionGroupsProved(field, ui) });
+  }
+  if (field.lookup) {
+    const lookup = field.lookup;
+    items.push({
+      label: `lookup ${lookup.form}${lookup.field ? `.${lookup.field}` : ''}`,
+      start: span.start,
+      end: span.end,
+      proved: (ui, columns) => lookupProved(lookup, ui, columns, app),
+    });
+  }
+  if (field.initialValue !== undefined) {
+    items.push({
+      label: 'initial value',
+      start: span.start,
+      end: span.end,
+      proved: (ui, columns) => initialProved(field.initialValue ?? '', ui, columns),
+    });
+  }
+  if (field.required) {
+    items.push({ label: 'required', start: span.start, end: span.end, proved: (ui, columns) => requiredProved(ui, columns) });
+  }
+  if (field.unique) {
+    items.push({ label: 'unique', start: span.start, end: span.end, proved: (ui, columns) => uniqueProved(ui, columns) });
+  }
+  return items;
+}
+
+function fieldListed(out: AuditOutputs, formName: string, field: Field): boolean {
+  return (
+    out.model.todos.some((t) => t.area === 'field' && t.name === `${formName}.${field.name}`) ||
+    out.schema.issues.some((i) => i.severity === 'unsupported' && i.form === formName && i.field === field.name)
+  );
+}
+
+function privacyPropertyListed(
+  todo: AuditOutputs['model']['todos'][number],
+  formName: string,
+  fieldName: string,
+  label: string,
+): boolean {
+  const match = /^property (private|personal data|encrypt|encryptdata)$/i.exec(label.trim());
+  if (!match?.[1] || todo.area !== 'field' || todo.name !== 'privacy flags' || !todo.manualStep) return false;
+  const wanted = `${match[1].toLowerCase()} = true`;
+  const prefix = `${formName}.${fieldName} (`;
+  const hasFlag = (text: string): boolean => {
+    let pos = 0;
+    while ((pos = text.indexOf(prefix, pos)) !== -1) {
+      const prev = pos === 0 ? '' : text[pos - 1]!;
+      const openEnd = pos + prefix.length;
+      if (pos === 0 || prev === '"' || prev === ',' || prev <= ' ') {
+        const close = text.indexOf(')', openEnd);
+        if (close > openEnd) {
+          const found = text
+            .slice(openEnd, close)
+            .split(',')
+            .map((part) => part.trim().toLowerCase())
+            .includes(wanted);
+          if (found) return true;
+        }
+      }
+      pos = openEnd;
+    }
+    return false;
+  };
+  return hasFlag(todo.reason) && hasFlag(todo.manualStep);
+}
+
+/**
+ * `path` is the chain of enclosing subform field names (root to parent,
+ * exclusive of `fieldName` itself) from the field's own place in `app.forms`.
+ * The coverage ledger names a field property `${form}.${field} ${setting}`
+ * with no subform path, so a subform field can share that name with the
+ * top-level field (or a field in a sibling subform) it is really auditing
+ * against — a generic by-name search would silently grab the wrong one, as a
+ * top-level field or an earlier subfield of the same name. Following the
+ * field's own path first resolves that ambiguity; a by-name search is the
+ * fallback only for a field the path does not lead to (e.g. the lookup ran
+ * before path-tracking existed, or the path itself does not resolve).
+ */
+function findUiField(model: UiModel, formName: string, fieldName: string, path: string[] = []): UiField | undefined {
+  const form = model.forms.find((item) => item.name === formName);
+  if (!form) return undefined;
+  let fields: UiField[] | undefined = form.fields;
+  for (const step of path) {
+    const parent: UiField | undefined = fields?.find((item) => item.name === step);
+    fields = parent?.subfields;
+    if (!fields) break;
+  }
+  const atPath = fields?.find((item) => item.name === fieldName);
+  if (atPath) return atPath;
+  // The audit names items `${form}.${field}` — a top-level match wins over a
+  // same-named subform column nested under an earlier field.
+  const top = form.fields.find((item) => item.name === fieldName);
+  if (top) return top;
+  const walk = (list: UiField[]): UiField | undefined => {
+    for (const item of list) {
+      if (item.name === fieldName) return item;
+      if (item.subfields?.length) {
+        const hit = walk(item.subfields);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  };
+  return walk(form.fields);
+}
+
+function findColumns(schema: SchemaPlan, formName: string, fieldName: string, path: string[] = []): SchemaColumn[] {
+  const ident = schemaIdent(fieldName, 'col');
+  const matches = (table: SchemaPlan['tables'][number]): SchemaColumn[] =>
+    table.columns.filter((column) => column.field === fieldName || column.name === fieldName || column.name === ident);
+  if (path.length) {
+    // Mirrors linkedTableName's `${parentTable}__${field}` chaining (packages/schema/src/generator.ts):
+    // a collision-suffixed or length-truncated table name falls through to the unscoped search below.
+    const atPath = schema.tables.find((table) => table.name === [formName, ...path].join('__'));
+    if (atPath) {
+      const columns = matches(atPath);
+      if (columns.length) return columns;
+    }
+  }
+  const columns: SchemaColumn[] = [];
+  for (const table of schema.tables) {
+    if (table.form !== formName) continue;
+    columns.push(...matches(table));
+  }
+  return columns;
+}
+
+function propertyProved(p: Property, field: Field, ui: UiField | undefined, columns: SchemaColumn[], app: App, out: AuditOutputs): boolean {
+  const key = p.key.trim().toLowerCase().replace(/\s+/g, ' ');
+  const raw = p.value;
+  const text = unquote(raw).trim();
+  if (defaultEquivalent(key, text, ui)) return true;
+  if (key === 'charcount' || key === 'character-count' || key === 'character count' || key === 'char count') {
+    return ['false', '0', 'no', 'off'].includes(text.toLowerCase());
+  }
+  if (key === 'type') return ui !== undefined || columns.length > 0;
+  if (key === 'displayname') {
+    const plain = unquote(raw);
+    // A blank override is a no-op: Creator falls back to the field's own name
+    // when `displayname` is empty, same as the generated label fallback
+    // (`field.displayName || field.name` in model.ts buildField).
+    if (plain.trim() === '') return ui?.label === field.name;
+    return ui?.label === plain || ui?.label === plain.trim();
+  }
+  // `qrcode = true` / `barcode = true` mark a scan-capable field the same way
+  // a bare `qr scan`/`barcode scan` flag does (wantsScan in model.ts reads
+  // both field.flags and field.properties for the same /scan|qr|barcode/i
+  // match). The generated input already carries that as `ui.scan`, which the
+  // static runtime renders as `data-scan="true"` (client-runtime.js fieldControl).
+  if (key === 'qrcode' || key === 'barcode') return ui?.scan === true;
+  // Address capture_coordinates=true is generated as a location-pin control
+  // that stores latitude and longitude in the composite field.
+  if (key === 'capture_coordinates') return text.toLowerCase() !== 'true' || ui?.captureCoordinates === true;
+  // Address adjust_using_map=true is generated as an interactive map control
+  // that previews and adjusts the stored latitude and longitude.
+  if (key === 'adjust_using_map') return text.toLowerCase() !== 'true' || ui?.adjustUsingMap === true;
+  // `preview duration = 0` on an image field is already proved by DEFAULT_EQUIVALENCE
+  // (above). A scan-capable field (qrcode/barcode text/number) has the same
+  // no-auto-dismiss default — the generated scan input relies on native device
+  // confirmation, same as the image capture control — but DEFAULT_EQUIVALENCE is
+  // keyed by widget, and a scan field's widget is never 'image'. A non-zero
+  // value on an image field is carried as ui.previewDuration (model.ts
+  // buildField), which client-runtime.js's showCapturePreview renders as the
+  // auto-confirm timer; a scan field has no photo to preview, so stays a
+  // counted manual step for any non-zero value (model.ts).
+  if (key === 'preview duration') {
+    if (ui?.scan === true) return text === '0';
+    if (ui?.widget === 'image') return text === String(ui.previewDuration ?? 0) || (text === '0' && ui.previewDuration === undefined);
+    return false;
+  }
+  // Image widgets prove these defaults in DEFAULT_EQUIVALENCE. A scan field
+  // does not open a camera: `false` matches that (no switch, no gallery) and
+  // `true` is a counted manual step in model.ts. `camera` has no such match.
+  if (key === 'switch camera') return ui?.scan === true && ui.widget !== 'image' && ['false', 'true'].includes(text.toLowerCase());
+  if (key === 'show gallery') return text.toLowerCase() === 'false' && ui?.scan === true && ui.widget !== 'image';
+  // `manual input = true` on a scan field is the generated text input itself:
+  // the user can type a value before invoking the scanner, so it is already carried.
+  if (key === 'manual input') return text.toLowerCase() === 'true' && ui?.scan === true;
+  // The generated lookup endpoint searches every readable parent column when
+  // this setting is true, and the display field alone when it is false.
+  if (key === 'advanced field search') return ui?.lookup !== undefined && ['false', 'true'].includes(text.toLowerCase());
+  if (key === 'format') return formatProved(text, ui);
+  if (key === 'displayformat') {
+    // System Users fields are backed by the Catalyst Users endpoint. Their
+    // display format is carried as the generated lookup's display field.
+    if (ui?.widget === 'users' && ui.lookup) {
+      const refs = unquote(raw).match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+      return refs.length > 0 && refs.every((ref) => ref === ui.lookup?.field);
+    }
+    return displayFormatProved(raw, field, ui);
+  }
+  if (key === 'module') return moduleProved(text, ui);
+  if (key === 'value') return ui?.widget === 'notes' && ui.notesHtml === unquote(raw);
+  if (key === 'searchable') return searchableProved(text, ui);
+  if (key === 'values') return choicesProved(field, ui) || lookupProved(field.lookup, ui, columns, app);
+  // `others option` lands as the generated select/radio "Others" free-text entry.
+  if (key === 'others option') return text.toLowerCase() !== 'true' || ui?.othersOption === true;
+  // `show onload = true` asks Creator to open the camera/scanner before the form
+  // displays; the generated field opens it only on a user tap, so only the `true`
+  // case is a gap (listed through model.ts's dedicated UI todo). A false/omitted
+  // value matches the generated behavior already, on any field.
+  if (key === 'show onload') return text.toLowerCase() !== 'true';
+  if (key === 'sortorder') return sortOrderProved(text, field, ui, app, out);
+  if (key === 'initial value') return initialProved(raw, ui, columns);
+  if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');
+  if (key === 'minchar' || key === 'min char' || key === 'min length') return lengthProved(text, ui?.minLength, columns, 'min');
+  if (key === 'regex' || key === 'pattern' || key.includes('regex')) return ui?.pattern === text;
+  if (key === 'decimalplace' || key === 'decimal places' || key === 'decimal digits') return placesProved(text, ui, columns);
+  if (key === 'defaultrow') return intEqual(text, ui?.defaultRowCount);
+  // `maxrow` lands as the generated grid's row cap (ui.maxRows): the grid's
+  // add control stops at it and the submit check rejects a longer list.
+  if (key === 'maxrow' || key === 'maxrows' || key === 'max row' || key === 'max rows') return intEqual(text, ui?.maxRows);
+  if (key === 'row') return intEqual(text, ui?.row);
+  if (key === 'column') return intEqual(text, ui?.column);
+  if (key === 'width') return ui?.width === text;
+  if (key === 'height') return ui?.height === text;
+  if (key === 'layout') return fieldLayoutProved(text, ui);
+  if (key === 'visibility') return visibilityProved(text, ui);
+  if (key === 'alloweddays') return allowedDaysProved(text, ui);
+  if (key === 'timedisplayoptions') return timeDisplayProved(text, ui);
+  if (key === 'source') return sourceProved(text, ui);
+  // `auto width = true` is the generated subform grid's default: columns size
+  // themselves to their content. `false` is carried as `autoWidth` plus each
+  // column's declared `width` on the generated grid.
+  if (key === 'auto width') return autoWidthProved(text, field, ui, app);
+  if (key === 'enable') return imageEnableProved(text, ui);
+  if (key === 'target') return imageTargetProved(text, ui);
+  // `auto width = true` is the generated subform grid's only layout: its
+  // columns always size themselves to their content, so that value needs no
+  // manual step. `false` asks for fixed column widths, which the grid has no
+  // control for; buildField in model.ts records that as a manual step.
+  if (key === 'auto width') return text.toLowerCase() === 'true';
+  if (key === 'start index') {
+    const rawTrim = raw.trim();
+    return columns.some((column) => {
+      const note = column.note ?? '';
+      return note.includes(`start index ${text}`) || note.includes(`start index ${rawTrim}`);
+    });
+  }
+  // `toolbar = enable` is generated as the rich-text toolbar (ui.toolbar).
+  // An explicit disabled value matches the generated plain editor exactly, so
+  // model.ts lists neither. Any other value is a counted field manual step
+  // there, which the field-manual-item branch counts before this is reached.
+  if (key === 'toolbar') {
+    const value = text.toLowerCase();
+    if (['disable', 'disabled', 'false', 'off', 'none'].includes(value)) return true;
+    return value === 'enable' && ui?.toolbar === true;
+  }
+  return false;
+}
+
+/**
+ * `auto width = false` is emitted only when the generated grid is flagged
+ * fixed-width and every Creator column `width` is on the matching subfield.
+ * A grid with no declared column widths still counts as emitted from the flag
+ * (plain fixed layout, nothing to stamp). True is the auto-sizing default.
+ */
+function autoWidthProved(text: string, field: Field, ui: UiField | undefined, app: App): boolean {
+  const value = text.toLowerCase();
+  if (value === 'true') return true;
+  if (value !== 'false') return false;
+  if (ui?.autoWidth !== false) return false;
+  const columns = ui.subfields ?? [];
+  if (!columns.length) return false;
+  const source = field.subfields.length ? field.subfields : linkedFormFields(field, app);
+  for (const col of columns) {
+    const part = source.find((item) => item.name === col.name);
+    const width = part ? fieldWidthValue(part) : undefined;
+    if (width && col.width !== width) return false;
+  }
+  return true;
+}
+
+function linkedFormFields(field: Field, app: App): Field[] {
+  const name = field.lookup?.form;
+  if (!name) return [];
+  return app.forms.find((item) => item.name === name)?.fields ?? [];
+}
+
+/** A Creator field `width`: a CSS length or one of the export's size words. */
+function fieldWidthValue(field: Field): string | undefined {
+  const raw = field.properties.find((p) => p.key.trim().toLowerCase() === 'width')?.value;
+  if (raw == null) return undefined;
+  const text = unquote(raw).trim();
+  if (!text) return undefined;
+  if (/^\d+(\.\d+)?(px|%|em|rem)$/.test(text) || /^(small|medium|large)$/i.test(text)) return text;
+  return undefined;
+}
+
+/**
+ * `module = users` is the system Users lookup, not a named form. It is carried
+ * only when the generated field is the users widget bound to the Catalyst
+ * project-users endpoint — the picker the generated app actually serves.
+ */
+function moduleProved(text: string, ui: UiField | undefined): boolean {
+  if (text.toLowerCase() !== 'users') return false;
+  return ui?.widget === 'users' && ui.lookup?.form === 'users' && (ui.lookup.endpoint ?? '').startsWith('/lookups/users/');
+}
+
+/**
+ * A field `layout` is proved only when the option arrangement it names is
+ * carried onto the generated field: column counts become `optionColumns` and
+ * `onecolumncard` also sets `optionCard`. `slidingpane` and `tabbar` are
+ * device `customize` layouts, not field settings — on a field they (and any
+ * unknown value) stay drops so a new export spelling cannot pass silently.
+ */
+function fieldLayoutProved(text: string, ui: UiField | undefined): boolean {
+  const value = text.toLowerCase();
+  if (value === '2' || value === 'twocolumn') return ui?.optionColumns === 2;
+  if (value === '3') return ui?.optionColumns === 3;
+  if (value === 'onecolumn') return ui?.optionColumns === 1;
+  if (value === 'onecolumncard') return ui?.optionColumns === 1 && ui?.optionCard === true;
+  return false;
+}
+
+/**
+ * `sortorder = ascending|descending`. On a lookup the generated
+ * `/lookups/:form/:field` query emits `ORDER BY <stored column> DIR, ROWID`
+ * (lookupOrderMap): proved only when that clause is in the emitted stub — when
+ * the UI bundle is among the outputs — and the widget carries the direction.
+ * A sort the generator could not bind to a stored column emits nothing and
+ * stays a drop. On an inline choice list the decoration sorts `ui.choices`.
+ */
+function sortOrderProved(text: string, field: Field, ui: UiField | undefined, app: App, out: AuditOutputs): boolean {
+  const lower = text.toLowerCase();
+  const dir = lower === 'asc' || lower === 'ascending' ? 'asc' : lower === 'desc' || lower === 'descending' ? 'desc' : undefined;
+  if (!dir) return false;
+  if (field.lookup) {
+    if (ui?.lookup?.sort !== dir) return false;
+    const choice = displayChoice(field.lookup);
+    const entry = lookupOrderMap(app)[field.lookup.form]?.[choice.field];
+    if (!entry || entry.dir !== dir) return false;
+    const stub = out.uiFiles?.find((file) => file.path === 'functions/lookups/lookup.mjs');
+    if (stub === undefined) return false;
+    const source = typeof stub.data === 'string' ? stub.data : stub.data.toString('utf8');
+    return source.includes(entry.orderBy);
+  }
+  const choices = field.choices;
+  if (!choices?.length || ui?.choices?.length !== choices.length) return false;
+  const sorted = dir === 'asc' ? [...choices].sort() : [...choices].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  return ui.choices.every((choice, index) => choice === sorted[index]);
+}
+
+function lengthProved(text: string, uiLength: number | undefined, columns: SchemaColumn[], bound: 'max' | 'min'): boolean {
+  const n = Number(text);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  if (uiLength === n) return true;
+  if (bound === 'min') return false;
+  return columns.some((column) => column.length === n || column.length === Math.min(n, 255));
+}
+
+function placesProved(text: string, ui: UiField | undefined, columns: SchemaColumn[]): boolean {
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 0) return false;
+  return ui?.decimalPlaces === n || columns.some((column) => column.precision === n);
+}
+
+function intEqual(text: string, value: number | undefined): boolean {
+  if (value === undefined) return false;
+  const n = Number(text);
+  return Number.isInteger(n) && n === value;
+}
+
+/**
+ * `format = commadotwestern` on a number, decimal, percent, or currency field
+ * is carried as `ui.format`, and report cells plus the record view group the
+ * integer digits. Any other format value is not grouped and stays a drop.
+ */
+function formatProved(text: string, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'number' && ui?.widget !== 'decimal' && ui?.widget !== 'percent' && ui?.widget !== 'currency') return false;
+  if (text.toLowerCase() !== 'commadotwestern') return false;
+  return ui.format?.toLowerCase() === 'commadotwestern';
+}
+
+/** `visibility = true` is the default and is omitted on ordinary widgets. */
+function visibilityProved(text: string, ui: UiField | undefined): boolean {
+  const shown = text.toLowerCase() !== 'false';
+  if (!shown) return ui?.visibility === false;
+  return ui?.visibility !== false;
+}
+
+/**
+ * `source` lists the acquisition choices a file, image, audio or video field
+ * offers. The generated controls cover `file` (the file input or drop zone),
+ * `camera` (a capture input) and `public_url` (a URL the page fetches and
+ * uploads) in both the vanilla runtime (`fieldControl`, `submitRecord`,
+ * `fetchUploadSource` in packages/ui/src/client-runtime.js) and the React app
+ * (`FileDropzoneField`, `resolveUrlSources` in lib/c2c-ui/form). A source the
+ * controls do not draw keeps the whole property counted.
+ */
+const UPLOAD_SOURCE_TOKENS = new Set(['file', 'camera', 'public_url']);
+
+function sourceProved(text: string, ui: UiField | undefined): boolean {
+  const sources = ui?.uploadSources;
+  if (!sources?.length) return false;
+  const tokens = text.split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
+  return tokens.length > 0 && tokens.length === sources.length && tokens.every((token, i) => sources[i] === token && UPLOAD_SOURCE_TOKENS.has(token));
+}
+
+/**
+ * `enable = link` / `enable = link, title` / `enable = title` on an image field
+ * is carried as `ui.imageLink` and `ui.imageTitle`, which render link/title
+ * inputs alongside the image upload and wrap the displayed image in an `<a>`
+ * when a link URL is present. Any unknown token in `enable` leaves the property
+ * unproved.
+ */
+function imageEnableProved(text: string, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'image') return false;
+  const tokens = text.split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
+  if (!tokens.length || !tokens.every((token) => token === 'link' || token === 'title')) return false;
+  if (tokens.includes('link') && ui.imageLink !== true) return false;
+  if (tokens.includes('title') && ui.imageTitle !== true) return false;
+  return true;
+}
+
+/**
+ * `target = same window` / `new window` on an image field with `enable = link`
+ * is carried as `ui.linkTarget` (`_self` / `_blank` / `_parent` / `_top`). Without
+ * `enable = link`, there is no clickable link on the image field and `buildField`
+ * records a manual-step UI todo instead.
+ */
+const IMAGE_LINK_TARGET_MAP: Record<string, NonNullable<UiField['linkTarget']>> = {
+  'same window': '_self',
+  'new window': '_blank',
+  'parent window': '_parent',
+  'top window': '_top',
+  _self: '_self',
+  _blank: '_blank',
+  _parent: '_parent',
+  _top: '_top',
+};
+
+function imageTargetProved(text: string, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'image' || ui.imageLink !== true) return false;
+  const expected = IMAGE_LINK_TARGET_MAP[text.trim().toLowerCase().replace(/\s+/g, ' ')];
+  return expected !== undefined && ui.linkTarget === expected;
+}
+
+/**
+ * `alloweddays = 0,1,2,3,4,5,6` (every weekday) is the Creator default. The
+ * generated date and datetime widgets enforce the restriction client-side, but
+ * the generated write path does not re-check it server-side. A restricted set
+ * therefore remains a counted manual step.
+ */
+function allowedDaysProved(text: string, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'date' && ui?.widget !== 'datetime') return false;
+  const days = new Set(text.split(',').map((day) => day.trim()));
+  return days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day));
+}
+
+/**
+ * `timedisplayoptions` names the clock format Creator's time picker shows. The
+ * generated datetime input carries seconds precision (`timeStep = 1`, `showSeconds = true`
+ * in packages/ui/src/model.ts) when requested, so a seconds-bearing format
+ * (`hh:mm:ss`) on a datetime field is proved. A time field has no seconds step
+ * and records a manual-step UI todo instead. A format that does not ask for
+ * seconds is proved outright on both widgets.
+ */
+function timeDisplayProved(text: string, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'time' && ui?.widget !== 'datetime') return false;
+  if (!/ss/i.test(text)) return true;
+  return ui.widget === 'datetime' && (ui.showSeconds === true || ui.timeStep !== undefined);
+}
+
+const BIDIRECTIONAL_MULTI_TOKENS = new Set(['list', 'checkboxes', 'multi select', 'multiselect', 'lookup multi', 'multi lookup']);
+
+/** A multi lookup that is not a subform grid: stored as a junction, not a column. */
+function bidirectionalMultiLookup(item: Field): boolean {
+  const token = normalizeType(item.type);
+  if (token === 'grid' || token === 'subform' || token === 'inline subform' || token === 'form') return false;
+  return BIDIRECTIONAL_MULTI_TOKENS.has(token) || (token === 'checkbox' && ((item.choices?.length ?? 0) > 0 || !!item.lookup));
+}
+
+/**
+ * A `bidirectional = Back` lookup pair is stored as one foreign key, which the
+ * schema generator places from the linked grid side (packages/schema
+ * generator.ts pendingRefs): a grid on form A pointing at T names its reverse
+ * column `Back` on T, related to A's table, or reuses that column when T
+ * already declares it. The pair is proved only when that named column exists
+ * with the right relation and the generator did not fall back to an unnamed
+ * back column. With no grid side, a declared partner lookup on T that looks
+ * back and names this field stores the pair on its own side: a junction when
+ * the partner is a multi lookup, else the partner's own named column (a
+ * filtered lookup's column carries no store relation; the backup loader still
+ * remaps the id it writes there to the target ROWID).
+ */
+function bidirectionalProved(p: Property, field: Field, formName: string, app: App, schema: SchemaPlan): boolean {
+  const target = field.lookup?.form;
+  const back = unquote(p.value).trim();
+  if (!target || !back) return false;
+  const table = (form: string): string | undefined => schema.tables.find((t) => t.form === form && t.role === 'form')?.name;
+  const own = table(formName);
+  const other = table(target);
+  if (!own || !other) return false;
+  const linkedGrid = (item: Field | undefined, to: string): boolean =>
+    item !== undefined && ['grid', 'subform', 'form'].includes((item.type ?? '').trim().toLowerCase()) && item.lookup?.form === to;
+  // The FK column `name` on the holder form's own table relates to table
+  // `to`, and no fallback back column (created without the bidirectional name)
+  // relates the same two tables. A same-named column on one of the form's
+  // child or junction tables is unrelated storage and never proves the pair.
+  const stored = (holder: string, name: string, to: string): boolean => {
+    const holderTable = schema.tables.find((t) => t.form === holder && t.role === 'form');
+    if (!holderTable) return false;
+    const ident = schemaIdent(name, 'col');
+    const named = holderTable.columns.filter((column) => column.field === name || column.name === name || column.name === ident);
+    if (!named.some((column) => column.relation?.table === to)) return false;
+    return !holderTable.columns.some((column) => column.creatorType === 'subform' && column.relation?.table === to && !named.includes(column));
+  };
+  if (linkedGrid(field, target)) return stored(target, back, own);
+  const partner = app.forms.find((form) => form.name === target)?.fields.find((item) => item.name === back);
+  const partnerBack = partner?.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
+  if (unquote(partnerBack?.value ?? '').trim() !== field.name) return false;
+  if (linkedGrid(partner, formName)) return stored(formName, field.name, other);
+  // A mutual pair of declared lookups, no grid side: the partner's own storage
+  // is the reverse the flag names — the junction its multi lookup generates,
+  // or its named column on the target table.
+  if (partner?.lookup?.form !== formName) return false;
+  const targetTable = schema.tables.find((t) => t.form === target && t.role === 'form');
+  if (!targetTable) return false;
+  if (bidirectionalMultiLookup(partner)) {
+    const ident = schemaIdent(back, 'link');
+    return schema.tables.some(
+      (t) =>
+        t.role === 'junction' &&
+        t.form === target &&
+        t.name.slice(t.name.lastIndexOf('__') + 2) === ident &&
+        t.columns.some((column) => column.relation?.table === targetTable.name) &&
+        t.columns.some((column) => column.relation?.table === own),
+    );
+  }
+  const ident = schemaIdent(back, 'col');
+  const named = targetTable.columns.filter((column) => column.field === back || column.name === back || column.name === ident);
+  return named.length > 0 && !named.some((column) => column.relation !== undefined && column.relation.table !== own);
+}
+
+function choicesProved(field: Field, ui: UiField | undefined): boolean {
+  const choices = field.choices ?? [];
+  if (!choices.length) return true;
+  const got = ui?.choices ?? [];
+  return choices.every((choice) => got.includes(choice));
+}
+
+function optionGroupsProved(field: Field, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'select') return false;
+  const groups = field.optionGroups ?? [];
+  const got = ui.optionGroups ?? [];
+  return groups.every((group) => got.some((item) => item.label === group.label && group.choices.every((choice) => item.choices.includes(choice))));
+}
+
+function lookupProved(lookup: Field['lookup'], ui: UiField | undefined, columns: SchemaColumn[], app: App): boolean {
+  if (!lookup) return false;
+  if (ui?.lookup && ui.lookup.form === lookup.form && (!lookup.field || ui.lookup.field === lookup.field)) return true;
+  if (columns.some((column) => column.relation !== undefined)) return true;
+  // A linked subform stores the other form's fields as its grid, not a lookup widget.
+  if (ui?.widget === 'subform' && ui.subfields?.length) {
+    const names = new Set(app.forms.find((form) => form.name === lookup.form)?.fields.map((item) => item.name));
+    return ui.subfields.some((sub) => names.has(sub.name));
+  }
+  return false;
+}
+
+function initialProved(raw: string, ui: UiField | undefined, columns: SchemaColumn[]): boolean {
+  const plain = unquote(raw);
+  const multi = multiValueDefault(raw);
+  const candidates = [raw, plain, ...(multi !== undefined ? [multi] : [])];
+  if (ui?.initialValue !== undefined && candidates.some((candidate) => sameStored(candidate, ui.initialValue))) return true;
+  return columns.some((column) => column.defaultValue !== undefined && candidates.some((candidate) => sameStored(candidate, column.defaultValue)));
+}
+
+function sameStored(expected: string, actual: string | undefined): boolean {
+  if (actual === undefined) return false;
+  if (expected === actual) return true;
+  const left = Number(expected);
+  const right = Number(actual);
+  return expected.trim() !== '' && actual.trim() !== '' && Number.isFinite(left) && Number.isFinite(right) && left === right;
+}
+
+function requiredProved(ui: UiField | undefined, columns: SchemaColumn[]): boolean {
+  return ui?.required === true || columns.some((column) => column.mandatory || column.appMandatory === true);
+}
+
+function uniqueProved(ui: UiField | undefined, columns: SchemaColumn[]): boolean {
+  return ui?.unique === true || columns.some((column) => column.unique || column.appUnique === true);
+}
+
+function modifierProved(modifier: string, ui: UiField | undefined, columns: SchemaColumn[]): boolean {
+  const name = modifier.trim().toLowerCase();
+  // The parser stores `must have` as the two words `must` and `have`. Both are the required flag.
+  if (name === 'must have' || name === 'required' || name === 'must' || name === 'have') return requiredProved(ui, columns);
+  if (name === 'unique') return uniqueProved(ui, columns);
+  return false;
+}
+
+function flagProved(flag: string, ui: UiField | undefined, field: Field): boolean {
+  if (/^(?:character[ -]?count|char[ -]?count)$/i.test(flag.trim())) return true;
+  if (/scan|qr|barcode/i.test(flag)) return ui?.scan === true;
+  // A bare `others option` word is the same setting as `others option = true`:
+  // model.ts reads both through hasOthersOption, so the flag is carried when
+  // the generated select/radio has its "Others" free-text entry.
+  if (/^others?\s*option$/i.test(flag.trim())) return ui?.othersOption === true;
+  // `allow new entries` is carried as the picker's add-new action; the
+  // generated lookup opens the parent form's add screen and selects the new
+  // row (client-runtime selectLookupNew, wired in wireForm).
+  if (flag.trim().toLowerCase() === 'allow new entries') return !!ui?.lookup?.addNew;
+  // `enable linkname` on a URL field has a real generated-field equivalent:
+  // the field's `linkName` flag (Creator stores both the URL and a link
+  // title). Proved only when the generated field actually carries it.
+  if (/^enable\s+linkname$/i.test(flag.trim())) return ui?.linkName === true;
+  // `description` declares the field's help text. It is carried when the
+  // field's `type = help_text` or `type = tooltip` annotation message reaches
+  // ui.help (decorations/labels.ts helpMessage). A description whose "Display
+  // As" is set to neither (`type = none`) is never shown to a user in
+  // Creator, so there is nothing for the flag to carry either — same
+  // reasoning as the `type = none` case in annotationProved, just reached
+  // from the other coverage row the same `description [...]` block produces.
+  if (flag === 'description') {
+    const message = helpTextMessage(field);
+    if (message !== undefined) return ui?.help === message;
+    return descriptionAllNone(field);
+  }
+  return false;
+}
+
+/** Message of the field's first `type = help_text` or `type = tooltip` annotation, decoded. */
+function helpTextMessage(field: Field): string | undefined {
+  for (const annotation of field.annotations) {
+    const message = helpTextOf(annotation);
+    if (message !== undefined) return message;
+  }
+  return undefined;
+}
+
+/** True when the field has a description block and every one of them is `type = none` (Creator shows it nowhere). */
+function descriptionAllNone(field: Field): boolean {
+  const typed = field.annotations.filter((a) => a.properties.some((p) => p.key.trim().toLowerCase() === 'type'));
+  return (
+    typed.length > 0 &&
+    typed.every((a) => {
+      const kind = a.properties.find((p) => p.key.trim().toLowerCase() === 'type');
+      return kind !== undefined && unquote(kind.value).trim().toLowerCase() === 'none';
+    })
+  );
+}
+
+/** Message of one annotation when it is `type = help_text` or `type = tooltip`, else undefined. */
+function helpTextOf(annotation: PropertyBlock): string | undefined {
+  const kind = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'type');
+  const kindValue = kind ? unquote(kind.value).trim().toLowerCase() : undefined;
+  if (kindValue !== 'help_text' && kindValue !== 'tooltip') return undefined;
+  const message = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'message');
+  return message === undefined ? undefined : unquote(message.value);
+}
+
+/**
+ * A field annotation that reached the generated field:
+ * - A `type = help_text` or `type = tooltip` annotation is carried as
+ *   UiField.help (decorations/labels.ts helpMessage). Proved only when the
+ *   generated help equals this annotation's message — a different or missing
+ *   help means this annotation was not the one carried.
+ * - A `type = none` description has its "Display As" set to neither tooltip
+ *   nor help text in Creator, so the message is never shown to a user.
+ *   Nothing is lost by not carrying it.
+ * - The untyped `displayname` block beside `allow new entries` is the add-new
+ *   dialog's title; other annotations have no consumer yet.
+ */
+function annotationProved(annotation: PropertyBlock, ui: UiField | undefined): boolean {
+  const message = helpTextOf(annotation);
+  if (message !== undefined) return ui?.help === message;
+  const kind = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'type');
+  if (kind && unquote(kind.value).trim().toLowerCase() === 'none') return true;
+  if (annotation.properties.some((p) => p.key.toLowerCase() === 'type')) return false;
+  const display = annotation.properties.find((p) => p.key.toLowerCase() === 'displayname');
+  if (!display) return false;
+  return ui?.lookup?.addNew?.label === unquote(display.value);
+}
+
+/**
+ * `displayformat = [...]` on a lookup names the parent field(s) the select and
+ * report cell show. The generator resolves the bracket through displayChoice
+ * and writes the result onto the field's lookup (decorations/lookups.ts
+ * decorateLookup): the displayed parent `field`, a `displayFields` list when
+ * the format spans several parent fields, and `displayFormat` terms when they
+ * do not share one top field. The lookup endpoint and lookupFormats feed the
+ * same resolution into functions/lookups/lookup.mjs. Proved only when the
+ * generated lookup carries exactly this property's resolution — a lookup that
+ * displays a different field, or none, is still a silent drop.
+ */
+function displayFormatProved(raw: string, field: Field, ui: UiField | undefined): boolean {
+  const lookup = field.lookup;
+  const got = ui?.lookup as ({ form: string; field?: string; displayFields?: string[]; displayFormat?: DisplayTerm[] } | undefined);
+  if (!lookup || !got || lookup.displayFormat === undefined) return false;
+  if (unquote(raw).trim() !== lookup.displayFormat.trim()) return false;
+  const choice = displayChoice(lookup);
+  if (got.field !== choice.field) return false;
+  if (JSON.stringify(got.displayFields ?? null) !== JSON.stringify(choice.displayFields ?? null)) return false;
+  if (JSON.stringify(got.displayFormat ?? null) !== JSON.stringify(choice.displayFormat ?? null)) return false;
+  return true;
+}
+
+/**
+ * `searchable = true` asks the lookup's option list to be searchable. The
+ * generated `/lookups/:form/:field` endpoint accepts `?q=` for every emitted
+ * lookup (generate.ts searchText/pagingArgs), so the setting is carried
+ * whenever the field generated a lookup widget. A field without one — or a
+ * `searchable = false` that the always-on endpoint does not honour — is not.
+ */
+function searchableProved(text: string, ui: UiField | undefined): boolean {
+  return text.toLowerCase() === 'true' && ui?.lookup !== undefined;
+}
+
+function spanCovered(out: AuditOutputs, start: number, end: number): boolean {
+  return out.todos.some((todo) => todo.start <= start && todo.end >= end);
+}
+
+function auditReport(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  for (const report of app.reports) {
+    const built = out.model.reports.find((r) => r.name === report.name);
+    if (built && built.status === 'generated') {
+      rows.push({ kind: 'report', name: report.name, status: 'emitted', via: 'UI report view' });
+      continue;
+    }
+    const listed = out.model.todos.some((t) => t.area === 'report' && t.name === report.name);
+    if (listed) {
+      rows.push({ kind: 'report', name: report.name, status: 'counted', via: 'UI report todo' });
+      continue;
+    }
+    rows.push({
+      kind: 'report',
+      name: report.name,
+      status: 'dropped',
+      via: 'none',
+      note: `Report ${report.name} is not generated and has no fidelity note. Add one: either migrate the report or record what the user must rebuild.`,
+    });
+  }
+  // A chart report that declares `allow drilldown and view underlying data =
+  // true` promises that clicking a segment opens the matching records. The
+  // generated chart draws bars with no click handler, so this must surface
+  // as an explicit manual step, not disappear once the chart itself renders.
+  for (const report of app.reports) {
+    const built = out.model.reports.find((r) => r.name === report.name);
+    if (!built || built.status !== 'generated' || built.view !== 'chart') continue;
+    if (reportProperty(report, 'allow drilldown and view underlying data') !== 'true') continue;
+    const name = `${report.name} drilldown`;
+    if (out.model.todos.some((t) => t.area === 'report' && t.name === report.name)) {
+      rows.push({ kind: 'report-feature', name, status: 'counted', via: 'UI report todo' });
+      continue;
+    }
+    rows.push({
+      kind: 'report-feature',
+      name,
+      status: 'dropped',
+      via: 'none',
+      note: `Chart report ${report.name} allows drilldown in Creator but the generated chart has no click-to-filter and no fidelity note. Add a todo telling the user to wire it up manually.`,
+    });
+  }
+}
+
+/** A property from the report's `report properties` block (`allow drilldown and view underlying data`, ...). */
+function reportProperty(report: Report, key: string): string | undefined {
+  for (const block of report.blocks) {
+    if (block.name.trim().toLowerCase() !== 'report properties') continue;
+    const found = block.properties.find((p) => p.key.trim().toLowerCase() === key);
+    if (found) return unquote(found.value).trim().toLowerCase();
+  }
+  return undefined;
+}
+
+/**
+ * Report-level features: columns, filters, custom actions, conditional
+ * formats, views, sort/group, criteria, settings blocks. Each one is emitted
+ * only when the generated report model contains that construct. A Deluge todo
+ * on its span counts it. On a counted report every feature is counted by the
+ * report-level manual item. A dropped report names the whole construct once —
+ * its features add no rows.
+ *
+ * `REPORT_VIEW` mirrors packages/ui/src/model.ts. A specialized view (kanban,
+ * calendar, …) that the model did not keep is its own row.
+ */
+const REPORT_VIEW: Record<string, string> = {
+  list: 'list',
+  report: 'list',
+  grid: 'list',
+  custom: 'list',
+  kanban: 'kanban',
+  calendar: 'calendar',
+  timeline: 'timeline',
+  map: 'map',
+  pivottable: 'pivot',
+  pivotchart: 'chart',
+  chart: 'chart',
+  spreadsheet: 'spreadsheet',
+  sheet: 'spreadsheet',
+  summary: 'summary',
+};
+
+interface ReportFeature {
+  label: string;
+  start: number;
+  end: number;
+  /** 'counted' when the artefact exists but only as an explicit fidelity hole. */
+  prove: (built: UiReport, bag: ReportBag) => 'emitted' | 'counted' | 'dropped';
+}
+
+interface ReportBag {
+  columns: string[];
+  filters: { field?: string; label?: string }[];
+  actions: string[];
+  formats: NonNullable<UiReport['conditionalFormats']>;
+  sort: string[];
+  groups: string[];
+  groupFieldUsed: boolean;
+}
+
+function auditReportFeatures(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  const reportRow = new Map(rows.filter((r) => r.kind === 'report').map((r) => [r.name, r.status]));
+  for (const report of app.reports) {
+    const status = reportRow.get(report.name);
+    if (status !== 'emitted' && status !== 'counted') continue;
+    const features = reportFeatures(report);
+    if (status === 'counted') {
+      for (const feature of features) {
+        rows.push({ kind: 'report-feature', name: `${report.name} ${feature.label}`, status: 'counted', via: 'report manual item' });
+      }
+      continue;
+    }
+    const built = out.model.reports.find((item) => item.name === report.name);
+    const bag = built ? reportBag(built) : emptyReportBag();
+    for (const feature of features) {
+      const name = `${report.name} ${feature.label}`;
+      if (spanCovered(out, feature.start, feature.end)) {
+        rows.push({ kind: 'report-feature', name, status: 'counted', via: 'todo' });
+        continue;
+      }
+      if (out.model.todos.some((t) => t.area === 'report' && t.name === name)) {
+        rows.push({ kind: 'report-feature', name, status: 'counted', via: 'UI report todo' });
+        continue;
+      }
+      const verdict = built ? feature.prove(built, bag) : 'dropped';
+      if (verdict === 'dropped') {
+        rows.push({
+          kind: 'report-feature',
+          name,
+          status: 'dropped',
+          via: 'none',
+          note: `Report ${report.name} ${feature.label} is not in the generated report. Add one: either emit it or record the manual step.`,
+        });
+        continue;
+      }
+      rows.push({ kind: 'report-feature', name, status: verdict, via: verdict === 'counted' ? 'conditional format todo' : 'UI report view' });
+    }
+    if (built) pushSpecializedView(report, built, out, rows);
+  }
+}
+
+function reportFeatures(report: Report): ReportFeature[] {
+  const cols = (list: Report['columns'], prefix: string, parent?: string): ReportFeature[] =>
+    list.flatMap((column) => {
+      // A part column renders as `<Parent>.<part>`: the view column it proves is the qualified path.
+      const path = parent ? `${parent}.${column.field}` : column.field;
+      return [
+        {
+          label: `${prefix}column ${column.field}`,
+          start: column.span.start,
+          end: column.span.end,
+          prove: (built, bag) => {
+            if (!take(bag.columns, path)) {
+              return takeGroupField(built, bag, column.field) ? 'emitted' : 'dropped';
+            }
+            // A composite part column renders only when the shipped cell
+            // reader resolves the stored flat `Parent_part` key; a lookup
+            // subcolumn's cell is written under its own dotted key instead.
+            if (parent && !emittedLookup(built, path) && !flatPartRenders(built, path)) return 'dropped';
+            return 'emitted';
+          },
+        },
+        ...cols(column.subcolumns, `${prefix}column ${column.field} `, path),
+      ];
+    });
+  return [
+    ...(report.criteria?.trim()
+      ? [
+          {
+            label: 'criteria',
+            start: report.span.start,
+            end: report.span.end,
+            prove: (built: UiReport) => (built.criteria && built.criteria.op !== 'todo' ? 'emitted' : 'dropped'),
+          } satisfies ReportFeature,
+        ]
+      : []),
+    ...(report.basedOn
+      ? [
+          {
+            label: `based on ${report.basedOn}`,
+            start: report.span.start,
+            end: report.span.end,
+            prove: (built: UiReport) => (built.basedOn === report.basedOn || built.startField === report.basedOn ? 'emitted' : 'dropped'),
+          } satisfies ReportFeature,
+        ]
+      : []),
+    ...cols(report.columns, ''),
+    ...report.filters.map(
+      (filter): ReportFeature => ({
+        label: `filter ${filter.label || filter.field || 'criteria'}`,
+        start: filter.span.start,
+        end: filter.span.end,
+        prove: (_built, bag) => (takeFilter(bag, filter) ? 'emitted' : 'dropped'),
+      }),
+    ),
+    ...report.customActions.map(
+      (action): ReportFeature => ({
+        label: `custom action ${action.name}`,
+        start: action.span.start,
+        end: action.span.end,
+        prove: (_built, bag) => (take(bag.actions, action.name) ? 'emitted' : 'dropped'),
+      }),
+    ),
+    // `confirmation before execution ( ... )` on the action: Creator's dialog
+    // shown before it runs. Creator's grammar has no separate `destructive`
+    // boolean, so this block is itself the destructive-action marker; proved
+    // when the built action carries the same message (packages/ui/src/model.ts
+    // actionConfirm).
+    ...report.customActions
+      .map((action) => ({ action, block: action.blocks.find((b) => b.name.trim().toLowerCase() === 'confirmation before execution') }))
+      .filter(
+        (entry): entry is { action: Report['customActions'][number]; block: PropertyBlock } =>
+          !!entry.block && entry.block.properties.some((p) => ['message for individual record', 'message'].includes(p.key.toLowerCase())),
+      )
+      .map(
+        ({ action, block }): ReportFeature => ({
+          label: `custom action ${action.name} confirmation`,
+          start: block.span.start,
+          end: block.span.end,
+          prove: (built) => (built.customActions.find((a) => a.name === action.name)?.confirm?.message ? 'emitted' : 'dropped'),
+        }),
+      ),
+    ...report.conditionalFormats.map(
+      (format): ReportFeature => ({
+        label: `conditional format ${format.name}`,
+        start: format.span.start,
+        end: format.span.end,
+        prove: (_built, bag) => takeFormat(bag, format.name),
+      }),
+    ),
+    ...report.sortBy.map(
+      (item): ReportFeature => ({
+        label: `sort by ${item.field}`,
+        start: report.span.start,
+        end: report.span.end,
+        prove: (_built, bag) => (take(bag.sort, item.field) ? 'emitted' : 'dropped'),
+      }),
+    ),
+    ...report.groupBy.map(
+      (item): ReportFeature => ({
+        label: `group by ${item.field}`,
+        start: report.span.start,
+        end: report.span.end,
+        prove: (built, bag) => (takeGroup(built, bag, item.field) ? 'emitted' : 'dropped'),
+      }),
+    ),
+    ...report.views.map(
+      (view): ReportFeature => ({
+        label: `${view.kind}${view.device ? ` ${view.device}` : ''}`,
+        start: view.span.start,
+        end: view.span.end,
+        prove: (built) => (viewProved(built, view) ? 'emitted' : 'dropped'),
+      }),
+    ),
+    ...report.blocks.map(
+      (block): ReportFeature => ({
+        label: `block ${block.name}`,
+        start: block.span?.start ?? report.span.start,
+        end: block.span?.end ?? report.span.end,
+        prove: (built) => (blockProved(built, block) ? 'emitted' : 'dropped'),
+      }),
+    ),
+  ];
+}
+
+function emptyReportBag(): ReportBag {
+  return { columns: [], filters: [], actions: [], formats: [], sort: [], groups: [], groupFieldUsed: false };
+}
+
+/** Columns, phone columns, and detail-block fields all count as an emitted column. */
+function reportBag(built: UiReport): ReportBag {
+  const columns: string[] = [];
+  for (const column of built.columns) columns.push(column.field);
+  for (const column of built.phoneColumns ?? []) columns.push(column.field);
+  for (const block of built.detailBlocks ?? []) for (const field of block.fields) columns.push(field.field);
+  for (const variant of built.deviceDetailBlocks ?? []) for (const block of variant.blocks) for (const field of block.fields) columns.push(field.field);
+  const actions = [
+    ...built.customActions.map((action) => action.name),
+    ...built.columns.filter((column) => column.action).map((column) => column.field),
+  ];
+  return {
+    columns,
+    filters: built.filters.map((filter) => ({ ...(filter.field ? { field: filter.field } : {}), ...(filter.label ? { label: filter.label } : {}) })),
+    actions,
+    formats: [...(built.conditionalFormats ?? [])],
+    sort: built.sort.map((item) => item.field),
+    groups: built.groupBy.map((item) => item.field),
+    groupFieldUsed: false,
+  };
+}
+
+/** The emitted `Parent.part` column is a related-record read when its head column is a lookup. */
+function emittedLookup(built: UiReport, path: string): boolean {
+  const head = path.split('.')[0];
+  for (const column of built.columns) {
+    if ((column.field === path || column.field === head) && column.lookup) return true;
+  }
+  return false;
+}
+
+let cachedRowRenderer: ((report: unknown, rows: unknown[]) => string) | null | undefined;
+
+/** `renderReportRows` from the shipped client runtime, evaluated once per audit. */
+function reportRowRenderer(): ((report: unknown, rows: unknown[]) => string) | null {
+  if (cachedRowRenderer !== undefined) return cachedRowRenderer;
+  cachedRowRenderer = null;
+  try {
+    const source = clientRuntimeSource().replace(/^export (?=(?:async )?function |const )/gm, '');
+    const rendered: unknown = vm.runInNewContext(`${source}\n;renderReportRows`, {}, { timeout: 2000 });
+    if (typeof rendered === 'function') cachedRowRenderer = rendered as (report: unknown, rows: unknown[]) => string;
+  } catch {
+    cachedRowRenderer = null;
+  }
+  return cachedRowRenderer;
+}
+
+/** The stored row keeps composite parts flat (`Parent_part`): the shipped cell reader must reach it. */
+function flatPartRenders(built: UiReport, path: string): boolean {
+  const render = reportRowRenderer();
+  if (!render) return true;
+  const probe = 'zzC2CflatProbezz';
+  const flat = path.split('.').join('_');
+  return render(built, [{ ROWID: '1', [flat]: probe }]).includes(probe);
+}
+
+function take(bag: string[], value: string): boolean {
+  const index = bag.indexOf(value);
+  if (index < 0) return false;
+  bag.splice(index, 1);
+  return true;
+}
+
+function takeFilter(bag: ReportBag, filter: { field?: string; label?: string }): boolean {
+  const index = bag.filters.findIndex((item) => (item.field ?? '') === (filter.field ?? '') && (item.label ?? '') === (filter.label ?? ''));
+  if (index < 0) return false;
+  bag.filters.splice(index, 1);
+  return true;
+}
+
+function takeFormat(bag: ReportBag, name: string): 'emitted' | 'counted' | 'dropped' {
+  const index = bag.formats.findIndex((format) => format.name === name);
+  if (index < 0) return 'dropped';
+  const format = bag.formats[index]!;
+  bag.formats.splice(index, 1);
+  return criteriaIsTodo(format.criteria) ? 'counted' : 'emitted';
+}
+
+/** A column naming the report's group-by field renders as the group headers (built.groupField), not a cell column. Consumed once. */
+function takeGroupField(built: UiReport, bag: ReportBag, field: string): boolean {
+  if (bag.groupFieldUsed || built.groupField !== field) return false;
+  bag.groupFieldUsed = true;
+  return true;
+}
+
+function takeGroup(built: UiReport, bag: ReportBag, field: string): boolean {
+  if (take(bag.groups, field)) return true;
+  if (!bag.groupFieldUsed && built.groupField === field) {
+    bag.groupFieldUsed = true;
+    return true;
+  }
+  return false;
+}
+
+function criteriaIsTodo(criteria: unknown): boolean {
+  return !!criteria && typeof criteria === 'object' && (criteria as { op?: string }).op === 'todo';
+}
+
+function viewProved(built: UiReport, view: ReportView): boolean {
+  if (view.kind === 'quickview') {
+    const fields = view.blocks.flatMap((block) => block.fields.map((field) => field.field).filter(Boolean));
+    if (!fields.length) return true;
+    const shown = new Set([...built.columns.map((column) => column.field), ...(built.phoneColumns ?? []).map((column) => column.field)]);
+    return fields.every((field) => shown.has(field));
+  }
+  if (!built.detail) return false;
+  if (!view.blocks.length) return true;
+  // The layout the generator kept for this device: `detailBlocks` holds the
+  // `detailDevice` layout, `deviceDetailBlocks` the carried variants a
+  // responsive record view swaps in. Any other device is not emitted.
+  const layout =
+    (built.detailDevice ?? 'web') === (view.device ?? 'web')
+      ? (built.detailBlocks ?? [])
+      : (built.deviceDetailBlocks ?? []).find((variant) => variant.device === view.device)?.blocks;
+  if (!layout) return false;
+  return view.blocks.every((block) => {
+    const title = block.title || block.name;
+    // Blocks can repeat a title (an "Overview" field section and an "Overview"
+    // related list): match the layout block with the same related field that
+    // holds every audited field.
+    return layout.some(
+      (item) =>
+        (item.title === title || item.title === block.name) &&
+        (item.relatedField ?? '') === (block.relatedField ?? '') &&
+        block.fields.every((field) => !field.field || item.fields.some((cell) => cell.field === field.field)),
+    );
+  });
+}
+
+/** An `options` block is emitted only when every property landed on the report. Any other block has no model home. A block with no properties, items, or nested blocks configures nothing and needs no emitted artifact (the model emits no todo for one either). */
+function blockProved(built: UiReport, block: PropertyBlock): boolean {
+  if (!block.properties.length && !block.blocks.length && !block.items.length) return true;
+  const name = block.name.trim().toLowerCase();
+  if (name === 'properties') {
+    // `group by`'s nested `properties` block: only `display record count`
+    // has a generated home (the rows-table header toggle, UiReport.showRecordCount).
+    // `= false` is the generated default — nothing to emit for it.
+    return (
+      !block.blocks.length &&
+      !block.items.length &&
+      block.properties.every((property) => {
+        const key = property.key.trim().toLowerCase().replace(/\s+/g, ' ');
+        if (key !== 'display record count') return false;
+        return unquote(property.value).trim().toLowerCase() !== 'true' || built.showRecordCount === true;
+      })
+    );
+  }
+  if (name === 'report properties') {
+    return block.properties.every((property) => reportPropertyProved(built, property));
+  }
+  if (name === 'toolbar') {
+    // The generated toolbar draws no export button and no add button; an
+    // explicit Creator `show export = false` or `show add button = false` is
+    // faithfully represented by that absence.
+    return block.properties.every((property) => {
+      const key = property.key.trim().toLowerCase().replace(/\s+/g, ' ');
+      return (
+        (key === 'show export' || key === 'show add button') &&
+        unquote(property.value).trim().toLowerCase() === 'false'
+      );
+    });
+  }
+  if (name === 'permission') {
+    // Both permission switches have generated consumers on the report surface.
+    return block.properties.every((property) => {
+      const key = property.key.trim().toLowerCase();
+      const value = property.value.trim().toLowerCase();
+      if (key === 'edit') return (value === 'true') === (built.rowActions?.edit === true);
+      if (key === 'add') return (value === 'true') === (built.rowActions?.add === true);
+      return false;
+    });
+  }
+  if (name !== 'options') return false;
+  return block.properties.every((property) => optionProved(built, property));
+}
+
+function reportPropertyProved(built: UiReport, property: Property): boolean {
+  const key = property.key.trim().toLowerCase().replace(/\s+/g, ' ');
+  const value = unquote(property.value).trim().toLowerCase();
+  if (key === 'display record count') return (value === 'true') === (built.showRecordCount === true);
+  return false;
+}
+
+function optionProved(built: UiReport, property: Property): boolean {
+  const key = property.key.trim().toLowerCase().replace(/\s+/g, ' ');
+  const value = unquote(property.value).trim();
+  if (key === 'display field') return built.groupField === value || built.titleField === value || built.mapField === value || built.displayField === value;
+  if (key === 'start date') return built.startField === value;
+  if (key === 'end date') return built.endField === value;
+  if (key === 'display rows') return built.pageSize === reportPageSizeOption(value);
+  if (key === 'display records per row') return built.recordsPerRow === recordsPerRowOption(value);
+  if (key === 'label width') return built.labelWidth !== undefined && built.labelWidth === labelWidthOption(value);
+  if (key === 'record count') return (value.toLowerCase() === 'enable') === (built.showRecordCount === true);
+  if (key === 'radius') return built.mapRadius === reportRadiusOption(value);
+  if (key === 'display type') return (value.toLowerCase() === 'week' || value.toLowerCase() === 'day') && built.displayType === value.toLowerCase();
+  if (key === 'sort order') return (value.toLowerCase() === 'ascending' || value.toLowerCase() === 'descending') && built.sortOrder === value.toLowerCase();
+  return false;
+}
+
+function pushSpecializedView(report: Report, built: UiReport, out: AuditOutputs, rows: CoverageRow[]): void {
+  const expected = REPORT_VIEW[report.type.toLowerCase()] ?? 'todo';
+  if (expected === 'list' || built.view === expected) return;
+  const name = `${report.name} view ${report.type}`;
+  const listed =
+    !!built.note ||
+    out.model.todos.some((todo) => todo.area === 'report' && todo.name === report.name) ||
+    spanCovered(out, report.span.start, report.span.end);
+  if (listed) {
+    rows.push({ kind: 'report-feature', name, status: 'counted', via: built.note ? 'UI report note' : 'todo' });
+    return;
+  }
+  rows.push({
+    kind: 'report-feature',
+    name,
+    status: 'dropped',
+    via: 'none',
+    note: `Report ${report.name} view ${report.type} is not the generated view (${built.view}). Add one: either emit the ${report.type} view or record the manual step.`,
+  });
+}
+
+function auditPage(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  for (const page of app.pages) {
+    const built = out.model.pages.find((p) => p.name === page.name);
+    if (built && built.status === 'generated') {
+      rows.push({ kind: 'page', name: page.name, status: 'emitted', via: 'UI page' });
+      continue;
+    }
+    const listed = out.model.todos.some((t) => (t.area === 'page' && t.name === page.name) || (t.area === 'zml' && t.name.startsWith(`${page.name}.`)));
+    if (listed) {
+      rows.push({ kind: 'page', name: page.name, status: 'counted', via: 'UI page todo' });
+      continue;
+    }
+    rows.push({
+      kind: 'page',
+      name: page.name,
+      status: 'dropped',
+      via: 'none',
+      note: `Page ${page.name} is not generated and has no fidelity note. Add one: either migrate the page or record what the user must rebuild.`,
+    });
+  }
+}
+
+/**
+ * Every ZML node, not only the top level. A node is emitted when the generated
+ * page tree contains it and the behaviour the export asked for (a supported
+ * KPI, copied parameters, copied criteria). A node the generator marked `todo`
+ * is counted. A same-tag todo does not cover a node that was generated without
+ * its payload — that payload is the drop. A page todo, or a zml todo naming
+ * this element, counts a node the tree does not contain.
+ */
+function auditPageElements(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  for (const page of app.pages) {
+    const built = out.model.pages.find((item) => item.name === page.name);
+    const pool = flattenUi(built?.elements ?? []);
+    walkZml(page.zml, (el) => {
+      const label = zmlName(el.attributes) || el.tag;
+      const name = `${page.name}.${label}`;
+      const found = takeElement(pool, el);
+      if (found?.kind === 'todo') {
+        rows.push({ kind: 'page-element', name, status: 'counted', via: 'UI zml todo' });
+        return;
+      }
+      const gap = found ? pageBehaviorGap(el, found) : 'missing';
+      if (found && !gap) {
+        rows.push({ kind: 'page-element', name, status: 'emitted', via: 'UI page element' });
+        return;
+      }
+      // A snippet (`dspZml`/`dsp`) that fails to compile still renders its own
+      // node with an empty payload, which reads as a dropped `content` gap —
+      // but the compiler already nested a same-tag TODO naming exactly that
+      // failure on the node itself. That TODO is keyed by tag, not by this
+      // element's export name (so same-tag siblings on the page keep distinct
+      // TODOs), so it never matches `namedTodo` below; check it directly.
+      if (found && gap === 'content' && found.children.some((child) => child.kind === 'todo' && child.tag === found.tag)) {
+        rows.push({ kind: 'page-element', name, status: 'counted', via: 'UI zml todo' });
+        return;
+      }
+      const namedTodo = out.model.todos.some((todo) => todo.area === 'zml' && (todo.name === name || todo.name === `${page.name}.${zmlName(el.attributes)}`));
+      const tagTodo = !found && out.model.todos.some((todo) => todo.area === 'zml' && todo.name === `${page.name}.${el.tag}`);
+      const pageTodo = out.model.todos.some((todo) => todo.area === 'page' && todo.name === page.name);
+      if (namedTodo || tagTodo || pageTodo) {
+        rows.push({ kind: 'page-element', name, status: 'counted', via: pageTodo && !namedTodo && !tagTodo ? 'UI page todo' : 'UI zml todo' });
+        return;
+      }
+      const why = gap === 'missing' ? 'is not in the generated page' : `is generated without its ${gap}`;
+      rows.push({
+        kind: 'page-element',
+        name,
+        status: 'dropped',
+        via: 'none',
+        note: `ZML element <${el.tag}> ${label} on page ${page.name} ${why}. Add one: either emit the element or record the manual step.`,
+      });
+    });
+  }
+}
+
+type ZmlNode = App['pages'][number]['zml'][number];
+
+const SUPPORTED_KPI = new Set(['count', 'sum']);
+const UNSUPPORTED_KPI = new Set(['distinctcount', 'distinct', 'avg', 'average', 'min', 'max']);
+
+function walkZml(nodes: ZmlNode[], visit: (el: ZmlNode) => void): void {
+  for (const node of nodes) {
+    visit(node);
+    walkZml(node.children, visit);
+  }
+}
+
+function flattenUi(nodes: UiElement[]): UiElement[] {
+  const out: UiElement[] = [];
+  const walk = (el: UiElement): void => {
+    out.push(el);
+    for (const child of el.children) walk(child);
+  };
+  for (const node of nodes) walk(node);
+  return out;
+}
+
+/** Generator name order: linkName, formLinkName, componentLinkName, elementName, name, id. */
+function zmlName(attributes: Record<string, string>): string | undefined {
+  return ciAttr(attributes, ['linkName', 'formLinkName', 'componentLinkName', 'elementName', 'name', 'id']);
+}
+
+function ciAttr(attributes: Record<string, string>, keys: string[]): string | undefined {
+  const rank = new Map(keys.map((key, index) => [key.toLowerCase(), index]));
+  let best: { rank: number; value: string } | undefined;
+  for (const [key, value] of Object.entries(attributes)) {
+    const index = rank.get(key.toLowerCase());
+    if (index === undefined || !value.trim()) continue;
+    if (!best || index < best.rank) best = { rank: index, value };
+  }
+  return best?.value;
+}
+
+function takeElement(pool: UiElement[], source: ZmlNode): UiElement | undefined {
+  const tag = source.tag.toLowerCase();
+  const name = zmlName(source.attributes)?.toLowerCase();
+  const same = pool.filter((el) => el.tag.toLowerCase() === tag);
+  // A named node is satisfied only by the generated element carrying that
+  // name: an unrelated same-tag node never stands in for it.
+  const picked = name ? same.find((el) => (el.name ?? '').toLowerCase() === name) : (same.find((el) => !el.name) ?? same[0]);
+  if (!picked) return undefined;
+  pool.splice(pool.indexOf(picked), 1);
+  return picked;
+}
+
+/**
+ * Whether every condition leaf in a carried report-link `parameters` string
+ * is one the client runtime applies (`clickParamConditions` in
+ * client-runtime.js). The string being present on `ui.parameters` is not
+ * proof every leaf wired: an `_op` outside 20/32/45/58, or a BETWEEN (58)
+ * value that does not split into two bounds, drops that leaf on the route,
+ * so the string is only partly carried. Mirrors reportParamsQuery's
+ * once-decode, name shape, and `_op` grouping; a `${name}`/`input.name`
+ * page-input value substitutes at draw time, so it counts as a value a leaf
+ * can use but cannot prove a BETWEEN split.
+ */
+function reportParamsFullyCarried(parameters: string): boolean {
+  const conditions = new Map<string, { value?: string; input?: boolean; op?: string }>();
+  const order: string[] = [];
+  for (const pair of parameters.split(/&+/).filter(Boolean)) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) return false;
+    const name = pair.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(name)) return false;
+    let value = pair.slice(eq + 1).trim();
+    if (value.includes('%')) {
+      try {
+        value = decodeURIComponent(value);
+      } catch {
+        return false;
+      }
+    }
+    const opm = /^([A-Za-z_][A-Za-z0-9_]*)_op$/i.exec(name);
+    const isOp = !!opm && /^\d+$/.test(value);
+    const key = isOp ? opm![1]! : name;
+    if (!conditions.has(key)) order.push(key);
+    const cond = conditions.get(key) ?? {};
+    if (isOp) cond.op = value;
+    else {
+      cond.value = value;
+      cond.input = /^\$\{[A-Za-z_]\w*\}$/.test(value) || /^input\.[A-Za-z_]\w*$/.test(value);
+    }
+    conditions.set(key, cond);
+  }
+  for (const field of order) {
+    const cond = conditions.get(field)!;
+    if (cond.op === undefined) continue;
+    if (cond.op === '20' || cond.op === '32' || cond.op === '45') continue;
+    if (cond.op === '58') {
+      if (cond.input) continue;
+      const parts = String(cond.value).split(';');
+      if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Payload the generator currently drops while still emitting the node:
+ * button `parameters`, search `criteria` / `criteriaString`, and KPI
+ * functions other than count and sum (distinctCount and the rest).
+ *
+ * A server-side HTML snippet whose body is entirely a Deluge island (logic,
+ * a redirect, a `<style>` block) compiles to a real render endpoint
+ * (`ui.src`, a `functions/htmlpages/*.mjs` module the client fetches): the
+ * static `html` left on the element is only the markup outside that island,
+ * which is legitimately empty when the whole snippet was one island. The
+ * endpoint is the produced artifact, so an empty static `html` next to a real
+ * `src` is not a content drop.
+ */
+function pageBehaviorGap(source: ZmlNode, ui: UiElement): string | undefined {
+  const parameters = ciAttr(source.attributes, ['parameters']);
+  if (parameters) {
+    const haystack = [ui.name, ui.text, ui.href, ui.parameters, ui.kpi ? JSON.stringify(ui.kpi) : ''].filter(Boolean).join('\n');
+    // The element carries `parameters` XML-decoded; compare the decoded source text.
+    if (!haystack.includes(parameters) && !haystack.includes(decodeXmlEntities(parameters))) return 'parameters';
+    // On a report route the carried text still has to translate leaf by leaf;
+    // a stored leaf the runtime cannot apply is a drop, not a carry.
+    if (typeof ui.parameters === 'string' && ui.parameters && ui.href?.startsWith('#/report/') && !reportParamsFullyCarried(ui.parameters)) return 'parameters';
+  }
+  const criteria = ciAttr(source.attributes, ['criteriaString', 'criteria']);
+  // An embedded report's criteria may ride the link query instead (`ui.parameters`).
+  if (criteria && !ui.criteria && !ui.parameters) return 'criteria';
+  const fn = kpiFunction(source, ui);
+  if (fn && !SUPPORTED_KPI.has(fn)) return `kpi ${fn}`;
+  const payload = staticPayload(source, ui);
+  if (payload && ui.kind !== 'container' && ui.kind !== 'todo' && !ui.kpi && !ui.src && !(ui.text?.trim() || ui.html?.trim())) return 'content';
+  return undefined;
+}
+
+/**
+ * The static text payload the export wrote on a leaf element: its inner text
+ * or a literal `label`/`text` attribute, plus `value` on the kinds where it
+ * is the shown content (text, button). An attribute holding an expression
+ * (`thisapp.X.count(...)`, `openUrl(...)`) or a non-text token (an icon name,
+ * an embed URL) is not static payload; those elements are proved through the
+ * KPI/behaviour checks instead.
+ */
+function staticPayload(source: ZmlNode, ui: UiElement): string {
+  const inner = (source.text ?? '').trim();
+  if (inner) return inner;
+  const literal = (ciAttr(source.attributes, ['label', 'text']) ?? '').trim();
+  if (literal && !literal.includes('(')) return literal;
+  if (ui.kind === 'text' || ui.kind === 'button') {
+    const value = (ciAttr(source.attributes, ['value']) ?? '').trim();
+    // The value is emitted when it became the element's identity (an icon's
+    // name) or its icon, not only when it is the shown text.
+    if (value && ui.name !== value && ui.icon !== value && !value.includes('(') && !/^thisapp\./i.test(value)) return value;
+  }
+  return '';
+}
+
+function kpiFunction(source: ZmlNode, ui: UiElement): string | undefined {
+  if (ui.kpi?.fn) return ui.kpi.fn.toLowerCase();
+  const formData = (ciAttr(source.attributes, ['type']) ?? '').toLowerCase() === 'form data' || ui.kind === 'kpi';
+  if (!formData) return undefined;
+  const value = (ciAttr(source.attributes, ['value']) ?? '').trim();
+  const match = /(?:^|\.)([A-Za-z_]\w*)\s*(?:\(|$)/.exec(value);
+  const name = match?.[1]?.toLowerCase();
+  if (name && UNSUPPORTED_KPI.has(name)) return name;
+  return undefined;
+}
+
+function handlerBase(w: Workflow): string {
+  return `${slug(w.form || 'form')}/${slug(w.event || w.name || 'handler')}`;
+}
+
+/** Coverage row for this workflow, when generate recorded one. */
+function coverageEntry(w: Workflow, out: AuditOutputs): WorkflowCoverage | undefined {
+  const coverage = out.coverage;
+  if (!coverage) return undefined;
+  const file = w.span.file ?? '';
+  return coverage.find(
+    (c) =>
+      c.form === (w.form || 'form') &&
+      c.event === (w.event || '') &&
+      c.name === (w.name || '') &&
+      c.start === w.span.start &&
+      c.end === w.span.end &&
+      (c.file ?? '') === file,
+  );
+}
+
+/**
+ * The per-event slug, or a coverage entry for the merged route file.
+ * A coverage row with `serverInvoked: false` is not production: the server
+ * body was emitted and nothing runs it. The client file does not override that.
+ */
+function handlerProduced(w: Workflow, out: AuditOutputs, paths: Set<string>): boolean {
+  const entry = coverageEntry(w, out);
+  if (entry?.serverInvoked === false) return false;
+  const base = handlerBase(w);
+  const legacy = [...paths].some(
+    (p) =>
+      p === `functions/aio/${base}.mjs` ||
+      p.startsWith(`functions/aio/${base}-`) ||
+      p.startsWith(`functions/aio/${base}.`) ||
+      p === `client/handlers/${base}.mjs` ||
+      p.startsWith(`client/handlers/${base}-`),
+  );
+  if (legacy) return true;
+  const coverage = out.coverage;
+  if (!coverage) return false;
+  const file = w.span.file ?? '';
+  return coverage.some(
+    (c) =>
+      c.form === (w.form || 'form') &&
+      c.event === (w.event || '') &&
+      c.name === (w.name || '') &&
+      c.start === w.span.start &&
+      c.end === w.span.end &&
+      (c.file ?? '') === file &&
+      c.paths.some((p) => paths.has(p)),
+  );
+}
+
+/** The ledger name auditWorkflow emits for a workflow (form/schedule/payment vs approval/blueprint branch). */
+function workflowRowName(w: Workflow): string {
+  const label = w.name || w.form || 'workflow';
+  const kind = workflowKind(w);
+  return kind === 'form' ? `${w.form ?? ''} ${w.event || label}`.trim() : label;
+}
+
+/**
+ * A workflow with no runnable statements declares no behaviour: blank, or
+ * commented out (gallery scripts wrapped in `/* ... *\/` or `//` lines parse
+ * to zero statements). Creator runs none of it either, so there is nothing
+ * to migrate and no manual step to list. An unparseable script is never
+ * vacuous here: the generator throws on it before the audit runs.
+ */
+function vacuous(w: Workflow): boolean {
+  if ((w.fieldRules?.length ?? 0) > 0) return false;
+  const text = w.deluge?.text ?? '';
+  if (!text.trim()) return true;
+  try {
+    return parse(text).body.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function auditWorkflow(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  const paths = new Set(out.files.map((f) => f.path));
+  for (const w of app.workflows) {
+    const kind = workflowKind(w);
+    const label = w.name || w.form || 'workflow';
+    const rowName = workflowRowName(w);
+    const listed = listedTodos(out.todos, w).length > 0;
+    if (kind === 'form') {
+      if (vacuous(w)) continue;
+      const base = handlerBase(w);
+      const produced = handlerProduced(w, out, paths);
+      if (produced) rows.push({ kind: 'workflow', name: rowName, status: 'emitted', via: `functions/aio/${base}.mjs` });
+      else if (listed) rows.push({ kind: 'workflow', name: rowName, status: 'counted', via: 'todo' });
+      else
+        rows.push({
+          kind: 'workflow',
+          name: rowName,
+          status: 'dropped',
+          via: 'none',
+          note: `Workflow ${label} (${w.event}) emitted no handler and carries no todo. Add one: either migrate the script or record the manual step.`,
+        });
+      continue;
+    }
+    if (kind === 'payment') {
+      const produced = paths.has(`not-supported/payments-${slug(w.name || w.form || 'workflow')}.mjs`);
+      if (produced) rows.push({ kind: 'workflow', name: rowName, status: 'emitted', via: 'payment stub' });
+      else if (listed) rows.push({ kind: 'workflow', name: rowName, status: 'counted', via: 'todo' });
+      else
+        rows.push({
+          kind: 'workflow',
+          name: rowName,
+          status: 'dropped',
+          via: 'none',
+          note: `Payments workflow ${label} has no stub and no fidelity note. Add one: the stub names the workflow and states that no gateway is called.`,
+        });
+      continue;
+    }
+    if (kind === 'schedule') {
+      const plan = out.schedules.get(w);
+      const produced = !!plan && ((plan.kind === 'custom' && !!plan.cron) || (plan.kind === 'form' && !!plan.sweep));
+      if (produced) rows.push({ kind: 'schedule', name: rowName, status: 'emitted', via: 'job module' });
+      else if (listed) rows.push({ kind: 'schedule', name: rowName, status: 'counted', via: 'todo' });
+      else
+        rows.push({
+          kind: 'schedule',
+          name: rowName,
+          status: 'dropped',
+          via: 'none',
+          note: `Schedule ${label} produced no cron or sweep and carries no gap todo. Add one: either plan the schedule or record the gap and the manual cron.`,
+        });
+      continue;
+    }
+    // Approval or blueprint: one machine module per approval group / blueprint.
+    // The lookup mirrors generate(): the group key addresses the spec map, and
+    // an unnamed workflow falls back to its blank spec name.
+    const key = kind === 'approval' ? w.name || `approval:${w.form ?? ''}` : w.name;
+    const spec =
+      out.specs.find((s) => s.kind === kind && s.name === key) ?? (key !== w.name ? out.specs.find((s) => s.kind === kind && s.name === w.name) : undefined);
+    const produced = !!spec && paths.has(`functions/flow/${spec.slug}.mjs`);
+    if (produced) rows.push({ kind: 'approval', name: rowName, status: 'emitted', via: `functions/flow/${spec!.slug}.mjs` });
+    else if (listed) rows.push({ kind: 'approval', name: rowName, status: 'counted', via: 'todo' });
+    else
+      rows.push({
+        kind: 'approval',
+        name: rowName,
+        status: 'dropped',
+        via: 'none',
+        note: `${kind === 'approval' ? 'Approval' : 'Blueprint'} ${label} emitted no machine module and carries no todo. Add one: either migrate the machine or record the manual step.`,
+      });
+  }
+}
+
+interface IntegrationCall {
+  task: string;
+  where: string;
+  invokeurl: boolean;
+}
+
+/** An invokeurl use is named `invokeurl <METHOD>`; a `zoho.<svc>.<task>` path never is. */
+function isInvokeurlTask(task: string): boolean {
+  const t = task.toLowerCase();
+  return t === 'invokeurl' || t.startsWith('invokeurl ');
+}
+
+/**
+ * The integration calls a script makes, from the audit's own unfiltered walk
+ * of the parsed script: every `zoho.<svc>.<task>(...)` call node and every
+ * `invokeurl` node, whether or not the connections analysis surfaces them.
+ * Comments and string literals parse to no call nodes, so they are never
+ * drops. An unparseable script enumerates nothing; the generator throws on
+ * it before the audit runs.
+ */
+function callsIn(text: string, where: string): IntegrationCall[] {
+  let script;
+  try {
+    script = parse(text);
+  } catch {
+    return [];
+  }
+  const calls: IntegrationCall[] = [];
+  walk(script, (n) => {
+    if (n.kind === 'call') {
+      const chain = memberChain(n.callee as Expr);
+      if (chain && chain[0] === 'zoho' && chain.length === 3) {
+        calls.push({ task: chain.slice(1).join('.').toLowerCase(), where, invokeurl: false });
+      }
+      return;
+    }
+    if (n.kind === 'invokeurl') calls.push({ task: 'invokeurl', where, invokeurl: true });
+  });
+  return calls;
+}
+
+function scriptsOf(app: App): { text: string; where: string }[] {
+  const out: { text: string; where: string }[] = [];
+  for (const w of app.workflows) if (w.deluge) out.push({ text: w.deluge.text, where: `${w.name} (${w.event})` });
+  for (const fn of app.functions) for (const d of fn.deluge) out.push({ text: d.text, where: `function ${fn.name}` });
+  return out;
+}
+
+/** True when the call needs no wiring: evaluated locally or refused explicitly. */
+function locallyHandled(root: string, task: string): boolean {
+  if (ZOHO_PAYMENT.test(task)) return true;
+  if (dispatchGet(ZOHO_ENV, root)) return true;
+  const hit = adapterFor(task.split('.'));
+  return !!hit?.adapter.local;
+}
+
+function auditIntegration(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  for (const { text, where } of scriptsOf(app)) {
+    for (const call of callsIn(text, where)) {
+      if (call.invokeurl) {
+        const covered =
+          out.connections.entries.some((e) => e.uses.some((u) => u.where === where && isInvokeurlTask(u.task))) ||
+          out.connections.unsupported.some((u) => isInvokeurlTask(u)) ||
+          out.connections.diagnostics.some((d) => d.includes(where) && /invokeurl/i.test(d));
+        if (covered) rows.push({ kind: 'integration', name: `invokeurl in ${where}`, status: 'counted', via: 'connections report' });
+        else
+          rows.push({
+            kind: 'integration',
+            name: `invokeurl in ${where}`,
+            status: 'dropped',
+            via: 'none',
+            note: `An invokeurl call in ${where} is analysed nowhere: no checklist row, no unsupported entry, no diagnostic. Record the service, the scope, and the manual connection step.`,
+          });
+        continue;
+      }
+      const root = call.task.split('.')[0]!;
+      if (locallyHandled(root, call.task)) {
+        rows.push({ kind: 'integration', name: `zoho.${call.task} in ${where}`, status: 'emitted', via: 'local evaluation' });
+        continue;
+      }
+      const covered =
+        out.connections.entries.some((e) => e.uses.some((u) => u.where === where && u.task.toLowerCase() === call.task)) ||
+        out.connections.unsupported.some((u) => u.toLowerCase() === `zoho-task:${call.task}`) ||
+        out.connections.diagnostics.some((d) => d.includes(where) && d.toLowerCase().includes(call.task));
+      if (covered) rows.push({ kind: 'integration', name: `zoho.${call.task} in ${where}`, status: 'counted', via: 'connections report' });
+      else
+        rows.push({
+          kind: 'integration',
+          name: `zoho.${call.task} in ${where}`,
+          status: 'dropped',
+          via: 'none',
+          note: `zoho.${call.task} in ${where} is translated to a runtime task call but the connections analysis never surfaces it: no checklist row, no unsupported entry, no diagnostic. List it in the connections report with the manual connection step.`,
+        });
+    }
+  }
+}
+
+/**
+ * True when the connections report has a `connection <link>: declares granted
+ * scopes <list>` diagnostic for exactly this link name whose listed scopes
+ * cover every scope in `literal`. Another connection's diagnostic — including
+ * one whose link merely shares a prefix — does not count.
+ */
+function connectionScopesListed(diagnostics: readonly string[], link: string, literal: readonly string[]): boolean {
+  if (!link) return false;
+  const re = new RegExp(`^connection ${link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: declares granted scopes (.*); carry them to the Catalyst connection$`);
+  for (const d of diagnostics) {
+    const m = re.exec(d);
+    if (!m) continue;
+    const listed = new Set(m[1]!.split(',').map((s) => s.trim()));
+    if (literal.every((s) => listed.has(s))) return true;
+  }
+  return false;
+}
+
+function auditPermission(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  const profiles = new Set(app.profiles.map((p) => p.name));
+  const roles = new Set<string>();
+  const walkRoles = (list: App['roles']): void => {
+    for (const r of list) {
+      roles.add(r.name);
+      walkRoles(r.children);
+    }
+  };
+  walkRoles(app.roles);
+  for (const p of app.permissions) {
+    if (profiles.has(p.owner ?? '') || roles.has(p.owner ?? '')) {
+      rows.push({ kind: 'permission', name: `permissions of ${p.owner ?? '(no owner)'}`, status: 'emitted', via: 'auth plan role grant' });
+      continue;
+    }
+    // A `permissions` literal on a `connections` block is the connection's
+    // granted scope list; covered only when the report's diagnostic for that
+    // connection lists every scope the literal grants. A literal holding a
+    // value that is not scope-name shaped is never fully listed.
+    const { scopes, unverified } = permissionScopes(p.value);
+    if (!unverified && connectionScopesListed(out.connections.diagnostics, p.owner ?? '', scopes)) {
+      rows.push({ kind: 'permission', name: `permissions of ${p.owner ?? '(no owner)'}`, status: 'counted', via: 'connections diagnostic' });
+      continue;
+    }
+    rows.push({
+      kind: 'permission',
+      name: `permissions of ${p.owner ?? '(no owner)'}`,
+      status: 'dropped',
+      via: 'none',
+      note: `A permissions literal owned by ${p.owner ?? '(no owner)'} matches no profile or role, so the auth plan migrates none of it. List what it grants and the manual role or grant that reproduces it.`,
+    });
+  }
+}
+
+/**
+ * Every declared function (`functions { ... }` / `deluge` / bare script)
+ * either emits `functions/custom/<name>.mjs` or is listed by a todo inside
+ * its span. A migration-report warning (`function-untranslated`,
+ * `custom-function-api-*`) is never coverage: warnings are not counted
+ * manual items, so a function that only carries a warning is a drop.
+ */
+function auditFunction(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  const paths = new Set(out.files.map((f) => f.path));
+  for (const fn of app.functions) {
+    const name = fn.name || 'function';
+    const produced = paths.has(`functions/custom/${slug(name)}.mjs`);
+    if (produced) {
+      rows.push({ kind: 'function', name: fn.name, status: 'emitted', via: `functions/custom/${slug(name)}.mjs` });
+      continue;
+    }
+    if (out.todos.some((t) => within(t, fn.span))) {
+      rows.push({ kind: 'function', name: fn.name, status: 'counted', via: 'todo' });
+      continue;
+    }
+    const warned = out.warnings.some(
+      (w) => (w.construct === 'function-untranslated' || w.construct.startsWith('custom-function-api-')) && w.name === fn.name,
+    );
+    rows.push({
+      kind: 'function',
+      name: fn.name,
+      status: 'dropped',
+      via: 'none',
+      note: `Function ${fn.name} emitted no module and carries no todo${warned ? ' — only a migration-report warning, which is not a counted manual item' : ''}. Add one: either migrate the body or record the manual step.`,
+    });
+  }
+}
+
+/** Every statement node of a parsed script, recursively, in source order. */
+function eachStatement(list: readonly Stmt[], visit: (s: Stmt) => void): void {
+  for (const s of list) {
+    visit(s);
+    if (s.kind === 'block') eachStatement(s.body, visit);
+    else if (s.kind === 'if') {
+      eachStatement([s.then, ...s.elifs.map((e) => e.body), ...(s.else ? [s.else] : [])], visit);
+    } else if (s.kind === 'forEach' || s.kind === 'while' || s.kind === 'fn') eachStatement([s.body], visit);
+    else if (s.kind === 'try') eachStatement(s.catchBody ? [s.body, s.catchBody] : [s.body], visit);
+  }
+}
+
+/**
+ * Every declared script (`workflow deluge`, blueprint transition phase
+ * `deluge`, `function` body) as one audit unit, labelled for drop names.
+ * `cov` is the coverage-ledger unit the emitters record its rows under
+ * (generate.ts coverShift); a unit whose script is never translated has no
+ * coverage label at all, so its statements can never borrow another unit's
+ * rows. `via` marks a unit whose script is deliberately not translated —
+ * a payments stub names the workflow and states no gateway is called, which
+ * is the listing surface for its statements. Any other unit without a
+ * coverage label drops every statement it declares.
+ */
+function scriptUnits(app: App, specs: readonly FlowSpec[]): { label: string; cov: string | null; via: string | null; owner: string; text: string; start: number; end: number }[] {
+  const out: { label: string; cov: string | null; via: string | null; owner: string; text: string; start: number; end: number }[] = [];
+  for (const w of app.workflows) {
+    const label = w.name || w.form || 'workflow';
+    if (w.deluge) {
+      const kind = workflowKind(w);
+      let cov: string | null = null;
+      let via: string | null = null;
+      if (kind === 'schedule') cov = `schedule ${label}`;
+      else if (kind === 'approval') {
+        const key = w.name || `approval:${w.form ?? ''}`;
+        const spec = specs.find((s) => s.kind === 'approval' && s.name === key) ?? (key !== w.name ? specs.find((s) => s.kind === 'approval' && s.name === w.name) : undefined);
+        cov = spec ? `approval ${spec.name}` : null;
+      } else if (kind === 'form') cov = `workflow ${label} (${w.event})`;
+      else if (kind === 'payment') via = 'payment stub';
+      out.push({ label: `workflow ${label} (${w.event})`, cov, via, owner: workflowRowName(w), text: w.deluge.text, start: w.deluge.span.start, end: w.deluge.span.end });
+    }
+    for (const t of w.blueprint?.transitions ?? []) {
+      for (const p of t.phases) {
+        for (const d of p.deluge)
+          out.push({ label: `blueprint ${t.name} / ${p.phase}`, cov: `blueprint ${t.name} / ${p.phase}`, via: null, owner: workflowRowName(w), text: d.text, start: d.span.start, end: d.span.end });
+      }
+    }
+  }
+  for (const fn of app.functions) {
+    for (const d of fn.deluge)
+      out.push({ label: `function ${fn.name}`, cov: `function ${fn.name}`, via: null, owner: `fn:${fn.name}`, text: d.text, start: d.span.start, end: d.span.end });
+  }
+  return out;
+}
+
+/**
+ * Statement-level coverage (C3). The translator records one coverage row per
+ * statement it visits (translate.ts `statement`/`stmts`), shifted to absolute
+ * `.ds` spans by the emitters (generate.ts `coverShift`). A declared
+ * statement is:
+ * - emitted when its row counted 'translated' or 'shimmed';
+ * - counted when its row counted 'todo' and a TODO item covers its span
+ *   (account() pushes the construct rows at the statement's own span);
+ * - dropped when no row exists (a generator that skipped the statement) or
+ *   the row counted 'skipped'/'todo' with no covering TODO.
+ */
+function auditStatements(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  // Owner rows already emitted by the workflow/function audits. A unit whose
+  // owner is counted or dropped is covered there; statement rows exist only
+  // where the unit's statements were supposed to be emitted.
+  const ownerStatus = new Map<string, CoverageRow['status']>();
+  for (const r of rows) if (r.kind === 'workflow' || r.kind === 'schedule' || r.kind === 'approval') ownerStatus.set(r.name, r.status);
+  for (const r of rows) if (r.kind === 'function') ownerStatus.set(`fn:${r.name}`, r.status);
+  // One claim set for the whole app: a coverage row can satisfy exactly one
+  // declared statement, in exactly one unit. Rows are also scoped to their
+  // own unit label, so a missing row can never be papered over by borrowing
+  // a neighbouring unit's same-kind row.
+  const used = new Set<CoverageEntry>();
+  for (const unit of scriptUnits(app, out.specs)) {
+    if (!unit.text.trim()) continue;
+    if (ownerStatus.get(unit.owner) !== 'emitted') continue;
+    let script;
+    try {
+      script = parse(unit.text);
+    } catch {
+      continue; // Unparseable: the generator throws before the audit runs.
+    }
+    // The declared span covers at least the script text (a degenerate
+    // `span: {0,0}` fixture widens to `start + text.length`), and an
+    // app-call resolution (`thisapp.<fn>` inserts in translateInApp) can push
+    // a statement's end past the raw span, so the end window is slack.
+    const unitEnd = Math.max(unit.end, unit.start + unit.text.length);
+    const cover = out.statementCoverage.filter((c) => c.unit === unit.cov && c.start >= unit.start && c.start <= unitEnd + 4096);
+    eachStatement(script.body, (s) => {
+      const name = `${unit.label} ${s.kind} statement`;
+      // A unit whose script is deliberately not translated (a payments stub)
+      // lists every statement through that listing surface.
+      if (unit.via) {
+        rows.push({ kind: 'statement', name, status: 'counted', via: unit.via });
+        return;
+      }
+      const abs = { start: unit.start + s.span.start, end: unit.start + s.span.end };
+      // Exact span + kind first; when resolveAppCalls rewrote the source the
+      // emitted spans sit in resolved coordinates, so fall back to the first
+      // unclaimed row of the same kind in this unit (statement order and
+      // kinds survive).
+      const row =
+        cover.find((c) => !used.has(c) && c.start === abs.start && c.end === abs.end && c.kind === s.kind) ??
+        cover.find((c) => !used.has(c) && c.kind === s.kind);
+      if (!row) {
+        rows.push({
+          kind: 'statement',
+          name,
+          status: 'dropped',
+          via: 'none',
+          note: `A ${s.kind} statement in ${unit.label} was never visited by the translator — the coverage ledger has no row for it. This is a generator bug: emit it or count it.`,
+        });
+        return;
+      }
+      used.add(row);
+      if (row.bucket === 'translated' || row.bucket === 'shimmed') {
+        rows.push({ kind: 'statement', name, status: 'emitted', via: `translated (${row.bucket})` });
+        return;
+      }
+      // A `block` only recurses: it accounts nothing itself, so 'skipped' is
+      // its resting state. Its children are audited row by row.
+      if (s.kind === 'block') {
+        rows.push({ kind: 'statement', name, status: 'emitted', via: 'container' });
+        return;
+      }
+      // The row's own span and the todo spans are both final-pass coordinates.
+      if (row.bucket === 'todo' && out.todos.some((t) => t.start < row.end && t.end > row.start)) {
+        rows.push({ kind: 'statement', name, status: 'counted', via: 'todo' });
+        return;
+      }
+      rows.push({
+        kind: 'statement',
+        name,
+        status: 'dropped',
+        via: 'none',
+        note: `A ${s.kind} statement in ${unit.label} counted '${row.bucket}' with no covering TODO item — a silent drop. Emit it or push a todo naming the untranslated construct.`,
+      });
+    });
+  }
+}
+
+/**
+ * A phone/tablet device's per-form setting — e.g. a mobile offline sync
+ * scope of "owned records only" vs "all" — is read by no generator (only
+ * the web device's `label placement` is consumed, in
+ * packages/ui/src/decorations/layout.ts). Counted only when the migration
+ * report names this device and form; otherwise the generated client
+ * silently keeps the default, unscoped sync and nothing tells the user.
+ */
+function auditDevice(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  for (const device of app.devices) {
+    if (device.device === 'web') continue;
+    for (const form of device.forms) {
+      if (!form.properties.length) continue;
+      const name = `${device.device}:${form.name}`;
+      const listed = out.warnings.some((w) => w.construct === 'device-form-setting-not-migrated' && w.name === name);
+      if (listed) {
+        rows.push({ kind: 'device', name, status: 'counted', via: 'migration-report warning' });
+        continue;
+      }
+      rows.push({
+        kind: 'device',
+        name,
+        status: 'dropped',
+        via: 'none',
+        note: `The ${device.device} device sets properties on form ${form.name} (for example, which records sync to the device for offline use) that no generator reads and no manual step names. List the device, the form, and what the user must reproduce by hand.`,
+      });
+    }
+  }
+}
+
+/** Every construct the `.ds` declares that is neither produced nor listed. */
+export function auditApp(app: App, outputs?: AuditOutputs): SilentDrop[] {
+  return coverageLedger(app, outputs)
+    .filter((r) => r.status === 'dropped')
+    .map((r) => ({
+      kind: r.kind,
+      name: r.name,
+      note: r.note ?? `${r.kind} ${r.name} is neither generated nor listed.`,
+      ...(r.form === undefined ? {} : { form: r.form }),
+      ...(r.field === undefined ? {} : { field: r.field }),
+      ...(r.property === undefined ? {} : { property: r.property }),
+    }));
+}
+
+/**
+ * The full generation-time coverage ledger: every construct the `.ds`
+ * declares — forms, fields and their properties, reports and their features,
+ * pages and their elements, workflows, functions, every script statement,
+ * integrations, permissions, translations — resolved to emitted, counted, or
+ * dropped.
+ */
+export function coverageLedger(app: App, outputs?: AuditOutputs): CoverageRow[] {
+  const out = outputs ?? collectOutputs(app);
+  const rows: CoverageRow[] = [];
+  auditForm(app, out, rows);
+  auditField(app, out, rows);
+  auditFieldValidation(app, out, rows);
+  auditFieldProperties(app, out, rows);
+  auditReport(app, out, rows);
+  auditReportFeatures(app, out, rows);
+  auditPage(app, out, rows);
+  auditPageElements(app, out, rows);
+  auditWorkflow(app, out, rows);
+  auditFunction(app, out, rows);
+  auditStatements(app, out, rows);
+  auditIntegration(app, out, rows);
+  auditPermission(app, out, rows);
+  auditTranslationDeclarations(app, out, rows);
+  auditDevice(app, out, rows);
+  return rows;
+}
+
+/** Thrown by assertCovered: generation produced constructs it neither emitted nor counted. */
+export class SilentDropError extends Error {
+  readonly drops: SilentDrop[];
+  constructor(drops: SilentDrop[]) {
+    super(`silent drops: every construct must be emitted or counted —\n${drops.map((d) => `  [${d.kind}] ${d.name}: ${d.note}`).join('\n')}`);
+    this.name = 'SilentDropError';
+    this.drops = drops;
+  }
+}
+
+/**
+ * The C3 invariant as a hard gate: throws SilentDropError naming every
+ * construct that is neither emitted nor counted. Callers that emit a
+ * migration run this so a silent drop fails generation instead of shipping.
+ */
+export function assertCovered(app: App, outputs?: AuditOutputs): CoverageRow[] {
+  const rows = coverageLedger(app, outputs);
+  const drops = rows.filter((r) => r.status === 'dropped').map((r) => ({ kind: r.kind, name: r.name, note: r.note ?? '' }));
+  if (drops.length) throw new SilentDropError(drops);
+  return rows;
+}
+
+/**
+ * Translation blocks: the string labels a block declares are produced when
+ * they all reach the client i18n table (UiModel.i18n → slate/assets/model.js;
+ * the client's language switch applies them to labels), and its app language
+ * settings are produced when they reach the model (`UiModel.languageWithLogin`,
+ * the client's `?lang`/storage/browser pick). A block whose remaining pieces
+ * have no generated equivalent — unrecognized entries, or an enabled
+ * language's `Auto Translate` machine translation — needs an explicit manual
+ * step, counted only by a todo inside its span — a migration-report warning
+ * (`translation-not-migrated`) is never coverage: warnings are not counted
+ * manual items, so a block that only carries a warning is a drop.
+ */
+function auditTranslationDeclarations(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  // The merged table the client ships: a later block overrides an earlier
+  // one's key, so a shadowed entry is still migrated under its final value.
+  const expected: Record<string, Record<string, string>> = Object.create(null);
+  for (const t of app.translations) {
+    for (const [l, labels] of Object.entries(translationStrings(t))) {
+      Object.assign((expected[l] ??= Object.create(null) as Record<string, string>), labels);
+    }
+  }
+  for (const t of app.translations) {
+    const lang = translationLanguage(t);
+    const name = lang ? `translation ${lang}` : 'translation block';
+    const strings = translationStrings(t);
+    const count = Object.values(strings).reduce((n, table) => n + Object.keys(table).length, 0);
+    if (count) {
+      const shipped = Object.entries(strings).every(([l, labels]) => {
+        const i18n = out.model.i18n;
+        const table = i18n && Object.hasOwn(i18n, l) ? i18n[l] : undefined;
+        return table && Object.keys(labels).every((key) => Object.hasOwn(table, key) && table[key] === expected[l]?.[key]);
+      });
+      if (shipped) {
+        rows.push({ kind: 'translation', name, status: 'emitted', via: 'slate/assets/model.js i18n' });
+        continue;
+      }
+      rows.push({
+        kind: 'translation',
+        name,
+        status: 'dropped',
+        via: 'none',
+        note: `${lang ? `The ${lang} translation block` : 'A translation block'} declares ${count} string label(s) that never reached the generated client i18n table (slate/assets/model.js). Copy the block's labels into the client i18n table.`,
+      });
+      continue;
+    }
+    const leftovers = translationLeftovers(t);
+    if (!leftovers.length) {
+      // No string labels, and every remaining piece is carried: an app
+      // language setting lands on the model; a language's `Language
+      // Properties` are honored in place (a disabled language ships nothing,
+      // an enabled one renders the default text the client already shows).
+      const setting = translationSettings(t)?.['LANGAGUE_WITH_LOGIN'];
+      if (typeof setting === 'string' && out.model.languageWithLogin === undefined) {
+        rows.push({
+          kind: 'translation',
+          name,
+          status: 'dropped',
+          via: 'none',
+          note: `${lang ? `The ${lang} translation block` : 'A translation block'} sets LANGAGUE_WITH_LOGIN = ${JSON.stringify(setting)} but the generated model carries no languageWithLogin (slate/assets/model.js). Carry the app language setting onto the model.`,
+        });
+        continue;
+      }
+      rows.push({
+        kind: 'translation',
+        name,
+        status: 'emitted',
+        via: typeof setting === 'string' ? 'slate/assets/model.js languageWithLogin' : 'language properties honored',
+      });
+      continue;
+    }
+    if (out.todos.some((todo) => within(todo, t.span))) {
+      rows.push({ kind: 'translation', name, status: 'counted', via: 'todo' });
+      continue;
+    }
+    const warned = out.warnings.some(
+      (w) => w.construct === 'translation-not-migrated' && (lang === undefined || w.name.includes(lang)),
+    );
+    rows.push({
+      kind: 'translation',
+      name,
+      status: 'dropped',
+      via: 'none',
+      note: `${lang ? `The ${lang} translation block` : 'A translation block'} holds ${leftovers.join('; ')} — pieces with no generated equivalent — and has no manual step${warned ? ' — only a migration-report warning, which is not a counted manual item' : ''}. List what the user must carry into the generated client.`,
+    });
+  }
+}
+
+export interface ClassCount {
+  kind: DropKind;
+  occurrences: number;
+  apps: number;
+  sample: string;
+}
+
+/** Aggregate per-app drops into anonymized classes: no app names, only counts and one sample note. */
+export function groupDrops(byApp: SilentDrop[][]): ClassCount[] {
+  const groups = new Map<string, { kind: DropKind; occurrences: number; apps: number; sample: string }>();
+  for (const drops of byApp) {
+    const seen = new Set<string>();
+    for (const d of drops) {
+      const key = `${d.kind}	${d.name}	${d.note}`;
+      const g = groups.get(key) ?? { kind: d.kind, occurrences: 0, apps: 0, sample: d.note };
+      g.occurrences++;
+      if (!seen.has(key)) {
+        seen.add(key);
+        g.apps++;
+      }
+      groups.set(key, g);
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.occurrences - a.occurrences || (a.kind < b.kind ? -1 : 1));
+}
+
+/**
+ * The docs/no-silent-drop.md body: numbered rows, no app names. Rows group
+ * identical constructs with occurrence and app counts.
+ */
+export function renderNoSilentDrop(apps: number, groups: ClassCount[], tool: string): string {
+  const lines = ['# No silent drops', '', `Audit tool: \`${tool}\`. Apps audited: ${apps}.`, ''];
+  if (!groups.length) {
+    lines.push('No silent drops. Every declared construct is either generated or listed as an explicit manual item.', '');
+    return `${lines.join('\n')}\n`;
+  }
+  const total = groups.reduce((n, g) => n + g.occurrences, 0);
+  lines.push(`Silent drops: ${total} occurrence(s) in ${apps} app(s). Each row is one construct class: kind, occurrences, apps affected, and what is missing.`, '');
+  groups.forEach((g, i) => {
+    lines.push(`${i + 1}. [${g.kind}] ×${g.occurrences} in ${g.apps} app(s): ${g.sample}`);
+  });
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}

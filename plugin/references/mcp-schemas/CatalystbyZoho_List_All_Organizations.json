@@ -1,0 +1,1 @@
+{"name":"CatalystbyZoho_List_All_Organizations","source":"ZohoMCP_getSchema snapshot","inputSchema":{"type":"object","properties":{},"required":[]},"outputSchema":{"type":"object","properties":{"data":{"type":"object"},"status":{"type":"string","enum":["success","failure"]}}},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false}}

@@ -1,0 +1,748 @@
+/**
+ * Calls to the existing c2c_api Advanced I/O function. Same contract as the
+ * generated vanilla runtime: the base comes from public/c2c-config.js
+ * (globalThis.C2C_API_BASE, rewritten by `c2c deploy`), each call carries the
+ * signed-in user's Catalyst token when the Web SDK is loaded, and cross-origin
+ * calls send cookies. With no base the endpoints stay root-relative. A call
+ * goes only to the page origin or the configured API origin (see apiUrl).
+ */
+
+export interface CatalystAuth {
+  isUserAuthenticated?: () => Promise<unknown>;
+  getCurrentUser?: () => Promise<unknown>;
+  generateAuthToken?: () => Promise<{ access_token?: string } | undefined>;
+  signIn?: (elementId: string, opts: { service_url: string }) => void;
+  signOut?: (redirect?: string) => void;
+}
+
+/** Catalyst Web SDK push surface used when the app spec has `sendsPush`. */
+export interface CatalystNotification {
+  enableNotification?: () => Promise<unknown> | unknown;
+  messageHandler?: (handler: (payload: unknown) => void) => void;
+}
+
+/** The browser window the app runs in, with the globals c2c-config.js sets. */
+export interface AppWindow extends Window {
+  C2C_API_BASE?: string;
+  C2C_APP_TIMEZONE?: string;
+  C2C_LOGIN_WAIT_MS?: number;
+  /** The smoke plan a deploy embeds for the hidden #/admin/smoke page. */
+  C2C_SMOKE_PLAN?: unknown;
+  /** The Catalyst project id the deploy targeted, for the smoke block's binding. */
+  C2C_SMOKE_PROJECT?: string;
+  /** Bound on the auth-token wait — see authToken. Default 10000 ms, capped at 15000. */
+  C2C_AUTH_TIMEOUT_MS?: number;
+  /** Bound on the smoke page's access check — see smoke/run.ts. Default 30000 ms. */
+  C2C_SMOKE_STATUS_TIMEOUT_MS?: number;
+  /**
+   * The c2c_auth token bridge on the function origin (c2c-config.js, set on a
+   * deployed app). When present, the app carries the token the bridge returned
+   * in the #c2c_auth fragment and sends no cookies.
+   */
+  C2C_AUTH_BRIDGE?: string;
+  catalyst?: { auth?: CatalystAuth; notification?: CatalystNotification };
+}
+
+export interface ApiReply<T = unknown> {
+  ok: boolean;
+  status: number;
+  body: T | undefined;
+}
+
+export interface Api {
+  post<T = unknown>(endpoint: string, body: unknown): Promise<ApiReply<T>>;
+  /** A read with no body: the lookup endpoints (GET /lookups/<form>/<field>?page=&pageSize=). */
+  get<T = unknown>(endpoint: string): Promise<ApiReply<T>>;
+}
+
+export function apiBase(view: AppWindow): string {
+  return typeof view.C2C_API_BASE === 'string' ? view.C2C_API_BASE.replace(/\/+$/, '') : '';
+}
+
+/** Exact loopback names — a host that only starts with one (`127.0.0.1.evil.test`) is not loopback. */
+export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+/**
+ * `window.location` throws once the window is gone — a realm teardown, a
+ * closed tab — and deferred work (a scheduled render, a promise continuation)
+ * can land after that point. Read the address defensively instead of letting
+ * the getter's throw escape into an async callback.
+ */
+export function pageHref(view: AppWindow): string {
+  try {
+    return typeof view.location?.href === 'string' ? view.location.href : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The route hash, `''` once the window can no longer answer it. */
+export function pageHash(view: AppWindow): string {
+  try {
+    return typeof view.location?.hash === 'string' ? view.location.hash : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The page's own address — the origin a relative endpoint belongs to. */
+function pageUrl(view: AppWindow): URL {
+  const href = pageHref(view);
+  try {
+    return new URL(href || 'https://localhost/');
+  } catch {
+    return new URL('https://localhost/');
+  }
+}
+
+/**
+ * Where an authenticated request may go. The endpoint joins the configured
+ * API base, or the page origin when no base is set, and the result must land
+ * on the page origin or the configured API origin itself. That configured
+ * origin is trusted only as https — or http to an exact loopback address on
+ * a local dev stack, the same rule the signed-upload check uses. Anything
+ * else — an absolute URL to another host, a protocol-relative `//host/path`,
+ * or a non-web scheme such as `javascript:` or `data:` — throws here, so the
+ * session token is never attached to a request for a different origin.
+ */
+export function apiUrl(view: AppWindow, endpoint: string): string {
+  if (typeof endpoint !== 'string' || !endpoint) throw new Error('api request refused: the endpoint is not an address');
+  const page = pageUrl(view);
+  const base = apiBase(view);
+  let baseOrigin = '';
+  if (base) {
+    try {
+      const parsedBase = new URL(base, page);
+      if (parsedBase.protocol === 'https:' || (parsedBase.protocol === 'http:' && LOOPBACK_HOSTS.has(parsedBase.hostname))) {
+        baseOrigin = parsedBase.origin;
+      }
+    } catch {
+      baseOrigin = '';
+    }
+  }
+  // A scheme (`https:`) or leading `//` names its own host — it never joins the base.
+  const absolute = /^[a-z][a-z0-9+.-]*:/i.test(endpoint) || endpoint.startsWith('//');
+  const request = !base || absolute ? endpoint : `${base}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  let target: URL | null = null;
+  try {
+    target = new URL(request, page);
+  } catch {
+    target = null;
+  }
+  const webTarget = target !== null && (target.protocol === 'http:' || target.protocol === 'https:');
+  const allowed = webTarget && target !== null && (target.origin === page.origin || (baseOrigin !== '' && target.origin === baseOrigin));
+  if (!allowed) throw new Error(`api request refused: ${endpoint} is not on the page or configured API origin`);
+  return request;
+}
+
+/**
+ * Token bridge. The Slate origin serves no /baas routes, so the
+ * Web SDK cannot mint a functions token on it. The configured C2C_AUTH_BRIDGE
+ * page runs on the function origin — where the SDK is first-party — and
+ * returns the token in `#c2c_auth=<token>&state=<state>`. The state binds the
+ * fragment to this tab: a link carrying a foreign token is refused because
+ * its state never equals the sessionStorage value written here.
+ */
+const BRIDGE_STATE_KEY = 'c2c.bridge.state';
+const BRIDGE_TOKEN_KEY = 'c2c.bridge.token';
+const BRIDGE_ROUTE_KEY = 'c2c.bridge.route';
+/** sessionStorage timestamp of the last bridge redirect, for the loop guard. */
+const BRIDGE_MARK = 'c2c.bridge.at';
+/** Two bridge round trips inside this window mean the trip itself fails. */
+const BRIDGE_LOOP_MS = 60_000;
+
+function bridgeConfigured(view: AppWindow): boolean {
+  return typeof view.C2C_AUTH_BRIDGE === 'string' && view.C2C_AUTH_BRIDGE.length > 0;
+}
+
+/** A fixed-time compare so a fragment's state is checked without an early exit. */
+function sameState(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function storedBridgeToken(view: AppWindow): string {
+  try {
+    return sessionStore(view)?.getItem(BRIDGE_TOKEN_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function forgetBridgeToken(view: AppWindow): void {
+  try {
+    sessionStore(view)?.removeItem(BRIDGE_TOKEN_KEY);
+  } catch {
+    // storage refused
+  }
+}
+
+/**
+ * Read `#c2c_auth=<token>&state=<state>` off the address bar. A matching
+ * fragment is consumed exactly once: the token is kept in sessionStorage for
+ * reloads, the route saved before the bridge trip is restored, and the
+ * fragment is stripped with replaceState so it never reaches the router, a
+ * log, or a referrer. A mismatched or unsigned state drops the token.
+ */
+export function intakeBridgeFragment(view: AppWindow): void {
+  const hash = typeof view.location?.hash === 'string' ? view.location.hash : '';
+  if (!hash.startsWith('#c2c_auth=')) return;
+  let token = '';
+  let state = '';
+  try {
+    const params = new URLSearchParams(hash.slice(1));
+    token = params.get('c2c_auth') ?? '';
+    state = params.get('state') ?? '';
+  } catch {
+    return;
+  }
+  // Strip the fragment before anything else can see it, restoring the route
+  // the tab was on when it left for the bridge.
+  let route = '/';
+  try {
+    const stored = sessionStore(view);
+    const saved = stored?.getItem(BRIDGE_ROUTE_KEY);
+    if (saved && saved.startsWith('/')) route = saved;
+    stored?.removeItem(BRIDGE_ROUTE_KEY);
+  } catch {
+    // storage refused: fall back to the root route
+  }
+  let replaceError: unknown;
+  try {
+    if (typeof view.history?.replaceState !== 'function') throw new Error('history.replaceState is unavailable');
+    view.history.replaceState(null, '', new URL(route, pageUrl(view).origin).href);
+  } catch (error) {
+    replaceError = error;
+    forgetBridgeToken(view);
+    try { view.location.hash = ''; } catch { /* location is read-only in some hosts */ }
+  }
+  let expected = '';
+  try {
+    expected = sessionStore(view)?.getItem(BRIDGE_STATE_KEY) ?? '';
+    sessionStore(view)?.removeItem(BRIDGE_STATE_KEY);
+  } catch {
+    // storage refused
+  }
+  if (replaceError) throw replaceError;
+  if (!token || !expected || !sameState(state, expected)) return;
+  try {
+    sessionStore(view)?.setItem(BRIDGE_TOKEN_KEY, token);
+  } catch {
+    // storage refused: the token stays in this page only
+  }
+}
+
+function recentBridge(view: AppWindow): boolean {
+  try {
+    const at = Number(sessionStore(view)?.getItem(BRIDGE_MARK));
+    return Number.isFinite(at) && at > 0 && Date.now() - at < BRIDGE_LOOP_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send the tab to the token bridge, remembering where it was. The bridge URL
+ * is the deploy-generated C2C_AUTH_BRIDGE: trusted config, https only (or a
+ * loopback host on a local stack). Returns false when the round trip would
+ * loop — a bridge return without a token lands on the signed-out prompt
+ * instead of redirecting forever.
+ */
+export function bridgeRedirect(view: AppWindow, force = false): boolean {
+  const bridge = view.C2C_AUTH_BRIDGE;
+  if (typeof bridge !== 'string' || !bridge) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(bridge, pageUrl(view));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname))) return false;
+  if (!force && recentBridge(view)) return false;
+  const store = sessionStore(view);
+  let state = '';
+  try {
+    const bytes = new Uint8Array(32);
+    (view.crypto ?? globalThis.crypto)?.getRandomValues(bytes);
+    state = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch {
+    return false;
+  }
+  try {
+    const here = `${view.location.pathname}${view.location.hash && !view.location.hash.startsWith('#c2c_auth=') ? view.location.hash : ''}`;
+    store?.setItem(BRIDGE_ROUTE_KEY, here || '/');
+    store?.setItem(BRIDGE_STATE_KEY, state);
+    store?.setItem(BRIDGE_MARK, String(Date.now()));
+  } catch {
+    // storage refused: the fragment's state check will refuse the return — do not leave
+    return false;
+  }
+  const target = `${parsed.origin}${parsed.pathname}?state=${state}`;
+  const location = view.location as Location & { assign?: (url: string) => void };
+  try {
+    if (typeof location.assign === 'function') location.assign(target);
+    else location.href = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the tab holds a bridge token (from intake or an earlier trip). */
+export function hasBridgeToken(view: AppWindow): boolean {
+  intakeBridgeFragment(view);
+  return storedBridgeToken(view) !== '';
+}
+
+/**
+ * Sign the tab out of the bridge session: every c2c.bridge.* key is dropped
+ * and the tab leaves for the bridge's signout action, which ends the
+ * function-origin session and returns to the Slate origin. The stored token
+ * is cleared first, so a navigation that never completes still cannot replay
+ * it. Returns false — navigating nowhere — when no web bridge is configured.
+ */
+export function bridgeSignOut(view: AppWindow): boolean {
+  const bridge = view.C2C_AUTH_BRIDGE;
+  if (typeof bridge !== 'string' || !bridge) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(bridge, pageUrl(view));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname))) return false;
+  try {
+    const store = sessionStore(view);
+    for (const key of [BRIDGE_TOKEN_KEY, BRIDGE_STATE_KEY, BRIDGE_ROUTE_KEY, BRIDGE_MARK]) store?.removeItem(key);
+  } catch {
+    // storage refused: the sign-out trip still happens
+  }
+  const location = view.location as Location & { assign?: (url: string) => void };
+  try {
+    const target = `${parsed.origin}${parsed.pathname}?action=signout`;
+    if (typeof location.assign === 'function') location.assign(target);
+    else location.href = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Shown when a current-user or token call never answers. Step 3 is the
+ * customer's "Sign in once" setup step (packages/deploy/src/customer-steps.ts).
+ * Kept in lockstep with the vanilla runtime's AUTH_STALL_MESSAGE.
+ */
+export const AUTH_STALL_MESSAGE =
+  'Sign-in did not complete. Reload the page; if it keeps happening, the app administrator must finish setup step 3, "Sign in once: sign in to the deployed app once".';
+/** Default bound on auth/current-user/token calls. C2C_AUTH_TIMEOUT_MS overrides it, capped at 15s. */
+const AUTH_TIMEOUT_DEFAULT_MS = 10000;
+const AUTH_TIMEOUT_CAP_MS = 15000;
+/** Slate serves no /baas: these exchanges stay pending forever unless aborted. */
+const AUTH_EXCHANGE = /\/project-user\/(?:current|token)(?:[/?#]|$)|\/authentication\/(?:token|current)(?:[/?#]|$)/i;
+
+const authInflight = new WeakMap<AppWindow, number>();
+const authStallFlag = new WeakMap<AppWindow, true>();
+const wrappedAuthFetches = new WeakSet<Function>();
+
+function authTimeoutMs(scope: AppWindow): number {
+  const configured = typeof scope.C2C_AUTH_TIMEOUT_MS === 'number' && Number.isFinite(scope.C2C_AUTH_TIMEOUT_MS) && scope.C2C_AUTH_TIMEOUT_MS >= 0
+    ? scope.C2C_AUTH_TIMEOUT_MS
+    : AUTH_TIMEOUT_DEFAULT_MS;
+  return Math.min(configured, AUTH_TIMEOUT_CAP_MS);
+}
+
+function authTimeoutError(): Error {
+  const error = new Error(AUTH_STALL_MESSAGE);
+  error.name = 'AuthTimeoutError';
+  return error;
+}
+
+export function isAuthTimeout(error: unknown): boolean {
+  return !!error && typeof error === 'object' && ((error as { name?: string }).name === 'AuthTimeoutError' || (error as { message?: string }).message === AUTH_STALL_MESSAGE);
+}
+
+function authInflightCount(scope: AppWindow): number {
+  return authInflight.get(scope) ?? 0;
+}
+
+export function authExchangePending(scope: AppWindow): boolean {
+  return authStalled(scope) || authInflightCount(scope) > 0;
+}
+
+function markAuthStall(scope: AppWindow): void {
+  authStallFlag.set(scope, true);
+}
+
+export function clearAuthStall(scope: AppWindow): void {
+  authStallFlag.delete(scope);
+}
+
+export function authStalled(scope: AppWindow): boolean {
+  return authStallFlag.get(scope) === true;
+}
+
+/** A minified SDK throw is a single letter (live console: "t"). Log a sentence instead. */
+function logAuthFailure(scope: AppWindow, error: unknown, what: string): void {
+  const raw = error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
+    ? (error as { message: string }).message
+    : error == null ? '' : String(error);
+  const detail = !raw || raw.length <= 1 ? `${what} did not answer` : raw;
+  const line = detail === AUTH_STALL_MESSAGE ? AUTH_STALL_MESSAGE : `Sign-in did not complete: ${detail}`;
+  const sink = (scope as { console?: { error?: (...args: unknown[]) => void } }).console ?? globalThis.console;
+  if (sink && typeof sink.error === 'function') sink.error(line);
+}
+
+function timerFns(scope: AppWindow): { set: typeof setTimeout; clear: typeof clearTimeout } {
+  const set = typeof scope.setTimeout === 'function' ? scope.setTimeout.bind(scope) : setTimeout;
+  const clear = typeof scope.clearTimeout === 'function' ? scope.clearTimeout.bind(scope) : clearTimeout;
+  return { set: set as typeof setTimeout, clear: clear as typeof clearTimeout };
+}
+
+/** Race `work` against the auth budget and abort `controller` when the budget expires. */
+function withAuthDeadline<T>(scope: AppWindow, work: () => Promise<T>, controller: AbortController): Promise<T> {
+  const ms = authTimeoutMs(scope);
+  const timers = timerFns(scope);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = timers.set(() => {
+      if (settled) return;
+      try {
+        controller.abort();
+      } catch {
+        /* already aborted */
+      }
+      reject(authTimeoutError());
+    }, ms);
+  });
+  const task = Promise.resolve().then(work);
+  task.catch(() => {});
+  timeout.catch(() => {});
+  return Promise.race([task, timeout]).finally(() => {
+    settled = true;
+    if (timer !== undefined) timers.clear(timer);
+  });
+}
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  return typeof input.url === 'string' ? input.url : '';
+}
+
+/**
+ * Abort current-user and token fetches that never answer. Other requests,
+ * including a 401 from a live auth host, are left alone.
+ */
+function bindAuthFetch(scope: AppWindow): void {
+  const current = scope.fetch;
+  if (typeof current !== 'function' || wrappedAuthFetches.has(current)) return;
+  const native = current;
+  const wrapped = function authBoundFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const url = requestUrl(input);
+    if (!AUTH_EXCHANGE.test(url)) return native.call(scope, input, init);
+    const controller = new AbortController();
+    const outer = init?.signal;
+    if (outer) {
+      if (outer.aborted) controller.abort();
+      else outer.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+    const nextInit: RequestInit = { ...init, signal: controller.signal };
+    authInflight.set(scope, authInflightCount(scope) + 1);
+    const timers = timerFns(scope);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = timers.set(() => {
+        timedOut = true;
+        try {
+          controller.abort();
+        } catch {
+          /* already aborted */
+        }
+        reject(authTimeoutError());
+      }, authTimeoutMs(scope));
+    });
+    const task = Promise.resolve().then(() => native.call(scope, input, nextInit));
+    task.catch(() => {});
+    timeout.catch(() => {});
+    return Promise.race([task, timeout])
+      .catch((error: unknown) => {
+        markAuthStall(scope);
+        logAuthFailure(scope, timedOut ? authTimeoutError() : error, 'the current-user call');
+        throw timedOut || isAuthTimeout(error) ? authTimeoutError() : error;
+      })
+      .finally(() => {
+        if (timer !== undefined) timers.clear(timer);
+        authInflight.set(scope, Math.max(0, authInflightCount(scope) - 1));
+      });
+  };
+  wrappedAuthFetches.add(wrapped);
+  try {
+    scope.fetch = wrapped as AppWindow['fetch'];
+  } catch {
+    /* fetch is sealed; the SDK-call deadline still applies */
+  }
+}
+
+/** Run one auth SDK call. A current-user fetch that does not settle rejects with AuthTimeoutError. */
+export function watchAuthCall<T>(scope: AppWindow, run: () => Promise<T>): Promise<T> {
+  bindAuthFetch(scope);
+  const controller = new AbortController();
+  return withAuthDeadline(scope, run, controller).catch((error: unknown) => {
+    const fetchStall = authStalled(scope) || authInflightCount(scope) > 0;
+    const minified = !!error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string' && (error as { message: string }).message.length === 1;
+    if (fetchStall || minified) {
+      markAuthStall(scope);
+      logAuthFailure(scope, error, 'the current-user call');
+      throw authTimeoutError();
+    }
+    if (isAuthTimeout(error)) {
+      logAuthFailure(scope, error, 'the current-user call');
+      throw error;
+    }
+    throw error;
+  });
+}
+
+async function authToken(view: AppWindow): Promise<string> {
+  intakeBridgeFragment(view);
+  if (bridgeConfigured(view)) return storedBridgeToken(view);
+  const auth = view.catalyst?.auth;
+  if (!auth || typeof auth.generateAuthToken !== 'function') return '';
+  // The SDK token chain is best-effort: on a host where the SDK's auth
+  // endpoints are not served (a Slate domain, where /baas stays pending),
+  // generateAuthToken can hang every API call. Bound the wait. A current-user
+  // fetch that does not settle is remembered so sign-in and the smoke page
+  // can stop; a hanging SDK method that never called the network still lets
+  // the request go out without a token.
+  const generate = auth.generateAuthToken;
+  try {
+    const token = await watchAuthCall(view, async () => {
+      // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
+      if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
+      return (await generate.call(auth))?.access_token;
+    });
+    return typeof token === 'string' ? token : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * A 403 from the API. Screens hand it to the per-route boundary (useAccessDenied),
+ * which shows the access-denied screen instead of the screen's own error state.
+ */
+export class AccessDenied extends Error {
+  constructor() {
+    super('access denied');
+    this.name = 'AccessDenied';
+  }
+}
+
+/** Fired on the window when a call answers 401 twice; cancel it to show your own prompt. */
+export const SESSION_EXPIRED_EVENT = 'c2c:session-expired';
+
+export interface SessionExpiredDetail {
+  /** Catalyst's hosted sign-in, returning to this page. */
+  login: string;
+  /** This tab came back from sign-in moments ago and is still refused: do not send it round again. */
+  looping: boolean;
+}
+
+/** sessionStorage key of the last sign-in redirect (a timestamp), for the loop guard. */
+const SIGN_IN_MARK = 'c2c-auth:sign-in-at';
+/** A 401 this soon after a sign-in round trip means signing in does not help (for example a user with no app role). */
+const SIGN_IN_LOOP_MS = 120_000;
+
+function sessionStore(view: AppWindow): Storage | null {
+  try {
+    return view.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The hosted sign-in page, returning to the page the user is on. */
+export function loginUrl(view: AppWindow): string {
+  const href = pageHref(view) || '/';
+  return `/__catalyst/auth/login?service_url=${encodeURIComponent(href)}`;
+}
+
+function recentSignIn(view: AppWindow): boolean {
+  try {
+    const at = Number(sessionStore(view)?.getItem(SIGN_IN_MARK));
+    return Number.isFinite(at) && at > 0 && Date.now() - at < SIGN_IN_LOOP_MS;
+  } catch {
+    return false;
+  }
+}
+
+function forgetSignIn(view: AppWindow): void {
+  try {
+    sessionStore(view)?.removeItem(SIGN_IN_MARK);
+  } catch {
+    // storage refused: nothing to forget
+  }
+}
+
+/** Send the page to sign-in, marking the time so a refused return does not loop. */
+export function goToSignIn(view: AppWindow, login: string = loginUrl(view)): void {
+  try {
+    sessionStore(view)?.setItem(SIGN_IN_MARK, String(Date.now()));
+  } catch {
+    // storage refused: the redirect still happens
+  }
+  try {
+    const location = view.location as Location & { assign?: (url: string) => void } | null;
+    if (location && typeof location.assign === 'function') location.assign(login);
+    else if (location) location.href = login;
+  } catch {
+    // a host that refuses navigation keeps the prompt on screen
+  }
+}
+
+/** One automatic redirect per window when no prompt handles the event. */
+const redirected = new WeakSet<object>();
+
+/**
+ * The session is gone. Listeners (the open form saves its draft; the shell
+ * shows the "Your session ended" prompt and cancels the event) run first. With
+ * no prompt mounted the page goes straight to sign-in, unless it just came
+ * back from there, which would loop.
+ */
+export function sessionExpired(view: AppWindow): void {
+  const detail: SessionExpiredDetail = { login: loginUrl(view), looping: bridgeConfigured(view) ? recentBridge(view) : recentSignIn(view) };
+  let handled = false;
+  try {
+    const Event = (view as unknown as { CustomEvent?: typeof CustomEvent }).CustomEvent ?? globalThis.CustomEvent;
+    if (typeof Event === 'function' && typeof view.dispatchEvent === 'function') {
+      handled = !view.dispatchEvent(new Event(SESSION_EXPIRED_EVENT, { cancelable: true, detail }));
+    }
+  } catch {
+    handled = false;
+  }
+  if (handled || detail.looping || redirected.has(view)) return;
+  redirected.add(view);
+  // Bridge mode never parks on a hosted-login URL — Slate has none. The
+  // refused bridge trip leaves the page to its prompt, whose button forces it.
+  if (bridgeConfigured(view)) return;
+  goToSignIn(view, detail.login);
+}
+
+/** A bigint (a toLong id) is written as its digit string. */
+function jsonReplacer(_key: string, value: unknown): unknown {
+  return typeof value === 'bigint' ? value.toString() : value;
+}
+
+async function readBody(res: Response): Promise<unknown> {
+  try {
+    const text = await res.text();
+    return text ? JSON.parse(text) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export type HeaderHook = () => Record<string, string> | Promise<Record<string, string>>;
+
+export interface ApiInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+/** The response shape the smoke runner reads: fetch Response minus json(). */
+export interface ApiResponse {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+}
+
+/**
+ * One fetch through the app's base and session — any method, for callers the
+ * form/report helpers do not cover (the hidden smoke page reads with GET).
+ * It hands back the raw status: the smoke page names 401 and 403 itself.
+ * The base comes from C2C_API_BASE, the signed-in user's token rides as
+ * `authorization`, and a remote call sends cookies.
+ */
+export async function apiCall(view: AppWindow, endpoint: string, init: ApiInit = {}): Promise<ApiResponse> {
+  // Resolve and check the target before the token is even requested: a
+  // refused endpoint throws here and no authorization header is attached.
+  const url = apiUrl(view, endpoint);
+  const call = view.fetch?.bind(view);
+  if (typeof call !== 'function') return { ok: false, status: 0, text: async () => '' };
+  const headers: Record<string, string> = { ...(init.headers ?? {}) };
+  const token = await authToken(view);
+  if (token) headers.authorization = token;
+  // Bridge mode sends no cookies at all: the Authorization header is the only
+  // authority, so a cross-site form cannot ride an ambient session.
+  const remote = apiBase(view) !== '' || token !== '';
+  return await call(url, {
+    method: init.method ?? 'GET',
+    headers,
+    ...(init.body !== undefined ? { body: init.body } : {}),
+    ...(bridgeConfigured(view) ? { credentials: 'omit' as const } : remote ? { credentials: 'include' as const } : {}),
+  });
+}
+
+export function createApi(view: AppWindow, extraHeaders?: HeaderHook): Api {
+  async function attempt<T>(method: 'GET' | 'POST', url: string, body?: unknown): Promise<ApiReply<T>> {
+    const call = view.fetch?.bind(view);
+    if (typeof call !== 'function') return { ok: false, status: 0, body: undefined };
+    const headers: Record<string, string> = { 'content-type': 'application/json', ...(extraHeaders ? await extraHeaders() : {}) };
+    const token = await authToken(view);
+    // Catalyst Web SDK v4.6.2+: the raw token, no prefix.
+    if (token) headers.authorization = token;
+    const remote = apiBase(view) !== '' || token !== '';
+    let res: Response;
+    try {
+      res = await call(url, {
+        method,
+        headers,
+        ...(method === 'POST' ? { body: JSON.stringify(body, jsonReplacer) } : {}),
+        ...(bridgeConfigured(view) ? { credentials: 'omit' as const } : remote ? { credentials: 'include' as const } : {}),
+      });
+    } catch {
+      // The network dropped or the host is unreachable: status 0, its own message.
+      return { ok: false, status: 0, body: undefined };
+    }
+    // The server's text for 401, 403 and 5xx never reaches a screen: each
+    // status has the app's own copy (failureText), so the body is dropped here.
+    const masked = res.status === 401 || res.status === 403 || res.status >= 500;
+    if (!masked) return { ok: res.ok, status: res.status, body: (await readBody(res)) as T | undefined };
+    // A 5xx that says wrote true still stored the row: only that flag crosses.
+    const raw = res.status >= 500 ? await readBody(res) : undefined;
+    const wrote = !!raw && typeof raw === 'object' && (raw as { wrote?: unknown }).wrote === true;
+    return { ok: res.ok, status: res.status, body: wrote ? ({ wrote: true } as T) : undefined };
+  }
+  async function send<T>(method: 'GET' | 'POST', endpoint: string, body?: unknown): Promise<ApiReply<T>> {
+    // Resolve and check the target before the token is even requested: a
+    // refused endpoint throws here and no authorization header is attached.
+    const url = apiUrl(view, endpoint);
+    let reply = await attempt<T>(method, url, body);
+    // 401: one retry with a freshly generated token (a stale token renews
+    // silently); a second 401 means the session is gone — the open form saves
+    // its draft and the page goes to sign-in. 403 is never retried.
+    // Bridge mode: drop the stored token and take one bridge round trip
+    // (loop-guarded); a refused trip lands on the session-expired prompt.
+    if (reply.status === 401) {
+      if (bridgeConfigured(view)) {
+        forgetBridgeToken(view);
+        if (!bridgeRedirect(view)) sessionExpired(view);
+        return reply;
+      }
+      reply = await attempt<T>(method, url, body);
+      if (reply.status === 401) sessionExpired(view);
+    }
+    if (reply.ok) forgetSignIn(view);
+    return reply;
+  }
+  return {
+    post: <T>(endpoint: string, body: unknown) => send<T>('POST', endpoint, body),
+    get: <T>(endpoint: string) => send<T>('GET', endpoint),
+  };
+}

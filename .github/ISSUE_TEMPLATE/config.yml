@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/samellis07/c2c/tree/main/docs
+    about: Guides and reference material
+  - name: Security report
+    url: https://github.com/samellis07/c2c/security/advisories/new
+    about: Report a vulnerability privately — do not file a public issue

@@ -1,0 +1,8 @@
+/* Lookup pickers: the paging footer inside the open menu and the links to the chosen records. Tokens only. */
+.c2c-lookup-status { margin: 0; padding: var(--space-2) var(--space-3); color: var(--text-muted); font-size: var(--text-sm); }
+.c2c-lookup-more { display: flex; width: 100%; min-height: 36px; align-items: center; gap: var(--space-2); border: 0; border-radius: calc(var(--radius-panel) - 5px); padding: 0 var(--space-3); background: transparent; color: var(--accent); font: inherit; font-size: var(--text-sm); font-weight: 500; text-align: left; cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard); }
+.c2c-lookup-more:hover, .c2c-lookup-more:focus-visible { background: var(--surface-muted); }
+.c2c-lookup-count { color: var(--text-muted); font-weight: 400; }
+.c2c-lookup-links { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 0; font-size: var(--text-sm); }
+.c2c-lookup-open { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--accent); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .c2c-lookup-more { transition: none; } }
