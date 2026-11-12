@@ -3066,6 +3066,15 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       }
     }
     const dropped = el.kind === 'html' && el.html ? droppedStyles(el.html, true) : [];
+    // A malformed declaration is labelled `?`; name its source text when the counts match exactly, else keep `?`.
+    const refused = el.refusedStyles ?? [];
+    delete el.refusedStyles;
+    if (refused.length && refused.length === dropped.filter((name) => name === '?').length) {
+      let next = 0;
+      dropped.forEach((name, n) => {
+        if (name === '?') dropped[n] = `"${refused[next++]}"`;
+      });
+    }
     if (dropped.length) todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedStyleReason(dropped), manualStep: droppedStyleStep(`On page ${page.name}, the <${el.tag}> element`, dropped) });
   }
   if (styleRules) {
