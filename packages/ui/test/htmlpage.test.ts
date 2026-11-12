@@ -290,6 +290,29 @@ test('a dropped page <script> is a counted manual step, other dropped tags stay 
   assert.equal(svg?.manualStep, undefined);
 });
 
+test('an external iframe removed from a compiled page snippet is a counted manual step', () => {
+  // The shape of a Help page that wraps static markup and a training video in
+  // a brace-only statement block.
+  const snippet = `htmlpage Help1()\ncontent\n<%{\n%>\n<p>Training video</p><table><tr><td><iframe width="640" src="https://www.youtube.com/embed/abc" allowfullscreen></iframe></td></tr></table><object data="https://example.com/x.swf"></object>\n<%\n}%>`;
+  const { model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  const iframe = model.todos.find((todo) => todo.reason === 'The <iframe> element is removed from this page snippet by the sanitizer');
+  const object = model.todos.find((todo) => todo.reason === 'The <object> element is removed from this page snippet by the sanitizer');
+  assert.ok(iframe, 'the dropped iframe is counted');
+  assert.ok(object, 'the dropped object is counted');
+  assert.deepEqual(iframe?.manualReasons, ['sanitizer-loss']);
+  assert.match(iframe?.manualStep ?? '', /^page Home: The page snippet embeds content with an <iframe> element\. The sanitizer removes it/);
+  const html = htmlElements(model)[0].html ?? '';
+  assert.match(html, /Training video/);
+  assert.doesNotMatch(html, /<iframe|youtube|<object/i);
+});
+
+test('an own-report iframe rewritten to a link is not counted as a dropped iframe', () => {
+  const snippet = `htmlpage hp1()\ncontent\n<iframe src="<%=zoho.appuri%>report-embed/Orders_Report"></iframe><p><%= input.name %></p>`;
+  const { model } = generateUi(appOf(`${ORDERS_REPORT}\n${pageWithSnippet(snippet)}`));
+  assert.equal(model.todos.filter((todo) => /<iframe> element is removed/.test(todo.reason)).length, 0);
+  assert.match(htmlElements(model)[0].html ?? '', /#\/report\/Orders_Report/);
+});
+
 test('empty server wrappers keep dropped styles as a counted TODO', () => {
   const unsafeSnippet = `htmlpage hp1()\ncontent\n<%{%}>\n<div style="background-image:url(javascript:alert(1))">x</div>`;
   const unsafe = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(unsafeSnippet)}`));

@@ -644,6 +644,19 @@ test('a page snippet lists each removed script, SVG, and template tag once in so
   ]);
 });
 
+test('a static page snippet counts each removed iframe, object, and embed tag', () => {
+  const zml = `<zml><dsp id='html_snippet'><![CDATA[<p>Watch</p><iframe src="https://www.youtube.com/embed/abc"></iframe><object data="x.swf"></object><embed src="x.swf">]]></dsp></zml>`;
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`));
+  const model = buildModel(app);
+  const todos = model.todos.filter((todo) => todo.area === 'zml' && /removed from this page snippet/.test(todo.reason));
+  assert.deepEqual(todos.map((todo) => todo.reason), [
+    'The <embed> element is removed from this page snippet by the sanitizer',
+    'The <iframe> element is removed from this page snippet by the sanitizer',
+    'The <object> element is removed from this page snippet by the sanitizer',
+  ]);
+  for (const todo of todos) assert.match(todo.manualStep ?? '', /Re-add it as a link to its address/);
+});
+
 test('a page snippet with carried static <style> CSS suppresses the generic style TODO', () => {
   const zml = `<zml><dsp id='html_snippet'><![CDATA[<script>bad()</script><style>.x{}</style>]]></dsp></zml>`;
   const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`));
