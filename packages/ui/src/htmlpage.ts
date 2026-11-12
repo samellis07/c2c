@@ -2659,7 +2659,9 @@ export function compileHtmlpage(
     // runtime wires `data-fn-call` clicks on the shell.
     const staticMarkup = chunks.map((c) => c.text).join('');
     if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
-    return withIncludes({ ok: true, staticOnly: true, html: sanitizeSnippet(staticMarkup), ...(fnFiles.length ? { files: fnFiles } : {}) });
+    const droppedTags: string[] = [];
+    const html = sanitizeSnippet(staticMarkup, undefined, droppedTags);
+    return withIncludes({ ok: true, staticOnly: true, html, ...(droppedTags.length ? { droppedTags } : {}), ...(fnFiles.length ? { files: fnFiles } : {}) });
   }
   // Legacy exports sometimes wrap entirely static markup in an empty
   // statement block. Parse every statement island before accepting this path:

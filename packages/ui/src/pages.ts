@@ -1212,7 +1212,10 @@ function cleanNode(node: DomNode, doc: DomDocument, dropped?: string[]): DomNode
   return out;
 }
 
-const REPORTED_DROPPED_TAGS = new Set(['script', 'style', 'svg', 'template']);
+/** Embedding tags: the sanitizer removes them with whatever they showed (a video, a map, an external page). */
+const EMBED_DROPPED_TAGS = new Set(['embed', 'frame', 'iframe', 'object']);
+
+const REPORTED_DROPPED_TAGS = new Set(['script', 'style', 'svg', 'template', ...EMBED_DROPPED_TAGS]);
 
 export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[]): string {
   const win = domWindow();
@@ -1471,6 +1474,8 @@ export function droppedTagReason(tag: string): string {
  * dropped tags keep their reason-only TODO.
  */
 export function droppedTagStep(page: string, tag: string): string | undefined {
+  if (EMBED_DROPPED_TAGS.has(tag))
+    return `page ${page}: The page snippet embeds content with an <${tag}> element. The sanitizer removes it and what it showed is not on the page. Re-add it as a link to its address, or rebuild it as a client component with a fixed allowlisted source, then keep this TODO open until the page is verified.`;
   if (tag !== 'script') return undefined;
   return `page ${page}: The page snippet contains a <script> element. The sanitizer removes it and its code is not run or bundled. Rebuild what it did as a client component or a function the page calls, then keep this TODO open until the page is verified.`;
 }
