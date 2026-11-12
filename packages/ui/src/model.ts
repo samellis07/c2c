@@ -2334,7 +2334,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   // manual step only where the schema keeps no status column.
   for (const column of report.columns) {
     if (knownColumnHead(form, column.field) || !UNSUPPORTED_RECORD_COLUMNS.has(column.field)) continue;
-    if (recordStatusColumn(app, form)) continue;
+    if (column.field === 'Record_Status' && recordStatusColumn(app, form)) continue;
     const name = `${report.name} column ${column.field}`;
     if (!todos.some((t) => t.area === 'report' && t.name === name)) {
       todos.push({
@@ -2853,9 +2853,11 @@ const RECORD_COLUMNS = new Set([
  * Applicable / Yet to get Approved / Approved / Rejected); when an approval
  * or blueprint machine governs the report's form the column reads the
  * machine's status column instead (`recordStatusColumn`), so only a form no
- * machine governs stays counted here.
+ * machine governs stays counted here. The geo stamps (`Added_Location`,
+ * `Modified_Location`) have no stored column either, so a report column
+ * naming one is counted rather than drawn blank.
  */
-const UNSUPPORTED_RECORD_COLUMNS = new Set(['Record_Status']);
+const UNSUPPORTED_RECORD_COLUMNS = new Set(['Record_Status', ...GEO_RECORD_COLUMNS]);
 
 /**
  * A report column resolves when its head names a field of the report's form

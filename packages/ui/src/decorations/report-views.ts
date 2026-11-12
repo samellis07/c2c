@@ -94,7 +94,12 @@ function applyReportViews(model: UiModel, app: App): void {
       const form = source.form ? app.forms.find((item) => item.name === source.form) : undefined;
       const prior = new Map(report.columns.map((column) => [column.field, column]));
       const actions = new Map(report.customActions.map((action) => [action.name, action]));
-      const merged = quickFields.map((field) => {
+      // A declared column the model dropped (a name the form does not store,
+      // such as a geo stamp) stays dropped: listing it again in the quick view
+      // would draw a column whose cell is always blank.
+      const declared = new Set(source.columns.map((column) => column.field));
+      const kept = quickFields.filter((field) => prior.has(field.field) || actions.has(field.field) || !declared.has(field.field));
+      const merged = kept.map((field) => {
         const existing = prior.get(field.field);
         // The quickview alias wins unless it only repeats the link name; then
         // the decorated column label; then the field's display name; never the
