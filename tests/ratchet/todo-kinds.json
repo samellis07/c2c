@@ -7,7 +7,6 @@
     "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.": 1,
     "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.": 1,
     "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.": 1,
-    "Fields \"New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.": 1,
     "Report \"Accounts\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.": 1,
     "Report \"Airports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.": 1,
     "Report \"Contacts\" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.": 1,
@@ -32,7 +31,6 @@
     "Report \"Vessels\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.": 1
   },
   "fixtures/redistributable/library-application-system": {
-    "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.": 1,
     "Report \"All_Book_Transactions\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.": 1,
     "Report \"All_Member_Infos\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.": 1,
     "Report \"All_Staff_Members\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.": 1,

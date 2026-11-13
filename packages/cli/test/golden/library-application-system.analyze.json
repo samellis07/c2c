@@ -538,14 +538,8 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 10,
+    "todo": 9,
     "todoLocations": [
-      {
-        "location": "field privacy flags",
-        "construct": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
-        "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the data-privacy protection needed for Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
-      },
       {
         "location": "report Book_Report block options",
         "construct": "Report \"Book_Report\" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",
@@ -608,13 +602,6 @@
       "detail": "Field Staff_Members.Phone_Number property defaultcountry is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "ui",
-      "label": "field privacy flags",
-      "detail": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
-      "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the data-privacy protection needed for Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     },
     {
       "kind": "ui",
@@ -681,13 +668,9 @@
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 10,
+    "todoCount": 9,
     "fillLockEntries": 0,
     "todoKinds": [
-      {
-        "construct": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
-        "count": 1
-      },
       {
         "construct": "Report \"All_Book_Transactions\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
         "count": 1
@@ -725,7 +708,7 @@
         "count": 1
       }
     ],
-    "uiTodoCount": 10,
+    "uiTodoCount": 9,
     "silentDrops": 1,
     "silentDropKinds": [
       {
