@@ -41,6 +41,33 @@ export interface WriteRuleColumn {
   required?: boolean;
   /** Multi select or checkboxes: text holding a JSON list, written through multiValueCell. */
   multiValue?: boolean;
+  /**
+   * Creator `alloweddays` on a date or datetime column: the weekdays (0 =
+   * Sunday ... 6 = Saturday) a value may fall on. Every write through the
+   * runtime refuses another day as `weekday-not-allowed`, whichever path
+   * (request handler, script, record assignment) carries it.
+   */
+  allowedDays?: readonly number[];
+}
+
+/**
+ * Creator `alloweddays` text as a weekday list, or undefined when it puts no
+ * restriction (every weekday) or is malformed (a duplicate or out-of-range
+ * day). A malformed list is never enforced; the caller keeps it a manual step.
+ */
+export function parseAllowedDays(text: string | undefined): number[] | undefined {
+  if (text === undefined) return undefined;
+  const parts = text.split(',').map((day) => day.trim());
+  if (!parts.every((day) => /^[0-6]$/.test(day))) return undefined;
+  const days = parts.map(Number);
+  if (new Set(days).size !== days.length || days.length === 7) return undefined;
+  return days;
+}
+
+/** The calendar weekday (0 = Sunday) of a yyyy-MM-dd day, independent of any time zone. */
+export function weekdayOf(ymd: string): number {
+  const [year, month, day] = ymd.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(year!, month! - 1, day!)).getUTCDay();
 }
 
 export interface WriteRefusal {
@@ -223,12 +250,14 @@ export function checkCell(column: WriteRuleColumn, value: unknown): { value: unk
     // day; only midnight is folded, so a time of day is never dropped silently.
     const serial = /^(\d{4}-\d{2}-\d{2})T00:00:00$/.exec(value.trim());
     const next = normalizeDate(serial ? serial[1]! : value);
-    return next.ok ? { value: next.value } : { rule: 'date-format' };
+    if (!next.ok) return { rule: 'date-format' };
+    return allowedDay(column, next.value) ? { value: next.value } : { rule: 'weekday-not-allowed' };
   }
   if (column.dataType === 'DateTime') {
     if (typeof value !== 'string') return { rule: 'date-format' };
     const next = normalizeDateTime(value);
-    return next.ok ? { value: next.value } : { rule: 'date-format' };
+    if (!next.ok) return { rule: 'date-format' };
+    return allowedDay(column, next.value) ? { value: next.value } : { rule: 'weekday-not-allowed' };
   }
   const max = textMax(column);
   if (max !== undefined && typeof value === 'string' && value.length > max) return { rule: 'text-length' };
@@ -241,6 +270,10 @@ export function checkCell(column: WriteRuleColumn, value: unknown): { value: unk
     if (digits === null || digits > DOUBLE_SIGNIFICANT_DIGITS) return { rule: 'significant-digits' };
   }
   return { value };
+}
+
+function allowedDay(column: WriteRuleColumn, normalized: string): boolean {
+  return !column.allowedDays?.length || column.allowedDays.includes(weekdayOf(normalized));
 }
 
 /** The value is absent for a required check: nothing, an empty string, or an empty list. */

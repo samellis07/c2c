@@ -27,6 +27,7 @@ import { flowHistoryTable, generateSchema, isMultiChoiceField, subformTablesOf, 
 import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
 import { LIMITS, jobPoolName } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
+import { parseAllowedDays } from '../../shims/src/write-rules.js';
 import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerKey, isStageFieldProperty, phaseFieldKind, transitionOwnerProperties, type BlueprintFieldSpec } from './blueprint-rules.js';
 import { analyzeConnections, connectionsChecklist, declaredConnections, walk } from './connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, linkedGridForm, writeLiveSource, type FieldStoreShape } from './field-store.js';
@@ -4958,7 +4959,7 @@ export function writeRulesOf(app: App, schema?: SchemaPlan): Record<string, Inte
     const out: Record<string, IntegrityColumn[]> = {};
     for (const table of plan.tables) {
       if (table.nosql || table.role === 'junction') continue;
-      out[table.role === 'form' ? table.form : table.name] = integrityColumns(table);
+      out[table.role === 'form' ? table.form : table.name] = withAllowedDays(integrityColumns(table), tableFields(app, table));
     }
     return out;
   };
@@ -4968,6 +4969,42 @@ export function writeRulesOf(app: App, schema?: SchemaPlan): Record<string, Inte
   const out = from(schemaOf(app));
   writeRulesCache.set(app, out);
   return out;
+}
+
+/** The Creator fields a schema table stores: a form's own, or an inline subform's row fields. */
+function tableFields(app: App, table: SchemaPlan['tables'][number]): readonly Field[] {
+  if (table.role === 'form') return app.forms.find((form) => form.name === table.form)?.fields ?? [];
+  if (table.role === 'child' && table.subform) {
+    const parent = app.forms.find((form) => form.name === table.subform!.form);
+    return parent?.fields.find((field) => field.name === table.subform!.field)?.subfields ?? [];
+  }
+  return [];
+}
+
+/** Creator `alloweddays` on a date or datetime field, as the weekday list the write rules enforce. */
+export function fieldAllowedDays(field: Field): number[] | undefined {
+  const row = fieldTypeRow(field.type)?.id;
+  if (row !== 'date' && row !== 'date-time') return undefined;
+  const found = field.properties.find((property) => property.key.toLowerCase() === 'alloweddays');
+  return found ? parseAllowedDays(unquote(found.value)) : undefined;
+}
+
+/**
+ * Carry each restricted date column's allowed weekdays on its write rule, so
+ * the runtime's one shared write check refuses another weekday on every path
+ * that writes through it: the generated submit and update handlers, script
+ * `insert into` / record assignment / update, and the subform child tables.
+ * The data loader builds its own rules from the schema and copies source rows
+ * as they are.
+ */
+function withAllowedDays(columns: IntegrityColumn[], fields: readonly Field[]): IntegrityColumn[] {
+  if (!fields.length) return columns;
+  const byName = new Map(fields.map((field) => [field.name, field]));
+  return columns.map((column) => {
+    const field = byName.get(column.name);
+    const days = field ? fieldAllowedDays(field) : undefined;
+    return days ? { ...column, allowedDays: days } : column;
+  });
 }
 
 /** `, writeRules: {…}` for a generated createRuntime call, or nothing. */
@@ -6163,6 +6200,8 @@ function writeField(field: Field, app?: App): WriteField {
   }
   const scalar = writeScalar(row?.id);
   if (scalar) node.scalar = scalar;
+  const allowedDays = fieldAllowedDays(field);
+  if (allowedDays) node.allowedDays = allowedDays;
   const choices = closedChoices(field);
   if (choices) node.choices = choices;
   const initial = isMultiChoiceField(field) ? multiValueDefault(field.initialValue) : staticDefault(field.initialValue);

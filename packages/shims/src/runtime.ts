@@ -3147,8 +3147,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           }
         }
         const reads = counterReads.get(meta);
+        // The shared write check runs at the assignment, before the value is
+        // queued, so a record assignment is refused like insert and update.
+        const stringified = stringifyValues({ [field]: storedTop });
+        const checked = checkedWrite(fetched.form, stringified, false);
+        const stored = Object.prototype.hasOwnProperty.call(checked, field) ? checked : stringified;
         setPath(meta.values, path, value);
-        const stored = stringifyValues({ [field]: storedTop });
         queueField(fetched.form, id, field, stored[field], reads?.get(field));
         return value;
       },
