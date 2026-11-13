@@ -159,10 +159,13 @@ enforced by [`packages/shims/src/access.ts`](../packages/shims/src/access.ts):
   endpoint and paints `This page is not available.` on 401/403
   (`client-runtime.js` hidden-target probe; see
   [Client behavior](#client-behavior-on-401403)).
-- **PII/ePHI flags**: `PIIAccess: false` / `ePHIAccess: false` on a profile
+- **PII/ePHI flags**: `PIIAccess: false` / `ePHIAccess: false` on a **profile**
   are **not enforced** — personal-data fields are not hidden by them
   (`securityFidelity`, same file). Unmodelled module flags (Tab, export,
-  import, comment, report-builder) are listed, not enforced.
+  import, comment, report-builder) are listed, not enforced. This is a
+  different, profile-level property from the per-**field** `private` /
+  `personal data` / `encrypt` / `encryptdata` flags, which *are* enforced —
+  see [field-privacy.md](field-privacy.md).
 
 ### Blueprint owners
 
