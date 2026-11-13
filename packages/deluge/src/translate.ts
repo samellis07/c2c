@@ -4642,7 +4642,7 @@ function loopListUpdate(
   // reading one of the lists can observe the list's mid-loop value, so the
   // whole loop remains a counted manual step.
   const updatedNames = new Set(listUpdates.map((u) => u.name));
-  if (updatedNames.size > 1 && tests.some((t) => [...updatedNames].some((n) => t.reads.includes(n) || t.unboundReads.includes(n)))) return null;
+  if (updatedNames.size > 1 && tests.some((t) => [...updatedNames].sort().some((n) => t.reads.includes(n) || t.unboundReads.includes(n)))) return null;
   // A local counter rides along only with a list the loop builds; a loop that
   // only counts locally stays on the client.
   if (updates.some((u) => u.local) && !listUpdates.length) return null;
