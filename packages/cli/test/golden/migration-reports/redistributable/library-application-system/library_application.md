@@ -25,9 +25,8 @@ App: Library_System_Application
 
 ## TODO counts
 
-10
+9
 
-- 1 Fields "Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.
 - 1 Report "All_Book_Transactions" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
 - 1 Report "All_Member_Infos" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
 - 1 Report "All_Staff_Members" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
@@ -54,8 +53,6 @@ App: Library_System_Application
 
 ## Residual TODO steps
 
-- `field privacy flags` — Fields "Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.
-  - Step: In the Catalyst console, apply the data-privacy protection needed for Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `report Book_Report block options` — Report "Book_Report" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.
   - Step: In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46.
 - `report Book_by_Genre block options` — Report "Book_by_Genre" has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.

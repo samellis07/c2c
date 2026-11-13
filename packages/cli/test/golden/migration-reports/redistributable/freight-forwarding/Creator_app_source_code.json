@@ -58,7 +58,7 @@
       "shimmed": 497
     }
   },
-  "todoCount": 28,
+  "todoCount": 27,
   "todoKinds": [
     {
       "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
@@ -78,10 +78,6 @@
     },
     {
       "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "count": 1
-    },
-    {
-      "construct": "Fields \"New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
       "count": 1
     },
     {
@@ -962,11 +958,6 @@
   ],
   "hiddenParts": [],
   "todoSteps": [
-    {
-      "location": "field privacy flags",
-      "construct": "Fields \"New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
-      "step": "In the Catalyst console, apply the data-privacy protection needed for New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
-    },
     {
       "location": "field New_SOF.Time property timedisplayoptions",
       "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",

@@ -58,12 +58,8 @@
       "shimmed": 60
     }
   },
-  "todoCount": 10,
+  "todoCount": 9,
   "todoKinds": [
-    {
-      "construct": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
-      "count": 1
-    },
     {
       "construct": "Report \"All_Book_Transactions\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
       "count": 1
@@ -240,11 +236,6 @@
     }
   ],
   "todoSteps": [
-    {
-      "location": "field privacy flags",
-      "construct": "Fields \"Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true)\" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.",
-      "step": "In the Catalyst console, apply the data-privacy protection needed for Staff_Members.Staff_Name (personal data = true), Staff_Members.Staff_Email (personal data = true), Staff_Members.Phone_Number (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
-    },
     {
       "location": "report Book_Report block options",
       "construct": "Report \"Book_Report\" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.",

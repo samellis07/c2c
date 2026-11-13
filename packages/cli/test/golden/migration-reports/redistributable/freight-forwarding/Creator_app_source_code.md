@@ -24,14 +24,13 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-28
+27
 
 - 1 Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
 - 1 Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
 - 1 Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
 - 1 Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
 - 1 Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-- 1 Fields "New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.
 - 1 Report "Accounts" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
 - 1 Report "Airports" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
 - 1 Report "Contacts" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.
@@ -80,8 +79,6 @@ App: Freight Forwarding and Feeder Solution
 
 ## Residual TODO steps
 
-- `field privacy flags` — Fields "New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true)" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.
-  - Step: In the Catalyst console, apply the data-privacy protection needed for New_Account.Email (personal data = true), New_Account.Phone_Number (personal data = true), New_User.Email (personal data = true), New_Contact.Contact_Name (personal data = true), New_Contact.Mobile (personal data = true), New_Contact.Assistant_Phone (personal data = true), New_Contact.Email (personal data = true), New_Contact.Phone_Number (personal data = true), New_Vendor.Phone_Number (personal data = true), New_Vendor.Email (personal data = true), New_Lead.Phone_Number (personal data = true), New_Lead.Name (personal data = true), New_Lead.Email (personal data = true), New_Lead.Mobile (personal data = true) by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `field New_SOF.Time property timedisplayoptions` — Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
   - Step: Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated.
 - `field New_SOF.FROM property timedisplayoptions` — Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
