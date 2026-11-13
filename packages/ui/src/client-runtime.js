@@ -1701,7 +1701,7 @@ export function reportRouteFilters(query, ctx) {
 function elementClickLink(el, appModel, doc) {
   const link = routeHref(el && el.href, appModel);
   if (!link) return '';
-      const query = typeof el.parameters === 'string' && el.parameters ? reportParamsQuery(el.parameters, includeInputFor(el) || snippetPageInput(doc)) : '';
+      const query = typeof el.parameters === 'string' && el.parameters ? reportParamsQuery(el.parameters, snippetPageInput(doc)) : '';
   return query ? `${link}?${query}` : link;
 }
 

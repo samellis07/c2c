@@ -492,7 +492,13 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
     const raw = part.slice(eq + 1);
     if (!/^[A-Za-z_]\w*$/.test(key)) return null;
     const matches = target.filter((name) => name.toLowerCase() === key.toLowerCase());
-    if (matches.length === 0 && /^zc_\w+$/i.test(key)) continue;
+    if (matches.length === 0 && /^zc_\w+$/i.test(key)) {
+      // Undeclared display flags are harmless only when their value is a
+      // bounded literal. An island or other expression must keep the embed
+      // counted so it is not silently dropped.
+      if (!LITERAL_PARAM.test(raw)) return null;
+      continue;
+    }
     if (matches.length !== 1) return null;
     const name = matches[0];
     if (INCLUDE_RESERVED.has(key.toLowerCase())) return null;
