@@ -2569,7 +2569,10 @@ export function emittedReadOnly(code: string, isReadOnly: (path: readonly string
   for (const m of code.matchAll(SHIM_CALL)) {
     const fn = m[2];
     if (m[1] === 'thisapp' && fn === 'call') continue;
-    if (m[1] === 'set' && fn === undefined) continue;
+    if (m[1] === 'set' && fn === undefined) {
+      if (!setsFreshLocal(code, m.index! + m[0].length)) return false;
+      continue;
+    }
     if (fn === undefined) {
       if (!ELEMENT_SHIM_ALLOW_SINGLE.has(m[1]!)) return false;
       continue;
@@ -2578,6 +2581,25 @@ export function emittedReadOnly(code: string, isReadOnly: (path: readonly string
     if (allow !== true && !allow?.has(fn)) return false;
   }
   return true;
+}
+
+/**
+ * The `shim.set(` whose arguments start at `at` writes into a collection the
+ * body itself created: its receiver is a plain local declared once as a fresh
+ * map or list literal and never rebound. Anything else (a loop variable over a
+ * fetched record's rows, a parameter, a rebound or nested value) may be a
+ * stored row, and setting its field is a write in the source app.
+ */
+function setsFreshLocal(code: string, at: number): boolean {
+  const recv = /^\s*([A-Za-z_$][\w$]*)\s*,/.exec(code.slice(at))?.[1];
+  if (!recv) return false;
+  // Source echo comments (`// Deluge: m = Map()`) are not bindings.
+  code = code.replace(/^\s*\/\/.*$/gm, '');
+  const esc = recv.replace(/\$/g, '\\$');
+  const decls = code.match(new RegExp(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`, 'g')) ?? [];
+  const fresh = code.match(new RegExp(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*[\\[{]`, 'g')) ?? [];
+  const binds = code.match(new RegExp(`(?:^|[^\\w$.])${esc}\\s*=(?!=)`, 'g')) ?? [];
+  return decls.length === 1 && fresh.length === 1 && binds.length === 1;
 }
 
 const CLIENT_CALL_SHIM_ALLOW: ReadonlyMap<string, ReadonlySet<string> | true> = (() => {
