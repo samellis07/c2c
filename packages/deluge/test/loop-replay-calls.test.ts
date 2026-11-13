@@ -53,7 +53,7 @@ row.Subject_field:ui.add(all_subject_list);`, {});
   assert.match(r.prefetch, /async \(all_subject_list, row_count\) =>|async \(row_count, all_subject_list\) =>/);
 });
 
-test('a loop value that reads another carried local stays a counted todo', () => {
+test('a loop value that reads another carried local replays in one run seeded before the loop', () => {
   const r = translate(`n = 0;
 s = "";
 ids = List();
@@ -63,13 +63,38 @@ for each rec in Item[ID != 0]
   s = s + n;
   ids.add(rec.ID);
 }
-input.A:ui.add(ids);
-input.B = s;
-if(s != "")
+input.A:ui.add(ids);`, {});
+  assert.deepEqual(r.todos, []);
+  assert.equal(r.prefetch.match(/await \(async \(/g)?.length, 1);
+  assert.match(r.prefetch, /var n = 0;\nvar s = "";\nvar ids = \[\];\nvar (\$loop\d+) = await \(async \(n, s, ids\) => \{[\s\S]*\}\)\(n, s, shim\.list\.duplicate\(ids\)\);\nvar ids = \1\[2\];/);
+});
+
+test('several lists and carried locals share one loop run, so no sibling is seeded after the loop', () => {
+  const r = translate(`plainstr = "";
+count_var = 1;
+session_rec = Session[Timing == input.T];
+a = List();
+b = List();
+for each ses_rec in session_rec
 {
-  alert s;
-}`, {});
-  assert.ok(r.todos.some((t) => t.construct === 'client-condition-uses-server'));
+  count_var = count_var + 1;
+  if(ses_rec.Monday != null)
+  {
+    a = thisapp.appendSubject(a,ses_rec.Monday.Subject_Name);
+    plainstr = plainstr + "x" + count_var;
+  }
+  else
+  {
+    a.add(ses_rec.Start_Time);
+  }
+  b.add(ses_rec.Start_Time);
+}
+input.Monday:ui.append(a);
+input.Tuesday:ui.append(b);`, { replayFunctions: ['appendSubject:0'] });
+  assert.deepEqual(r.todos, []);
+  assert.equal(r.prefetch.match(/await \(async \(/g)?.length, 1);
+  const run = /var (\$loop\d+) = await/.exec(r.prefetch)![1]!;
+  assert.match(r.prefetch, new RegExp(`var a = \\${run}\\[\\d\\];[\\s\\S]*var b = \\${run}\\[\\d\\];`));
 });
 
 // The replay set is an authorization boundary: a function in it runs in the
