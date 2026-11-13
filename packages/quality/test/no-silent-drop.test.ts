@@ -3198,7 +3198,7 @@ test('a bidirectional lookup still eligible through a linked grid side keeps the
   assert.equal(out.model.todos.some((t) => t.name === 'Site.Owner property bidirectional'), false);
 });
 
-test('alloweddays is emitted only for every weekday on a generated date widget', () => {
+test('alloweddays is emitted for every well-formed weekday set on a generated date widget', () => {
   const days = (value: string, type = 'date'): string => `
 	form Visit
 	{
@@ -3215,15 +3215,22 @@ test('alloweddays is emitted only for every weekday on a generated date widget',
   const datetime = dsApp(days('0,1,2,3,4,5,6', 'datetime'));
   assert.equal(rowStatus(datetime, collectOutputs(datetime), 'Visit.Day property alloweddays'), 'emitted');
 
-  for (const value of ['1,2,3,4,5', '0', '6', '0,1,2,3,4,5,5']) {
-    const restricted = dsApp(days(value));
+  // A restricted set is enforced by the client and the write schema alike.
+  for (const [value, type] of [['1,2,3,4,5', 'date'], ['0', 'date'], ['6', 'datetime']] as const) {
+    const restricted = dsApp(days(value, type));
     const restrictedOut = collectOutputs(restricted);
-    assert.equal(rowStatus(restricted, restrictedOut, 'Visit.Day property alloweddays'), 'counted', value);
-    assert.deepEqual(restrictedOut.model.forms[0]!.fields[0]!.allowedDays, value === '0,1,2,3,4,5,5' ? undefined : value.split(',').map(Number));
-    const todo = restrictedOut.model.todos.find((t) => t.area === 'field' && t.name === 'Visit.Day property alloweddays');
-    assert.ok(todo, `expected a manual todo for alloweddays = ${value}`);
-    assert.match(todo!.manualStep ?? '', /validation/);
+    assert.equal(rowStatus(restricted, restrictedOut, 'Visit.Day property alloweddays'), 'emitted', value);
+    assert.deepEqual(restrictedOut.model.forms[0]!.fields[0]!.allowedDays, value.split(',').map(Number));
+    assert.equal(restrictedOut.model.todos.some((t) => t.name === 'Visit.Day property alloweddays'), false, value);
   }
+
+  // A malformed or duplicate set is not carried and stays a counted manual step.
+  const duplicate = dsApp(days('0,1,2,3,4,5,5'));
+  const duplicateOut = collectOutputs(duplicate);
+  assert.equal(rowStatus(duplicate, duplicateOut, 'Visit.Day property alloweddays'), 'counted');
+  assert.equal(duplicateOut.model.forms[0]!.fields[0]!.allowedDays, undefined);
+  const todo = duplicateOut.model.todos.find((t) => t.area === 'field' && t.name === 'Visit.Day property alloweddays');
+  assert.match(todo?.manualStep ?? '', /validation/);
 
   // Mutation test: removing the generated restriction restores the counted TODO.
   const restricted = dsApp(days('1,2,3,4,5'));

@@ -2923,6 +2923,9 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
     }
     const choices = closed.get(`${prefix}${field.name}`);
     if (choices) node.choices = choices;
+    // Creator `alloweddays`: the server refuses a date on another weekday,
+    // the same check the generated client runs.
+    if ((field.widget === 'date' || field.widget === 'datetime') && field.allowedDays?.length) node.allowedDays = field.allowedDays;
     if (field.othersOption) {
       // The server screens the posted Others text like the client's free-text
       // box: plain string, never the marker value, capped at the field's
