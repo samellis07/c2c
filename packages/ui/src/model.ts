@@ -2673,7 +2673,14 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   // Related/lookup paths (for example `Author.Name`) are accepted by the
   // Creator parser but otherwise disappear from the generated query.
   const isPlainColumn = (field: string): boolean => Boolean(formField(form, field) || RECORD_COLUMNS.has(field));
-  const sortField = report.sortBy.find((item) => item.field !== 'ROWID' && item.field !== 'ID' && !isPlainColumn(item.field))?.field;
+  // A sort through a single lookup to a plain column of its parent
+  // (`Raised_By.Select_Privilege`) is generated when every sort entry can be
+  // applied: the list read resolves the parent value under the caller's read
+  // scope and orders in memory, bounded (see relatedSortKeys).
+  const relatedSort = relatedSortKeys(app, report.form, report.sortBy);
+  const sortField = relatedSort
+    ? undefined
+    : report.sortBy.find((item) => item.field !== 'ROWID' && item.field !== 'ID' && !isPlainColumn(item.field))?.field;
   if (sortField && sortField !== 'ROWID' && sortField !== 'ID' && !isPlainColumn(sortField)) {
     todos.push({
       area: 'report',
@@ -2837,6 +2844,66 @@ function reportBlockSettings(block: PropertyBlock): string {
     parts.push(display ? `${nested.name} ${display.value.trim()}` : `${nested.name} block`);
   }
   return parts.join(', ') || '(no properties)';
+}
+
+/**
+ * A report sort on `<Lookup>.<Field>` the generated list read can apply: the
+ * lookup is a single lookup field of the report form, and the leaf is a plain
+ * stored column of the lookup's parent form (not a lookup, composite part,
+ * subform or file). Anything else stays a counted manual step.
+ */
+export function relatedSortPath(
+  app: App,
+  formName: string | undefined,
+  sort: { field: string; order?: string } | undefined,
+): { key: string; head: string; form: string; field: string; rest: string; dir: 'asc' | 'desc' } | undefined {
+  if (!formName || !sort || !/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/.test(sort.field)) return undefined;
+  const [head, leaf] = sort.field.split('.') as [string, string];
+  const form = app.forms.find((item) => item.name === formName);
+  const lookup = formField(form, head);
+  // A single lookup only (the widget rule in buildField): a multi lookup
+  // holds a list, which has no one parent value to order by.
+  const token = normalizeType(lookup?.type);
+  if (!lookup?.lookup?.form || !['picklist', 'dropdown', 'radiobuttons', 'radio', 'lookup', ''].includes(token)) return undefined;
+  const parent = app.forms.find((item) => item.name === lookup.lookup!.form);
+  const target = formField(parent, leaf);
+  if (!parent || !target || target.lookup || fieldTypeRow(target.type)?.kind !== 'column') return undefined;
+  const dir = String(sort.order ?? '').toLowerCase().startsWith('desc') ? 'desc' : 'asc';
+  return { key: sort.field, head, form: parent.name, field: leaf, rest: leaf, dir };
+}
+
+/**
+ * The sort keys of a report whose sort runs through a lookup: every entry is
+ * either a plain column of the report form (or ROWID/ID/a record column) or a
+ * {@link relatedSortPath}, and at least one is related. Undefined otherwise,
+ * so an entry the read cannot apply stays a counted manual step.
+ */
+export function relatedSortKeys(
+  app: App,
+  formName: string | undefined,
+  sortBy: readonly { field: string; order?: string }[],
+): Array<{ field: string; dir: 'asc' | 'desc'; key?: string; head?: string; form?: string; rest?: string }> | undefined {
+  if (!formName || !sortBy.some((item) => item.field.includes('.'))) return undefined;
+  const form = app.forms.find((item) => item.name === formName);
+  const keys: Array<{ field: string; dir: 'asc' | 'desc'; key?: string; head?: string; form?: string; rest?: string }> = [];
+  for (const item of sortBy) {
+    const dir = String(item.order ?? '').toLowerCase().startsWith('desc') ? 'desc' : 'asc';
+    if (item.field === 'ROWID' || item.field === 'ID' || RECORD_COLUMNS.has(item.field)) {
+      keys.push({ field: item.field, dir });
+      continue;
+    }
+    const plain = formField(form, item.field);
+    if (plain) {
+      if (plain.lookup || fieldTypeRow(plain.type)?.kind !== 'column') return undefined;
+      keys.push({ field: item.field, dir });
+      continue;
+    }
+    const path = relatedSortPath(app, formName, item);
+    if (!path) return undefined;
+    const { dir: _dir, ...rest } = path;
+    keys.push({ ...rest, dir });
+  }
+  return keys;
 }
 
 function formField(form: Form | undefined, fieldName: string): Field | undefined {
