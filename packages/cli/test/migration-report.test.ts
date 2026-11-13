@@ -54,30 +54,31 @@ test('committed fixtures carry the deterministic flag', () => {
   const lib = report.apps.find((app) => app.app === 'library-application-system');
   assert.ok(ff && lib);
   assert.equal(ff.deterministic, false);
-  assert.equal(ff.todoCount, 28);
+  assert.equal(ff.todoCount, 27);
   assert.equal(ff.fillLockEntries, 0);
-  assert.equal(ff.uiTodoCount, 28);
+  assert.equal(ff.uiTodoCount, 27);
   assert.equal(
     ff.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    28,
+    27,
   );
-  // Both apps now carry personal-data field flags as one counted manual-step UI
-  // todo per app instead of silent drops, so lib has todos too (it did not before).
-  // lib also carries manual steps for a button's click `parameters`, a search
-  // box's `criteria`, and a KPI tile's drill-down `parameters` the generated
-  // page element does not carry.
+  // Neither app's privacy-flagged fields are nested, so the field-privacy
+  // manual-step todo no longer appears for either app (freight-forwarding's
+  // 14 fields, library-application-system's 3). lib still carries manual
+  // steps for a button's click `parameters`, a search box's `criteria`, and
+  // a KPI tile's drill-down `parameters` the generated page element does not
+  // carry.
   assert.equal(lib.deterministic, false);
-  assert.equal(lib.todoCount, 10);
-  assert.equal(lib.uiTodoCount, 10);
+  assert.equal(lib.todoCount, 9);
+  assert.equal(lib.uiTodoCount, 9);
   assert.equal(
     lib.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    10,
+    9,
   );
   assert.equal(lib.silentDrops, 1);
   assert.equal(ff.silentDrops, 0);
   assert.equal(report.aggregate.deterministicApps, 0);
   assert.equal(report.aggregate.silentDrops, 1);
-  assert.equal(report.aggregate.todoTotal, 38);
+  assert.equal(report.aggregate.todoTotal, 36);
   // Neither app has zero todos anymore.
   assert.equal(report.aggregate.noTodoApps, 0);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
