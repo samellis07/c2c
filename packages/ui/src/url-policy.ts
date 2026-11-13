@@ -130,8 +130,8 @@ export function isSameAppNavTarget(url: string): boolean {
  * undefined for anything else (no scheme, a different scheme, or a scheme
  * written with the wrong number of slashes). Userinfo (`user:pass@host`) is
  * part of the authority, not the host: this takes the text AFTER the last
- * `@`, so `https://allowed.example@evil.example` is judged on
- * `evil.example`, never on the attacker-chosen prefix before it.
+ * `@`, so `https://allowed.example.com@evil.example.com` is judged on
+ * `evil.example.com`, never on the attacker-chosen prefix before it.
  */
 function httpsHost(url: string): string | undefined {
   const m = /^https:\/\/([^/?#\\]+)/i.exec(String(url ?? ''));

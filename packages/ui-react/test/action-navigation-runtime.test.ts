@@ -45,7 +45,7 @@ const VECTORS: Array<[string, string, boolean]> = [
   ['protocol-relative open redirect to an allowlisted-looking host', '//allowed.example/x', false],
   ['plain http to an allowlisted host', 'http://allowed.example/doc', false],
   ['https host not on the allowlist', 'https://evil.example/x', false],
-  ['https userinfo trick: attacker host after an allowed-looking userinfo', 'https://allowed.example@evil.example/x', false],
+  ['https userinfo trick: attacker host after an allowed-looking userinfo', 'https://allowed.example.com@evil.example.com/x', false],
   ['relative path carrying an embedded backslash', '/\\evil.example', false],
 ];
 
