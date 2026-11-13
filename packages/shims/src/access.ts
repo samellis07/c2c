@@ -7,7 +7,7 @@
  */
 
 import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from './criteria.js';
-import { WriteRuleError, normalizeDate, normalizeDateTime } from './write-rules.js';
+import { WriteRuleError, normalizeDate, normalizeDateTime, weekdayOf } from './write-rules.js';
 
 export class RecordAccessError extends Error {
   readonly code = 'RECORD_ACCESS_DENIED';
@@ -973,10 +973,7 @@ function screenLeaf(form: string, dotted: string, field: DepthField, value: unkn
  * computes it.
  */
 function screenWeekday(form: string, field: DepthField, ymd: string, value: unknown): unknown {
-  if (!field.allowedDays?.length) return value;
-  const [year, month, day] = ymd.split('-').map(Number);
-  const weekday = new Date(Date.UTC(year!, month! - 1, day!)).getUTCDay();
-  if (field.allowedDays.includes(weekday)) return value;
+  if (!field.allowedDays?.length || field.allowedDays.includes(weekdayOf(ymd))) return value;
   throw new WriteRuleError(form, [{ column: field.name, rule: 'weekday-not-allowed' }]);
 }
 
