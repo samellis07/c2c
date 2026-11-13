@@ -412,11 +412,11 @@ test('a <style> sheet wrapped in HTML comments carries like a browser parses it'
   assert.deepEqual(mixed.dropped, ['background declaration']);
 });
 
-test('legacy *prop and _prop hack declarations carry with a checked value, but dangerous bases stay refused', () => {
+test('legacy *prop and _prop IE-only hack declarations are refused and counted', () => {
   const result = carryStaticStyle('.a{*zoom:1;_height:50%;color:red}', '[data-page="a"]');
-  assert.equal(result.droppedRules, 0);
-  assert.equal(result.css, '[data-page="a"] .a{*zoom:1;_height:50%;color:red}');
-  for (const css of ['.a{*behavior:url(x.htc)}', '.a{_width:expression(alert(1))}', '.a{*background:url(//x.test/a)}']) {
+  assert.equal(result.droppedRules, 2);
+  assert.equal(result.css, '[data-page="a"] .a{color:red}');
+  for (const css of ['.a{*behavior:url(x.htc)}', '.a{_width:expression(alert(1))}', '.a{*background:url(//x.test/a)}', '.a{color:red\\9}']) {
     const res = carryStaticStyle(css, '[data-page="a"]');
     assert.equal(res.css, '', `expected empty css for: ${css}`);
     assert.equal(res.droppedRules, 1, `expected 1 dropped declaration for: ${css}`);
