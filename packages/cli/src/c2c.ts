@@ -314,7 +314,7 @@ function unknownCommand(cmd: string): number {
       'Start with the customer journey:\n' +
       '  c2c doctor (check your setup)\n' +
       '  c2c analyze <file.ds> (is your app convertible?)\n' +
-      '  c2c plan <file.ds> --out <dir> (the full blueprint)\n' +
+      '  c2c plan <file.ds> --dc <dc> --out <dir> (the full blueprint)\n' +
       '  c2c migrate-data (move the records)\n' +
       '  c2c verify (prove it matches)\n' +
       'See docs/guide/ for the walkthrough (c2c --help lists every command).\n',
@@ -724,6 +724,10 @@ function main(argv: string[]): number {
     return i >= 0 ? (rest[i + 1] ?? '') : undefined;
   };
   if (cmd === 'analyze') {
+    if (!target.toLowerCase().endsWith('.ds')) {
+      process.stderr.write(`c2c: ${target} is not a Creator .ds application export (no application block)\nnext step: re-export the app from Creator (Settings -> Export) and confirm the file is non-empty\n`);
+      return 2;
+    }
     const { ir, locked } = loadIrOrLocked(target);
     if (locked) return CLI_EXIT.lockedExport;
     if (!ir) return CLI_EXIT.inputMissing;
