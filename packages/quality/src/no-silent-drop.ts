@@ -107,6 +107,7 @@ import { reportCriteria, type TodoItem } from '../../deluge/src/translate.js';
 import { criteriaHasTodo } from '../../shims/src/criteria.js';
 import { adapterFor } from '../../shims/src/zoho-adapters.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
+import { parseAllowedDays } from '../../shims/src/write-rules.js';
 import { generateSchema, schemaIdent, type SchemaColumn, type SchemaPlan } from '../../schema/src/generator.js';
 import { normalizeType } from '../../schema/src/mapping.js';
 import { buildModel, labelWidthOption, recordsPerRowOption, reportPageSizeOption, reportRadiusOption, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
@@ -917,8 +918,8 @@ function allowedDaysProved(text: string, ui: UiField | undefined): boolean {
   if (ui?.widget !== 'date' && ui?.widget !== 'datetime') return false;
   const days = new Set(text.split(',').map((day) => day.trim()));
   if (days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day))) return true;
-  const listed = text.split(',').map((day) => Number(day.trim()));
-  return !!ui.allowedDays?.length && listed.length === ui.allowedDays.length && listed.every((day, index) => ui.allowedDays![index] === day);
+  const listed = parseAllowedDays(text);
+  return !!listed && !!ui.allowedDays?.length && listed.length === ui.allowedDays.length && listed.every((day, index) => ui.allowedDays![index] === day);
 }
 
 /**
