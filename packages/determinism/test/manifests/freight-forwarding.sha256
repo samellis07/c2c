@@ -399,13 +399,14 @@ b19cacb5a97f5ffb3cb2ecda04fef5eff5cf7a4a702a51cc1762777037eda31a  web/lib/c2c-ui
 81b097e17201d7cafbd8b2076a30553eff91c23a9d5abba08762eb592f98b9b5  web/lib/c2c-ui/pages/sanitize.ts
 b00ff3ee6235892882a44a4c9dfc3711a7364dcf2342255e46c9f456d74cc1a1  web/lib/c2c-ui/pwa/sw.template.js
 130e11327e498dca8c7a19990711c0060ffeb11bf768bc96b19e188448d3540d  web/lib/c2c-ui/report/MapView.tsx
-a3b81995db1d6d84e598fbfef1b6d65b2b8c8175e4bed528cbb85a2f72f80e6d  web/lib/c2c-ui/report/ReportView.tsx
+c4c7cae37fbafa2259375cad0ead51238d3778913e1a23a8de28a21d2eec745c  web/lib/c2c-ui/report/ReportView.tsx
 11e3a0cce260ddeb5a600f8259cb9aebe1a23bd5cddaaf9dbabd555dbf9b65ab  web/lib/c2c-ui/report/criteria.ts
 963b9f101aa5074a619e5e9e71f7ba78e0927c7cb69de390d82bf79468bac14f  web/lib/c2c-ui/runtime/StatusScreens.tsx
 82fc1dd46fc3885ace13397ebd6c50d4803bc348321e5074c32a07650a01dcdc  web/lib/c2c-ui/runtime/api.ts
 da26fd59d213cb8951453c927b5f246b4e6daab536d7ce70916e4b99755b1982  web/lib/c2c-ui/runtime/auth.tsx
 4c68aeab426496a055991f5a31184bb61b63c458a3b068a92cb081aa7c2ae729  web/lib/c2c-ui/runtime/env.tsx
 e92711b4d35987a7896db0c94c7606221e89b1098b0f22a3cf2656fb418293f7  web/lib/c2c-ui/runtime/extend.tsx
+23b247b9b4cb2fa705a6f5fbfa202642212fdfec1ba206f69536263634357108  web/lib/c2c-ui/runtime/navigation.ts
 c473c3e8dfa3850b3cb0500107f3264ce7e6546e9c8a01cd1807bba9c936dbf7  web/lib/c2c-ui/runtime/observers.ts
 2981347142fff9cc1aa556e533b92a18e061f8d5a26d5e3b36c64d9d09ca81a4  web/lib/c2c-ui/runtime/router.ts
 716f5ad206ab0a899423dcc2aa1388f182aaa5212b4a2037379b1e770cd91998  web/lib/c2c-ui/shell/AppShell.tsx
@@ -418,7 +419,7 @@ c473c3e8dfa3850b3cb0500107f3264ce7e6546e9c8a01cd1807bba9c936dbf7  web/lib/c2c-ui
 ab0cb258abd32326b78cee471b42673c55b7bc530e86b75257d4ea86accb8d1c  web/lib/c2c-ui/subform/SubformGrid.tsx
 f8e44da62a5fc08f7ece3214a492f1d6520fd11c11f052a188331ad0fd6afdeb  web/lib/c2c-ui/subform/rows.ts
 3f110b83535075d85835b1bc0fd9229c83f5e37a4ff47a10fd12ead279e6acf3  web/lib/c2c-ui/subform/subform.css
-361b6c414c2c53439cc71468e375b5c44d813e7dfea46339db1bf8a8ac05bf60  web/lib/c2c-ui/types.ts
+913248c7eae5d8081bee1513790d6464626fab862572a52a03699e7618dc6487  web/lib/c2c-ui/types.ts
 1cfbfe42d97cd0b848c4a0bc4d4b14bd479327f58fda3c375a8b60596ab84498  web/lib/c2c-ui/vite/plugin.ts
 8f75f481d2dc6e9dae4d51d8a9f3e7a0e53913661616fd744840bf9d0240330f  web/lib/c2c-ui/workflow/ApprovalsInbox.tsx
 d0eb613b0771884197332c502fe766a6369059bbf594320250819a1921ec2935  web/lib/c2c-ui/workflow/DecisionDialog.tsx
