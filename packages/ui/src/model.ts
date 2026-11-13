@@ -11,7 +11,7 @@ import type { App, Field, Form, FunctionDef, Page, Property, PropertyBlock, Repo
 import { hasOthersOption, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
-import { blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
+import { actionNavigationLifted, blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
 import { parse as parseDeluge, parseExpression } from '../../deluge/src/parser.js';
 import { conditionalFormatCriteria, reportCriteria } from '../../deluge/src/translate.js';
@@ -794,8 +794,10 @@ function containsOpenUrl(body: readonly Stmt[]): boolean {
  * Best-effort: does this dispatchable custom action's workflow (or the one
  * function it delegates to, the same single hop actionNavigation follows)
  * contain an openUrl call that actionNavigation could not turn into a static
- * link? A dropped navigation is otherwise invisible — the action still runs
- * and reports success, it just never takes the user anywhere.
+ * link, AND that the generator does not instead return as a navigate
+ * instruction (`actionNavigationLifted`, see docs/report-action-navigation.md)?
+ * A navigation this check still calls dropped is otherwise invisible — the
+ * action runs and reports success, but never takes the user anywhere.
  */
 function actionDropsOpenUrl(app: App, workflow: string | undefined): boolean {
   const wanted = (workflow ?? '').trim();
@@ -807,13 +809,14 @@ function actionDropsOpenUrl(app: App, workflow: string | undefined): boolean {
   } catch {
     return false;
   }
-  if (containsOpenUrl(body)) return true;
+  if (containsOpenUrl(body)) return !actionNavigationLifted(app, fn);
   if (body.length !== 1 || body[0]?.kind !== 'expr' || body[0].expr.kind !== 'call') return false;
   const calleeName = calleeFunctionName(body[0].expr.callee);
   const calleeFn = calleeName ? app.functions.find((item) => item.name.toLowerCase() === calleeName.toLowerCase()) : undefined;
   if (!calleeFn) return false;
   try {
-    return containsOpenUrl(parseDeluge(calleeFn.deluge.map((part) => part.text).join('\n')).body);
+    if (!containsOpenUrl(parseDeluge(calleeFn.deluge.map((part) => part.text).join('\n')).body)) return false;
+    return !actionNavigationLifted(app, fn);
   } catch {
     return false;
   }

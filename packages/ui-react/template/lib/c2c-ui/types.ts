@@ -331,6 +331,16 @@ export interface AppSpec {
   dateFormat?: string;
   /** The app `time format` setting ("24-hr" / "12-hr"); date-time cells use its clock. */
   timeFormat?: string;
+  /**
+   * The https hosts a report custom action's returned navigate instruction
+   * may target when it is not this app's own route (see
+   * docs/report-action-navigation.md and runtime/navigation.ts's `navOk`).
+   * Absent or empty means no such host is ever allowed — currently always
+   * the case, since the generator does not yet have a source for this list
+   * it can trust (a value built from the .ds's own literal URLs would have
+   * to trust the very openUrl call it is meant to vet).
+   */
+  navigationAllowlist?: string[];
   /** The phone `customize { layout }` arrangement: `sliding-pane` swaps the tab bar for a drawer; `tab-bar` keeps it. */
   phoneLayout?: DeviceLayout;
   /** The tablet `customize { layout }` arrangement. */

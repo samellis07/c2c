@@ -8416,8 +8416,17 @@ test('an if/else of own-app openUrl on a form-typed param is client navigation, 
   const driverMod = g.files.find((f) => f.path === 'functions/custom/customaction-driverassignments.mjs');
   assert.ok(rejectMod);
   assert.ok(driverMod);
-  assert.match(rejectMod.source, /Client action openUrl: executed in client navigation/);
-  assert.match(driverMod.source, /Client action openUrl: executed in client navigation/);
+  // The whole body is an if/elif/else of openUrl to an own-app form route:
+  // classifyClientOpenUrl resolves every branch, so the dropped navigation
+  // is lifted into a returned navigate instruction (docs/report-action-navigation.md)
+  // instead of the plain "Client action openUrl" marker comment this used
+  // to stop at — a dispatcher that forwards the function's return value
+  // (e.g. a report custom action's "for each record" wrapper) now carries
+  // the navigation through; a caller that never dispatches this function at
+  // all (a pure static client link, decided independently of what this
+  // module contains) is unaffected either way.
+  assert.match(rejectMod.source, /return \{ \["kind"\]: "navigate", \["url"\]: .*Add_Remarks.*, \["target"\]: "new" \};/);
+  assert.match(driverMod.source, /return \{ \["kind"\]: "navigate", \["url"\]: .*Assign_Driver.*, \["target"\]: "new" \};/);
   assert.equal(g.todos.some((t) => t.construct === 'function-untranslated'), false);
   assert.equal(g.todos.some((t) => t.construct === 'openurl-unsupported-target'), false);
 });
