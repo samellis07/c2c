@@ -1888,7 +1888,7 @@ export function includeInputFor(node) {
  */
 function includeInput(params, outer) {
   const input = Object.create(null);
-  for (const param of params) {
+  for (const param of params) { // determinism-allow: params is the validated array from parseIncludeSpec; declaration order is the include contract
     const value = 'from' in param ? (Object.prototype.hasOwnProperty.call(outer, param.from) ? outer[param.from] : undefined) : param.value;
     if (typeof value === 'string') input[param.key] = value;
   }
