@@ -5533,7 +5533,7 @@ function buildAccessPolicy(app: App): AccessPolicy {
   const policy: AccessPolicy = { profiles, roles: roleNames(app.roles) };
   const hidden = hiddenComponentNames(app);
   if (hidden.length) policy.hidden = hidden;
-  const admins = [...adminProfiles];
+  const admins = [...adminProfiles].sort(compareEnUs);
   if (admins.length) policy.admins = admins;
   return policy;
 }
