@@ -201,7 +201,7 @@
       "id": "dev-write-rate",
       "status": "pass",
       "detail": "no source row counts — the dev-api-calls budget carries the missing-source warning; the stated Development write rate is ~100 writes/min/table (datastore.write_requests_per_minute, unverified)",
-      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; run c2c probe P-RATE before a large load"
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; measure a representative load before a large migration"
     }
   ],
   "budgetsOk": true,
