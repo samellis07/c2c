@@ -139,15 +139,78 @@ test('a template naming no layout on the form is a model todo, not a crash', () 
   assert.equal(ghostTodos[0]?.manualStep, undefined);
 });
 
-test('a resolved print template is flagged as a manual step: the default web app does not draw it', () => {
+test('a resolved print template with only drawn element kinds gets no manual-step todo', () => {
+  // Both generated web apps draw columns/text/field/lookup (docs/print-templates.md):
+  // a template built entirely from those kinds needs no manual recreation.
   const model = modelOf(FORM, REPORT);
-  const todo = model.todos.find((item) => item.area === 'report' && item.name === 'All_Contacts' && item.manualStep);
-  assert.ok(todo, JSON.stringify(model.todos));
-  assert.match(todo.reason, /does not draw a print layout/);
-  assert.match(todo.manualStep ?? '', /--ui vanilla/);
+  const manual = model.todos.filter((item) => item.area === 'report' && item.name === 'All_Contacts' && item.manualStep);
+  assert.deepEqual(manual, [], JSON.stringify(manual));
   // A report with no print template gets no such note.
   const plainTodos = model.todos.filter((item) => item.name === 'Plain_List');
   assert.equal(plainTodos.length, 0);
+});
+
+test('a print template element kind no target draws is a counted manual step naming the feature', () => {
+  const withChart = FORM.replace(
+    '"mainLayout":[',
+    '"mainLayout":[{"elements":[{"type":"chart","element":{}}]},',
+  );
+  assert.notEqual(withChart, FORM);
+  const model = modelOf(withChart, REPORT);
+  const template = model.reports.find((item) => item.name === 'All_Contacts')?.printTemplate;
+  assert.ok(template);
+  assert.equal(template.elements[0]?.type, 'todo');
+  assert.match(template.elements[0]?.note ?? '', /"chart" is not generated/);
+  const todo = model.todos.find((item) => item.area === 'report' && item.name === 'All_Contacts' && /chart/.test(item.reason));
+  assert.ok(todo, JSON.stringify(model.todos));
+  assert.match(todo.reason, /uses a chart element; the generated print layout does not draw it/);
+  assert.match(todo.manualStep ?? '', /^Recreate the chart element by hand in the "Card" print layout on report All_Contacts — this is not generated\.$/);
+});
+
+test('a `header`/`footer` block parses into the template, drawn once above and below the body', () => {
+  const withHeader = FORM.replace(
+    TEMPLATE_CONTENT,
+    JSON.stringify({
+      version: '2',
+      templateStyle: 'text-align: left; width: 100%; margin: 0 auto',
+      themeFont: 'lato',
+      isHeaderEnabled: true,
+      isFooterEnabled: true,
+      header: { elements: [{ type: 'text', element: { content: '<h1>${Name} invoice</h1>' } }] },
+      footer: { elements: [{ type: 'text', element: { content: '<p>Thank you</p>' } }] },
+      mainLayout: [
+        {
+          id: 1,
+          elements: [{ type: 'text', element: { id: 'e1', content: '<div><p>${Name}</p></div>' } }],
+        },
+      ],
+    }),
+  );
+  assert.notEqual(withHeader, FORM);
+  const model = modelOf(withHeader, REPORT);
+  const template = model.reports.find((item) => item.name === 'All_Contacts')?.printTemplate;
+  assert.ok(template, JSON.stringify(model.todos));
+  assert.equal(template.header?.[0]?.type, 'text');
+  assert.match(template.header?.[0]?.html ?? '', /\$\{Name\} invoice/);
+  assert.equal(template.footer?.[0]?.type, 'text');
+  assert.match(template.footer?.[0]?.html ?? '', /Thank you/);
+});
+
+test('`isHeaderEnabled: false` keeps a stored header out of the resolved template', () => {
+  const disabled = FORM.replace(
+    TEMPLATE_CONTENT,
+    JSON.stringify({
+      version: '2',
+      isHeaderEnabled: false,
+      header: { elements: [{ type: 'text', element: { content: '<h1>Hidden</h1>' } }] },
+      mainLayout: [{ id: 1, elements: [{ type: 'text', element: { content: '<p>Body</p>' } }] }],
+    }),
+  );
+  assert.notEqual(disabled, FORM);
+  const model = modelOf(disabled, REPORT);
+  const template = model.reports.find((item) => item.name === 'All_Contacts')?.printTemplate;
+  assert.ok(template);
+  assert.equal(template.header, undefined);
 });
 
 interface PrintRuntime {
