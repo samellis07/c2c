@@ -100,6 +100,16 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
   const uiTodos = (files: readonly GeneratedFile[]) => buildModel(app, files).todos;
   const deluge = generateDeluge(app, { schema: opts.schema, uiTodos, ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}) });
   const model = buildModel(app, deluge.files);
+  const schema = generateSchema(app);
+  const projectionByForm = new Map(
+    schema.tables.map((table) => [table.name, projectionNames(table.columns.map((column) => column.name))]),
+  );
+  // A related sort the model accepted but the generated read cannot apply
+  // (staged read, unresolvable parent column) is counted, never dropped.
+  for (const report of model.reports) {
+    const plan = relatedSortPlan(app, report, projectionByForm.get(report.form ?? '') ?? ['ROWID']);
+    if (plan && 'unapplied' in plan) model.todos.push(unappliedSortTodo(report, plan.unapplied));
+  }
   const summary = summarize(model);
   const files: OutFile[] = [];
 
@@ -143,11 +153,7 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     files.push({ path: 'functions/c2c-files.mjs', data: filesModule() });
   }
   files.push({ path: 'functions/lookups/lookup.mjs', data: lookupStub(app) });
-  const schema = generateSchema(app);
   files.push({ path: 'functions/admin/smoke.mjs', data: smokeStub(app, model, schema) });
-  const projectionByForm = new Map(
-    schema.tables.map((table) => [table.name, projectionNames(table.columns.map((column) => column.name))]),
-  );
   for (const report of model.reports) {
     files.push({
       path: `functions/reports/${slug(report.name)}.mjs`,
@@ -2029,6 +2035,54 @@ function aggregateRows(rows, spec) {
 }
 `;
 
+type RelatedSortKeys = NonNullable<ReturnType<typeof relatedSortKeys>>;
+
+/**
+ * Whether the generated list read applies a report's sort through a lookup
+ * (model.ts relatedSortKeys). Applied only when every related entry reads a
+ * stored parent column through a projected lookup column and the report is
+ * served by the single-query read: the staged read (a report over the
+ * one-SELECT column cap) keeps ROWID order, so a related sort there is
+ * `unapplied` and buildUi counts it as a manual step. Undefined when the
+ * report has no related sort the model accepted.
+ */
+export function relatedSortPlan(
+  app: App,
+  report: UiModel['reports'][number],
+  projection: readonly string[],
+): { keys: RelatedSortKeys } | { unapplied: 'staged' | 'unreadable' } | undefined {
+  const formName = report.form;
+  const keys = relatedSortKeys(app, formName, report.sort);
+  if (!formName || !keys) return undefined;
+  const parentColumns = storedColumnsOfParents(app, lookupParentsOf(app, formName), schemaOf(app));
+  const readable = keys.every(
+    (key) => !key.head || (projection.includes(key.head) && (Object.hasOwn(parentColumns, key.form!) ? parentColumns[key.form!]! : []).includes(key.field)),
+  );
+  if (!readable) return { unapplied: 'unreadable' };
+  let staged: boolean;
+  try {
+    staged = stagedReportQueries(app, report) !== null;
+  } catch (err) {
+    if (!(err instanceof ZcqlLimitError)) throw err;
+    staged = true;
+  }
+  return staged ? { unapplied: 'staged' } : { keys };
+}
+
+/** The counted manual step for a related sort the generated read does not apply. */
+function unappliedSortTodo(report: UiModel['reports'][number], why: 'staged' | 'unreadable'): UiModel['todos'][number] {
+  const sortText = report.sort.map((item) => item.field).join(', ');
+  return {
+    area: 'report',
+    name: report.name,
+    reason:
+      why === 'staged'
+        ? `Sort by "${sortText}" runs through a lookup and is not applied: report ${report.name} reads through staged queries (too many columns for one query), which keep default (ROWID) order.`
+        : `Sort by "${sortText}" runs through a lookup whose parent column the report read cannot resolve, so rows render in default (ROWID) order.`,
+    manualStep: `On report ${report.name}, replace the related-field sort "${sortText}" with a plain ${report.form || 'form'} column, or add an equivalent server query and client ordering before cutover; then verify the first and last rows against Creator.`,
+  };
+}
+
 function reportStub(app: App, report: UiModel['reports'][number], projection: readonly string[]): string {
   const formName = report.form ?? '';
   const ident = formName && /^[A-Za-z_][A-Za-z0-9_]*$/.test(formName) ? formName : '';
@@ -2123,17 +2177,8 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   // orders by every sort entry in memory, the related ones resolved from the
   // parent under the caller's scope. Emitted only when every related entry
   // reads a stored parent column through a projected lookup column.
-  const relatedKeys = relatedSortKeys(app, formName, report.sort);
-  const sortKeys =
-    relatedKeys &&
-    relatedKeys.every(
-      (key) =>
-        !key.head ||
-        (projection.includes(key.head) &&
-          (Object.prototype.hasOwnProperty.call(parentColumns, key.form!) ? parentColumns[key.form!]! : []).includes(key.field)),
-    )
-      ? relatedKeys
-      : undefined;
+  const relatedPlan = relatedSortPlan(app, report, projection);
+  const sortKeys = relatedPlan && 'keys' in relatedPlan ? relatedPlan.keys : undefined;
   const sortPathConst = sortKeys ? `const sortKeys = ${JSON.stringify(sortKeys)};\n${relatedSortHelper}` : '';
   const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\nconst navPaths = ${JSON.stringify(navPaths)};\n${sortPathConst}`;
   const attachRows = subformLinks.length ? `\n      if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried);` : '';
@@ -2164,6 +2209,8 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
             pageSize,
           )
         : null;
+      // Past the row cap the page keeps ROWID order; the reply says so.
+      const sortNotice = relatedSort && relatedSort.length && sortedRows === null ? \`related sort not applied: more than \${AGGREGATE_ROW_CAP} matching rows\` : null;
       `
     : '';
   const sortedPick = sortKeys ? 'sortedRows ?? (' : '';
@@ -2629,7 +2676,7 @@ ${wantsRelative ? '      if (relative) rows = rows.filter((row) => matchRow(row,
       send(res, 200, {
         dryRun: false,
         rows,
-        fields: scoped.fields ?? null,
+        fields: scoped.fields ?? null,${sortKeys ? '\n        ...(sortNotice ? { notice: sortNotice } : {}),' : ''}
         queryShape,
         criteria: ${criteriaRef},
         page,
