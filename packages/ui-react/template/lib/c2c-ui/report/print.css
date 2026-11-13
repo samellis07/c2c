@@ -1,0 +1,106 @@
+/*
+ * Record print sheet: an overlay on screen, the only page content on paper.
+ * See docs/print-templates.md. The `data-print-*` hooks match the vanilla
+ * target's (packages/ui/src/client/70-print.js), so an export's print
+ * template reads the same whichever target draws it.
+ */
+[data-print-sheet] {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: var(--background);
+  overflow: auto;
+  padding: var(--space-5);
+}
+[data-print-bar] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 48rem;
+  margin: 0 auto var(--space-4);
+}
+[data-print-hint] {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+[data-print-page] {
+  background: var(--surface);
+  color: var(--foreground);
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--space-6);
+  box-shadow: var(--shadow-raised);
+}
+[data-print-columns] {
+  display: flex;
+  gap: var(--space-4);
+}
+[data-print-col] {
+  flex: 1;
+  min-width: 0;
+}
+[data-print-field] {
+  display: flex;
+  gap: var(--space-3);
+  margin: var(--space-1) 0;
+  break-inside: avoid;
+}
+[data-print-label] {
+  flex: none;
+  min-width: 8rem;
+  color: var(--text-muted);
+}
+[data-print-lookup] {
+  margin: var(--space-2) 0;
+}
+[data-print-lookup-label] {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-2);
+}
+[data-print-lookup] table {
+  width: 100%;
+}
+[data-print-lookup] tr {
+  break-inside: avoid;
+}
+[data-print-image] {
+  display: block;
+  max-width: 100%;
+  margin: var(--space-2) auto;
+}
+[data-print-spacer] {
+  min-height: 1rem;
+}
+[data-print-header],
+[data-print-footer] {
+  break-inside: avoid;
+}
+
+@media print {
+  body > *:not([data-print-sheet]) {
+    display: none !important;
+  }
+  [data-print-sheet] {
+    position: static;
+    overflow: visible;
+    background: transparent;
+    padding: 0;
+  }
+  [data-print-bar] {
+    display: none;
+  }
+  [data-print-page] {
+    box-shadow: none;
+    max-width: none;
+    padding: 0;
+    background: transparent;
+  }
+  [data-print-columns],
+  [data-print-field],
+  [data-print-lookup] tr,
+  [data-print-header],
+  [data-print-footer] {
+    break-inside: avoid;
+  }
+}

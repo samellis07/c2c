@@ -37,6 +37,7 @@ import { performActionNav, type ActionNavInstruction } from '../runtime/navigati
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { matchCriteria } from './criteria';
 import { MapPlot } from './MapView';
+import { PrintSheet } from './PrintSheet';
 import { multiValueItems } from '../form/value';
 import { isSafeStyleProperty, isSafeStyleValue, STYLE_TEXT_MAX } from '../style-allowlist';
 import { displayDateValue, type DateKind } from '../form/dates';
@@ -703,6 +704,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
   const own = custom.reports?.[report.name];
   const [detail, setDetail] = useState<{ state: 'loading' } | { state: 'error'; status: number } | { state: 'ready'; record: Row }>({ state: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const [printing, setPrinting] = useState(false);
   const deny = useAccessDenied();
 
   useEffect(() => {
@@ -792,8 +794,18 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
               </a>
             </p>
           ) : null}
+          {report.printTemplate ? (
+            <p>
+              <Button type="button" variant="secondary" size="sm" data-print-record={rowId} onClick={() => setPrinting(true)}>
+                Print
+              </Button>
+            </p>
+          ) : null}
         </article>
       )}
+      {printing && report.printTemplate && detail.state === 'ready' ? (
+        <PrintSheet template={report.printTemplate} row={detail.record} onClose={() => setPrinting(false)} />
+      ) : null}
       <Slot>{own?.slots?.after}</Slot>
     </section>
   );
