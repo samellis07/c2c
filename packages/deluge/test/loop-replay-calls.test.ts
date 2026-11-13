@@ -156,3 +156,26 @@ test('attack: the call site must pass the loop list at the updated parameter', (
   assert.ok(r.todos.some((t) => t.construct === 'client-condition-uses-server'));
   assert.doesNotMatch(r.prefetch, /appendSubject/);
 });
+
+test('attack: element, alias, nested, clear, addAll and map-alias mutations of the list parameter are not replayable', () => {
+  const bodies = [
+    ['list f(list L)', 'L.get(0).put("k", "v");\nreturn L;'],
+    ['list f(list L)', 't = L.get(0);\nt.put("k", "v");\nreturn L;'],
+    ['list f(list L)', 'L.get(L.size() - 1).put("k", "v");\nreturn L;'],
+    ['list f(list L)', 'L.get(0).clear();\nreturn L;'],
+    ['list f(list L)', 'for each e in L\n{\n  e.clear();\n}\nreturn L;'],
+    ['list f(list L)', 'for each e in L\n{\n  e.put("k", "v");\n}\nreturn L;'],
+    ['list f(list L)', 'L.get(0).addAll({1});\nreturn L;'],
+    ['list f(list L)', 'M = L;\nM.add(1);\nreturn L;'],
+    ['list f(list L)', 'M = L;\nM.get(0).put("k", "v");\nreturn L;'],
+    ['map f(map M)', 'x = M.get("a");\nx.add(1);\nreturn M;'],
+    ['map f(map M)', 'N = M;\nN.put("k", 1);\nreturn M;'],
+    ['list f(list L)', 'L = Add_Staffs[ID == 1];\nL.add(1);\nreturn L;'],
+  ];
+  for (const [sig, body] of bodies) assert.equal(replaySet(sig!, body!).size, 0, `${sig} ${body}`);
+});
+
+test('a function that builds and updates a fresh local while updating its list parameter replays', () => {
+  assert.deepEqual([...replaySet('list f(list L)', 'T = List();\nT.add(1);\nL.addAll(T);\nreturn L;')], ['f:0']);
+  assert.deepEqual([...replaySet('map f(map M)', 'N = Map();\nN.put("a", 1);\nM.putAll(N);\nreturn M;')], ['f:0']);
+});

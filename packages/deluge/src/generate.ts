@@ -4083,7 +4083,7 @@ export function replayFunctionNames(app: App): ReadonlySet<string> {
   if (cached) return cached;
   const foldedCount = new Map<string, number>();
   for (const fn of app.functions) foldedCount.set(fn.name.toLowerCase(), (foldedCount.get(fn.name.toLowerCase()) ?? 0) + 1);
-  const bodies = new Map<string, { server: string; index: number }>();
+  const bodies = new Map<string, { server: string; index: number; param?: string }>();
   for (const fn of app.functions) {
     if (bodies.has(fn.name) || (foldedCount.get(fn.name.toLowerCase()) ?? 0) > 1) continue;
     let slot = 0;
@@ -4101,17 +4101,12 @@ export function replayFunctionNames(app: App): ReadonlySet<string> {
     const collections = params.map((p, i) => ({ p, i })).filter(({ p }) => /^(list|map)\b/i.test(p.type.trim()));
     if (collections.length > 1) continue;
     const coll = collections[0];
-    // A shallow duplicate shares element objects with the handler. Reject
-    // element mutations; only updates to the collection itself are replay-safe.
-    if (coll && new RegExp(`\\b(?:${coll.p.name})\\s*\\.\\s*get\\s*\\([^)]*\\)\\s*\\.\\s*(?:put|add|remove|removeElement)\\s*\\(`, 'i').test(scripts.join('\n'))) continue;
-    if (coll && new RegExp(`\\bfor\\s+each\\s+\\w+\\s+in\\s+${coll.p.name}\\b[\\s\\S]*?\\b\\w+\\s*\\.\\s*(?:put|add|remove|removeElement)\\s*\\(`, 'i').test(scripts.join('\n'))) continue;
-    if (/\.\s*get\s*\([^)]*\)\s*\.\s*put\s*\(/i.test(scripts.join('\n'))) continue;
     // Only the one list or map parameter may be updated; every other
     // parameter (and `input`) stays read-only.
     if (mutatesParameters(scripts, coll ? params.filter((_, i) => i !== coll.i) : params)) continue;
     const strict = !mutatesParameters(scripts, params);
     if (!strict && !coll) continue;
-    bodies.set(fn.name, { server, index: strict ? -1 : coll!.i });
+    bodies.set(fn.name, { server, index: strict ? -1 : coll!.i, param: strict ? undefined : coll!.p.name });
   }
   const names = new Map<string, number>();
   for (;;) {
@@ -4119,8 +4114,10 @@ export function replayFunctionNames(app: App): ReadonlySet<string> {
     // determinism-allow: fixed-point loop over Map/Set, rerun until `changed` stops, so the result is order-independent
     for (const [key, body] of bodies) {
       if (names.has(key)) continue;
-      // A nested call must reach a function that updates no parameter.
-      if (!emittedReadOnly(body.server, (path) => names.get(path.join('.')) === -1)) continue;
+      // A nested call must reach a function that updates no parameter. The
+      // one list or map parameter may be written only as a plain identifier,
+      // never through an element, alias, or loop row the handler also holds.
+      if (!emittedReadOnly(body.server, (path) => names.get(path.join('.')) === -1, body.param ? [body.param] : [])) continue;
       names.set(key, body.index);
       changed = true;
     }
