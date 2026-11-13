@@ -10,7 +10,8 @@ import { generateSchema } from '../../schema/src/generator.js';
 import { seedMigrateCli, type Io } from '../src/cli.js';
 import { bucketItem, importTemplate, importTemplateJson, projectTemplateJson } from '../src/iac.js';
 import { seedBucketName } from '../src/seed.js';
-import { bucketCreateBody, ensureSeedBucket } from '../src/stratus-bucket.js';
+import { bucketCreateBody, ensureSeedBucket, resolveAppBucket } from '../src/stratus-bucket.js';
+import { bucketName } from '../src/offline-plan.js';
 import type { RestCall, RestFn } from '../src/tables.js';
 
 const ORG = '10000000000';
@@ -300,6 +301,39 @@ test('the seed upload uses the bucket the import actually created, not the plann
   const uploads = cap.fetched.filter((call) => call.url.includes('zohostratus'));
   assert.ok(uploads.length >= 1);
   assert.ok(uploads.every((call) => call.url.startsWith(`https://${actual}-development.zohostratus.in/`)), uploads.map((call) => call.url).join(','));
+});
+
+/** A bucket list helper that only ever answers the project's bucket list. */
+function listOnly(names: string[]): RestFn {
+  return async ({ method, path }) => {
+    if (method === 'GET' && path.endsWith('/bucket')) return { status: 200, body: { data: names.map((bucket_name) => ({ bucket_name })) } };
+    return { status: 404, body: {} };
+  };
+}
+
+test('resolveAppBucket: the planned candidate resolves on its own', async () => {
+  const resolved = await resolveAppBucket(listOnly([BUCKET]), PROJECT, BUCKET);
+  assert.deepEqual(resolved, { outcome: 'resolved', name: BUCKET });
+});
+
+test('resolveAppBucket: a learned candidate resolves even when its shape does not match the planned prefix', async () => {
+  const learnedName = 'stratus-widget-renamed-by-console';
+  const resolved = await resolveAppBucket(listOnly([learnedName]), PROJECT, BUCKET, learnedName);
+  assert.deepEqual(resolved, { outcome: 'resolved', name: learnedName });
+  // Without the learned candidate the same list is unresolvable.
+  assert.equal((await resolveAppBucket(listOnly([learnedName]), PROJECT, BUCKET)).outcome, 'refused');
+});
+
+test('resolveAppBucket: a derived app/projectName candidate resolves even when its shape does not match the planned bucket', async () => {
+  // An unrelated literal `planned` (no hex tail) so its shape only matches
+  // itself exactly — the derived name below can only resolve as an exact
+  // candidate, never by shape.
+  const unrelatedPlanned = 'custom-planned-bucket';
+  const derived = bucketName('Widget', 'c2c-widget');
+  const resolved = await resolveAppBucket(listOnly([derived]), PROJECT, unrelatedPlanned, undefined, 'Widget', 'c2c-widget');
+  assert.deepEqual(resolved, { outcome: 'resolved', name: derived });
+  // Without app/projectName the derived name is just another unmatched bucket.
+  assert.equal((await resolveAppBucket(listOnly([derived]), PROJECT, unrelatedPlanned)).outcome, 'refused');
 });
 
 test('two buckets of this app refuse the seed load before any write', async (t) => {

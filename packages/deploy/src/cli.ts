@@ -1079,7 +1079,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       // read the project's real bucket back before any write, and persist it.
       if (confirm && filesApp && provisionedBucket) {
         const bucketRest: RestFn = io.rest ?? ((call: RestCall) => catalystRestCall(io.env, guard.org, guard.projectId, call, { log: (line) => io.stderr(`${line}\n`) }));
-        const resolved = await resolveAppBucket(bucketRest, guard.projectId, provisionedBucket);
+        const resolved = await resolveAppBucket(bucketRest, guard.projectId, provisionedBucket, undefined, appLink, guard.projectName);
         if (resolved.outcome === 'refused') throw new Error(resolved.message);
         if (resolved.name !== provisionedBucket) {
           io.stdout(`bucket: the project's bucket is ${resolved.name} (planned ${provisionedBucket})\n`);
@@ -1976,7 +1976,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
     if (seedBucket) {
       // The project's real bucket wins over the planned name; several
       // candidates refuse before the first row write.
-      const resolved = await resolveAppBucket(restFn, guard.projectId, seedBucket);
+      const resolved = await resolveAppBucket(restFn, guard.projectId, seedBucket, undefined, appLink, guard.projectName);
       if (resolved.outcome === 'resolved') seedBucket = resolved.name;
       else if (!/\(found: none\)/.test(resolved.message)) {
         io.stderr(`c2c: ${resolved.message}\n`);
