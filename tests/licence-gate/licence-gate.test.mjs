@@ -11,7 +11,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { licenseAllowed, SHIPPED_LICENSES } from '../../scripts/licenses/allowed-licenses.mjs';
+import { licenseAllowed, licenseOf, SHIPPED_LICENSES } from '../../scripts/licenses/allowed-licenses.mjs';
 import { auditLockfile, declaredFunctionDependencies } from '../../tools/licence-gate.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -348,6 +348,54 @@ test('transitive deps and nested lockfile paths are walked; dev entries are not'
 test('the committed function-runtime mirror still matches FUNCTION_DEPENDENCIES', () => {
   const declared = declaredFunctionDependencies(root);
   assert.ok(declared && Object.keys(declared).length > 0);
+});
+
+test('declaredFunctionDependencies merges HTMLPAGE_DEPENDENCIES from a bare (unquoted) key, not a second hand-maintained list', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'c2c-licence-functiondir-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(path.join(dir, 'packages/deploy/src'), { recursive: true });
+  writeFileSync(
+    path.join(dir, 'packages/deploy/src/function-dir.ts'),
+    [
+      "export const FUNCTION_DEPENDENCIES: Readonly<Record<string, string>> = { 'zcatalyst-sdk-node': '3.4.0' };",
+      "export const HTMLPAGE_DEPENDENCIES: Readonly<Record<string, string>> = { ...FUNCTION_DEPENDENCIES, 'fake-html-dep': '9.9.9' };",
+      '',
+    ].join('\n'),
+  );
+  assert.deepEqual(declaredFunctionDependencies(dir), { 'zcatalyst-sdk-node': '3.4.0', 'fake-html-dep': '9.9.9' });
+});
+
+test('an htmlpage-only dependency with a disallowed licence fails the audit; parse5 and its transitive entities dep pass today', (t) => {
+  // Fake dependency + fake licence lookup (no network): proves the gate would
+  // catch a disallowed licence shipped only through HTMLPAGE_DEPENDENCIES.
+  const bad = fixtureTree(t, {
+    deps: { 'fake-html-dep': '1.0.0' },
+    lockEntries: lockEntry('fake-html-dep', 'GPL-3.0-only'),
+  });
+  const { problems } = auditLockfile({ root: bad, dir: '.', label: 'fixture' });
+  assert.ok(problems.some((p) => /fake-html-dep@1\.0\.0.*GPL-3\.0-only.*not on the project allowlist/.test(p)), problems.join('\n'));
+
+  // Real licences of the actual htmlpage extras (from installed node_modules/package.json),
+  // read via the project's own licence lookup, not hand-typed: both are allowed today.
+  const parse5License = licenseOf(JSON.parse(readFileSync(path.join(root, 'node_modules/parse5/package.json'), 'utf8')));
+  const entitiesLicense = licenseOf(JSON.parse(readFileSync(path.join(root, 'node_modules/entities/package.json'), 'utf8')));
+  assert.equal(licenseAllowed(parse5License), true, `parse5 licence ${parse5License} must be on the allowlist`);
+  assert.equal(licenseAllowed(entitiesLicense), true, `entities licence ${entitiesLicense} must be on the allowlist`);
+});
+
+test('the function-runtime mirror package.json includes every HTMLPAGE_DEPENDENCIES entry, not just FUNCTION_DEPENDENCIES', () => {
+  const declared = declaredFunctionDependencies(root);
+  const mirrored = JSON.parse(readFileSync(path.join(root, 'scripts/licenses/function-runtime/package.json'), 'utf8')).dependencies;
+  assert.deepEqual(mirrored, declared);
+  assert.ok('parse5' in mirrored, 'parse5 (an HTMLPAGE_DEPENDENCIES-only package) must be in the mirrored manifest');
+});
+
+test('the function-runtime audit tree covers parse5 and its transitive entities dependency', () => {
+  const { packages, problems } = auditLockfile({ root, dir: 'scripts/licenses/function-runtime', label: 'generated function runtime' });
+  assert.deepEqual(problems, []);
+  const names = packages.map((p) => p.name);
+  assert.ok(names.includes('parse5'), names.join(', '));
+  assert.ok(names.includes('entities'), names.join(', '));
 });
 
 test('no second literal copy of the project licence list outside the shared module', () => {
