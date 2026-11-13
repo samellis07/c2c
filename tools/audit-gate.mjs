@@ -3,18 +3,24 @@
 // advisories at severity high or critical, subtract entries in
 // tools/audit-allowlist.txt, and fail if anything remains.
 //
-// Usage: node tools/audit-gate.mjs [dir ...]
-// Default dirs: the repository root and packages/ui-react/template.
+// Usage: node tools/audit-gate.mjs [dir-or-lockfile ...]
+// Default targets: the repository root, packages/ui-react/template, and the
+// two lockfiles that ship inside every generated Catalyst function. A
+// lockfile target has no package.json beside it (npm would walk up to the
+// root), so it is copied alone into a temp dir and audited there.
 // Exit 1 with a listing when an unallowlisted high/critical advisory exists.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dirs = process.argv.slice(2);
-const targets = dirs.length ? dirs : [".", "packages/ui-react/template"];
+const targets = dirs.length
+  ? dirs
+  : [".", "packages/ui-react/template", "packages/deploy/fn/package-lock.json", "packages/deploy/fn/package-lock-htmlpage.json"];
 
 function loadAllowlist(path) {
   const today = new Date().toISOString().slice(0, 10);
@@ -34,16 +40,28 @@ function loadAllowlist(path) {
 
 const allowlist = loadAllowlist(join(root, "tools/audit-allowlist.txt"));
 
+function runAudit(dir, cwd, args) {
+  try {
+    return execFileSync("npm", ["audit", "--json", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    if (e.stdout) return e.stdout;
+    console.error(`audit-gate: npm audit failed in ${dir}: ${e.message}`);
+    process.exit(2);
+  }
+}
+
 function audit(dir) {
   let out;
-  try {
-    out = execFileSync("npm", ["audit", "--json"], { cwd: join(root, dir), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  } catch (e) {
-    if (e.stdout) out = e.stdout;
-    else {
-      console.error(`audit-gate: npm audit failed in ${dir}: ${e.message}`);
-      process.exit(2);
+  if (dir.endsWith(".json")) {
+    const tmp = mkdtempSync(join(tmpdir(), "c2c-audit-"));
+    try {
+      copyFileSync(join(root, dir), join(tmp, "package-lock.json"));
+      out = runAudit(dir, tmp, ["--package-lock-only"]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
     }
+  } else {
+    out = runAudit(dir, join(root, dir), []);
   }
   let report;
   try {

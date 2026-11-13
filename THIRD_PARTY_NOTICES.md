@@ -14,14 +14,28 @@ generates. Test fixtures and their licences are listed in `NOTICE`.
 
 Declared in the root `package.json` and `package-lock.json`. These run
 on the user's machine at conversion time; none ships inside generated
-Catalyst functions (which carry only `zcatalyst-sdk-node` plus vendored
-shims — see `packages/deploy/src/function-dir.ts`).
+Catalyst functions (see the next section for what those carry).
 
 | package | licence | shipped in generated functions |
 |---|---|---|
 | lossless-json@4.3.3 | MIT | no (CLI-side exact-JSON parsing only) |
 | typescript@5.9.3 | Apache-2.0 | no (CLI build tool) |
 | jsdom@^24.1.3 | MIT | no (CLI-side HTML parsing) |
+
+## npm packages of the generated Catalyst functions
+
+Pinned exactly in `FUNCTION_DEPENDENCIES` / `HTMLPAGE_DEPENDENCIES`
+(`packages/deploy/src/function-dir.ts`) and locked by
+`packages/deploy/fn/package-lock.json` (every function) and
+`packages/deploy/fn/package-lock-htmlpage.json` (functions that serve
+htmlpages). `tools/audit-gate.mjs` audits both lockfiles.
+
+| package | licence | shipped in |
+|---|---|---|
+| zcatalyst-sdk-node@3.4.0 | MIT | every function |
+| agent-base@7.1.4, https-proxy-agent@7.0.6, debug@4.4.3, ms@2.1.3 | MIT | every function (SDK dependencies) |
+| parse5@7.3.0 | MIT | htmlpage functions |
+| entities@6.0.1 | BSD-2-Clause | htmlpage functions (parse5 dependency) |
 
 ## npm packages of the generated React app
 
