@@ -1274,7 +1274,7 @@ function resumeIo(failOn: string | undefined) {
     },
     rest: async (call) => {
       if (call.method === 'GET' && call.path === '/baas/v1/project/1001') return { status: 200, body: { data: { id: '1001', project_name: 'c2c-sample-app', org_id: FIXTURE_ORG } } };
-      if (call.method === 'GET') return { status: 200, body: { data: [] } };
+      if (call.method === 'GET') return { status: 200, body: { status: 'success', data: [], total_size: 0 } };
       return { status: 200, body: { data: { table_id: '1', table_name: 'x' } } };
     },
   };

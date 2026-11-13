@@ -31,7 +31,7 @@ import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeploy
 import { asyncLaneBlocker } from './events.js';
 import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, readMailSenderEvidence } from './mail.js';
 import { humanChecklist } from './human-steps.js';
-import { applyFunctionEnvSecrets, deployFunctionEnv, functionIdFromList, readConnectionSecretKeys } from './function-env.js';
+import { applyFunctionEnvSecrets, deployFunctionEnv, functionIdFromList, liveEnvDroppedByDeploy, readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
 import { applyFunctionConnectSrc, functionOriginFromApiBase, SHELL_CONTENT_SECURITY_POLICY } from '../../ui/src/csp.js';
 import { appTimeZone, authBridgeUrl, generateUi, slateConfigSource } from '../../ui/src/generate.js';
@@ -1222,6 +1222,18 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     state.pendingGates = pendingGates.map((gate) => gate.id);
     writeState(cwd, state);
     const gatePending = (id: string): boolean => pendingGates.some((gate) => gate.id === id);
+    // `catalyst deploy` replaces the function's whole environment with
+    // catalyst-config.json env_variables. A live variable the --function-env
+    // file does not name (or any variable under `new`) would be erased without
+    // a word, so the deploy stops before the functions step and names them.
+    if (bundle.commands.some((command) => command.id === 'functions') && !state.done.includes('functions')) {
+      const dropped = await liveEnvDroppedByDeploy(restFn, guard.projectId, deployedEnvKeys, retry);
+      if (dropped.length) {
+        io.stderr(`c2c: ${API_FUNCTION} already has environment variable(s) the deploy would erase: ${dropped.join(', ')}\n`);
+        io.stderr(`next step: add them to the --function-env file (the ${API_FUNCTION} console environment as a JSON object), then re-run deploy --confirm --resume --out ${cwd}; the function was not deployed\n`);
+        return 1;
+      }
+    }
     // When the CLI output has no "App Url:" the Slate API is the URL source:
     // the app list and its deployment report the served domain. The result is
     // persisted so a resumed run and the CORS step can use it.
