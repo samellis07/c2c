@@ -8355,6 +8355,93 @@ test('a function that reads a value then conditionally navigates is a counted ma
   assert.match(todo!.manualStep ?? '', /Voting_Page/);
 });
 
+test('a guard-read function whose branch assigns a local then navigates to an own-app page is lifted into a returned navigate instruction', () => {
+  // The actual Approval_Management gallery app shape (the fixture above has
+  // no Voting_Page, so it is judged unsupported for an unrelated reason —
+  // this is the same branch shape with the target page declared, proving
+  // the lift itself: `bareOpenUrl` used to require a branch body of exactly
+  // one statement, so `url = "..."; openUrl(url, ...);` inside an if-branch
+  // was never recognized as liftable even though classifyOpenUrlStmt (the
+  // same check a bare trailing openUrl goes through) already judges this
+  // target safe.
+  const vote: FunctionDef = {
+    name: 'Vote.vote',
+    kind: 'creator',
+    signature: 'void Vote.vote(int record_id)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'user_count = Employees[Email_Id == zoho.loginuserid].count();',
+          'if(user_count == 1)',
+          '{',
+          '\turl = "#Page:Voting_Page?Idea=" + record_id;',
+          '\topenUrl(url,"new window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Employees', [plainField('Email_Id')])],
+      pages: [{ name: 'Voting_Page', params: ['Idea'], zml: [], references: [], properties: [], span: Z }],
+      functions: [vote],
+    }),
+  );
+  const module = g.files.find((f) => f.path === 'functions/custom/vote-vote.mjs');
+  assert.ok(module, 'the guard read still produces a server module');
+  assert.match(module!.source, /shim\.datastore\.aggregate/);
+  assert.match(module!.source, /return \{ \["kind"\]: "navigate", \["url"\]: url, \["target"\]: "new" \};/);
+  assert.equal(g.todos.some((t) => t.construct === 'openurl-dropped-with-server-logic'), false);
+});
+
+test('attack: a guard-read function whose branch builds a navigation target from a record value stays a counted manual item when the page does not declare that param', () => {
+  // Same new branch shape (`url = ...; openUrl(url, ...);` inside an
+  // if-branch, guarded by a server read) as the lift test above, but the
+  // query parameter ("Secret") is NOT one Voting_Page declares — the exact
+  // attack this analysis must keep refusing: a record-derived value reaching
+  // a navigation target that the mechanism cannot statically prove is a
+  // page parameter the generated page will actually accept. If this were
+  // lifted anyway, the server would hand the client a `nav` instruction
+  // whose query string a record's own field controls with no safety check.
+  const vote: FunctionDef = {
+    name: 'Vote.vote',
+    kind: 'creator',
+    signature: 'void Vote.vote(int record_id)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'user_count = Employees[Email_Id == zoho.loginuserid].count();',
+          'if(user_count == 1)',
+          '{',
+          '\turl = "#Page:Voting_Page?Secret=" + record_id;',
+          '\topenUrl(url,"new window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Employees', [plainField('Email_Id')])],
+      pages: [{ name: 'Voting_Page', params: ['Idea'], zml: [], references: [], properties: [], span: Z }],
+      functions: [vote],
+    }),
+  );
+  const module = g.files.find((f) => f.path === 'functions/custom/vote-vote.mjs');
+  assert.ok(module);
+  assert.doesNotMatch(module!.source, /"kind":\s*"navigate"|\["kind"\]: "navigate"/);
+  const todo = g.todos.find((t) => t.construct === 'openurl-dropped-with-server-logic');
+  assert.ok(todo, 'the unresolvable target stays a counted manual item, not a silent drop');
+  assert.match(todo!.manualStep ?? '', /Voting_Page has no parameter Secret/);
+});
+
 test('an if/else of own-app openUrl on a form-typed param is client navigation, not function-untranslated', () => {
   const rejectTravel: FunctionDef = {
     name: 'CustomAction.rejectTravel',
