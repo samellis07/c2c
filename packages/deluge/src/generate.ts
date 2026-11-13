@@ -3911,6 +3911,7 @@ export function unmigratedReportCriteria(app: App): { report: Report; criteria: 
  */
 export function workflowScriptOptions(app: App, w: Workflow): TranslateOptions {
   return {
+    replayFunctions: [...replayFunctionNames(app)].sort(),
     alertEvent: alertEventClass(w.event),
     prefetchBound: subformEventField(w.event) ? ['row'] : [],
     // Server-condition functions are named for the workflow they came from:
@@ -4062,6 +4063,67 @@ export function clientCallFunctions(app: App): ClientCallCatalog {
     if (!changed) break;
   }
   return { names, bodies, reads, resolve: (path) => dispatchTarget(path)?.name };
+}
+
+const replayFunctionCache = new WeakMap<App, ReadonlySet<string>>();
+
+/**
+ * Functions the prefetch may call while replaying a list-building loop, as
+ * `name:index`: the same read-only proof as {@link clientCallFunctions},
+ * except that a function may update the ONE list or map parameter at `index`.
+ * The call site must pass the loop's own list there, and the loop replay runs
+ * on a copy, so that update never reaches a value the handler holds. Every
+ * other parameter, `input`, and anything fetched stays unwritable, and a
+ * nested same-app call must reach a function that updates no parameter at
+ * all. A call endpoint still refuses such a function, because its caller
+ * would not see the update.
+ */
+export function replayFunctionNames(app: App): ReadonlySet<string> {
+  const cached = replayFunctionCache.get(app);
+  if (cached) return cached;
+  const foldedCount = new Map<string, number>();
+  for (const fn of app.functions) foldedCount.set(fn.name.toLowerCase(), (foldedCount.get(fn.name.toLowerCase()) ?? 0) + 1);
+  const bodies = new Map<string, { server: string; index: number }>();
+  for (const fn of app.functions) {
+    if (bodies.has(fn.name) || (foldedCount.get(fn.name.toLowerCase()) ?? 0) > 1) continue;
+    let slot = 0;
+    const server = fn.deluge
+      .map((d) => {
+        const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
+        slot = tr.nextSlot;
+        return tr.server;
+      })
+      .filter((x) => x.trim())
+      .join('\n');
+    if (!server.trim() || emittedReadForms(server) === null) continue;
+    const scripts = fn.deluge.map((d) => d.text);
+    const params = fnSignatureParams(fn.signature);
+    const collections = params.map((p, i) => ({ p, i })).filter(({ p }) => /^(list|map)\b/i.test(p.type.trim()));
+    if (collections.length > 1) continue;
+    const coll = collections[0];
+    // Only the one list or map parameter may be updated; every other
+    // parameter (and `input`) stays read-only.
+    if (mutatesParameters(scripts, coll ? params.filter((_, i) => i !== coll.i) : params)) continue;
+    const strict = !mutatesParameters(scripts, params);
+    if (!strict && !coll) continue;
+    bodies.set(fn.name, { server, index: strict ? -1 : coll!.i });
+  }
+  const names = new Map<string, number>();
+  for (;;) {
+    let changed = false;
+    // determinism-allow: fixed-point loop over Map/Set, rerun until `changed` stops, so the result is order-independent
+    for (const [key, body] of bodies) {
+      if (names.has(key)) continue;
+      // A nested call must reach a function that updates no parameter.
+      if (!emittedReadOnly(body.server, (path) => names.get(path.join('.')) === -1)) continue;
+      names.set(key, body.index);
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  const out = new Set([...names].map(([n, i]) => (i < 0 ? n : `${n}:${i}`)));
+  replayFunctionCache.set(app, out);
+  return out;
 }
 
 export interface ButtonFunctionCall {
