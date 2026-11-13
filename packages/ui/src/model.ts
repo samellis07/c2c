@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App, Field, Form, FunctionDef, Page, Property, PropertyBlock, Report, ReportCustomAction } from '../../core/src/ir.js';
-import { hasOthersOption, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
+import { hasOthersOption, PRIVACY_PROPERTY_KEYS, privacyFlagsOf, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { actionNavigationDropReason, actionNavigationLifted, blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
@@ -561,11 +561,12 @@ const FILE_WIDGETS = new Set<Widget>(['file', 'image', 'audio', 'video', 'signat
 /** Known remote document browsing sources for file fields that have no Catalyst equivalent. */
 const BROWSE_REMOTE_SOURCES = new Set(['google_docs', 'zoho_docs']);
 
-// A field marked `private` or `personal data` is a data-privacy flag, not a widget
-// setting. Catalyst has no generated field-level privacy or access control, so all
-// privacy-flagged fields in an app are recorded together in one manual step rather
-// than invented as UI.
-const PRIVACY_PROPERTY_KEYS = ['private', 'personal data', 'encrypt', 'encryptdata'];
+// A field marked `private` or `personal data` is a data-privacy flag, not a
+// widget setting. A top-level field's protection is generated — see
+// packages/deluge/src/generate.ts fieldGrant and docs/field-privacy.md — so no
+// manual step is recorded for it. A privacy flag on a subform/composite child
+// field (depth > 0) is not covered there: those are still recorded together in
+// one manual step.
 const PRIVACY_TODO_NAME = 'privacy flags';
 
 export function parsePrivacyTodoEntries(todo: UiTodo): { field: string; flags: string[] }[] {
@@ -595,9 +596,13 @@ export function parsePrivacyTodoEntries(todo: UiTodo): { field: string; flags: s
   return entries;
 }
 
-function recordPrivacyFlags(formName: string, field: Field, todos: UiTodo[]): void {
-  const active = PRIVACY_PROPERTY_KEYS.filter((key) => prop(field, key)?.trim().toLowerCase() === 'true');
+function recordPrivacyFlags(formName: string, field: Field, todos: UiTodo[], depth: number): void {
+  const active = privacyFlagsOf(field);
   if (!active.length) return;
+  // A top-level field's privacy protection is generated (fieldGrant in
+  // packages/deluge/src/generate.ts); only a subform/composite child field
+  // (depth > 0) still needs the manual step below.
+  if (depth === 0) return;
   const fieldRef = `${formName}.${field.name}`;
   const existing = todos.find((t) => t.area === 'field' && t.name === PRIVACY_TODO_NAME);
   const entries = existing ? parsePrivacyTodoEntries(existing) : [];
@@ -1701,7 +1706,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
   }
-  recordPrivacyFlags(formName, field, todos);
+  recordPrivacyFlags(formName, field, todos, depth);
   if (widget === 'address') {
     const captureCoordinates = prop(field, 'capture_coordinates');
     if (captureCoordinates?.trim().toLowerCase() === 'true') {
