@@ -28,41 +28,40 @@ part (a record id, a field value) already substituted with its real,
 server-computed value. `target` mirrors Deluge's `openUrl` window argument:
 anything other than `"same window"` becomes `'new'`.
 
-The server only emits `nav` when the navigation target is one the per-app
-policy (below) can approve from the Deluge source alone, at generate time:
-
-- the whole body of the `openUrl` is a same-app route (`#Form:`, `#Report:`,
-  `#Page:`, a relative path, a record-edit or record-summary link, `mailto:`,
-  `tel:`) — the same shape `classifyClientOpenUrl` already recognizes for a
-  workflow whose *entire* body is a navigation (see
-  `packages/deluge/src/generate.ts`); or
-- a **literal** `https://host/...` prefix whose host is on this app's
-  allowlist (below).
+The server only emits `nav` when the navigation target is a same-app route —
+the whole body of the `openUrl` is a same-app route (`#Form:`, `#Report:`,
+`#Page:`, a relative path, a record-edit or record-summary link, `mailto:`,
+`tel:`) — the same shape `classifyClientOpenUrl` already recognizes for a
+workflow whose *entire* body is a navigation (see
+`packages/deluge/src/generate.ts`).
 
 Anything else — an `openUrl` whose scheme or host is itself built from a
-Deluge value (a field, a variable, a function argument), a `#Script:` pseudo
-route, or a target this scan cannot resolve — is **never** turned into a
-`nav` reply. It stays a counted manual item with a location-specific
-`manualStep` (`Custom action "X" on report "Y" runs its workflow, but a
-navigation (openUrl) inside it is not carried over...`), exactly as before.
-A value this analysis cannot see statically cannot be trusted as a
-navigation target at runtime either.
+Deluge value (a field, a variable, a function argument), a literal
+`https://` target, a `#Script:` pseudo route, or a target this scan cannot
+resolve — is **never** turned into a `nav` reply. It stays a counted manual
+item with a location-specific `manualStep` (`Custom action "X" on report "Y"
+runs its workflow, but a navigation (openUrl) inside it is not carried
+over...`), exactly as before. A value this analysis cannot see statically
+cannot be trusted as a navigation target at runtime either; and a literal
+`https://` host found in the `.ds` source is not trusted either, since it
+would let an attacker-authored `openUrl("https://evil.example.com")` allowlist
+its own host (see `packages/deluge/src/generate.ts:2885-2892`,
+`classifyOpenUrlStmt`).
 
-## The per-app allowlist
+## The per-app allowlist (declared, not yet populated)
 
-Each generated app carries its own `navigationAllowlist: string[]` — the
-distinct hostnames found in a **literal** `https://host...` string
-immediately inside an `openUrl(` call anywhere in the source `.ds`
-(`extractLiteralHttpsHosts` in `packages/ui/src/url-policy.ts`). A host that
-only appears after string concatenation (`"https://" + x`, `zoho.appuri +
-"https://..."`) is never collected: the app owner's own literal Deluge source
-is the only thing this allowlist trusts, never a value only known at
-runtime.
-
-The allowlist is generated once per app (`UiModel.navigationAllowlist`,
-threaded into the generated `AppSpec` as `navigationAllowlist`) and shipped
-to the client so the browser-side check below does not have to trust the
-server's classification alone.
+`AppSpec` declares an optional `navigationAllowlist?: string[]` field (see
+`packages/ui-react/template/lib/c2c-ui/types.ts`) as the mechanism a future,
+owner-approved source of trusted hosts could use to let a report custom
+action's navigation target an external `https:` host. Nothing in the
+generator populates it today: `extractLiteralHttpsHosts` in
+`packages/ui/src/url-policy.ts` exists and is unit-tested, but it is never
+called when building the `AppSpec` that ships to a generated app
+(`packages/ui/src/model.ts` has no such wiring). `navigationAllowlist` is
+therefore always absent in every generated app, `allowedHosts` always
+resolves to `[]` on the client, and an `https:` navigation target is
+unconditionally refused — there is currently no way for a report custom
+action to navigate to an external host at all, only to a same-app route.
 
 ## The client-side policy check
 
@@ -96,11 +95,10 @@ gets a handle back to the page that opened it.
 
 ## What stays manual
 
-A navigation whose target is built from a Deluge value in a way this
-analysis cannot resolve to one of the two allowed shapes above — most
-commonly an `https:` URL whose host itself comes from a field, a variable, or
-string concatenation, or a `#Script:` pseudo-route (`page.refresh`, which is
-not a real navigation target) — is not carried. The custom action still
+A navigation whose target is not a same-app route — most commonly a literal
+or dynamically built `https:` URL (a host itself coming from a field, a
+variable, or string concatenation), or a `#Script:` pseudo-route
+(`page.refresh`, which is not a real navigation target) — is not carried. The custom action still
 dispatches and runs its workflow; only the navigation is dropped, and it is
 always counted with a `manualStep` naming the action, the report, and (where
 known) why the target could not be resolved.
