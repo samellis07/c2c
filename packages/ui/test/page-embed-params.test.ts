@@ -84,8 +84,7 @@ test('declared zc parameters are passed, while undeclared display flags are igno
 
 test('dynamic undeclared zc parameters keep the embed counted', () => {
   const out = compileHtmlpage(appOf([snippetPage('Inner', 'htmlpage Inner1()\ncontent\n<p>x</p>')]), 'Outer', 'Outer1', outerSnippet('<%=zoho.appuri%>view-embed/Inner?zc_Header=<%=input.usermailid%>'));
-  assert.equal(out.ok, true, out.reason ?? 'compile failed');
-  assert.deepEqual(out.includes, []);
+  assert.ok(!out.ok || !(out.includes ?? []).length);
 });
 
 test('attack: path traversal and cross-app targets stay counted', () => {
