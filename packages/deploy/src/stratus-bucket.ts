@@ -72,8 +72,23 @@ export type AppBucketResolve = { outcome: 'resolved'; name: string } | { outcome
  * older project of the same app), so the project's bucket list is the truth:
  * exactly one bucket named `<planned prefix><hex>`, never the doctor's
  * c2cprobe bucket and never a bucket of another project.
+ *
+ * `learned`, `app` and `projectName` name additional exact candidates beyond
+ * `planned` itself: a previously-resolved name the caller already persisted
+ * (`learned`), and the deterministic names this app would get under the
+ * project id or project name (`app` + `projectName`). A bucket is accepted
+ * when it fits the planned name's own shape (prefix + hex tail — the
+ * Catalyst-renamed-bucket recovery case, where the actual name cannot be
+ * derived in advance) or exactly equals one of those known candidates.
  */
-export async function resolveAppBucket(rest: RestFn, projectId: string, planned: string): Promise<AppBucketResolve> {
+export async function resolveAppBucket(
+  rest: RestFn,
+  projectId: string,
+  planned: string,
+  learned?: string,
+  app?: string,
+  projectName?: string,
+): Promise<AppBucketResolve> {
   const listed = await listBucketNames(rest, projectId);
   if (listed.status === 'unverifiable') {
     return { outcome: 'refused', message: `refusing: the Stratus bucket list of project ${projectId} could not be read (${listed.detail}); open Stratus on the project, then re-run` };
@@ -83,7 +98,13 @@ export async function resolveAppBucket(rest: RestFn, projectId: string, planned:
   const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // The seed and plan namers differ in hash length (8 and 10), so any 8+ hex tail.
   const shape = new RegExp(`^${escaped}${suffix ? '[0-9a-f]{8,}' : ''}$`);
-  const matches = listed.names.filter((name) => !name.startsWith('c2cprobe') && shape.test(name));
+  const exact = new Set<string>([planned, ...(learned ? [learned] : [])]);
+  if (app) {
+    const { bucketName } = await import('./offline-plan.js');
+    exact.add(bucketName(app, projectId));
+    if (projectName) exact.add(bucketName(app, projectName));
+  }
+  const matches = listed.names.filter((name) => !name.startsWith('c2cprobe') && (shape.test(name) || exact.has(name)));
   if (matches.length === 1) return { outcome: 'resolved', name: matches[0] };
   return {
     outcome: 'refused',
