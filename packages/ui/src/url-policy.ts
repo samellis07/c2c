@@ -99,6 +99,120 @@ export function safeUrl(value: unknown, relativeOnly = false): boolean {
  * only appears after decoding (`javascript%3Aalert(1)`) must not be treated
  * as a scheme-less relative URL just because it has no literal `:` yet.
  */
+/**
+ * A navigation instruction a dispatched report custom action's server
+ * function returns instead of performing the browser navigation itself
+ * (see docs/report-action-navigation.md). `target` mirrors Deluge's openUrl
+ * window argument: "same" keeps the current tab, "new" opens a tab with
+ * `noopener,noreferrer`.
+ */
+export interface NavInstruction {
+  kind: 'navigate';
+  url: string;
+  target?: 'same' | 'new';
+}
+
+/**
+ * This app's own hash route (`#...`) or a single-leading-slash relative path
+ * (`/report/...`, never `//host/...`, which is a protocol-relative open
+ * redirect wearing a relative path's clothes): always allowed, regardless of
+ * any per-app host allowlist, because it can never leave the generated app's
+ * own origin.
+ */
+export function isSameAppNavTarget(url: string): boolean {
+  const raw = String(url ?? '');
+  if (raw.startsWith('#')) return true;
+  return raw.startsWith('/') && !raw.startsWith('//');
+}
+
+/**
+ * The lowercase hostname of a well-formed `https://host/...` prefix, or
+ * undefined for anything else (no scheme, a different scheme, or a scheme
+ * written with the wrong number of slashes). Userinfo (`user:pass@host`) is
+ * part of the authority, not the host: this takes the text AFTER the last
+ * `@`, so `https://allowed.example@evil.example` is judged on
+ * `evil.example`, never on the attacker-chosen prefix before it.
+ */
+function httpsHost(url: string): string | undefined {
+  const m = /^https:\/\/([^/?#\\]+)/i.exec(String(url ?? ''));
+  if (!m) return undefined;
+  const authority = m[1]!;
+  const at = authority.lastIndexOf('@');
+  const hostPart = at >= 0 ? authority.slice(at + 1) : authority;
+  const host = hostPart.split(':')[0]!.toLowerCase();
+  return host || undefined;
+}
+
+/**
+ * The policy a generated page runs before acting on a server action's
+ * navigate instruction (the browser runtime keeps the same rule — see
+ * client-runtime.js and the ui-react runtime navigation module, both named
+ * in docs/report-action-navigation.md): a same-app hash route or relative
+ * path is always allowed; an `https:` URL is allowed only when its host is
+ * on this app's own allowlist (built at generate time from literal URLs
+ * found in the source .ds — see `extractLiteralHttpsHosts` — never from a
+ * value only known at runtime); everything else — a denied scheme
+ * (`javascript:`, `data:`, `vbscript:`, `file:`), a protocol-relative
+ * `//host/...` open redirect, plain `http:`, or an https host not on the
+ * allowlist — is refused.
+ */
+export function navigationAllowed(url: string, allowedHosts: ReadonlySet<string>): boolean {
+  const raw = String(url ?? '');
+  const flat = flatUrl(raw);
+  if (DENIED_HREF_SCHEMES.some((scheme) => flat.startsWith(scheme)) || flat.startsWith('file:') || flat.startsWith('//')) return false;
+  if (isSameAppNavTarget(raw)) return !/[\u0000- \\]/.test(raw);
+  const host = httpsHost(raw);
+  return !!host && allowedHosts.has(host);
+}
+
+/**
+ * Literal `https://host...` prefixes immediately inside an `openUrl(` call
+ * in Deluge source — the only hosts a generated app's server-returned
+ * navigation may ever target. A dynamically-built URL (a local variable, a
+ * concatenation, a field read — anything that is not a plain quoted string
+ * literal right after `openUrl(`) contributes no host here: a value this
+ * scan cannot see statically cannot be trusted as a navigation target at
+ * runtime either, so that case stays a manual step instead (see
+ * docs/report-action-navigation.md).
+ */
+export function extractLiteralHttpsHosts(sources: readonly string[]): string[] {
+  const hosts = new Set<string>();
+  const re = /openUrl\(\s*["']https:\/\/([^/"'?#\\\s]+)/gi;
+  for (const source of sources) {
+    for (const m of source.matchAll(re)) {
+      const authority = m[1]!;
+      const at = authority.lastIndexOf('@');
+      const host = (at >= 0 ? authority.slice(at + 1) : authority).split(':')[0]!.toLowerCase();
+      if (host) hosts.add(host);
+    }
+  }
+  return [...hosts].sort();
+}
+
+/**
+ * `c2cNavOk` in the generated page client: the browser-side mirror of
+ * `navigationAllowed`, run on every server-returned navigate instruction
+ * before it is acted on (see the ui-react runtime navigation module, which
+ * keeps this same rule hand-written in TypeScript instead of generated from
+ * this source, the same split `c2cUrlFunctionSource` already uses).
+ */
+export function navigationPolicyFunctionSource(): string {
+  const denied = DENIED_HREF_SCHEMES.map((scheme) => `flat.startsWith(${JSON.stringify(scheme)})`).join(' || ');
+  return `function c2cNavOk(url, allowedHosts) {
+  var raw = String(url || "");
+  var flat = raw.replace(/${URL_FLAT_CLASS}+/g, "").toLowerCase();
+  if (${denied} || flat.startsWith("file:") || flat.startsWith("//")) return false;
+  if (raw.startsWith("#") || (raw.startsWith("/") && !raw.startsWith("//"))) return !/[\\u0000-\\u0020\\\\]/.test(raw);
+  var m = /^https:\\/\\/([^/?#\\\\]+)/i.exec(raw);
+  if (!m) return false;
+  var authority = m[1];
+  var at = authority.lastIndexOf("@");
+  var hostPart = at >= 0 ? authority.slice(at + 1) : authority;
+  var host = hostPart.split(":")[0].toLowerCase();
+  return !!host && allowedHosts.indexOf(host) >= 0;
+}`;
+}
+
 export function c2cUrlFunctionSource(): string {
   const allowed = PAGE_HREF_SCHEMES.map((scheme) => `flat.startsWith(${JSON.stringify(scheme)})`).join(' || ');
   return `function c2cUrlOk(url) {
