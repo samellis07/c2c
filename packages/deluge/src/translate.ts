@@ -4666,13 +4666,9 @@ function loopListUpdate(
   if (!tests.every((t) => listUpdateReadOnly(t, s.name) && !staleFx(t, scope))) return null;
   if (names.some((n) => tempNames.has(n)) || tempNames.has(s.name) || Array.from(tempNames).sort().some((t) => before.has(t))) return null;
   if (!temps.every((t) => listUpdateReadOnly(t.value, s.name) && !staleFx(t.value, scope) && !t.value.reads.includes(t.name) && !names.some((n) => t.value.reads.includes(n)))) return null;
-  // One loop updating several lists replays each list from a copy of its own
-  // earlier value, so no test, temp, or update value may read another list the
-  // loop updates: the replay would see the copy, not the live iteration state.
-  if (names.length > 1) {
-    const readsNamed = (f: Fx) => names.some((n) => f.reads.includes(n));
-    if (tests.some(readsNamed) || temps.some((t) => readsNamed(t.value)) || updates.some((u) => names.some((n) => n !== u.name && u.value.reads.includes(n)))) return null;
-  }
+  // One loop updating several names runs ONCE into a shared result seeded
+  // with every name's pre-loop value, so a test, temp, or update value may
+  // read a sibling: inside that single run it sees the live iteration state.
   const body = serverBody
     .split('\n')
     .filter((line) => !/^\s*\/\//.test(line))
@@ -4689,13 +4685,36 @@ function loopListUpdate(
     ids.length === 1
       ? `await (async (${ids[0]}) => {\n${indent(loop)}\n  return ${ids[0]};\n})(${seeds[0]})`
       : `await (async (${ids.join(', ')}) => {\n${indent(loop)}\n  return [${ids.join(', ')}];\n})(${seeds.join(', ')})`;
-  // Each list's binding reads every sibling's earlier version, so the replay
-  // emits those first.
-  const all = names.length > 1 ? [...reads, ...names] : reads;
-  const rebound = names.map((n, i) => listUpdateBinding(n, before.get(n)!, ids.length === 1 ? call : `(${call})[${i}]`, all, stateReads, before, scope));
+  let rebound: Binding[];
+  let sharedRun: Binding | undefined;
+  if (names.length === 1) {
+    rebound = [listUpdateBinding(name, before.get(name)!, call, reads, stateReads, before, scope)];
+  } else {
+    // The shared run reads every name's pre-loop binding; each name then reads
+    // its slot of that one result, so no run is seeded with a sibling's
+    // post-loop value.
+    const shared = listUpdateBinding(name, before.get(name)!, call, [...reads, ...names], stateReads, before, scope);
+    const sharedKey = `\0loop#${scope.depSeq.next++}`;
+    const sharedId = `$loop${scope.depSeq.next - 1}`;
+    scope.bindings.set(sharedKey, { ...shared, emitAs: sharedId });
+    const sharedBinding = scope.bindings.get(sharedKey)!;
+    sharedRun = sharedBinding;
+    rebound = names.map((_, i) => ({
+      ...shared,
+      code: `${sharedId}[${i}]`,
+      reads: [sharedKey],
+      deps: new Map([[sharedKey, sharedBinding]]),
+      seq: scope.clock.seq++,
+      stateReads: undefined,
+    }));
+  }
   // A replayed body that calls a read-only function is a read: the replay
   // checks it with the `thisapp.call` rewritten, like any read-only call binding.
-  if (callNames.size) for (const b of rebound) b.readOnlyCalls = true;
+  if (callNames.size) {
+    for (const b of rebound) b.readOnlyCalls = true;
+    // The shared run holds the checked call; nothing else is marked.
+    if (sharedRun) sharedRun.readOnlyCalls = true;
+  }
   names.forEach((n, i) => scope.bindings.set(n, rebound[i]!));
   return name;
 }
