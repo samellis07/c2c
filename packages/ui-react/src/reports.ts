@@ -5,9 +5,43 @@
  * stay a counted stub.
  */
 import type { App, Report as IrReport } from '../../core/src/ir.js';
-import type { UiForm, UiReport } from '../../ui/src/model.js';
-import type { ColumnSpec, CustomActionSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
+import type { UiForm, UiPrintElement, UiPrintTemplate, UiReport } from '../../ui/src/model.js';
+import type { ColumnSpec, CustomActionSpec, PrintElementSpec, PrintTemplateSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
 import { reportChart } from './charts.js';
+
+function printElementSpec(el: UiPrintElement): PrintElementSpec {
+  return {
+    type: el.type,
+    ...(el.split !== undefined ? { split: el.split } : {}),
+    ...(el.columns ? { columns: el.columns.map((col) => col.map(printElementSpec)) } : {}),
+    ...(el.html !== undefined ? { html: el.html } : {}),
+    ...(el.field !== undefined ? { field: el.field } : {}),
+    ...(el.label !== undefined ? { label: el.label } : {}),
+    ...(el.labelStyle !== undefined ? { labelStyle: el.labelStyle } : {}),
+    ...(el.valueStyle !== undefined ? { valueStyle: el.valueStyle } : {}),
+    ...(el.valueTextStyle !== undefined ? { valueTextStyle: el.valueTextStyle } : {}),
+    ...(el.wrapperStyle !== undefined ? { wrapperStyle: el.wrapperStyle } : {}),
+    ...(el.labelTextStyle !== undefined ? { labelTextStyle: el.labelTextStyle } : {}),
+    ...(el.fields ? { fields: el.fields.map((f) => ({ ...f })) } : {}),
+    ...(el.src !== undefined ? { src: el.src } : {}),
+    ...(el.alt !== undefined ? { alt: el.alt } : {}),
+    ...(el.style !== undefined ? { style: el.style } : {}),
+    ...(el.height !== undefined ? { height: el.height } : {}),
+    ...(el.note !== undefined ? { note: el.note } : {}),
+  };
+}
+
+function printTemplateSpec(template: UiPrintTemplate): PrintTemplateSpec {
+  return {
+    name: template.name,
+    label: template.label,
+    ...(template.style !== undefined ? { style: template.style } : {}),
+    ...(template.font !== undefined ? { font: template.font } : {}),
+    elements: template.elements.map(printElementSpec),
+    ...(template.header?.length ? { header: template.header.map(printElementSpec) } : {}),
+    ...(template.footer?.length ? { footer: template.footer.map(printElementSpec) } : {}),
+  };
+}
 
 /** Report views the skeleton draws as a table. */
 export const LIST_VIEWS = new Set(['list', 'spreadsheet', 'summary', 'detail']);
@@ -113,5 +147,6 @@ export function reportSpec(app: App, ui: UiReport, forms: UiForm[] = []): Report
     ...(form?.recordEndpoint ? { recordEndpoint: form.recordEndpoint } : {}),
     ...(form?.deleteEndpoint ? { deleteEndpoint: form.deleteEndpoint } : {}),
     ...(ui.todo ? { todo: listLike ? listNote(ui, ui.todo) : ui.todo } : {}),
+    ...(ui.printTemplate ? { printTemplate: printTemplateSpec(ui.printTemplate) } : {}),
   };
 }

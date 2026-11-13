@@ -362,6 +362,13 @@ export interface UiPrintTemplate {
   /** `themeFont`. */
   font?: string;
   elements: UiPrintElement[];
+  /**
+   * Creator `header`/`footer` block, drawn once above/below the body. Plain
+   * CSS has no reliable way to repeat arbitrary HTML on every physical page a
+   * browser's print engine lays out, so this is not a running header/footer.
+   */
+  header?: UiPrintElement[];
+  footer?: UiPrintElement[];
 }
 
 export interface UiPage {

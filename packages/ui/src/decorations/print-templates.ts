@@ -125,12 +125,31 @@ function elementOf(raw: RawElement): UiPrintElement {
   }
 }
 
+function sectionElements(value: unknown): UiPrintElement[] {
+  if (!value || typeof value !== 'object') return [];
+  const elements = (value as RawContainer).elements;
+  return Array.isArray(elements) ? elements.map((item) => elementOf(item as RawElement)) : [];
+}
+
 function elementsOf(content: Record<string, unknown>): UiPrintElement[] {
   const layout = Array.isArray(content.mainLayout) ? content.mainLayout : [];
   const out: UiPrintElement[] = [];
   for (const section of layout as RawContainer[]) {
     const elements = section && typeof section === 'object' ? section.elements : undefined;
     for (const item of Array.isArray(elements) ? elements : []) out.push(elementOf(item as RawElement));
+  }
+  return out;
+}
+
+/** The feature name a `type: 'todo'` element's note carries (see `elementOf`'s default case). */
+const UNSUPPORTED_NOTE = /^Print element "(.+)" is not generated\.$/;
+
+/** Every Creator element kind in this layout (recursing into columns) that the renderer cannot draw. */
+function unsupportedPrintFeatures(elements: UiPrintElement[]): string[] {
+  const out: string[] = [];
+  for (const el of elements) {
+    if (el.type === 'todo') out.push(UNSUPPORTED_NOTE.exec(el.note ?? '')?.[1] ?? 'element');
+    for (const column of el.columns ?? []) out.push(...unsupportedPrintFeatures(column));
   }
   return out;
 }
@@ -159,16 +178,23 @@ function applyPrintTemplates(model: UiModel, app: App): void {
     if (dropped.length) model.todos.push({ area: 'report', name: report.name, reason: `Print template "${name}": ${droppedStyleReason(dropped)}`, manualStep: droppedStyleStep(`On report ${report.name}, print template "${name}"`, dropped) });
     // A record view must exist to print from, even when the export has no detail view.
     report.detail = true;
-    // The default generated web app (react) has no renderer for this layout; only
-    // --ui vanilla draws report.printTemplate (client/70-print.js). Without this
-    // note the gap is invisible: the shared model resolves fine, so no other pass
-    // ever flags it, and the react build drops the data with no record of why.
-    model.todos.push({
-      area: 'report',
-      name: report.name,
-      reason: `Print template "${name}" is resolved on the report model, but the default generated web app does not draw a print layout from it.`,
-      manualStep: `Recreate the "${name}" print layout by hand in the generated app, or generate this app with --ui vanilla to keep it — the default web app does not draw a print layout.`,
-    });
+    // The generated web app draws every element kind `elementOf` resolves (see
+    // docs/print-templates.md); an element kind it does not know becomes a
+    // `type: 'todo'` placeholder (elementOf's default case). Each one stays a
+    // counted manual step naming the feature, so the gap is never silent.
+    const unsupported = [
+      ...unsupportedPrintFeatures(target.printTemplate.elements),
+      ...unsupportedPrintFeatures(target.printTemplate.header ?? []),
+      ...unsupportedPrintFeatures(target.printTemplate.footer ?? []),
+    ];
+    for (const feature of unsupported) {
+      model.todos.push({
+        area: 'report',
+        name: report.name,
+        reason: `Print template "${name}" uses a ${feature} element; the generated print layout does not draw it.`,
+        manualStep: `Recreate the ${feature} element by hand in the "${name}" print layout on report ${report.name} — this is not generated.`,
+      });
+    }
   }
 }
 
@@ -199,12 +225,19 @@ function templateFromBlock(name: string, block: PropertyBlock): UiPrintTemplate 
     data = undefined;
   }
   if (!data) return undefined;
+  // Creator keeps `header`/`footer` content even while its own toggle is off;
+  // an explicit `false` is the only way the export turns it off (anything
+  // else, including a missing flag, leaves a stored block enabled).
+  const header = data.isHeaderEnabled !== false ? sectionElements(data.header) : [];
+  const footer = data.isFooterEnabled !== false ? sectionElements(data.footer) : [];
   return {
     name,
     label: prop(block, 'displayname') || name,
     ...(text(data.templateStyle) ? { style: String(data.templateStyle) } : {}),
     ...(text(data.themeFont) ? { font: String(data.themeFont) } : {}),
     elements: elementsOf(data),
+    ...(header.length ? { header } : {}),
+    ...(footer.length ? { footer } : {}),
   };
 }
 

@@ -275,6 +275,52 @@ export interface ReportSpec {
   deleteEndpoint?: string;
   /** Why the export marked this report todo even though it draws as a table. */
   todo?: string;
+  /** The report's `print template = <Name>` layout, resolved from its form. */
+  printTemplate?: PrintTemplateSpec;
+}
+
+/**
+ * One element of a resolved print layout (`print template` block `content`
+ * JSON). `columns` nests its cells in `columns`; `text` keeps the layout HTML
+ * with `${Field}` placeholders, filled and sanitized at render; `field` is a
+ * label/value pair; `lookup` is a related-record table; `image` and `spacer`
+ * are self-evident. Any other Creator element kind arrives as `todo`, with
+ * `note` naming the feature — it renders a visible placeholder, never record
+ * data the renderer cannot yet check.
+ */
+export interface PrintElementSpec {
+  type: 'columns' | 'text' | 'field' | 'lookup' | 'image' | 'spacer' | 'todo';
+  split?: string;
+  columns?: PrintElementSpec[][];
+  html?: string;
+  field?: string;
+  label?: string;
+  labelStyle?: string;
+  valueStyle?: string;
+  valueTextStyle?: string;
+  wrapperStyle?: string;
+  labelTextStyle?: string;
+  fields?: { field: string; label: string; labelStyle?: string; valueStyle?: string }[];
+  src?: string;
+  alt?: string;
+  style?: string;
+  height?: string;
+  note?: string;
+}
+
+/** A form `print template` block resolved for one report. */
+export interface PrintTemplateSpec {
+  name: string;
+  /** `displayname`, or the block name. */
+  label: string;
+  /** `templateStyle` on the layout container. */
+  style?: string;
+  /** `themeFont`. */
+  font?: string;
+  elements: PrintElementSpec[];
+  /** A repeating block (Creator `header`/`footer`): drawn once per printed page. */
+  header?: PrintElementSpec[];
+  footer?: PrintElementSpec[];
 }
 
 export interface NavItem {
