@@ -29,9 +29,16 @@ async function loadNavigation(t: { after(fn: () => void): void }) {
   };
 }
 
-const ALLOWED = ['allowed.example'];
+const ALLOWED = ['allowed.example', 'allowed.example.com'];
 
-/** [label, url, expected navOk(url, ALLOWED) result] — the same attack classes pinned in packages/ui/test/navigation-policy.test.ts, run here against the ACTUAL shipped client copy. */
+/**
+ * [label, url, expected navOk(url, ALLOWED) result] — the same attack classes pinned in packages/ui/test/navigation-policy.test.ts, run here against the ACTUAL shipped client copy.
+ *
+ * The userinfo-trick vectors below all pair an ALLOWED host as the userinfo with a non-allowed
+ * host as the real authority, so correct parsing (host taken after the LAST '@') and a naive
+ * parse (host taken before the first '@' or before the first ':') disagree: naive parsing would
+ * read the ALLOWED-looking userinfo back as the host and wrongly allow. Each must still refuse.
+ */
 const VECTORS: Array<[string, string, boolean]> = [
   ['same-app hash route', '#/report/Orders', true],
   ['relative path', '/report/Orders', true],
@@ -46,6 +53,9 @@ const VECTORS: Array<[string, string, boolean]> = [
   ['plain http to an allowlisted host', 'http://allowed.example/doc', false],
   ['https host not on the allowlist', 'https://evil.example/x', false],
   ['https userinfo trick: attacker host after an allowed-looking userinfo', 'https://allowed.example.com@evil.example.com/x', false],
+  ['https userinfo trick with a colon-separated password', 'https://allowed.example.com:s3cret@evil.example.com/x', false],
+  ['https userinfo trick: attacker host is a Cyrillic look-alike of the allowed host', 'https://allowed.example.com@аllowed.example.com/x', false],
+  ['https userinfo trick: a backslash truncates the authority right after the attacker host', 'https://allowed.example.com@ev\\il.example.com/x', false],
   ['relative path carrying an embedded backslash', '/\\evil.example', false],
 ];
 
