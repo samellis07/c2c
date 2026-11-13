@@ -470,6 +470,7 @@ const FORWARD_ISLAND = /^<%=[ \t]*input[ \t]*\.[ \t]*([A-Za-z_]\w*)[ \t]*%>$/;
 const LITERAL_PARAM = /^[A-Za-z0-9_.-]{0,64}$/;
 /** Grammar of one include parameter in a marker: `key=@param` (forward) or `key=literal`. */
 export const INCLUDE_PARAM = /^[A-Za-z_]\w*=(?:@[A-Za-z_]\w*|[A-Za-z0-9_.-]{0,64})$/;
+const INCLUDE_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
  * The include parameters of an embed query, or null when any part cannot be
@@ -485,19 +486,21 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
   const seen = new Set<string>();
   for (const part of query.split('&')) {
     if (part === '') continue;
-    if (/^zc_\w+(=[^&<%]*)?$/i.test(part)) continue;
     const eq = part.indexOf('=');
     if (eq <= 0) return null;
     const key = part.slice(0, eq);
     const raw = part.slice(eq + 1);
     if (!/^[A-Za-z_]\w*$/.test(key)) return null;
     const matches = target.filter((name) => name.toLowerCase() === key.toLowerCase());
+    if (matches.length === 0 && /^zc_\w+$/i.test(key)) continue;
     if (matches.length !== 1) return null;
     const name = matches[0];
+    if (INCLUDE_RESERVED.has(key.toLowerCase())) return null;
     if (seen.has(name.toLowerCase())) return null;
     seen.add(name.toLowerCase());
     const forward = FORWARD_ISLAND.exec(raw);
     if (forward) {
+      if (INCLUDE_RESERVED.has(forward[1].toLowerCase())) return null;
       if (!own.has(forward[1])) return null;
       out.push(`${name}=@${forward[1]}`);
     } else if (LITERAL_PARAM.test(raw)) {

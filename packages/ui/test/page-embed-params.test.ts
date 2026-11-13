@@ -63,6 +63,9 @@ test('attack: parameter injection stays counted', () => {
     // A value glued to an island, or a reserved key.
     '<%=zoho.appuri%>view-embed/Inner?dayVal=a<%=input.usermailid%>',
     '<%=zoho.appuri%>view-embed/Inner?__proto__=a',
+    '<%=zoho.appuri%>view-embed/Inner?constructor=a',
+    '<%=zoho.appuri%>view-embed/Inner?prototype=a',
+    '<%=zoho.appuri%>view-embed/Inner?Constructor=a',
     '<%=zoho.appuri%>view-embed/Inner?=a',
     '<%=zoho.appuri%>view-embed/Inner?dayVal',
   ];
@@ -70,6 +73,13 @@ test('attack: parameter injection stays counted', () => {
     const out = compileOuter(src);
     assert.ok(!out.ok || !(out.includes ?? []).length, `${src} must not become an include`);
   }
+});
+
+test('declared zc parameters are passed, while undeclared display flags are ignored', () => {
+  const target = snippetPage('Inner(zc_flag)', 'htmlpage Inner1(zc_flag)\ncontent\n<p>x</p>');
+  const out = compileHtmlpage(appOf([target]), 'Outer', 'Outer1', outerSnippet('<%=zoho.appuri%>view-embed/Inner?zc_flag=on&zc_Header=false'));
+  assert.equal(out.ok, true, out.reason ?? 'compile failed');
+  assert.deepEqual(out.includes, ['Inner?zc_flag=on']);
 });
 
 test('attack: path traversal and cross-app targets stay counted', () => {

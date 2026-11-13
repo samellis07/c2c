@@ -1701,7 +1701,7 @@ export function reportRouteFilters(query, ctx) {
 function elementClickLink(el, appModel, doc) {
   const link = routeHref(el && el.href, appModel);
   if (!link) return '';
-  const query = typeof el.parameters === 'string' && el.parameters ? reportParamsQuery(el.parameters, snippetPageInput(doc)) : '';
+      const query = typeof el.parameters === 'string' && el.parameters ? reportParamsQuery(el.parameters, includeInputFor(el) || snippetPageInput(doc)) : '';
   return query ? `${link}?${query}` : link;
 }
 
@@ -8163,7 +8163,7 @@ export function boot(appModel, doc) {
         // Only a generated client-call route is a valid target; any other
         // value in sanitized markup is inert.
         if (typeof call === 'function' && /^\/functions\/[a-z0-9-]+\/call$/i.test(path)) {
-          const input = snippetPageInput(documentRef);
+          const input = includeInputFor(fnBtn) || snippetPageInput(documentRef);
           const args = [];
           let bad = false;
           const argc = fnBtn.getAttribute('data-fn-argc');
