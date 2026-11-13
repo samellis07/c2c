@@ -3296,6 +3296,20 @@ function emitFunction(
             ? `Function ${fn.name} runs its server logic, but the openUrl navigation to ${clientNav.target} that follows it is not carried over (a function that also does server work cannot return client navigation). Wire that navigation by hand in the generated UI.`
             : `Function ${fn.name} runs its server logic, but the openUrl call that follows it is dropped${clientNav.reason ? ` (${clientNav.reason})` : ''}. Wire that navigation by hand in the generated UI.`,
       });
+    } else {
+      // openUrlStmtsOf only recognises a bare openUrl, or an if/elif/else
+      // whose every branch is one openUrl after plain local assigns. A nested
+      // if ahead of the branch's openUrl, a second openUrl in the same
+      // branch, a statement after the openUrl, or an openUrl ahead of the if
+      // all break that shape, so classifyClientOpenUrl returns nothing here
+      // too — the call sits in server code that did translate (e.g. a guard
+      // read) and would otherwise vanish with no record.
+      todos.push({
+        construct: 'openurl-dropped-unrecognized-branch-shape',
+        start: fn.span.start,
+        end: fn.span.end,
+        manualStep: `Function ${fn.name} runs its server logic, but an openUrl call sits in a branch shape the generator does not carry (a nested if ahead of it, more than one openUrl in the same branch, a statement after it, or an openUrl ahead of the if) and is dropped. Wire that navigation by hand in the generated UI.`,
+      });
     }
   }
   const params = fnParams(fn.signature);
