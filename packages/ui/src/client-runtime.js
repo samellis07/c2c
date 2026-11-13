@@ -3117,7 +3117,18 @@ function openUrlNav(root, url, target) {
     if (kind === 'same window') {
       if (view.location && typeof view.location.assign === 'function') view.location.assign(url);
     } else if (typeof view.open === 'function') {
-      view.open(url, kind === 'parent window' ? '_parent' : '_blank', kind === 'popup window' ? 'popup' : undefined);
+      // `_parent` targets an existing frame in the same browsing-context
+      // group rather than opening a new top-level browsing context, so
+      // there is no `window.opener` to deny and no features string to pass.
+      if (kind === 'parent window') {
+        view.open(url, '_parent');
+      } else {
+        // `noopener` (plus `noreferrer` for defense in depth) keeps the
+        // opened page from reaching back via `window.opener` — otherwise a
+        // malicious destination can rewrite this tab's location
+        // (reverse tabnabbing).
+        view.open(url, '_blank', kind === 'popup window' ? 'popup,noopener,noreferrer' : 'noopener,noreferrer');
+      }
     }
   } catch {
     /* a test document has no navigation */

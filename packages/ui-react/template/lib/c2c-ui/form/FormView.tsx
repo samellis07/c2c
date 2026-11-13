@@ -279,7 +279,9 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
         },
         openUrl: (url, target) => {
           try {
-            if (target === '_blank') view.open?.(url, '_blank');
+            // `noopener`/`noreferrer` keep the opened page from reaching
+            // back via `window.opener` (reverse tabnabbing).
+            if (target === '_blank') view.open?.(url, '_blank', 'noopener,noreferrer');
             else if (view.location) view.location.href = url;
           } catch {
             // the window is already gone
