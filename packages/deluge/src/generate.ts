@@ -4101,6 +4101,10 @@ export function replayFunctionNames(app: App): ReadonlySet<string> {
     const collections = params.map((p, i) => ({ p, i })).filter(({ p }) => /^(list|map)\b/i.test(p.type.trim()));
     if (collections.length > 1) continue;
     const coll = collections[0];
+    // A shallow duplicate shares element objects with the handler. Reject
+    // element mutations; only updates to the collection itself are replay-safe.
+    if (coll && new RegExp(`\\b(?:${coll.p.name})\\s*\\.\\s*get\\s*\\([^)]*\\)\\s*\\.\\s*(?:put|add|remove|removeElement)\\s*\\(`, 'i').test(scripts.join('\n'))) continue;
+    if (coll && new RegExp(`\\bfor\\s+each\\s+\\w+\\s+in\\s+${coll.p.name}\\b[\\s\\S]*?\\b\\w+\\s*\\.\\s*(?:put|add|remove|removeElement)\\s*\\(`, 'i').test(scripts.join('\n'))) continue;
     // Only the one list or map parameter may be updated; every other
     // parameter (and `input`) stays read-only.
     if (mutatesParameters(scripts, coll ? params.filter((_, i) => i !== coll.i) : params)) continue;
@@ -4121,7 +4125,7 @@ export function replayFunctionNames(app: App): ReadonlySet<string> {
     }
     if (!changed) break;
   }
-  const out = new Set([...names].map(([n, i]) => (i < 0 ? n : `${n}:${i}`)));
+  const out = new Set([...names].sort(([a], [b]) => a.localeCompare(b)).map(([n, i]) => (i < 0 ? n : `${n}:${i}`)));
   replayFunctionCache.set(app, out);
   return out;
 }
