@@ -262,3 +262,22 @@ test('past the row cap the read keeps ROWID order and says so in the reply', () 
   assert.match(text, /related sort not applied: more than \$\{AGGREGATE_ROW_CAP\} matching rows/);
   assert.match(text, /\.\.\.\(sortNotice \? \{ notice: sortNotice \} : \{\}\)/);
 });
+
+test('a composite part sort orders by the part column; a part with no column is counted', () => {
+  const withName = (part: string) =>
+    sortSrc('Genre', 'ascending')
+      .replace(`${field('Fine', 'number')}\n\t}`, `${field('Fine', 'number')}\n${field('Contact', 'name')}\n\t}`)
+      .replace('\t\t\tBook.Genre ascending', `\t\t\tContact.${part} ascending`);
+  const built = buildUi(deriveIr(parse(withName('prefix'))));
+  assert.equal(built.model.todos.some((t) => t.area === 'report' && t.name === 'Loans_By_Genre'), false);
+  const text = String(built.files.find((item) => String(item.data).includes('export const reportName = "Loans_By_Genre";'))!.data);
+  assert.match(text, /const sortKeys = \[\{"field":"Contact_prefix","dir":"asc","part":"Contact"\}\]/);
+  // Read access follows the composite field, not the part column.
+  assert.match(text, /readableField\(key\.head \|\| key\.part \|\| key\.field, readableFields\)/);
+  const missing = buildUi(deriveIr(parse(withName('nope'))));
+  const todo = missing.model.todos.find((t) => t.area === 'report' && t.name === 'Loans_By_Genre');
+  assert.ok(todo);
+  assert.match(todo!.manualStep ?? '', /related-field sort "Contact\.nope"/);
+  const missingText = String(missing.files.find((item) => String(item.data).includes('export const reportName = "Loans_By_Genre";'))!.data);
+  assert.equal(missingText.includes('relatedSortRead'), false);
+});

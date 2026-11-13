@@ -2882,10 +2882,10 @@ export function relatedSortKeys(
   app: App,
   formName: string | undefined,
   sortBy: readonly { field: string; order?: string }[],
-): Array<{ field: string; dir: 'asc' | 'desc'; key?: string; head?: string; form?: string; rest?: string }> | undefined {
+): Array<{ field: string; dir: 'asc' | 'desc'; key?: string; head?: string; form?: string; rest?: string; part?: string }> | undefined {
   if (!formName || !sortBy.some((item) => item.field.includes('.'))) return undefined;
   const form = app.forms.find((item) => item.name === formName);
-  const keys: Array<{ field: string; dir: 'asc' | 'desc'; key?: string; head?: string; form?: string; rest?: string }> = [];
+  const keys: Array<{ field: string; dir: 'asc' | 'desc'; key?: string; head?: string; form?: string; rest?: string; part?: string }> = [];
   for (const item of sortBy) {
     const dir = String(item.order ?? '').toLowerCase().startsWith('desc') ? 'desc' : 'asc';
     if (item.field === 'ROWID' || item.field === 'ID' || RECORD_COLUMNS.has(item.field)) {
@@ -2896,6 +2896,15 @@ export function relatedSortKeys(
     if (plain) {
       if (plain.lookup || fieldTypeRow(plain.type)?.kind !== 'column') return undefined;
       keys.push({ field: item.field, dir });
+      continue;
+    }
+    // A composite part (`Name.prefix`) is the part's own stored column
+    // (`Name_prefix`); read access follows the composite field.
+    const [head, part] = item.field.split('.');
+    const composite = part !== undefined && !part.includes('.') ? formField(form, head!) : undefined;
+    const compositeRow = composite ? fieldTypeRow(composite.type)?.id : undefined;
+    if (composite && !composite.lookup && (compositeRow === 'name' || compositeRow === 'address') && /^[A-Za-z_][A-Za-z0-9_]*$/.test(part!)) {
+      keys.push({ field: `${head}_${part}`, dir, part: head });
       continue;
     }
     const path = relatedSortPath(app, formName, item);
