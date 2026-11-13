@@ -144,7 +144,7 @@ function pageEmbedDetail(value: string): string {
     .filter((part) => part.includes('\u0001'))
     .map((part) => part.slice(0, Math.max(part.indexOf('='), 0)))
     .filter((key) => /^[A-Za-z_]\w*$/.test(key));
-  const unique = [...new Set(keys)];
+  const unique = [...new Set(keys)]; // determinism-allow: keys is query source order; Set preserves first occurrence for the guidance text
   return ` to page ${m[1]}${unique.length ? ` with Deluge values in ${unique.join(' and ')}` : ''}`;
 }
 
