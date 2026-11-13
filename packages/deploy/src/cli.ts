@@ -151,6 +151,9 @@ export function flag(args: readonly string[], name: string): string | undefined 
 export function loadSource(target: string): App {
   const st = statSync(target, { throwIfNoEntry: false });
   if (!st) throw new Error(`no such file or directory: ${target}`);
+  if (st.isFile() && !target.toLowerCase().endsWith('.ds')) {
+    throw new Error(`${target} is not a Creator .ds application export (no application block)`);
+  }
   return st.isDirectory() ? parseProject(target).ir : parseFileWithSidecars(target).ir;
 }
 

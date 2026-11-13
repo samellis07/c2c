@@ -454,7 +454,7 @@ function writeRateBudget(tables: SchemaTable[], source?: readonly SourceTableDat
       detail:
         `no source row counts — the dev-api-calls budget carries the missing-source warning; ` +
         `the stated Development write rate is ${cap} writes/min/table (datastore.write_requests_per_minute, unverified)`,
-      fix: 're-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; run c2c probe P-RATE before a large load',
+      fix: 're-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; measure a representative load before a large migration',
     };
   }
   const calls = new Map<string, number>();
@@ -478,7 +478,7 @@ function writeRateBudget(tables: SchemaTable[], source?: readonly SourceTableDat
         `the mover sends ${listed} back-to-back — at the stated Development write rate of ${cap} writes/min/table ` +
         `(datastore.write_requests_per_minute, unverified) that is a minute or more at the cap per table${missingNote}; ` +
         `the mover does not pace writes and a refused batch stops the load`,
-      fix: 'run c2c probe P-RATE before the load and re-run the mover on a refusal — it checkpoints, so a re-run resumes; pace or stage the load if 429s fire',
+      fix: 'measure a representative load before starting; re-run the mover on a refusal — it checkpoints, so a re-run resumes; pace or stage the load if 429s fire',
     };
   }
   const estimate = [...calls.entries()].map(([name, count]) => describe(name, count)).join(', ') || 'no measured tables';
@@ -487,7 +487,7 @@ function writeRateBudget(tables: SchemaTable[], source?: readonly SourceTableDat
       id: 'dev-write-rate',
       status: 'pass',
       detail: `${estimate}; no source rows for ${unmeasured.join(', ')} — counted in the dev-api-calls warning (the stated Development write rate is ${cap} writes/min/table, datastore.write_requests_per_minute, unverified)`,
-      fix: 'export the missing tables under --source-* so the estimate counts them; run c2c probe P-RATE before a large load',
+      fix: 'export the missing tables under --source-* so the estimate counts them; measure a representative load before a large migration',
     };
   }
   return {
@@ -743,7 +743,7 @@ export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTabl
       ? `widest generated read of ${widest.name} selects ${emittedWidth} columns per statement (docs ${SELECT_WIDTH_DOC}, unverified limit ${SELECT_WIDTH_UNVERIFIED}; confirm with P-WIDTH)` +
         (width > emittedWidth ? `; the ${width}-column table is staged into ${Math.ceil(width / SELECT_WIDTH_UNVERIFIED)} reads` : '')
       : `widest generated read selects ${emittedWidth} columns (docs ${SELECT_WIDTH_DOC}, unverified limit ${SELECT_WIDTH_UNVERIFIED}; confirm with P-WIDTH)`,
-    ...(overDoc ? { fix: 'run c2c probe P-WIDTH before a wider single SELECT' } : {}),
+    ...(overDoc ? { fix: 'use paged queries or narrower selects before a wider single SELECT' } : {}),
   });
   budgets.push({
     id: PLAN_BUDGET_IDS[4],
