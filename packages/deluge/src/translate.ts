@@ -2539,10 +2539,9 @@ function elementSafe(code: string): boolean {
       continue;
     }
     const allow = ELEMENT_SHIM_ALLOW.get(m[1]!);
-    if ((m[1] === 'list' || m[1] === 'map') && fn === 'put' && !setsFreshLocal(code, m.index! + m[0].length)) return false;
     if (allow !== true && !allow?.has(fn)) return false;
   }
-  return true;
+  return mutatesOnlyFreshLocals(code);
 }
 
 const THISAPP_CALL_PATH = /(\bshim\.thisapp\.call\s*\(\s*ctx\s*,\s*)(\[[^\]]*\])/g;
@@ -2573,16 +2572,13 @@ export function emittedThisappCalls(code: string): string[][] | null {
  * the generator's transitive read-only classifier uses on emitted function
  * bodies.
  */
-export function emittedReadOnly(code: string, isReadOnly: (path: readonly string[]) => boolean): boolean {
+export function emittedReadOnly(code: string, isReadOnly: (path: readonly string[]) => boolean, mutableParams: readonly string[] = []): boolean {
   const calls = emittedThisappCalls(code);
   if (calls === null || calls.some((path) => !isReadOnly(path))) return false;
   for (const m of code.matchAll(SHIM_CALL)) {
     const fn = m[2];
     if (m[1] === 'thisapp' && fn === 'call') continue;
-    if (m[1] === 'set' && fn === undefined) {
-      if (!setsFreshLocal(code, m.index! + m[0].length)) return false;
-      continue;
-    }
+    if (m[1] === 'set' && fn === undefined) continue;
     if (fn === undefined) {
       if (!ELEMENT_SHIM_ALLOW_SINGLE.has(m[1]!)) return false;
       continue;
@@ -2590,26 +2586,88 @@ export function emittedReadOnly(code: string, isReadOnly: (path: readonly string
     const allow = ELEMENT_SHIM_ALLOW.get(m[1]!);
     if (allow !== true && !allow?.has(fn)) return false;
   }
-  return true;
+  return mutatesOnlyFreshLocals(code, mutableParams);
 }
 
 /**
- * The `shim.set(` whose arguments start at `at` writes into a collection the
- * body itself created: its receiver is a plain local declared once as a fresh
- * map or list literal and never rebound. Anything else (a loop variable over a
- * fetched record's rows, a parameter, a rebound or nested value) may be a
- * stored row, and setting its field is a write in the source app.
+ * `shim.list.*` functions that only read their receiver. Every other
+ * `shim.list.*` call, and `shim.set`, is treated as a write to its first
+ * argument, so a new shim export is a write until it is listed here.
  */
-function setsFreshLocal(code: string, at: number): boolean {
-  const recv = /^\s*([A-Za-z_$][\w$]*)\s*,/.exec(code.slice(at))?.[1];
-  if (!recv) return false;
-  // Source echo comments (`// Deluge: m = Map()`) are not bindings.
-  code = code.replace(/^\s*\/\/.*$/gm, '').replace(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, '');
-  const esc = recv.replace(/\$/g, '\\$');
-  const decls = code.match(new RegExp(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`, 'g')) ?? [];
-  const fresh = code.match(new RegExp(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*[\\[{]`, 'g')) ?? [];
-  const binds = code.match(new RegExp(`(?:^|[^\\w$.])${esc}\\s*=(?!=)`, 'g')) ?? [];
-  return decls.length === 1 && fresh.length === 1 && binds.length === 1;
+export const LIST_SHIM_READERS: ReadonlySet<string> = new Set([
+  'aggregate',
+  'column',
+  'contains',
+  'containsKey',
+  'containsValue',
+  'distinct',
+  'duplicate',
+  'get',
+  'getJson',
+  'getKey',
+  'getLastKey',
+  'indexOf',
+  'intersect',
+  'isEmpty',
+  'keys',
+  'lastIndexOf',
+  'length',
+  'notContains',
+  'numberList',
+  'size',
+  'sortKey',
+  'subList',
+  'values',
+]);
+
+/** The first argument of the call whose `(` was just consumed at `at`, or null if it does not parse. */
+function firstArgument(code: string, at: number): string | null {
+  let depth = 0;
+  let quote = '';
+  for (let i = at; i < code.length; i++) {
+    const c = code[i]!;
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'" || c === '`') quote = c;
+    else if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) return code.slice(at, i).trim();
+      depth--;
+    } else if (c === ',' && depth === 0) return code.slice(at, i).trim();
+  }
+  return null;
+}
+
+/**
+ * Every write to a list or map in emitted code (`shim.set`, or any
+ * `shim.list.*` call that is not in {@link LIST_SHIM_READERS}) lands on a
+ * collection the body itself created, or on one of `mutableParams`. The
+ * receiver must be a plain identifier declared exactly once, bound once to a
+ * fresh `[` / `{` literal and never rebound; a parameter in `mutableParams`
+ * must never be rebound. Anything else (a fetched record or row, a loop
+ * variable, an alias, a `get(...)` chain, a parameter) may be shared with a
+ * stored row or the caller, so the body is not read-only.
+ */
+export function mutatesOnlyFreshLocals(code: string, mutableParams: readonly string[] = []): boolean {
+  const plain = code.replace(/^\s*\/\/.*$/gm, '').replace(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, '""');
+  const count = (re: string): number => plain.match(new RegExp(re, 'g'))?.length ?? 0;
+  for (const m of code.matchAll(SHIM_CALL)) {
+    const isSet = m[1] === 'set' && m[2] === undefined;
+    if (!isSet && !(m[1] === 'list' && m[2] !== undefined && !LIST_SHIM_READERS.has(m[2]))) continue;
+    const recv = firstArgument(code, m.index! + m[0].length);
+    if (!recv || !/^[A-Za-z_$][\w$]*$/.test(recv)) return false;
+    const esc = recv.replace(/\$/g, '\\$');
+    const bind = `(?:^|[^\\w$.])${esc}\\s*=(?!=)`;
+    if (mutableParams.includes(recv)) {
+      if (count(bind) > 0 || count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`) > 0) return false;
+      continue;
+    }
+    const decls = count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`);
+    const fresh = count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*[\\[{]`);
+    if (decls !== 1 || fresh !== 1 || count(bind) !== 1) return false;
+  }
+  return true;
 }
 
 const CLIENT_CALL_SHIM_ALLOW: ReadonlyMap<string, ReadonlySet<string> | true> = (() => {
