@@ -12,7 +12,7 @@ import { deriveIr, emptyApp, headerWords, isGroup, parse, parseFile, parseProjec
 import { createRuntime, LIMITS } from '../../shims/src/runtime.js';
 import { RecordAccessError } from '../../shims/src/access.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
-import { aioLibraryModule, conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, FORM_EVENT_SERVER_UNINVOKED, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
+import { accessPolicyFor, aioLibraryModule, conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, FORM_EVENT_SERVER_UNINVOKED, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
 import { mutatesParameters } from '../src/param-mutation.js';
 
 function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
@@ -1485,6 +1485,114 @@ test('prefetch embeds the profile field grant and the report record filter', () 
   assert.equal(access.profiles.Staff.Orders.recordFilter.value.__bind, 'loginUser');
   assert.equal(JSON.stringify(access).includes('Secret'), false);
   check(prefetch.source, 'prefetch-auth.mjs');
+});
+
+/** A top-level field flagged `private`/`personal data`/`encrypt`/`encryptdata` (docs/field-privacy.md). */
+function privacyField(name: string, key: string): App['forms'][number]['fields'][number] {
+  return { ...plainField(name), properties: [{ key, value: 'true', span: Z }] };
+}
+
+const PATIENT_REPORT: App['reports'][number] = {
+  name: 'Patient_View',
+  type: 'list',
+  modifiers: [],
+  form: 'Patient',
+  flags: [],
+  properties: [],
+  columns: [],
+  customActions: [],
+  conditionalFormats: [],
+  filters: [],
+  groupBy: [],
+  sortBy: [],
+  blocks: [],
+  views: [],
+  span: Z,
+};
+
+test('accessPolicyFor denies a privacy-flagged field by default and allows it for an explicit .ds grant, Administrator, and a view-only owner-scoped grant', () => {
+  const withProfiles = (modules: App['profiles'][number]['modules'], extra: App['profiles'] = []): App =>
+    app({
+      forms: [plainForm('Patient', [plainField('Name'), privacyField('SSN', 'personal data')])],
+      reports: [PATIENT_REPORT],
+      profiles: [
+        { name: 'Staff', type: 'Users_Permissions', properties: [], modules, span: Z },
+        {
+          name: 'Administrator',
+          type: 'Users_Permissions',
+          properties: [],
+          description: 'This profile has all the permissions by default.',
+          modules: [],
+          span: Z,
+        },
+        ...extra,
+      ],
+    });
+
+  // Default: View All, no per-field permissions at all — denied.
+  const defaultDenied = accessPolicyFor(
+    withProfiles([{ component: 'Patient', properties: [{ key: 'enabled', value: 'Viewall', span: Z }], reports: [], fields: [], span: Z }]),
+  );
+  assert.deepEqual(defaultDenied.profiles.Staff!.Patient!.fields, ['Name']);
+  assert.equal(defaultDenied.profiles.Administrator!.Patient!.fields, undefined, 'Administrator has no field restriction at all');
+
+  // An explicit .ds grant (FieldPermissions visibility:true) overrides the default denial.
+  const explicitGrant = accessPolicyFor(
+    withProfiles([
+      {
+        component: 'Patient',
+        properties: [{ key: 'enabled', value: 'Viewall', span: Z }],
+        reports: [],
+        fields: [
+          { field: 'Name', flags: { visibility: 'true' }, span: Z },
+          { field: 'SSN', flags: { visibility: 'true' }, span: Z },
+        ],
+        span: Z,
+      },
+    ]),
+  );
+  assert.deepEqual(explicitGrant.profiles.Staff!.Patient!.fields, ['Name', 'SSN']);
+
+  // A view-only owner-scoped grant (no View All): every row it ever reads is
+  // the caller's own, so the field is exempt.
+  const portalModule: App['profiles'][number]['modules'][number] = {
+    component: 'Patient',
+    properties: [
+      { key: 'enabled', value: 'true', span: Z },
+      { key: 'allFieldsVisible', value: 'true', span: Z },
+    ],
+    reports: [{ key: 'Patient_View', value: '{"View"}', span: Z }],
+    fields: [],
+    span: Z,
+  };
+  const ownerView = accessPolicyFor(
+    withProfiles([{ component: 'Patient', properties: [{ key: 'enabled', value: 'Viewall', span: Z }], reports: [], fields: [], span: Z }], [
+      { name: 'Portal', type: 'Customer_Portal', properties: [], modules: [portalModule], span: Z },
+    ]),
+  );
+  // allFieldsVisible with nothing explicitly hidden is the "no restriction at
+  // all" shortcut (absent `fields` means every field): the owner-scoped
+  // exemption left SSN out of the denial set, so nothing narrowed it to a list.
+  assert.equal(ownerView.profiles.Portal!.Patient!.fields, undefined, 'owner-scoped (no View All) grant is exempt, including SSN');
+  assert.equal(ownerView.profiles.Portal!.Patient!.ownerScope, 'view');
+
+  // The same module with no owner sharing (an ordinary internal profile,
+  // View All instead) is denied SSN, via the same allFieldsVisible shortcut
+  // now narrowed to an explicit list — proving the exemption above is really
+  // about ownerScope, not something else about this module's shape.
+  const notOwnerScoped = accessPolicyFor(withProfiles([{ ...portalModule, properties: portalModule.properties.map((p) => (p.key === 'enabled' ? { ...p, value: 'Viewall' } : p)) }]));
+  assert.deepEqual(notOwnerScoped.profiles.Staff!.Patient!.fields, ['Name']);
+
+  // View All without Modify All ("modify" owner scope, via a role-hierarchy
+  // shared form) only narrows rows for a modify intent: an ordinary read
+  // sees every row, so the field stays denied.
+  const roleShared = withProfiles([
+    { component: 'Patient', properties: [{ key: 'enabled', value: 'Viewall', span: Z }], reports: [{ key: 'Any', value: '{"Edit"}', span: Z }], fields: [], span: Z },
+  ]);
+  roleShared.shareSettings = [{ key: 'role Hierarchy', value: '{Patient}', span: Z }];
+  const ownerModify = accessPolicyFor(roleShared);
+  assert.equal(ownerModify.profiles.Staff!.Patient!.ownerScope, 'modify', 'sanity: this grant really is modify-scoped');
+  assert.deepEqual(ownerModify.profiles.Staff!.Patient!.fields, ['Name'], 'a modify-scoped grant sees every row on an ordinary read, so SSN stays denied');
 });
 
 test('schedules generate deterministic Catalyst jobs: pool and cron metadata', () => {
