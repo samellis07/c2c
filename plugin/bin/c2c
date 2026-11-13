@@ -52,7 +52,7 @@ if ! node_supported "$NODE_V"; then
 fi
 
 if [ ! -f "$ENTRY" ]; then
-  echo "c2c: the vendored converter is missing ($ENTRY); this command needs a c2c checkout. Run it from a c2c checkout or reinstall the plugin." >&2
+  echo "c2c: the vendored converter is missing ($ENTRY). Reinstall the c2c plugin." >&2
   exit 6
 fi
 
