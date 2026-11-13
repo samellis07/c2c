@@ -2792,6 +2792,52 @@ export function actionNavigationLifted(app: App, fn: FunctionDef): boolean {
   return liftTrailingActionNavigation(app, fn) !== undefined || delegatesToLiftableNavigation(app, fn) !== undefined;
 }
 
+/**
+ * Why `fn`'s navigation stays a counted manual item instead of being lifted
+ * — the same resolution `actionDropsOpenUrl` (packages/ui/src/model.ts)
+ * follows (direct, then one hop of delegation), but explaining the specific
+ * gap instead of a generic "wire it by hand": a second openUrl earlier in
+ * the body, a target classifyOpenUrlStmt refused and why, or the shape not
+ * being analyzable at all. Returns undefined only when `fn` has no openUrl
+ * to explain (the caller should not have reached here).
+ */
+export function actionNavigationDropReason(app: App, fn: FunctionDef): string | undefined {
+  if (fn.deluge.length !== 1) return 'its workflow spans more than one event block, so the navigation inside it cannot be analyzed';
+  let targetFn = fn;
+  let body: Stmt[];
+  try {
+    body = parse(fn.deluge[0]!.text).body;
+  } catch {
+    return 'its workflow did not parse, so the navigation inside it cannot be analyzed';
+  }
+  if (!containsOpenUrlStmt(body)) {
+    // The openUrl is not in THIS body at all: the same one-hop delegation
+    // actionDropsOpenUrl follows (a "for each record" wrapper that only
+    // calls another function, which is where the real openUrl lives).
+    const stmt = body.length === 1 ? body[0] : undefined;
+    const call = stmt?.kind === 'expr' && stmt.expr.kind === 'call' ? stmt.expr : undefined;
+    const calleeName = call ? calleePathName(call.callee) : undefined;
+    const calleeFn = calleeName ? app.functions.find((item) => item.name.toLowerCase() === calleeName.toLowerCase()) : undefined;
+    if (!calleeFn || calleeFn.deluge.length !== 1) return 'its workflow spans more than one event block, so the navigation inside it cannot be analyzed';
+    targetFn = calleeFn;
+    try {
+      body = parse(calleeFn.deluge[0]!.text).body;
+    } catch {
+      return 'its workflow did not parse, so the navigation inside it cannot be analyzed';
+    }
+  }
+  if (containsOpenUrlStmt(body.slice(0, -1))) return 'it calls openUrl more than once, and only its last navigation could ever be carried safely';
+  const units = trailingOpenUrlUnits(body);
+  if (!units?.length) return "its navigation is not the workflow's own last action (or branch of actions), so it cannot be told apart from server work that must keep running first";
+  const classified = openUrlStmtsOf(trailingLocalsSlice(body));
+  if (!classified || classified.length !== units.length) return 'one of its branches reads a local value no classification could resolve safely';
+  for (const unit of classified) {
+    const result = classifyOpenUrlStmt(app, targetFn, unit, new Map());
+    if (result.kind === 'unsupported') return result.reason ?? 'its target is not a supported own-app form, report, or page route';
+  }
+  return undefined;
+}
+
 /** The patched text and original-span coverage rows for `fn`, if `emitFunction` lifts its navigation (either directly or through one hop of delegation) — else undefined. */
 function actionNavigationLift(app: App, fn: FunctionDef): { text: string; liftedSpans: { kind: string; start: number; end: number }[] } | undefined {
   return liftTrailingActionNavigation(app, fn) ?? delegatesToLiftableNavigation(app, fn);
