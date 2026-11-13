@@ -192,8 +192,12 @@ export interface OfflinePlan {
   counts: {
     /** Creator source forms before schema expansion into child/system tables. */
     forms: number;
-    /** Creator source fields before composites and system columns expand the stored schema. */
-    fields: number;
+    /**
+     * Creator source fields, one per form field, before `c2c schema` expands composites,
+     * subform rows and system columns into stored columns. Not comparable to `c2c schema
+     * --json`'s `summary.fields`, which counts the expanded, generated field outcomes.
+     */
+    sourceFields: number;
     /** Creator source workflows before compatible event handlers are merged into generated routes. */
     workflows: number;
     tables: number;
@@ -1695,7 +1699,7 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
     doctor: 'not-run',
     counts: {
       forms: app.forms.length,
-      fields: app.forms.reduce((count, form) => count + form.fields.length, 0),
+      sourceFields: app.forms.reduce((count, form) => count + form.fields.length, 0),
       workflows: app.workflows.length,
       tables: schema.tables.length,
       dataStoreTables: schema.tables.filter((table) => !table.nosql).length,

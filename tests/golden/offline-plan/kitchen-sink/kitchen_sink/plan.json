@@ -8,7 +8,7 @@
   "doctor": "not-run",
   "counts": {
     "forms": 6,
-    "fields": 43,
+    "sourceFields": 43,
     "workflows": 12,
     "tables": 9,
     "dataStoreTables": 9,
