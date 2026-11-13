@@ -277,6 +277,13 @@ export interface TranslateOptions {
    */
   clientCallFunctions?: readonly string[];
   /**
+   * Dotted `thisapp` callees whose emitted bodies only read, apart from
+   * updating a list or map passed as a parameter. The prefetch may replay
+   * `L = thisapp.f(L, …)` inside a list-building loop: the loop runs on a copy
+   * of `L`, so the parameter update changes only that copy.
+   */
+  replayFunctions?: readonly string[];
+  /**
    * Names the translation unit for server-condition naming: the workflow's
    * form and script. A client condition that needs a server read is compiled
    * into a `c2cCond_*` function the browser calls through the client-call
@@ -641,7 +648,9 @@ interface Scope {
    */
   replayBarrier: number;
   /** List updates (`L.add(x)`) in the `for each` body being translated, for {@link loopListUpdate}. */
-  listUpdates?: { name: string; value: Fx; scalar?: boolean }[];
+  listUpdates?: { name: string; value: Fx; scalar?: boolean; viaCall?: boolean; local?: boolean }[];
+  /** See {@link TranslateOptions.replayFunctions}. */
+  replayFunctions: Set<string>;
   /** `if` / `else if` tests in that body, for {@link loopListUpdate}. */
   listUpdateTests?: Fx[];
   /** Plain local assignments in that body, for {@link loopListUpdate}. */
@@ -2906,6 +2915,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     formNames: new Set(options.formNames ?? []),
     functions: new Set((options.functions ?? []).map((n) => n.toLowerCase())),
     clientCallFunctions: new Set(options.clientCallFunctions ?? []),
+    replayFunctions: new Set(options.replayFunctions ?? []),
     clientCallFunctionsFolded: new Map(
       [...(options.clientCallFunctions ?? [])]
         .reduce((acc, n) => acc.set(n.toLowerCase(), acc.has(n.toLowerCase()) ? '' : n), new Map<string, string>())
@@ -4087,7 +4097,14 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     // A scalar that reads its own earlier value (`tot = tot + Lines[...].sum(Qty)`)
     // is a loop-carried accumulator, not a fresh temp: the loop replay carries
     // it from the binding in force before the loop.
-    if (
+    if (selfRef && scope.listUpdates && listCallUpdate(name, value, scope)) {
+      scope.listUpdates.push({ name, value, viaCall: true });
+    } else if (selfRef && scope.listUpdates && localScalarCarry(name, value, scope)) {
+      // `n = n + 1`, `s = s + "…" + n`: a loop-carried local computed only from
+      // locals and literals. The replayed loop carries it like a server
+      // accumulator, so a list the same loop builds can still be replayed.
+      scope.listUpdates.push({ name, value, scalar: true, local: true });
+    } else if (
       selfRef &&
       value.serverOnly &&
       !rowScalarOnClient(value, scope) &&
@@ -4400,6 +4417,65 @@ function listUpdateBinding(name: string, prior: Binding, code: string, reads: re
   };
 }
 
+/**
+ * `L = thisapp.f(L, …)` on a local list, where every `thisapp` call reaches a
+ * function in `replayFunctions` and every other call is an allowlisted read.
+ * Inside a list-building loop this is an update of `L` the replay can run on
+ * its copy.
+ */
+function listCallUpdate(name: string, value: Fx, scope: Scope): boolean {
+  if (!value.appFunction || value.todo || value.unboundReads.length) return false;
+  if (!(scope.list.has(name) || scope.map.has(name)) || heldElsewhere(name, scope)) return false;
+  const head = /^await shim\.thisapp\.call\(ctx, (\[[^\]]*\]), \[/.exec(value.code);
+  if (!head) return false;
+  const calls = emittedThisappCalls(value.code);
+  if (calls?.length !== 1) return false;
+  // The outer call may update only its one list or map parameter, and the
+  // loop's own list (the copy the replay runs on) must be the argument there.
+  const callee = (JSON.parse(head[1]!) as string[]).join('.');
+  const updates = [...scope.replayFunctions].find((f) => f.startsWith(`${callee}:`));
+  if (updates) {
+    const args = topLevelArgs(value.code.slice(head[0].length));
+    if (args?.[Number(updates.slice(callee.length + 1))]?.trim() !== name) return false;
+  } else if (!scope.replayFunctions.has(callee)) return false;
+  return emittedReadOnly(value.code, (path) => path.join('.') === callee);
+}
+
+/** The comma-separated arguments of an array literal whose `[` was just consumed, or null. */
+function topLevelArgs(code: string): string[] | null {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = '';
+  let quote = '';
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i]!;
+    if (quote) {
+      cur += c;
+      if (c === '\\') cur += code[++i] ?? '';
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') quote = c;
+    else if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === '}' || (c === ']' && depth > 0)) depth--;
+    else if (c === ']' && depth === 0) return [...out, cur];
+    else if (c === ',' && depth === 0) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += c;
+  }
+  return null;
+}
+
+/** A self-update of a plain local scalar from locals and literals only: no shim call at all. */
+function localScalarCarry(name: string, value: Fx, scope: Scope): boolean {
+  if (value.serverOnly || value.appFunction || value.todo || value.sideEffect || value.unboundReads.length) return false;
+  if (!scope.bindings.has(name) || scope.list.has(name) || scope.map.has(name) || scope.query.has(name) || scope.row.has(name)) return false;
+  return !/\bshim\./.test(value.code) && !/\bawait\b/.test(value.code);
+}
+
 /** The update reads nothing the prefetch must not run: no write, send, app call, or name bound only later. */
 function listUpdateReadOnly(value: Fx, loopVar?: string): boolean {
   return (
@@ -4543,7 +4619,7 @@ function loopListUpdate(
   s: Extract<Stmt, { kind: 'forEach' }>,
   col: Fx,
   colRefused: boolean,
-  updates: readonly { name: string; value: Fx; scalar?: boolean }[],
+  updates: readonly { name: string; value: Fx; scalar?: boolean; viaCall?: boolean; local?: boolean }[],
   tests: readonly Fx[],
   temps: readonly { name: string; value: Fx }[],
   serverBody: string,
@@ -4561,12 +4637,19 @@ function loopListUpdate(
   const scalarNames = new Set(updates.filter((u) => u.scalar).map((u) => u.name));
   const scalarLeaves = tempLeaves.filter((st) => st.kind === 'assign' && st.target.kind === 'name' && scalarNames.has(st.target.name));
   const listUpdates = updates.filter((u) => !u.scalar);
-  if (!updates.length || listUpdates.length + tempLeaves.length !== stmts.length || stmts.some((st) => st.kind !== 'expr' && st.kind !== 'assign')) return null;
+  // A local counter rides along only with a list the loop builds; a loop that
+  // only counts locally stays on the client.
+  if (updates.some((u) => u.local) && !listUpdates.length) return null;
+  // `L = thisapp.f(L, …)` is an assignment leaf that is also a list update.
+  const callNames = new Set(updates.filter((u) => u.viaCall).map((u) => u.name));
+  const callLeaves = tempLeaves.filter((st) => st.kind === 'assign' && st.target.kind === 'name' && callNames.has(st.target.name));
+  if (callLeaves.length !== updates.filter((u) => u.viaCall).length) return null;
+  if (!updates.length || listUpdates.length + tempLeaves.length - callLeaves.length !== stmts.length || stmts.some((st) => st.kind !== 'expr' && st.kind !== 'assign')) return null;
   if (scalarLeaves.length !== updates.length - listUpdates.length) return null;
   // Each temp is a fresh local: a pure read that is neither the list, the loop
   // variable, nor a value carried from an earlier iteration.
   const tempNames = new Set(temps.map((t) => t.name));
-  const plainLeaves = tempLeaves.filter((st) => !scalarLeaves.includes(st));
+  const plainLeaves = tempLeaves.filter((st) => !scalarLeaves.includes(st) && !callLeaves.includes(st));
   if (temps.length !== plainLeaves.length || plainLeaves.some((st) => st.kind !== 'assign' || st.op !== '=' || st.target.kind !== 'name')) return null;
   const names = [...new Set(updates.map((u) => u.name))];
   const name = names[0]!;
@@ -4579,7 +4662,7 @@ function loopListUpdate(
     if (scalarNames.has(n) && updates.some((u) => u.name === n && !u.scalar)) return null;
   }
   if (col.todo || col.appFunction || col.sideEffect || col.unboundReads.length || names.some((n) => col.reads.includes(n)) || NON_READ_EFFECT.test(col.code) || staleFx(col, scope)) return null;
-  if (!updates.every((u) => listUpdateReadOnly(u.value, s.name))) return null;
+  if (!updates.every((u) => u.viaCall || listUpdateReadOnly(u.value, s.name))) return null;
   if (!tests.every((t) => listUpdateReadOnly(t, s.name) && !staleFx(t, scope))) return null;
   if (names.some((n) => tempNames.has(n)) || tempNames.has(s.name) || Array.from(tempNames).sort().some((t) => before.has(t))) return null;
   if (!temps.every((t) => listUpdateReadOnly(t.value, s.name) && !staleFx(t.value, scope) && !t.value.reads.includes(t.name) && !names.some((n) => t.value.reads.includes(n)))) return null;
@@ -4610,6 +4693,9 @@ function loopListUpdate(
   // emits those first.
   const all = names.length > 1 ? [...reads, ...names] : reads;
   const rebound = names.map((n, i) => listUpdateBinding(n, before.get(n)!, ids.length === 1 ? call : `(${call})[${i}]`, all, stateReads, before, scope));
+  // A replayed body that calls a read-only function is a read: the replay
+  // checks it with the `thisapp.call` rewritten, like any read-only call binding.
+  if (callNames.size) for (const b of rebound) b.readOnlyCalls = true;
   names.forEach((n, i) => scope.bindings.set(n, rebound[i]!));
   return name;
 }
