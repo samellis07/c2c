@@ -1916,19 +1916,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
     if (allowedDays !== undefined && !isEveryWeekday(allowedDays)) {
       const parsedDays = allowedDays.split(',').map((day) => Number(day.trim()));
       const validDays = parsedDays.length === new Set(parsedDays).size && parsedDays.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
-      if (validDays) ui.allowedDays = parsedDays;
-      const name = `${formName}.${field.name} property alloweddays`;
-      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-        todos.push({
-          area: 'field',
-          name,
-          reason: validDays
-            ? `Field ${field.name} restricts selectable weekdays to \`${allowedDays}\`; the generated client validates this, but the generated server write path does not re-check it.`
-            : `Field ${field.name} has malformed or duplicate allowed weekdays \`${allowedDays}\`; the generated field cannot safely prove this restriction.`,
-          manualStep: validDays
-            ? `Add server-side validation so ${field.name} only accepts the Creator-allowed days (\`${allowedDays}\`); only client-side validation is generated.`
-            : `Correct the malformed or duplicate Creator allowed weekdays (\`${allowedDays}\`) and add client/server validation before accepting writes.`,
-        });
+      if (validDays) {
+        // The generated client and the generated write path both refuse a
+        // date on another weekday (write schema `allowedDays`).
+        ui.allowedDays = parsedDays;
+      } else {
+        const name = `${formName}.${field.name} property alloweddays`;
+        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+          todos.push({
+            area: 'field',
+            name,
+            reason: `Field ${field.name} has malformed or duplicate allowed weekdays \`${allowedDays}\`; the generated field cannot safely prove this restriction.`,
+            manualStep: `Correct the malformed or duplicate Creator allowed weekdays (\`${allowedDays}\`) and add client/server validation before accepting writes.`,
+          });
+        }
       }
     }
   }

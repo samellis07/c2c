@@ -906,15 +906,19 @@ function imageTargetProved(text: string, ui: UiField | undefined): boolean {
 }
 
 /**
- * `alloweddays = 0,1,2,3,4,5,6` (every weekday) is the Creator default. The
- * generated date and datetime widgets enforce the restriction client-side, but
- * the generated write path does not re-check it server-side. A restricted set
- * therefore remains a counted manual step.
+ * `alloweddays` restricts the weekdays a date or datetime may fall on. The
+ * every-weekday set is the Creator default. A well-formed restricted set is
+ * carried on the UI field (`allowedDays`): the generated client refuses
+ * another day and the generated write schema carries the same list, so the
+ * write path refuses it too (`weekday-not-allowed`). A malformed or
+ * duplicate list is not proved and stays a counted manual step.
  */
 function allowedDaysProved(text: string, ui: UiField | undefined): boolean {
   if (ui?.widget !== 'date' && ui?.widget !== 'datetime') return false;
   const days = new Set(text.split(',').map((day) => day.trim()));
-  return days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day));
+  if (days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day))) return true;
+  const listed = text.split(',').map((day) => Number(day.trim()));
+  return !!ui.allowedDays?.length && listed.length === ui.allowedDays.length && listed.every((day, index) => ui.allowedDays![index] === day);
 }
 
 /**

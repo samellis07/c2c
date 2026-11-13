@@ -212,6 +212,13 @@ export interface WriteField {
    * Absent when the field has no initial value or a dynamic one.
    */
   defaultValue?: string;
+  /**
+   * Creator `alloweddays` on a date or datetime leaf: the weekdays (0 =
+   * Sunday … 6 = Saturday) a value may fall on. A posted date on another
+   * weekday is refused as `weekday-not-allowed`, as the client refuses it.
+   * Only the client-facing write schema carries it.
+   */
+  allowedDays?: readonly number[];
 }
 
 /**
@@ -533,6 +540,7 @@ interface DepthField {
   choices?: readonly string[];
   othersOption?: boolean;
   required?: boolean;
+  allowedDays?: readonly number[];
   children: DepthField[];
 }
 
@@ -579,6 +587,7 @@ function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthFiel
     ...(field.choices?.length ? { choices: field.choices } : {}),
     ...(field.othersOption ? { othersOption: true } : {}),
     ...(field.required ? { required: true } : {}),
+    ...(field.allowedDays?.length ? { allowedDays: field.allowedDays } : {}),
     children: (field.fields ?? []).map((child) => toDepth(child, readonlyNames)),
   };
 }
@@ -937,12 +946,15 @@ function screenLeaf(form: string, dotted: string, field: DepthField, value: unkn
     case 'date': {
       const text = typeof value === 'string' ? value : '';
       const serial = /^(\d{4}-\d{2}-\d{2})T00:00:00$/.exec(text.trim());
-      if (normalizeDate(serial ? serial[1]! : text).ok) return value;
+      const date = normalizeDate(serial ? serial[1]! : text);
+      if (date.ok) return screenWeekday(form, field, date.value, value);
       throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
     }
-    case 'datetime':
-      if (typeof value === 'string' && normalizeDateTime(value).ok) return value;
+    case 'datetime': {
+      const stamp = typeof value === 'string' ? normalizeDateTime(value) : { ok: false as const };
+      if (stamp.ok) return screenWeekday(form, field, stamp.value.slice(0, 10), value);
       throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
+    }
     case 'time':
       if (typeof value === 'string' && validClock(value)) return value;
       throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
@@ -952,6 +964,20 @@ function screenLeaf(form: string, dotted: string, field: DepthField, value: unkn
     default:
       return value;
   }
+}
+
+/**
+ * Creator `alloweddays`: the posted calendar day (yyyy-MM-dd, already
+ * format-checked) must fall on one of the field's weekdays. The weekday is
+ * the calendar day's own, independent of any time zone, as the client
+ * computes it.
+ */
+function screenWeekday(form: string, field: DepthField, ymd: string, value: unknown): unknown {
+  if (!field.allowedDays?.length) return value;
+  const [year, month, day] = ymd.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year!, month! - 1, day!)).getUTCDay();
+  if (field.allowedDays.includes(weekday)) return value;
+  throw new WriteRuleError(form, [{ column: field.name, rule: 'weekday-not-allowed' }]);
 }
 
 /** `HH:mm` or `HH:mm:ss`, the only clock text a `type = time` control posts. */
