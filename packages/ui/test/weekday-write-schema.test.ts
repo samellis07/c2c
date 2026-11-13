@@ -33,8 +33,10 @@ test('a restricted weekday set reaches the generated write schema', () => {
   assert.equal(built.model.todos.some((t) => t.name === 'Leave.From_Date property alloweddays'), false);
 });
 
-test('a malformed weekday set is not carried and stays a manual step', () => {
-  const built = buildUi(deriveIr(parse(source('1,1'))));
-  assert.equal(built.files.some((file) => file.path.startsWith('functions/') && String(file.data).includes('"allowedDays"')), false);
-  assert.equal(built.model.todos.some((t) => t.name === 'Leave.From_Date property alloweddays'), true);
+test('malformed weekday sets are not carried and stay manual steps', () => {
+  for (const days of ['1,1', '1,2,', '01,2', '1.0,2']) {
+    const built = buildUi(deriveIr(parse(source(days))));
+    assert.equal(built.files.some((file) => file.path.startsWith('functions/') && String(file.data).includes('"allowedDays"')), false, days);
+    assert.equal(built.model.todos.some((t) => t.name === 'Leave.From_Date property alloweddays'), true, days);
+  }
 });

@@ -20,6 +20,7 @@ import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '
 import { criteriaHasTodo, sealRelativeCriteria, type Criteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
+import { parseAllowedDays } from '../../shims/src/write-rules.js';
 import { derivedFieldColumns, isMultiChoiceField } from '../../schema/src/generator.js';
 import {
   droppedStyleReason,
@@ -1914,9 +1915,8 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   if (widget === 'date' || widget === 'datetime') {
     const allowedDays = prop(field, 'alloweddays');
     if (allowedDays !== undefined && !isEveryWeekday(allowedDays)) {
-      const parsedDays = allowedDays.split(',').map((day) => Number(day.trim()));
-      const validDays = parsedDays.length === new Set(parsedDays).size && parsedDays.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
-      if (validDays) {
+      const parsedDays = parseAllowedDays(allowedDays);
+      if (parsedDays) {
         // The generated client and the generated write path both refuse a
         // date on another weekday (write schema `allowedDays`).
         ui.allowedDays = parsedDays;
