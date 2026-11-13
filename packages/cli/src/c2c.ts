@@ -306,7 +306,7 @@ function usage(): never {
 
 /**
  * Short customer entry for an unknown verb: the five-command journey plus a
- * pointer at docs/guide/. The full internal usage stays behind --help.
+ * pointer at the public guide. The full internal usage stays behind --help.
  */
 function unknownCommand(cmd: string): number {
   process.stderr.write(
@@ -317,7 +317,7 @@ function unknownCommand(cmd: string): number {
       '  c2c plan <file.ds> --dc <dc> --out <dir> (the full blueprint)\n' +
       '  c2c migrate-data (move the records)\n' +
       '  c2c verify (prove it matches)\n' +
-      'See docs/guide/ for the walkthrough (c2c --help lists every command).\n',
+      'See https://github.com/samellis07/c2c/tree/main/docs/guide for the walkthrough (c2c --help lists every command).\n',
   );
   return 2;
 }
@@ -457,6 +457,10 @@ function doctorGateRefusal(args: readonly string[], opts: { createsProject?: boo
 function main(argv: string[]): number {
   const [cmd, ...restAll] = argv;
   if (!cmd) usage();
+  if (cmd === '--version' || cmd === '-V') {
+    process.stdout.write('0.2.0\n');
+    return 0;
+  }
   if (cmd === '--help' || cmd === '-h') return printHelp();
   if (helpRequested(cmd, restAll)) return printHelp((DISPATCH_COMMANDS as readonly string[]).includes(cmd) ? cmd : undefined);
   if (!(DISPATCH_COMMANDS as readonly string[]).includes(cmd)) return unknownCommand(cmd);
@@ -718,7 +722,10 @@ function main(argv: string[]): number {
     return 0;
   }
   const [target, ...rest] = restAll;
-  if (!target) usage();
+  if (!target) {
+    process.stderr.write(`c2c ${cmd}: an input file or directory is required (run c2c ${cmd} --help)\n`);
+    return 2;
+  }
   const flag = (name: string) => {
     const i = rest.indexOf(name);
     return i >= 0 ? (rest[i + 1] ?? '') : undefined;

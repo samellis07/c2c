@@ -439,7 +439,8 @@ export function maskEmail(email: string): string {
 }
 
 function checkC3(stdout: string, stderr: string, code: number, dc: string | undefined): CheckResult {
-  const who = /Logged as:\s*(\S+)/.exec(`${stdout}\n${stderr}`);
+  const clean = `${stdout}\n${stderr}`.replace(/[\u001b\u009b]\[[0-?]*[ -\/]*[@-~]/g, '');
+  const who = /Logged as:\s*(\S+)/.exec(clean);
   if (code === 0 && who) {
     return { ...pass('D-C3', 'CLI signed in'), screen: `CLI signed in (${maskEmail(who[1]!)})` };
   }
@@ -791,6 +792,10 @@ function checkE(ctx: DoctorContext): CheckResult[] {
     out.push(fail('D-E4', 'run c2c from your own workspace folder, not from the plugin folder', null));
   } else {
     try {
+      if (ctx.local) {
+        out.push(skip('D-E4', 'not run (--local)'));
+        return out;
+      }
       const dir = join(cwd, 'c2c-out', '.c2c');
       mkdirSync(dir, { recursive: true });
       const probe = join(dir, `.write-probe-${process.pid}`);
@@ -1378,7 +1383,7 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
 
   const d1 = checkD1(ctx);
   checks.push(d1.result);
-  if (d1.ir) checks.push(...checkMailSender(d1.ir, ctx.workspace, ctx.scope.project));
+  if (d1.ir && !ctx.local) checks.push(...checkMailSender(d1.ir, ctx.workspace, ctx.scope.project));
   checks.push(ctx.local ? localSkip('D-D2') : checkD2(ctx));
   checks.push(ctx.local ? localSkip('D-D3') : checkD3(ctx));
 
