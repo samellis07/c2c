@@ -724,7 +724,8 @@ function main(argv: string[]): number {
     return i >= 0 ? (rest[i + 1] ?? '') : undefined;
   };
   if (cmd === 'analyze') {
-    if (!target.toLowerCase().endsWith('.ds')) {
+    const analyzeStat = statSync(target, { throwIfNoEntry: false });
+    if (analyzeStat?.isFile() && !target.toLowerCase().endsWith('.ds')) {
       process.stderr.write(`c2c: ${target} is not a Creator .ds application export (no application block)\nnext step: re-export the app from Creator (Settings -> Export) and confirm the file is non-empty\n`);
       return 2;
     }

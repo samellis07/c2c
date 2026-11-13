@@ -152,6 +152,27 @@ test('c2c migration-report and analyze --json print the flag from the CLI', () =
   assert.equal(notDir.status, 2);
 });
 
+test('c2c analyze accepts a directory project not itself named .ds, but refuses a non-.ds file', () => {
+  const cli = join(root, 'dist/cli/src/c2c.js');
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-analyze-ext-'));
+  try {
+    const project = join(dir, 'myproject');
+    mkdirSync(project);
+    writeFileSync(join(project, 'main.ds'), 'application "DirProject"\n{\n}\n');
+    const onDir = spawnSync(process.execPath, [cli, 'analyze', project, '--json'], { encoding: 'utf8' });
+    assert.equal(onDir.status, 0, onDir.stderr);
+    assert.equal((JSON.parse(onDir.stdout) as { app: { name: string } }).app.name, 'DirProject');
+
+    const notDs = join(dir, 'sample.txt');
+    writeFileSync(notDs, 'not a .ds export');
+    const onFile = spawnSync(process.execPath, [cli, 'analyze', notDs], { encoding: 'utf8' });
+    assert.equal(onFile.status, 2);
+    assert.match(onFile.stderr, /is not a Creator \.ds application export/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Oracles: the previous stat-based listing and lock lookup with lstat in
 // place of stat, so symlinks are not followed: a link entry is skipped and a
 // linked lock is no lock.
