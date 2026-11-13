@@ -948,9 +948,12 @@ function cleanSheetDeclaration(part: string, colon: number): string | undefined 
   const cleaned = cleanStyle(part);
   if (!cleaned.dropped.length && cleaned.style) return cleaned.style;
   const prop = flatCss(part.slice(0, colon));
-  // A `*prop`/`_prop` legacy hack names a property no modern browser applies,
-  // so carrying it verbatim is inert; its value is checked like any other.
+  // Legacy `*prop`/`_prop` declarations are IE-only hacks. Keep them out of
+  // generated CSS rather than preserving obsolete syntax whose behavior can
+  // differ across parsers; the dropped declaration remains counted by the
+  // page's manual step.
   const hack = /^[*_]([-a-z0-9]+)$/.exec(prop);
+  if (hack) return undefined;
   const base = hack ? hack[1]! : prop;
   // Digits reach property names through legacy entries like
   // `scrollbar-3dlight-color`; a value still passes the same checks.
