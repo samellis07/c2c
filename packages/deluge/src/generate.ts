@@ -4125,7 +4125,8 @@ export function replayFunctionNames(app: App): ReadonlySet<string> {
     }
     if (!changed) break;
   }
-  const out = new Set([...names].sort(([a], [b]) => a.localeCompare(b)).map(([n, i]) => (i < 0 ? n : `${n}:${i}`)));
+  const codeUnitCompare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  const out = new Set([...names].sort(([a], [b]) => codeUnitCompare(a, b)).map(([n, i]) => (i < 0 ? n : `${n}:${i}`)));
   replayFunctionCache.set(app, out);
   return out;
 }

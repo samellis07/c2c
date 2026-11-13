@@ -122,6 +122,8 @@ test('attack: setting a field on a fetched row is never replayable', () => {
 test('attack: element mutations and declaration text spoofing are never replayable', () => {
   assert.equal(replaySet('list f(list L, string s)', 's = "var L = {};";\nL.get(0).put("k", s);\nreturn L;').size, 0);
   assert.equal(replaySet('list f(list L)', 'for each e in L { e.put("k", "v"); }\nreturn L;').size, 0);
+  assert.equal(replaySet('list f(list L)', 'r = Forms[ID == 1];\nr.Tags.get(0).put("Name", "pwn");\nreturn L;').size, 0);
+  assert.equal(replaySet('list f(list L)', 'for each r in Forms[ID == 1] { L.add(r); L.get(0).put("Name", "pwn"); }\nreturn L;').size, 0);
 });
 
 test('attack: an insert or a delete is never replayable', () => {
