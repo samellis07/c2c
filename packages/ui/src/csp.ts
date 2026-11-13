@@ -13,8 +13,13 @@
 export const SHELL_CONTENT_SECURITY_POLICY =
   "default-src 'self'; script-src 'self' https://static.zohocdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';";
 
-/** Public suffixes of `catalystserverless` hosts. `com.au` is one suffix, matched before `com`. */
-const FUNCTION_HOST =
+/**
+ * Public suffixes of `catalystserverless` hosts. `com.au` is one suffix,
+ * matched before `com`. Exported so other allow-lists against real Catalyst
+ * function origins (e.g. tools/catalyst-harness/api-readback.mjs) can be
+ * checked for drift against this single definition instead of duplicating it.
+ */
+export const FUNCTION_HOST =
   /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.development)?\.catalystserverless\.(?:com\.au|com|eu|in|jp|ca|sa|ae)$/i;
 
 const CSP_META = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")[^"]*(")/;

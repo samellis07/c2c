@@ -14,6 +14,17 @@
  */
 import { pathToFileURL } from 'node:url';
 
+/**
+ * Mirrors packages/ui/src/csp.ts's FUNCTION_HOST: one Catalyst-assigned
+ * label, optional `.development`, then `catalystserverless.<dc>` for every
+ * real Catalyst data centre. Kept in sync with csp.ts by a drift test in
+ * test/api-readback.test.mjs rather than importing it, since this tool runs
+ * as plain ESM with no build step of its own.
+ */
+const CATALYST_FUNCTION_HOST =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.development)?\.catalystserverless\.(?:com\.au|com|eu|in|jp|ca|sa|ae)$/i;
+const LOCALHOST_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
 export class ReadBackError extends Error {
   constructor(message, status) {
     super(message);
@@ -31,6 +42,8 @@ export function readBackUrl(invokeUrl, path) {
     throw new ReadBackError(`the invoke URL is not a URL: ${String(invokeUrl).slice(0, 80)}`);
   }
   if (base.protocol !== 'https:' && base.protocol !== 'http:') throw new ReadBackError('the invoke URL must be http(s)');
+  if (base.protocol === 'http:' && !LOCALHOST_HOSTS.includes(base.hostname)) throw new ReadBackError('the invoke URL must use HTTPS except for localhost');
+  if (!CATALYST_FUNCTION_HOST.test(base.hostname) && !LOCALHOST_HOSTS.includes(base.hostname)) throw new ReadBackError('the invoke URL host is not a Catalyst function origin');
   return `${base.href.replace(/\/+$/, '')}/${String(path).replace(/^\/+/, '')}`;
 }
 
