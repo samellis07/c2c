@@ -327,10 +327,13 @@ export async function applyFunctionEnvSecrets(
   assertEnvVariablesWithinLimit(variables);
   await call(rest, { method: 'POST', path: `${prefix}/function/${id}/configuration`, body: { variables } }, opts, `setting ${API_FUNCTION} env vars`);
   const verified = liveFunctionVariables(await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `verifying ${API_FUNCTION} env vars`));
-  // Catalyst may omit empty, name-only seed placeholders from its read-back.
-  // They are intentionally not proof of a failed write; all non-empty values
-  // and every secret must still match exactly.
-  if (Object.entries(variables).some(([key, value]) => value !== '' && verified[key] !== value)) {
+  // Catalyst may omit empty, name-only placeholders from its read-back
+  // entirely; that omission alone is intentionally not proof of a failed
+  // write. But an empty value Catalyst DOES report back — present under the
+  // same key with some other, non-empty content — is a real mismatch (a
+  // stale or leaked value), not an omission, and still fails like any other
+  // value. Every non-empty value and every secret must still match exactly.
+  if (Object.entries(variables).some(([key, value]) => (value !== '' || (key in verified && verified[key] !== '')) && verified[key] !== value)) {
     throw new Error('live env read-back did not match the deployed env_variables after update; set the variables in the Catalyst console or MCP env tools');
   }
   return names;

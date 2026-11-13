@@ -446,6 +446,19 @@ test('applyFunctionEnvSecrets accepts Catalyst omitting empty seeded placeholder
   assert.deepEqual(await applyFunctionEnvSecrets(rest, '1001', { C2C_OWNER_APPROVAL_TOKEN: '' }, ['C2C_DEPLOY_MODE'], { tries: 1 }), ['C2C_OWNER_APPROVAL_TOKEN']);
 });
 
+test('applyFunctionEnvSecrets still fails when Catalyst reports a stale value for an intentionally empty placeholder', async () => {
+  const { rest } = restStub((call) => {
+    if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+    if (call.method === 'POST') return { status: 200, body: {} };
+    if (call.method === 'GET') return { status: 200, body: { data: { configuration: { environment: { variables: { C2C_DEPLOY_MODE: 'live', C2C_OWNER_APPROVAL_TOKEN: 'stale-leftover-token' } } } } } };
+    return undefined;
+  });
+  await assert.rejects(
+    applyFunctionEnvSecrets(rest, '1001', { C2C_OWNER_APPROVAL_TOKEN: '' }, ['C2C_DEPLOY_MODE'], { tries: 1 }),
+    /live env read-back did not match/,
+  );
+});
+
 test('liveEnvDroppedByDeploy names live variables the deploy set omits, never values', async () => {
   const listWithLiveEnv = { ...functionList, data: [{ ...functionList.data[0], configuration: { environment: { variables: { C2C_DEPLOY_MODE: 'live', KEPT: 'a', LOST_TOKEN: 'v', PROJECT_ID: '1' } } } }, functionList.data[1]] };
   const live = restStub((call) => (call.path === `${PREFIX}/function` ? { status: 200, body: listWithLiveEnv } : undefined));
