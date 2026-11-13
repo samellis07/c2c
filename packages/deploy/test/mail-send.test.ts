@@ -27,6 +27,7 @@ import {
   writeDeployTree,
   writeMailSenderEvidence,
   type Io,
+  type RestFn,
 } from '../src/index.js';
 
 const SECRET = '/tmp/cred-mail-test';
@@ -273,14 +274,12 @@ for (const [name, rest] of [
   ['returns 403', async () => ({ status: 403, body: { status: 'failure', data: { message: 'forbidden' } } })],
   ['hits a network error', async () => { throw new TypeError('fetch failed'); }],
 ] as const) {
-  test(`a confirmed deploy continues with a counted manual step when the live read-back ${name}`, async () => {
+  test(`a confirmed deploy refuses without --mail-readback-unavailable, and continues with a counted manual step with it, when the live read-back ${name}`, async () => {
     const { ds, ws, cleanup } = liveMailSetup();
     try {
       const recorded = { version: 1 as const, projectId: '1001', at: new Date().toISOString(), senders: { [mailSenderTag(OWNER)]: 'VERIFIED' } };
       writeMailSenderEvidence(ws, recorded);
-      const cap = io();
-      const calls: string[] = [];
-      cap.io.rest = async (call) => {
+      const restOf = (calls: string[]): RestFn => async (call) => {
         calls.push(`${call.method} ${call.path}`);
         if (call.path === '/baas/v1/project/1001/email') return rest();
         // First deploy: c2c_api is not listed yet, so the live env check has nothing to keep.
@@ -290,10 +289,29 @@ for (const [name, rest] of [
         }
         throw new Error('rest refused in this test');
       };
-      // The scope guard reads `catalyst project:list`; answer it as the CLI does.
-      cap.io.spawn = async (_command, args) => ({ code: 0, stdout: args.includes('project:list') ? PROJECT_LIST : '', stderr: '' });
+      const spawn = async (_command: string, args: readonly string[]) => ({ code: 0, stdout: args.includes('project:list') ? PROJECT_LIST : '', stderr: '' });
+
+      // Without the flag: refuse, naming the flag, before any write.
+      const refusedCap = io();
+      const refusedCalls: string[] = [];
+      refusedCap.io.rest = restOf(refusedCalls);
+      refusedCap.io.spawn = spawn;
+      const refusedCode = await inWorkspace(ws, () =>
+        deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER], refusedCap.io),
+      );
+      assert.equal(refusedCode, 1);
+      assert.match(refusedCap.err(), /--mail-readback-unavailable/);
+      assert.deepEqual(refusedCalls.filter((call) => call.endsWith('/email')), ['GET /baas/v1/project/1001/email']);
+      // The stale record is neither trusted nor overwritten by the refusal.
+      assert.deepEqual(readMailSenderEvidence(ws), recorded);
+
+      // With the flag: continue, with a counted manual step.
+      const cap = io();
+      const calls: string[] = [];
+      cap.io.rest = restOf(calls);
+      cap.io.spawn = spawn;
       const code = await inWorkspace(ws, () =>
-        deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER], cap.io),
+        deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER, '--mail-readback-unavailable'], cap.io),
       );
       assert.notEqual(code, 1, cap.err());
       // One read-back attempt; the later project-scope read is the guard's, not mail's.

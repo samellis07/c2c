@@ -934,7 +934,8 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
   const { target, rest } = targetOf(args);
   if (!target) {
     io.stderr(
-      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address>]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>] [--previous <deployed .ds> [--rename Form.Old=New]...]\n' +
+      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address>] [--mail-readback-unavailable]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>] [--previous <deployed .ds> [--rename Form.Old=New]...]\n' +
+        '       --mail-readback-unavailable: continue past an unreadable live Catalyst mail read-back with a manual step, instead of refusing the deploy\n' +
         '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
@@ -1119,6 +1120,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }
     let mailVerified = false;
     let mailReadbackUnavailable = false;
+    const allowMailReadbackUnavailable = rest.includes('--mail-readback-unavailable');
     if (mailFrom && rest.includes('--mail')) {
       if (confirm) {
         const observed = await observeMailSenders(
@@ -1127,6 +1129,10 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           process.cwd(),
         );
         if (!observed) {
+          if (!allowMailReadbackUnavailable) {
+            io.stderr(`c2c: the live Catalyst mail read-back is unavailable for this account; pass --mail-readback-unavailable to continue with a manual step (confirm the sender is Verified in Catalyst Mail → Email Configuration), or fix CLI email read scope and re-run\n`);
+            return 1;
+          }
           mailReadbackUnavailable = true;
           io.stderr(`manual mail step (non-blocking): confirm the sender is Verified in Catalyst Mail → Email Configuration; CLI email read scope is unavailable for this account, so deploy is continuing without read-back proof\n`);
         }
