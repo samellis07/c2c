@@ -11,7 +11,7 @@ import type { App, Field, Form, FunctionDef, Page, Property, PropertyBlock, Repo
 import { hasOthersOption, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
-import { actionNavigationLifted, blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
+import { actionNavigationDropReason, actionNavigationLifted, blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
 import { parse as parseDeluge, parseExpression } from '../../deluge/src/parser.js';
 import { conditionalFormatCriteria, reportCriteria } from '../../deluge/src/translate.js';
@@ -2528,11 +2528,17 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     // navigation — the button reports success and never takes the user
     // anywhere. Keep the working dispatch; just name the gap.
     if (dispatch && actionDropsOpenUrl(app, action.workflow)) {
+      // Names the specific reason (a second openUrl, a #Script pseudo-route,
+      // an unresolvable dynamic target, ...) instead of a generic "wire it
+      // by hand", so the operator knows what to look for without re-reading
+      // the workflow (docs/report-action-navigation.md).
+      const workflowFn = app.functions.find((item) => item.kind === 'creator' && item.name === (action.workflow ?? '').trim());
+      const dropReason = workflowFn ? actionNavigationDropReason(app, workflowFn) : undefined;
       todos.push({
         area: 'report',
         name: report.name,
         reason: `Custom action "${action.name.trim()}" on report "${report.name}" runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.`,
-        manualStep: `Wire the missing navigation for action "${action.name.trim()}" on report "${report.name}" by hand in the generated UI.`,
+        manualStep: `Wire the missing navigation for action "${action.name.trim()}" on report "${report.name}" by hand in the generated UI${dropReason ? ` (${dropReason})` : ''}.`,
       });
     }
     return {
