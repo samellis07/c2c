@@ -28,7 +28,7 @@ import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
 import { LIMITS, jobPoolName } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerKey, isStageFieldProperty, phaseFieldKind, transitionOwnerProperties, type BlueprintFieldSpec } from './blueprint-rules.js';
-import { analyzeConnections, connectionsChecklist, declaredConnections } from './connections.js';
+import { analyzeConnections, connectionsChecklist, declaredConnections, walk } from './connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, linkedGridForm, writeLiveSource, type FieldStoreShape } from './field-store.js';
 import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill-todos.js';
 import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
@@ -2589,6 +2589,214 @@ function classifyClientOpenUrl(app: App, fn: FunctionDef): ClientOpenUrlResult |
   return unsupported ?? supported;
 }
 
+/** True when an `openUrl` statement appears anywhere in `nodes`, including nested inside an if/forEach/try — used to refuse a lift that would otherwise leave a SECOND, earlier navigation silently dropped with no todo naming it. */
+function containsOpenUrlStmt(nodes: readonly Stmt[]): boolean {
+  let found = false;
+  walk(nodes, (n) => {
+    if (n.kind === 'openUrl') found = true;
+  });
+  return found;
+}
+
+/** A bare `openUrl(...)` statement, or a `{ openUrl(...) }` block with no other statement — never a local-assign substitution, since the replacement this backs must splice the ORIGINAL source text verbatim. */
+function bareOpenUrl(stmt: Stmt): Stmt | undefined {
+  if (stmt.kind === 'openUrl') return stmt;
+  if (stmt.kind === 'block' && stmt.body.length === 1 && stmt.body[0]?.kind === 'openUrl') return stmt.body[0];
+  return undefined;
+}
+
+/**
+ * This function body's own trailing `openUrl` (or an if/elif/else whose
+ * every branch is one bare `openUrl`, nothing else) — regardless of what
+ * real server statements precede it, unlike `openUrlStmtsOf`, which only
+ * tolerates plain local assigns before it. Each returned unit is the
+ * ORIGINAL statement, unsubstituted: the lift this backs references local
+ * variables by name in the generated `return`, not their resolved value, so
+ * no local-read substitution is needed or wanted here.
+ */
+function trailingOpenUrlUnits(body: readonly Stmt[]): Stmt[] | undefined {
+  if (!body.length) return undefined;
+  const last = body[body.length - 1]!;
+  const bare = bareOpenUrl(last);
+  if (bare) return [bare];
+  if (last.kind !== 'if') return undefined;
+  const thenUrl = bareOpenUrl(last.then);
+  if (!thenUrl) return undefined;
+  const out: Stmt[] = [thenUrl];
+  for (const branch of last.elifs) {
+    const url = bareOpenUrl(branch.body);
+    if (!url) return undefined;
+    out.push(url);
+  }
+  if (last.else) {
+    const url = bareOpenUrl(last.else);
+    if (!url) return undefined;
+    out.push(url);
+  }
+  return out;
+}
+
+/** "same window" (Deluge's own default) maps to `'same'`; every other window argument — "new window", "popup window", "parent window", or none at all written differently — opens in a new tab. Only a literal string is read; a dynamic window argument defaults to `'new'`, the safer of the two (a tab a user did not expect is recoverable; silently reusing the current tab for an unexpected target is not). */
+function navTargetOf(openUrlStmt: Extract<Stmt, { kind: 'openUrl' }>): 'same' | 'new' {
+  const winArg = openUrlStmt.args[1];
+  if (winArg?.kind === 'string' && winArg.value.trim().toLowerCase() === 'same window') return 'same';
+  if (winArg === undefined) return 'same';
+  return 'new';
+}
+
+/**
+ * The trailing contiguous run of plain `name = expr;` local assigns right
+ * before `body`'s final statement, plus that final statement itself — e.g.
+ * `item_row.Status = "Accepted"; url = "#Form:X?F=" + id; openUrl(url, ...);`
+ * slices to just the last two. `openUrlStmtsOf` can resolve a dynamic
+ * `openUrl(url, ...)` read against this slice (substituting `url` with its
+ * assigned value) for classification, while the splice in
+ * `liftTrailingActionNavigation` leaves these same assigns untouched and
+ * references `url` by name instead — the local is still in scope and still
+ * holds the same value at runtime.
+ */
+function trailingLocalsSlice(body: readonly Stmt[]): readonly Stmt[] {
+  let j = body.length - 2;
+  while (j >= 0) {
+    const s = body[j]!;
+    if (s.kind !== 'assign' || s.op !== '=' || s.target.kind !== 'name') break;
+    j--;
+  }
+  return body.slice(j + 1);
+}
+
+/**
+ * Replaces a function's trailing `openUrl` unit(s) with a
+ * `return {"kind":"navigate","url":<same url expression, verbatim>,"target":"same"|"new"};`
+ * for each one classifyOpenUrlStmt resolves to 'supported' (a same-app route
+ * or an allowlisted https host) — the mechanism docs/report-action-navigation.md
+ * describes. If ANY unit is 'unsupported', none are lifted: a workflow with
+ * one safe branch and one unsafe one keeps reporting the whole navigation as
+ * dropped, exactly as `classifyClientOpenUrl` already treats a mixed
+ * if/elif/else (`unsupported ?? supported`), rather than silently losing the
+ * unsafe branch's target while fixing the safe one.
+ *
+ * Scoped to a function with exactly one `deluge` source chunk: the span
+ * offsets `trailingOpenUrlUnits` reads come from parsing the chunks joined
+ * with `\n`, which only line up with a single chunk's own text. A
+ * multi-chunk function (more than one event block) is not lifted; its
+ * navigation stays a counted manual item, same as before this existed.
+ *
+ * Returns the patched text alongside each lifted unit's ORIGINAL span (kind
+ * `'openUrl'`): emitFunction records a matching coverage row for each one,
+ * since the patched text itself carries only the new `return` statement's
+ * span, and the no-silent-drop audit re-parses the function's unmodified
+ * source to check that every original statement was visited.
+ */
+function liftTrailingActionNavigation(app: App, fn: FunctionDef): { text: string; liftedSpans: { kind: string; start: number; end: number }[] } | undefined {
+  if (fn.deluge.length !== 1) return undefined;
+  const text = fn.deluge[0]!.text;
+  let body: Stmt[];
+  try {
+    body = parse(text).body;
+  } catch {
+    return undefined;
+  }
+  // `units` is the RAW, unsubstituted statement the splice below rewrites in
+  // place; `classified` is the SAME positions, but with any local var in
+  // `openUrl`'s argument resolved to its assigned value, purely so
+  // classifyOpenUrlStmt can judge whether that resolved target is safe. A
+  // structural mismatch between the two (only possible for an if/elif/else
+  // whose branch itself holds local assigns, which `trailingOpenUrlUnits`
+  // refuses but `openUrlStmtsOf` tolerates) refuses the lift rather than
+  // risk splicing against a unit classification did not actually judge.
+  const units = trailingOpenUrlUnits(body);
+  if (!units?.length) return undefined;
+  // A SECOND openUrl anywhere earlier in the body (a function that navigates
+  // twice, or guards one openUrl behind another) is not safe to touch here:
+  // lifting only the trailing one would leave that earlier call silently
+  // dropped exactly as before, but with no todo naming it, since the
+  // function's `server` text would no longer be empty once the trailing
+  // return is spliced in. Refuse the whole lift instead.
+  if (containsOpenUrlStmt(body.slice(0, -1))) return undefined;
+  const classified = openUrlStmtsOf(trailingLocalsSlice(body));
+  if (!classified || classified.length !== units.length) return undefined;
+  // https is deliberately never classified as navigable here: an allowlist
+  // "derived from literal URLs in the .ds" cannot tell an app owner's own
+  // trusted literal from an attacker-chosen one written in the SAME openUrl
+  // call it would be judging, since that call's own literal host always
+  // shows up in the very scan meant to vet it. Only a same-app route
+  // reaches 'supported' through this path; see docs/report-action-navigation.md.
+  const results = classified.map((unit) => classifyOpenUrlStmt(app, fn, unit, new Map()));
+  if (results.some((r) => r.kind !== 'supported')) return undefined;
+  // Replace from the LAST unit to the FIRST so an earlier replacement's
+  // length change never shifts an already-computed later span.
+  let patched = text;
+  const liftedSpans: { kind: string; start: number; end: number }[] = [];
+  for (let i = units.length - 1; i >= 0; i--) {
+    const unit = units[i]! as Extract<Stmt, { kind: 'openUrl' }>;
+    const urlExpr = unit.args[0]!;
+    const after = patched.slice(unit.span.end);
+    const close = /^\s*\)\s*;?/.exec(after);
+    const end = unit.span.end + (close ? close[0].length : 0);
+    const urlText = patched.slice(urlExpr.span.start, urlExpr.span.end);
+    const target = navTargetOf(unit);
+    const replacement = `return {"kind":"navigate","url":${urlText},"target":"${target}"};`;
+    patched = patched.slice(0, unit.span.start) + replacement + patched.slice(end);
+    liftedSpans.unshift({ kind: 'openUrl', start: unit.span.start, end: unit.span.end });
+  }
+  return { text: patched, liftedSpans };
+}
+
+/**
+ * This function's whole body is one bare delegating call
+ * (`thisapp.X.Y(args);`, no assignment, no return) to another function in
+ * the app whose own trailing navigation `liftTrailingActionNavigation`
+ * would lift. Lifting the callee alone is not enough: Creator's "for each
+ * record" wrapper a report custom action actually dispatches typically just
+ * delegates like this, and a bare call statement discards whatever the
+ * callee returns, so the wrapper itself needs `return` added to forward it
+ * (`shim.thisapp.call` resolves to the callee's own return value).
+ *
+ * Returns the patched text alongside the wrapper's own lifted span (kind
+ * `'expr'`, its original bare call statement) — see
+ * `liftTrailingActionNavigation`'s note on why emitFunction needs this to
+ * record a matching coverage row.
+ */
+function delegatesToLiftableNavigation(app: App, fn: FunctionDef): { text: string; liftedSpans: { kind: string; start: number; end: number }[] } | undefined {
+  if (fn.deluge.length !== 1) return undefined;
+  const text = fn.deluge[0]!.text;
+  let body: Stmt[];
+  try {
+    body = parse(text).body;
+  } catch {
+    return undefined;
+  }
+  const stmt = body.length === 1 ? body[0] : undefined;
+  const call = stmt?.kind === 'expr' && stmt.expr.kind === 'call' ? stmt.expr : undefined;
+  if (!stmt || !call) return undefined;
+  const calleeName = calleePathName(call.callee);
+  const calleeFn = calleeName ? app.functions.find((item) => item.name.toLowerCase() === calleeName.toLowerCase()) : undefined;
+  if (!calleeFn || liftTrailingActionNavigation(app, calleeFn) === undefined) return undefined;
+  const before = text.slice(0, stmt.span.start);
+  const callText = text.slice(stmt.span.start, stmt.span.end);
+  const after = text.slice(stmt.span.end);
+  return { text: `${before}return ${callText}${after}`, liftedSpans: [{ kind: 'expr', start: stmt.span.start, end: stmt.span.end }] };
+}
+
+/**
+ * True when emitFunction will turn this function's dropped navigation into
+ * a returned `{kind:'navigate',...}` instead — either directly
+ * (`liftTrailingActionNavigation`) or through one hop of plain delegation
+ * (`delegatesToLiftableNavigation`). Exported so the UI model's own,
+ * independent `actionDropsOpenUrl` check (packages/ui/src/model.ts) agrees
+ * with what the generator actually emits, instead of re-deriving the same
+ * classification by a different path that could drift from it.
+ */
+export function actionNavigationLifted(app: App, fn: FunctionDef): boolean {
+  return liftTrailingActionNavigation(app, fn) !== undefined || delegatesToLiftableNavigation(app, fn) !== undefined;
+}
+
+/** The patched text and original-span coverage rows for `fn`, if `emitFunction` lifts its navigation (either directly or through one hop of delegation) — else undefined. */
+function actionNavigationLift(app: App, fn: FunctionDef): { text: string; liftedSpans: { kind: string; start: number; end: number }[] } | undefined {
+  return liftTrailingActionNavigation(app, fn) ?? delegatesToLiftableNavigation(app, fn);
+}
+
 function classifyOpenUrlStmt(
   app: App,
   fn: FunctionDef,
@@ -2628,6 +2836,14 @@ function classifyOpenUrlStmt(
   } else if (isAppUri(parts[0])) {
     parts.splice(0, 1);
   }
+  // An https: target that is NOT this app's own address is never classified
+  // 'supported' here: a per-app "allowlist" built from literal URLs found in
+  // the .ds cannot vet it safely, because the very openUrl call being judged
+  // always contributes its own literal host to that scan — an attacker who
+  // controls the source text can make any host "literal" and so trivially
+  // self-allowlist it (see the attack fixture in action-navigation.test.ts
+  // that pins this). It stays a counted manual item; see
+  // docs/report-action-navigation.md.
 
   if (parts[0]?.kind === 'string' && /^\s*javascript:/i.test(parts[0].value)) {
     return { kind: 'unsupported', reason: 'javascript script URLs are not supported' };
@@ -2925,9 +3141,19 @@ function emitFunction(
   warnings: GenerateWarning[],
   schema?: SchemaPlan,
 ): void {
+  // A dropped navigation after real server work (or a bare one-hop
+  // delegation to a function with one) is turned into a returned navigate
+  // instruction instead of silently dropped, when the target resolves to a
+  // same-app route or an allowlisted https host (docs/report-action-navigation.md).
+  // Only the one chunk's text changes; `d.span` (used below to shift any
+  // todo this chunk still produces back to absolute `.ds` positions) is
+  // untouched, and the lifted tail itself raises no todo to shift.
+  const lift = actionNavigationLift(app, fn);
+  const liftedText = lift?.text;
+  const deluge = lift ? [{ ...fn.deluge[0]!, text: lift.text }] : fn.deluge;
   const binding = functionRowBinding(fn);
   let slot = 0;
-  const parts = fn.deluge.map((d) => {
+  const parts = deluge.map((d) => {
     const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
     slot = tr.nextSlot;
     addStats(stats, tr.stats);
@@ -2937,6 +3163,18 @@ function emitFunction(
     recordAlertDiags(tr.todos, d, { form: fn.form, event: fn.name, name: fn.name }, alertDiagnostics);
     return tr;
   });
+  // The lifted text's `return` statement(s) replaced the ORIGINAL openUrl
+  // (or delegating call) statement(s); those original spans and kinds have
+  // no coverage row from the translation above (it only ever saw the
+  // `return`). The no-silent-drop audit re-parses this function's
+  // unmodified source and expects one, so record it directly, shifted by
+  // the same chunk offset `coverShift` would have used.
+  if (lift) {
+    const base = fn.deluge[0]!.span.start;
+    for (const span of lift.liftedSpans) {
+      statementCoverage.push({ unit: `function ${fn.name}`, kind: span.kind, start: base + span.start, end: base + span.end, bucket: 'translated' });
+    }
+  }
   // functionScriptOptions is serverOnly: a function has no client half, so
   // there is no client module, prefetch module, or client-call endpoint.
   let server = parts.map((p) => p.server).filter((s) => s.trim()).join('\n');
@@ -2976,14 +3214,16 @@ function emitFunction(
       }
       return;
     }
-  } else if (server.trim() && /\bopenurl\s*\(/i.test(fn.deluge.map((d) => d.text).join('\n'))) {
+  } else if (liftedText === undefined && server.trim() && /\bopenurl\s*\(/i.test(fn.deluge.map((d) => d.text).join('\n'))) {
     // The function also produced real server code (e.g. a guard read before
     // the navigation), so classifyClientOpenUrl's whole-function shape still
     // matches but the earlier branch above never runs. Keep the server code
     // as generated — converting it into a static link would skip the guard
     // — and name the dropped navigation as a manual item instead of letting
     // it vanish with no record (see `case 'openUrl'` in translate.ts, which
-    // drops a noClient openUrl statement without raising a todo).
+    // drops a noClient openUrl statement without raising a todo). A target
+    // liftTrailingActionNavigation or delegatesToLiftableNavigation could
+    // resolve is not dropped at all (liftedText !== undefined, above).
     const clientNav = classifyClientOpenUrl(app, fn);
     if (clientNav) {
       todos.push({

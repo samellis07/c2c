@@ -64,8 +64,12 @@ const COUNTED = {
   'Missing Page Params': ['Missing_Page_Params', `openUrl("#Page:Nowhere?param1=" + input.Name,"same window");`],
 } as const;
 
-// A body with any other statement is no navigation; this one generates a
-// function, so it dispatches through the registry as before.
+// A body with any other statement is no STATIC navigation (actionNavigation
+// requires the whole body to be openUrl); it generates a function and
+// dispatches through the registry, same as before. Its trailing openUrl
+// targets a safe own-app route with no other openUrl anywhere in the body,
+// so the dispatched function returns a navigate instruction instead of
+// dropping it (docs/report-action-navigation.md).
 const MIXED = { Mixed: ['Mixed_Body', `info "Opening";\nopenUrl("#Form:Request","popup window");`] } as const;
 
 const ALL = { ...NAV, ...COUNTED, ...MIXED } as Record<string, readonly string[]>;
@@ -205,17 +209,19 @@ test('an openUrl-only workflow to an own form, report or page is a navigation; a
     assert.equal(byName.get(name)?.preview, true, `${name} stays turned off`);
     assert.equal(byName.get(name)?.navigate, undefined, `${name} is no navigation`);
   }
-  assert.equal(byName.get('Mixed')?.navigate, undefined, 'a mixed body is no navigation');
+  assert.equal(byName.get('Mixed')?.navigate, undefined, 'a mixed body is no STATIC navigation');
   assert.equal(byName.get('Mixed')?.preview, undefined, 'a mixed body that generated a function still dispatches');
-  assert.ok(files.some((file) => file.path === 'functions/custom/mixed-body.mjs'));
+  const mixedFile = files.find((file) => file.path === 'functions/custom/mixed-body.mjs');
+  assert.ok(mixedFile);
+  // Mixed still dispatches (its function runs), and its trailing openUrl — a
+  // safe own-app route, with no other openUrl anywhere in the body — comes
+  // back as a navigate instruction instead of being dropped: no counted todo
+  // names it, and the generated function itself proves the fix rather than
+  // just the absence of a todo.
+  assert.match(String(mixedFile!.data), /return \{ \["kind"\]: "navigate", \["url"\]: "#Form:Request", \["target"\]: "new" \};/);
   const externalLink = ' It opens an external URL, which Catalyst does not migrate as an action navigation; add a reviewed allowlisted link manually.';
   const actionTodos = model.todos.filter((todo) => todo.area === 'report' && /^Custom action /.test(todo.reason)).map((todo) => todo.reason);
-  // Mixed still dispatches (its function runs), but the openUrl inside it is
-  // dropped — a Catalyst nav-only button acting successfully while silently
-  // going nowhere — so it is named too, ahead of the turned-off actions (its
-  // todo is pushed while building actions, the turned-off ones afterwards).
   assert.deepEqual(actionTodos, [
-    'Custom action "Mixed" on report "All_Items" runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.',
     ...Object.keys(COUNTED).map((name) => `Custom action "${name}" is not migrated; its button is turned off.${name === 'External' || name === 'Foreign Host' ? externalLink : ''}`),
   ]);
   assert.ok(

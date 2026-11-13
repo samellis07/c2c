@@ -33,6 +33,7 @@ import { formattedNumber } from '../number-format';
 import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
 import { actionNavHref, hrefFor, navNeedsRow, reportClickFilter, useLocationHash } from '../runtime/router';
+import { performActionNav, type ActionNavInstruction } from '../runtime/navigation';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { matchCriteria } from './criteria';
 import { MapPlot } from './MapView';
@@ -332,7 +333,7 @@ function ReportList({ report }: { report: ReportSpec }) {
   const runAction = useCallback(
     (name: string, endpoint: string, recordId?: string) => {
       setActionNote(null);
-      api.post<{ dryRun?: boolean }>(endpoint, recordId === undefined ? {} : { ROWID: recordId }).then(
+      api.post<{ dryRun?: boolean; nav?: ActionNavInstruction }>(endpoint, recordId === undefined ? {} : { ROWID: recordId }).then(
         (reply) => {
           if (reply.status === 403) {
             deny();
@@ -342,13 +343,18 @@ function ReportList({ report }: { report: ReportSpec }) {
             setActionNote(actionFailure(reply.status, `The action "${name}" did not run.`));
             return;
           }
+          // Checked against this app's own policy before acting on it — the
+          // server's classification decided whether to send `nav` at all,
+          // but this never assumes that decision was correct on its own
+          // (docs/report-action-navigation.md).
+          performActionNav(reply.body?.nav, spec.navigationAllowlist ?? [], view);
           if (reply.body?.dryRun === false) setActionNote(`${name} ran.`);
           else setActionNote(`${name} ran. Preview: nothing was saved yet.`);
         },
         () => setActionNote(`The action "${name}" did not run.`),
       );
     },
-    [api, deny],
+    [api, deny, spec, view],
   );
 
   const removeRow = useCallback(
