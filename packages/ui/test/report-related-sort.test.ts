@@ -13,6 +13,7 @@ import { deriveIr, parse } from '../../core/src/index.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
 import { buildUi } from '../src/index.js';
 import { buildModel } from '../src/model.js';
+import { limitValue } from '../../schema/src/limits.js';
 
 function invoke(handler: (req: unknown, res: unknown) => unknown, req: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
   let status = 0;
@@ -226,4 +227,38 @@ test('a plain sort entry before the related one orders first, the related one br
 test('a sort entry that is neither a column nor a lookup path stays a counted manual step', () => {
   const source = sortSrc('Genre', 'ascending').replace('\t\t\tBook.Genre ascending', '\t\t\tMember.Nope ascending');
   assert.equal(buildModel(deriveIr(parse(source))).todos.some((t) => t.area === 'report' && /Sort by "Member\.Nope"/.test(t.reason)), true);
+});
+
+// A Loan form wide enough that one SELECT cannot list every report column:
+// the report reads through staged queries, which keep ROWID order.
+function stagedSource(): string {
+  const extra = Array.from({ length: limitValue('zcql.select_columns') + 1 }, (_, index) => field(`X${String(index).padStart(3, '0')}`, 'text')).join('\n');
+  return sortSrc('Genre', 'ascending').replace(`${field('Fine', 'number')}\n\t}`, `${field('Fine', 'number')}\n${extra}\n\t}`);
+}
+
+test('a related sort on a staged report read is a counted manual step, never a silent drop', () => {
+  const app = deriveIr(parse(stagedSource().replace(/\t\tshow all rows from Loan\n\t\t\(\n\t\t\tMember\n\t\t\tBook\n\t\t\tFine\n\t\t\)/, '\t\tshow all rows from Loan')));
+  const built = buildUi(app);
+  const file = built.files.find((item) => String(item.data).includes('export const reportName = "Loans_By_Genre";'));
+  assert.ok(file);
+  const text = String(file!.data);
+  assert.match(text, /export const zcqlStages = /);
+  // The staged read does not carry the in-memory sort ...
+  assert.equal(text.includes('relatedSortRead'), false);
+  // ... so the sort is counted with a step that names the report and the sort.
+  const todo = built.model.todos.find((t) => t.area === 'report' && t.name === 'Loans_By_Genre' && /staged/.test(t.reason));
+  assert.ok(todo, JSON.stringify(built.model.todos.filter((t) => t.area === 'report')));
+  assert.match(todo!.manualStep ?? '', /On report Loans_By_Genre, replace the related-field sort "Book\.Genre"/);
+  assert.ok(built.files.some((item) => item.path === 'ui-manual-steps.json' && String(item.data).includes('Loans_By_Genre')));
+  // The single-query read of the same report applies the sort and counts nothing.
+  const plain = buildUi(deriveIr(parse(sortSrc('Genre', 'ascending'))));
+  assert.equal(plain.model.todos.some((t) => t.area === 'report' && /Sort by/.test(t.reason)), false);
+  assert.ok(plain.files.some((item) => String(item.data).includes('relatedSortRead')));
+});
+
+test('past the row cap the read keeps ROWID order and says so in the reply', () => {
+  const plain = buildUi(deriveIr(parse(sortSrc('Genre', 'ascending'))));
+  const text = String(plain.files.find((item) => String(item.data).includes('export const reportName = "Loans_By_Genre";'))!.data);
+  assert.match(text, /related sort not applied: more than \$\{AGGREGATE_ROW_CAP\} matching rows/);
+  assert.match(text, /\.\.\.\(sortNotice \? \{ notice: sortNotice \} : \{\}\)/);
 });
