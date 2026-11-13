@@ -2539,6 +2539,7 @@ function elementSafe(code: string): boolean {
       continue;
     }
     const allow = ELEMENT_SHIM_ALLOW.get(m[1]!);
+    if ((m[1] === 'list' || m[1] === 'map') && fn === 'put' && !setsFreshLocal(code, m.index! + m[0].length)) return false;
     if (allow !== true && !allow?.has(fn)) return false;
   }
   return true;
@@ -2603,7 +2604,7 @@ function setsFreshLocal(code: string, at: number): boolean {
   const recv = /^\s*([A-Za-z_$][\w$]*)\s*,/.exec(code.slice(at))?.[1];
   if (!recv) return false;
   // Source echo comments (`// Deluge: m = Map()`) are not bindings.
-  code = code.replace(/^\s*\/\/.*$/gm, '');
+  code = code.replace(/^\s*\/\/.*$/gm, '').replace(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, '');
   const esc = recv.replace(/\$/g, '\\$');
   const decls = code.match(new RegExp(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`, 'g')) ?? [];
   const fresh = code.match(new RegExp(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*[\\[{]`, 'g')) ?? [];
