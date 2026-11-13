@@ -594,7 +594,7 @@ export function mcpRequestInstructions(request: McpRequest, target: ProbeTarget 
     calls,
     ...(project ? { cleanup: probeDeleteCall(probe, target) } : {}),
     steps,
-    ...(project ? { signedPut: probeSignedPut(probe, nonce) } : {}),
+    ...(project ? { signedPut: probeSignedPut(probe, nonce, target.dc) } : {}),
     observationFile: 'c2c-out/.c2c/mcp-observation.json',
     ...(objectCleanup ? { objectCleanup } : {}),
     neverCall: NEVER_CALL_MCP_TOOLS.map((name) => `CatalystbyZoho_${name}`),

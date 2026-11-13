@@ -230,6 +230,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
     scope.app = basename(named).replace(/\.ds$/i, '');
   }
   const probeTarget: ProbeTarget = {
+    ...(scope.dc !== undefined ? { dc: scope.dc } : {}),
     ...(scope.org !== undefined ? { org: scope.org } : {}),
     ...(scope.project !== undefined ? { project: scope.project } : {}),
   };

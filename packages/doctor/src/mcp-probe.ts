@@ -120,6 +120,7 @@ export function probeScopeOfName(name: string): ProbeScope {
 }
 
 export interface ProbeTarget {
+  dc?: string;
   org?: string;
   project?: string;
 }
@@ -164,8 +165,9 @@ export function probeObjectCall(bucket: string, nonce: string, target: ProbeTarg
  * own host under /_signed/, never the bare /<key> path (that answers
  * 400 invalid_request_parameter). The query is the signature the call returned.
  */
-export function probeSignedPut(bucket: string, nonce: string): { method: 'PUT'; url: string; body: string } {
-  return { method: 'PUT', url: `https://${bucket}-development.zohostratus.in/_signed/${nonce}?<the signature query the call returned>`, body: nonce };
+export function probeSignedPut(bucket: string, nonce: string, dc: string = 'in'): { method: 'PUT'; url: string; body: string } {
+  const tld = dc === 'us' ? 'com' : dc === 'au' ? 'com.au' : dc;
+  return { method: 'PUT', url: `https://${bucket}-development.zohostratus.${tld}/_signed/${nonce}?<the signature query the call returned>`, body: nonce };
 }
 
 /** PUT that deletes one nonce object and leaves the reusable probe bucket. [DOC] object delete; CLI token scope [UNVERIFIED]. */
