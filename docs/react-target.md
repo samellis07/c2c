@@ -12,9 +12,11 @@ unchanged: the React app calls the same endpoints with the same bodies.
 Status: `c2c ui-react` generates the app for any Creator app; the shell,
 navigation, forms (all field families except users and rich text), lookups
 and subforms ([Lookups and subforms](#lookups-and-subforms)), list reports,
-sign-in, offline, the extension points, and Creator pages, dashboards and
-chart reports ([Pages, dashboards and charts](#pages-dashboards-and-charts))
-are in place. `c2c deploy --ui react` (or `"ui": "react"` in
+sign-in, offline, the extension points, Creator pages, dashboards and
+chart reports ([Pages, dashboards and charts](#pages-dashboards-and-charts)),
+and a report's print template (`docs/print-templates.md`: a Print button on
+the record view opens a print-optimised layout for the browser's own print
+dialog — no server-side PDF) are in place. `c2c deploy --ui react` (or `"ui": "react"` in
 `c2c-deploy.json`) deploys it: the deploy writes the React source under
 `web/`, builds it to `web/dist`, and links Slate to `dist/` instead of the
 vanilla `slate/` tree. Other report views, users and rich-text fields, and
