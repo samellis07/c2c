@@ -4217,7 +4217,7 @@ test('file count = 1 is emitted; a higher count emits a counted UI todo, not a s
   assert.equal(rowStatus(singleFile, brokenWidget, 'Attachment.File_Attachment property file count'), 'dropped');
 });
 
-test('private and personal data field flags emit one counted manual step per app listing the fields, not one per field', () => {
+test('private and personal data field flags on a top-level field are emitted through the generated field grant, with no manual step', () => {
   const flaggedField = (flag: string): string => `
 	form Patient
 	{
@@ -4230,24 +4230,13 @@ test('private and personal data field flags emit one counted manual step per app
 `;
   const privateField = dsApp(flaggedField('private'));
   const privateOut = collectOutputs(privateField);
-  assert.equal(rowStatus(privateField, privateOut, 'Patient.SSN property private'), 'counted');
-  assert.equal(privateOut.model.todos.length, 1);
-  const privateTodo = privateOut.model.todos.find((t) => t.name === 'privacy flags');
-  assert.ok(privateTodo, 'UI todo is emitted for a private field');
-  assert.match(privateTodo.reason, /Patient\.SSN \(private = true\)/);
-  assert.match(privateTodo.reason, /Catalyst generates no privacy or access control/);
-  assert.ok(privateTodo.manualStep, 'private field todo names a manual step');
-  assert.match(privateTodo.manualStep, /Patient\.SSN \(private = true\)/);
+  assert.equal(rowStatus(privateField, privateOut, 'Patient.SSN property private'), 'emitted');
+  assert.equal(privateOut.model.todos.some((t) => t.name === 'privacy flags'), false, 'a top-level privacy flag needs no manual step');
 
   const personalDataField = dsApp(flaggedField('personal data'));
   const personalDataOut = collectOutputs(personalDataField);
-  assert.equal(rowStatus(personalDataField, personalDataOut, 'Patient.SSN property personal data'), 'counted');
-  assert.equal(personalDataOut.model.todos.length, 1);
-  const personalDataTodo = personalDataOut.model.todos.find((t) => t.name === 'privacy flags');
-  assert.ok(personalDataTodo, 'UI todo is emitted for a personal-data field');
-  assert.match(personalDataTodo.reason, /Patient\.SSN \(personal data = true\)/);
-  assert.ok(personalDataTodo.manualStep, 'personal data field todo names a manual step');
-  assert.match(personalDataTodo.manualStep, /Patient\.SSN \(personal data = true\)/);
+  assert.equal(rowStatus(personalDataField, personalDataOut, 'Patient.SSN property personal data'), 'emitted');
+  assert.equal(personalDataOut.model.todos.some((t) => t.name === 'privacy flags'), false);
 
   const multiFieldApp = dsApp(`
 	form Patient
@@ -4274,43 +4263,42 @@ test('private and personal data field flags emit one counted manual step per app
 	}
 `);
   const multiOut = collectOutputs(multiFieldApp);
-  assert.equal(multiOut.model.todos.length, 1, 'emits one privacy manual step per app across all flagged fields');
-  const appTodo = multiOut.model.todos[0]!;
-  assert.equal(appTodo.name, 'privacy flags');
-  assert.match(
-    appTodo.reason,
-    /Fields "Patient\.SSN \(private = true, personal data = true\), Patient\.Email \(personal data = true\), Billing\.Card_Note \(private = true\)" are flagged for data privacy; Catalyst generates no privacy or access control for these fields\./,
-  );
-  assert.ok(appTodo.manualStep);
-  assert.match(
-    appTodo.manualStep,
-    /Patient\.SSN \(private = true, personal data = true\), Patient\.Email \(personal data = true\), Billing\.Card_Note \(private = true\)/,
-  );
-  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.SSN property private'), 'counted');
-  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.SSN property personal data'), 'counted');
-  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.Email property personal data'), 'counted');
-  assert.equal(rowStatus(multiFieldApp, multiOut, 'Billing.Card_Note property private'), 'counted');
+  assert.equal(multiOut.model.todos.some((t) => t.name === 'privacy flags'), false, 'no app-wide manual step when every flagged field is top-level');
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.SSN property private'), 'emitted');
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.SSN property personal data'), 'emitted');
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Patient.Email property personal data'), 'emitted');
+  assert.equal(rowStatus(multiFieldApp, multiOut, 'Billing.Card_Note property private'), 'emitted');
 
-  // Mutation test: removing the UI todo makes the private flag a drop again — proving
-  // the flag is not silently carried by any generated widget.
-  const mutated = cloneOutputs(privateOut);
-  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'privacy flags');
-  assert.equal(rowStatus(privateField, mutated, 'Patient.SSN property private'), 'dropped');
-
-  // Partial mutation test: dropping one field from the per-app listing makes only that field's flag a drop.
-  const partialMutated = cloneOutputs(multiOut);
-  partialMutated.model.todos = partialMutated.model.todos.map((t) => ({
-    ...t,
-    reason: t.reason.replace(', Patient.Email (personal data = true)', ''),
-    manualStep: t.manualStep?.replace(', Patient.Email (personal data = true)', ''),
-  }));
-  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Patient.SSN property private'), 'counted');
-  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Patient.SSN property personal data'), 'counted');
-  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Patient.Email property personal data'), 'dropped');
-  assert.equal(rowStatus(multiFieldApp, partialMutated, 'Billing.Card_Note property private'), 'counted');
+  // A false value is not a privacy flag at all: the setting is trivially proved either way.
+  const notPrivate = dsApp(flaggedField('private').replace('private = true', 'private = false'));
+  assert.equal(rowStatus(notPrivate, collectOutputs(notPrivate), 'Patient.SSN property private'), 'emitted');
 });
 
-test('encrypt and encryptdata field flags are counted through the shared privacy todo', () => {
+test('a private or personal data flag on a subform child field is still counted through the shared privacy todo', () => {
+  // fieldGrant (packages/deluge/src/generate.ts) only excludes top-level
+  // fields from a profile's grant; a privacy flag nested inside a subform
+  // is not generated, so it still needs the manual-step todo. The coverage
+  // ledger names a field property with no subform path, so this reuses the
+  // same-name-collision setup the "subform field is proved against its own
+  // generated widget" test above uses, to give the nested field a row to
+  // attach its own properties to.
+  const withSubform = appWithField(field('Notes', 'text'));
+  withSubform.forms[0]!.fields.push({
+    ...field('Visits', 'grid'),
+    subfields: [{ ...field('Notes', 'text'), properties: [{ key: 'private', value: 'true', span: Z }] }],
+  });
+  const out = collectOutputs(withSubform);
+  const todo = out.model.todos.find((t) => t.name === 'privacy flags');
+  assert.ok(todo, 'a subform field still needs the shared manual-step todo');
+  assert.match(todo.reason, /Orders\.Notes \(private = true\)/);
+  assert.equal(rowStatus(withSubform, out, 'Orders.Notes property private'), 'counted');
+
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'privacy flags');
+  assert.equal(rowStatus(withSubform, mutated, 'Orders.Notes property private'), 'dropped');
+});
+
+test('encrypt and encryptdata field flags on a top-level field are emitted through the generated field grant', () => {
   for (const key of ['encrypt', 'encryptdata']) {
     const source = dsApp(`
 	form Patient
@@ -4323,11 +4311,8 @@ test('encrypt and encryptdata field flags are counted through the shared privacy
 	}
 `);
     const out = collectOutputs(source);
-    assert.equal(rowStatus(source, out, `Patient.SSN property ${key}`), 'counted');
-    assert.match(out.model.todos.find((todo) => todo.name === 'privacy flags')?.reason ?? '', new RegExp(`SSN \\(${key} = true\\)`));
-    const mutated = cloneOutputs(out);
-    mutated.model.todos = mutated.model.todos.filter((todo) => todo.name !== 'privacy flags');
-    assert.equal(rowStatus(source, mutated, `Patient.SSN property ${key}`), 'dropped');
+    assert.equal(rowStatus(source, out, `Patient.SSN property ${key}`), 'emitted');
+    assert.equal(out.model.todos.some((todo) => todo.name === 'privacy flags'), false);
   }
 });
 

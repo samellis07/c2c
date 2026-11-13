@@ -94,7 +94,7 @@
 import vm from 'node:vm';
 
 import type { App, Field, Property, PropertyBlock, Report, ReportView, Workflow } from '../../core/src/ir.js';
-import { formLink, translationLeftovers, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
+import { formLink, PRIVACY_PROPERTY_KEYS, translationLeftovers, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
 import { authPlan, type AuthPlan } from '../../auth/src/plan.js';
 import { analyzeConnections, memberChain, permissionScopes, walk, type ConnectionsReport } from '../../deluge/src/connections.js';
 import type { Expr } from '../../deluge/src/ast.js';
@@ -356,7 +356,7 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
   eachField(app, (formName, field, path) => {
     const status = fieldRow.get(`${formName}.${field.name}`);
     if (status !== 'emitted' && status !== 'counted') return;
-    const items = fieldSettingItems(field, app, formName, out);
+    const items = fieldSettingItems(field, app, formName, out, path);
     if (status === 'counted' || fieldListed(out, formName, field)) {
       for (const item of items) {
         rows.push({ kind: 'field-property', name: `${formName}.${field.name} ${item.label}`, status: 'counted', via: 'field manual item' });
@@ -409,16 +409,28 @@ interface FieldSetting {
   proved: (ui: UiField | undefined, columns: SchemaColumn[]) => boolean;
 }
 
-function fieldSettingItems(field: Field, app: App, formName: string, out: AuditOutputs): FieldSetting[] {
+function fieldSettingItems(field: Field, app: App, formName: string, out: AuditOutputs, path: readonly string[]): FieldSetting[] {
   const span = field.span;
   const items: FieldSetting[] = [];
   for (const p of field.properties) {
     const bidirectional = p.key.trim().toLowerCase() === 'bidirectional';
+    // A top-level field's privacy property (private, personal data, encrypt,
+    // encryptdata) is generated: fieldGrant in packages/deluge/src/generate.ts
+    // excludes the field from every profile's grant that the property's
+    // default or .ds permissions deny. A subform/composite child field
+    // (path.length > 0) is not covered there and still falls through to the
+    // manual-step todo check below. See docs/field-privacy.md.
+    const isPrivacyProperty = (PRIVACY_PROPERTY_KEYS as readonly string[]).includes(p.key.trim().toLowerCase());
     items.push({
       label: `property ${p.key}`,
       start: p.span.start,
       end: p.span.end,
-      proved: (ui, columns) => (bidirectional ? bidirectionalProved(p, field, formName, app, out.schema) : propertyProved(p, field, ui, columns, app, out)),
+      proved: (ui, columns) =>
+        isPrivacyProperty
+          ? path.length === 0 || unquote(p.value).trim().toLowerCase() !== 'true'
+          : bidirectional
+            ? bidirectionalProved(p, field, formName, app, out.schema)
+            : propertyProved(p, field, ui, columns, app, out),
     });
   }
   for (const modifier of field.modifiers) {

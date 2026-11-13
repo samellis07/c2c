@@ -518,6 +518,17 @@ export function unquote(s: string): string {
   return s;
 }
 
+/** Field property keys that mark a field as holding personal or otherwise private data. */
+export const PRIVACY_PROPERTY_KEYS = ['private', 'personal data', 'encrypt', 'encryptdata'] as const;
+
+/** Privacy property keys set `true` on this field, in `PRIVACY_PROPERTY_KEYS` order. */
+export function privacyFlagsOf(field: Field): string[] {
+  return PRIVACY_PROPERTY_KEYS.filter((key) => {
+    const found = field.properties.find((p) => p.key.toLowerCase() === key);
+    return found !== undefined && unquote(found.value).trim().toLowerCase() === 'true';
+  });
+}
+
 /**
  * Static Creator initial value as literal text, or undefined. The
  * gallery apps carry only static literals (quoted strings, numbers,

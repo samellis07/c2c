@@ -14,7 +14,7 @@
  * Nothing here deploys or contacts Catalyst.
  */
 
-import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, staticDefault, translationLeftovers, translationStrings, unquote, type App, type Device, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
+import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, privacyFlagsOf, staticDefault, translationLeftovers, translationStrings, unquote, type App, type Device, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
@@ -5488,14 +5488,16 @@ function buildAccessPolicy(app: App): AccessPolicy {
   }
   const profiles: AccessPolicy['profiles'] = {};
   const hierarchy = new Set(roleHierarchyForms(app));
+  const adminProfiles = new Set(administratorProfiles(app));
   for (const profile of app.profiles) {
     const forms: Record<string, FormGrant> = {};
     const portal = /portal/i.test(profile.type ?? '');
+    const isAdmin = adminProfiles.has(profile.name);
     for (const mod of profile.modules) {
       // Owner sharing applies to every form of a portal profile, and to the
       // forms an internal profile shares through the role hierarchy.
       const shared = portal || hierarchy.has(mod.component);
-      const grant = grantFor(app, mod, reports, shared);
+      const grant = grantFor(app, mod, reports, shared, isAdmin);
       if (grant) forms[mod.component] = grant;
     }
     const preset = profilePreset(profile);
@@ -5511,6 +5513,18 @@ function buildAccessPolicy(app: App): AccessPolicy {
         // The portal default has no View All: a portal user reads and edits
         // only the records they added.
         if (preset === 'portal-add') grant.ownerScope = 'view';
+        // A preset grants every field with no .ds module permission to
+        // consult: Administrator still sees privacy-flagged fields; every
+        // other preset (Write, Read, add-view, portal-add) is denied them
+        // unless the preset is itself owner-scoped (portal-add — every row
+        // it can read or write is a row it owns).
+        if (preset !== 'administrator') {
+          const denied = privacyDeniedFields(app, form.name, false, grant.ownerScope === 'view');
+          if (denied.size) {
+            grant.fields = withoutPrivacyFields(app, form.name, undefined, denied);
+            if (write) grant.writable = withoutPrivacyFields(app, form.name, undefined, denied);
+          }
+        }
         forms[form.name] = grant;
       }
     }
@@ -5519,9 +5533,48 @@ function buildAccessPolicy(app: App): AccessPolicy {
   const policy: AccessPolicy = { profiles, roles: roleNames(app.roles) };
   const hidden = hiddenComponentNames(app);
   if (hidden.length) policy.hidden = hidden;
-  const admins = administratorProfiles(app);
+  const admins = [...adminProfiles];
   if (admins.length) policy.admins = admins;
   return policy;
+}
+
+/**
+ * Top-level field names of `formName` flagged `private`, `personal data`,
+ * `encrypt` or `encryptdata`. A privacy flag on a subform/composite child
+ * field is not covered here — see docs/field-privacy.md.
+ */
+function privacyFieldNames(app: App, formName: string): string[] {
+  const form = app.forms.find((item) => item.name === formName);
+  if (!form) return [];
+  return form.fields.filter((field) => privacyFlagsOf(field).length > 0).map((field) => field.name);
+}
+
+/**
+ * Privacy-flagged fields of `formName` this grant must not expose: not the
+ * Administrator-preset profile, not an owner-scoped grant (every row it can
+ * read is a row it owns, so the field only ever carries the caller's own
+ * data), and — when `mod` is given — not a field the .ds module permission
+ * explicitly makes visible to this profile. docs/field-privacy.md is the
+ * contract for this default.
+ */
+function privacyDeniedFields(app: App, formName: string, isAdmin: boolean, ownerScoped: boolean, mod?: ModulePermission): Set<string> {
+  if (isAdmin || ownerScoped) return new Set();
+  const names = privacyFieldNames(app, formName);
+  if (!names.length) return new Set();
+  return new Set(
+    names.filter((name) => {
+      const explicit = mod?.fields.find((field) => field.field === name);
+      return !/^"?true"?$/i.test((explicit?.flags.visibility ?? '').trim());
+    }),
+  );
+}
+
+/** `fields` (or every stored field of `formName`, when `fields` is the unrestricted `undefined`) minus `denied`. */
+function withoutPrivacyFields(app: App, formName: string, fields: string[] | undefined, denied: ReadonlySet<string>): string[] | undefined {
+  if (denied.size === 0) return fields;
+  if (fields) return fields.filter((name) => !denied.has(name));
+  const formFields = app.forms.find((item) => item.name === formName)?.fields.map((field) => field.name) ?? [];
+  return formFields.filter((name) => !denied.has(name));
 }
 
 /** Forms listed in share_settings `role Hierarchy = {...}`: records shared up the role hierarchy. */
@@ -5744,12 +5797,17 @@ function enabledFlags(mod: ModulePermission): Set<string> {
  *   shows every record even when the role hierarchy is on. Other forms of
  *   an internal profile read every row the report filters allow.
  * - Create with no View and no View All is an add-only grant: read is false.
+ * - `isAdmin` (Administrator-preset profile) and an owner-scoped grant
+ *   (`ownerShared` with no View All: every row read or written is a row the
+ *   caller owns) are the two cases a privacy-flagged field needs no explicit
+ *   .ds visibility grant to reach — see fieldGrant and docs/field-privacy.md.
  */
 function grantFor(
   app: App,
   mod: ModulePermission,
   reports: Map<string, { form: string; criteria?: Criteria }>,
   ownerShared: boolean,
+  isAdmin: boolean,
 ): FormGrant | undefined {
   const flags = enabledFlags(mod);
   const viewAll = flags.has('viewall');
@@ -5764,7 +5822,10 @@ function grantFor(
   // A boolean `enabled = true` names no Create flag: add follows the write verbs.
   const booleanForm = flags.size === 1 && flags.has('true');
   const canCreate = flags.has('create') || ['add', 'create', 'import'].some((verb) => verbs.has(verb)) || (booleanForm && canEdit);
-  const fields = fieldGrant(app, mod);
+  // Matches the ownerScope "view" condition set below: without View All,
+  // every row this grant reads or writes is the caller's own.
+  const ownerScoped = ownerShared && !viewAll;
+  const fields = fieldGrant(app, mod, isAdmin, ownerScoped);
   if (!viewAll && known.length === 0) {
     if (!canCreate) return undefined;
     const addOnly: FormGrant = { read: false, write: true, edit: false };
@@ -5796,7 +5857,7 @@ function grantFor(
   return grant;
 }
 
-function fieldGrant(app: App, mod: ModulePermission): string[] | undefined {
+function fieldGrant(app: App, mod: ModulePermission, isAdmin: boolean, ownerScoped: boolean): string[] | undefined {
   const flag = (key: string) => mod.properties.find((p) => p.key.toLowerCase() === key)?.value.trim() ?? '';
   const allVisible = /^"?true"?$/i.test(flag('allfieldsvisible'));
   const allHidden = /^"?false"?$/i.test(flag('allfieldsvisible'));
@@ -5804,12 +5865,17 @@ function fieldGrant(app: App, mod: ModulePermission): string[] | undefined {
     mod.fields.filter((field) => /^"?false"?$/i.test((field.flags.visibility ?? '').trim())).map((field) => field.field),
   );
   const shown = mod.fields.filter((field) => field.flags.visibility !== undefined && !hidden.has(field.field)).map((field) => field.field);
-  if (allVisible && hidden.size === 0) return undefined;
-  const formFields = app.forms.find((form) => form.name === mod.component)?.fields.map((field) => field.name);
-  if (allVisible && formFields) return formFields.filter((name) => !hidden.has(name));
-  if (shown.length > 0) return shown;
-  if (allVisible || allHidden || mod.fields.length > 0) return [];
-  return undefined;
+  const denied = privacyDeniedFields(app, mod.component, isAdmin, ownerScoped, mod);
+  let fields: string[] | undefined;
+  if (allVisible && hidden.size === 0) fields = undefined;
+  else {
+    const formFields = app.forms.find((form) => form.name === mod.component)?.fields.map((field) => field.name);
+    if (allVisible && formFields) fields = formFields.filter((name) => !hidden.has(name));
+    else if (shown.length > 0) fields = shown;
+    else if (allVisible || allHidden || mod.fields.length > 0) fields = [];
+    else fields = undefined;
+  }
+  return withoutPrivacyFields(app, mod.component, fields, denied);
 }
 
 function combineFilters(filters: Criteria[]): Criteria | undefined {
