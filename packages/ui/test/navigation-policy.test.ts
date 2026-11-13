@@ -44,7 +44,7 @@ const NAV_VECTORS: Array<[string, string, boolean]> = [
   ['https host not on the allowlist (arbitrary user-controlled host)', 'https://evil.example/x', false],
   ['https host that merely contains an allowed host as a substring', 'https://notallowed.example.evil.example/x', false],
   ['https host that is a subdomain of an allowed host, not the host itself', 'https://allowed.example.evil.example/x', false],
-  ['https userinfo trick: attacker host after an allowed-looking userinfo', 'https://allowed.example@evil.example/x', false],
+  ['https userinfo trick: attacker host after an allowed-looking userinfo', 'https://allowed.example.com@evil.example.com/x', false],
   ['https userinfo trick with a colon', 'https://allowed.example:443@evil.example/x', false],
   ['https with no host at all', 'https:///x', false],
   ['single-slash https (malformed scheme, not a real https URL)', 'https:/evil.example/x', false],
