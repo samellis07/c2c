@@ -4105,7 +4105,7 @@ export function replayFunctionNames(app: App): ReadonlySet<string> {
     // element mutations; only updates to the collection itself are replay-safe.
     if (coll && new RegExp(`\\b(?:${coll.p.name})\\s*\\.\\s*get\\s*\\([^)]*\\)\\s*\\.\\s*(?:put|add|remove|removeElement)\\s*\\(`, 'i').test(scripts.join('\n'))) continue;
     if (coll && new RegExp(`\\bfor\\s+each\\s+\\w+\\s+in\\s+${coll.p.name}\\b[\\s\\S]*?\\b\\w+\\s*\\.\\s*(?:put|add|remove|removeElement)\\s*\\(`, 'i').test(scripts.join('\n'))) continue;
-    if (/\\.\\s*get\\s*\\([^)]*\\)\\s*\\.\\s*put\\s*\\(/i.test(scripts.join('\n'))) continue;
+    if (/\.\s*get\s*\([^)]*\)\s*\.\s*put\s*\(/i.test(scripts.join('\n'))) continue;
     // Only the one list or map parameter may be updated; every other
     // parameter (and `input`) stays read-only.
     if (mutatesParameters(scripts, coll ? params.filter((_, i) => i !== coll.i) : params)) continue;
