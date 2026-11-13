@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 // @ts-ignore shared JavaScript test helper
 import { cleanCliEnv } from './cli-test-env.mjs';
+import { c2cVersion } from '../../doctor/src/index.js';
 
 const cli = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'dist/cli/src/c2c.js');
 // The `node c2c.js` children below share a V8 compile cache so each e2e spawn
@@ -52,6 +53,15 @@ test('an unknown verb keeps exit 2 and prints the short customer entry', () => {
   const lines = result.stderr.trimEnd().split('\n');
   assert.ok(lines.length < 10, `unknown-verb output is ${lines.length} lines, want under 10`);
   assert.equal(result.stdout, '');
+});
+
+test('--version and -V print c2cVersion() and exit 0', () => {
+  for (const flag of ['--version', '-V']) {
+    const result = run(flag);
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, `${c2cVersion()}\n`);
+    assert.equal(result.stderr, '');
+  }
 });
 
 test('an unknown verb with --help still prints the full usage and exits 0', () => {

@@ -4,5 +4,5 @@ export const DISPATCH_COMMANDS = [
   'rollback-export', 'verify', 'verify-behavior', 'status', 'support-bundle', 'cutover-checklist', 'proof', 'fill-todos',
   'migrate-data', 'analyze', 'precheck', 'report', 'migration-report', 'parse', 'corpus',
   'features', 'schema', 'iac-drift', 'schema-corpus', 'seed', 'deluge', 'ui',
-  'score-ui', 'ui-react', 'auth', 'ui-corpus', '--verify-vendor',
+  'score-ui', 'ui-react', 'auth', 'ui-corpus', '--verify-vendor', '--version', '-V',
 ] as const;
