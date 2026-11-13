@@ -67,9 +67,39 @@ test('every shim list function is classified as a reader or treated as a write',
   assert.equal(mutatesOnlyFreshLocals('var m = {};\nshim.set(m, "a", 1);'), true);
 });
 
+test('mutating a subList or duplicate copy of a fetched field stays read-only', () => {
+  assert.equal(readOnly(`${FETCH}l = r.Tags.subList(0, 1);\nl.add(1);\nreturn l;`), true);
+  assert.equal(readOnly(`${FETCH}l = r.Tags.duplicate();\nl.add(1);\nreturn l;`), true);
+});
+
+test('duplicate() chained directly on an unfetched query is not read-only', () => {
+  // shim.list.duplicate's own isPlain guard excludes `{ __query: true, ... }`
+  // and returns the receiver unchanged (packages/shims/src/list.ts), so this
+  // call must never reach the fast dispatch path that mutatesOnlyFreshLocals
+  // then treats as a fresh copy (translate.ts directMethod, method ===
+  // 'duplicate').
+  assert.equal(readOnly(`r = Add_Staffs[ID == input.id].duplicate();\nr.add(1);\nreturn 1;`), false);
+});
+
+test('mutatesOnlyFreshLocals treats subList/duplicate locals as fresh', () => {
+  assert.equal(mutatesOnlyFreshLocals('var r = shim.list.subList(x, 0, 1);\nshim.list.add(r, 1);'), true);
+  assert.equal(mutatesOnlyFreshLocals('var r = shim.list.duplicate(x);\nshim.list.add(r, 1);'), true);
+  // A rebind to anything else (not a literal, not a fresh-copy call) is still rejected.
+  assert.equal(mutatesOnlyFreshLocals('var r = x;\nshim.list.add(r, 1);'), false);
+});
+
 test('a mutable parameter is writable only while it is never rebound', () => {
   assert.equal(mutatesOnlyFreshLocals('shim.list.add(L, 1);', ['L']), true);
   assert.equal(mutatesOnlyFreshLocals('L = r;\nshim.list.add(L, 1);', ['L']), false);
   assert.equal(mutatesOnlyFreshLocals('shim.list.add(shim.list.get(L, 0), 1);', ['L']), false);
   assert.equal(mutatesOnlyFreshLocals('shim.list.add(L, 1);', []), false);
+  // A rebind to a fresh copy call is allowed exactly once; a second rebind,
+  // even to another fresh copy, is refused (it could read the parameter's
+  // post-first-rebind value).
+  assert.equal(mutatesOnlyFreshLocals('L = shim.list.duplicate(x);\nshim.list.add(L, 1);', ['L']), true);
+  assert.equal(mutatesOnlyFreshLocals('L = [1];\nshim.list.add(L, 1);', ['L']), false);
+  assert.equal(
+    mutatesOnlyFreshLocals('L = shim.list.duplicate(x);\nL = shim.list.duplicate(y);\nshim.list.add(L, 1);', ['L']),
+    false,
+  );
 });

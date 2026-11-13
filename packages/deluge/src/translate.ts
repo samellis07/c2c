@@ -2640,31 +2640,63 @@ function firstArgument(code: string, at: number): string | null {
 }
 
 /**
+ * `shim.list.*` calls proved to return a brand-new top-level list or map,
+ * decoupled from whatever receiver or argument they read: `subList` slices a
+ * copy, `duplicate` slices (list) or spreads (map). A local bound to one of
+ * these is as fresh as a `[` / `{` literal — mutating it, or rebinding a
+ * mutable parameter to it, cannot alias the source. A shallow copy still
+ * shares any nested row or record in the source, so an element write
+ * (`x.get(0).put(…)`) past such a local stays refused: the receiver there is
+ * never a plain identifier, so it fails the check below regardless.
+ */
+const FRESH_COPY_CALL = '(?:await\\s+)?shim\\.list\\.(?:subList|duplicate)\\s*\\(';
+
+/**
  * Every write to a list or map in emitted code (`shim.set`, or any
  * `shim.list.*` call that is not in {@link LIST_SHIM_READERS}) lands on a
  * collection the body itself created, or on one of `mutableParams`. The
  * receiver must be a plain identifier declared exactly once, bound once to a
- * fresh `[` / `{` literal and never rebound; a parameter in `mutableParams`
- * must never be rebound. Anything else (a fetched record or row, a loop
- * variable, an alias, a `get(...)` chain, a parameter) may be shared with a
- * stored row or the caller, so the body is not read-only.
+ * fresh `[` / `{` literal or {@link FRESH_COPY_CALL} and never rebound again;
+ * a parameter in `mutableParams` may be rebound only to such a fresh value,
+ * and only once. Anything else (a fetched record or row, a loop variable, an
+ * alias, a `get(...)` chain, a parameter) may be shared with a stored row or
+ * the caller, so the body is not read-only.
  */
 export function mutatesOnlyFreshLocals(code: string, mutableParams: readonly string[] = []): boolean {
   const plain = code.replace(/^\s*\/\/.*$/gm, '').replace(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, '""');
   const count = (re: string): number => plain.match(new RegExp(re, 'g'))?.length ?? 0;
+  const freshBind = (esc: string): number =>
+    count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*(?:[\\[{]|${FRESH_COPY_CALL})`);
+  // A mutableParam is never declared with var/let/const, so its one allowed
+  // rebind has no such prefix; unlike an ordinary local's fresh binding, a
+  // `[`/`{` literal there is refused (see the comment below), so only
+  // FRESH_COPY_CALL counts.
+  const freshParamRebind = (esc: string): number => count(`(?:^|[^\\w$.])${esc}\\s*=\\s*${FRESH_COPY_CALL}`);
   for (const m of code.matchAll(SHIM_CALL)) {
     const isSet = m[1] === 'set' && m[2] === undefined;
     if (!isSet && !(m[1] === 'list' && m[2] !== undefined && !LIST_SHIM_READERS.has(m[2]))) continue;
-    const recv = firstArgument(code, m.index! + m[0].length);
+    let recv = firstArgument(code, m.index! + m[0].length);
+    // A sibling `if`/`else if` arm that never locally rebinds the parameter
+    // still reads it as `shim.input.get(ctx, "name")`, since the rebind in
+    // another arm is not in scope here. That read is the parameter itself,
+    // not an alias, so it is the same receiver as the bare identifier.
+    const inputRead = recv ? /^shim\.input\.get\(ctx,\s*"([A-Za-z_$][\w$]*)"\)$/.exec(recv) : null;
+    if (inputRead && mutableParams.includes(inputRead[1]!)) recv = inputRead[1]!;
     if (!recv || !/^[A-Za-z_$][\w$]*$/.test(recv)) return false;
     const esc = recv.replace(/\$/g, '\\$');
     const bind = `(?:^|[^\\w$.])${esc}\\s*=(?!=)`;
     if (mutableParams.includes(recv)) {
-      if (count(bind) > 0 || count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`) > 0) return false;
+      // A rebind of the parameter itself (`var givenList = …` or `givenList
+      // = …`, counted by `bind`) is allowed only when every such rebind — and
+      // there must be exactly one, since a second rebind could read the
+      // parameter's post-first-rebind value — binds it to a fresh copy call,
+      // never a literal: the parameter already held a value the body did not
+      // create, so a literal there would silently drop it instead of copying it.
+      if (count(bind) > 1 || (count(bind) === 1 && freshParamRebind(esc) !== 1)) return false;
       continue;
     }
     const decls = count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`);
-    const fresh = count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*[\\[{]`);
+    const fresh = freshBind(esc);
     if (decls !== 1 || fresh !== 1 || count(bind) !== 1) return false;
   }
   return true;
@@ -7035,7 +7067,13 @@ function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   if (method === 'removeElement') return call(`shim.list.removeElement(${recv.code}, ${args[0]?.code ?? 'undefined'})`, { list: true });
   if (method === 'delete') return call(`shim.list.deleteItem(${recv.code}, ${args[0]?.code ?? 'undefined'})`, { sideEffect: true });
   if (method === 'deleteAll') return call(`shim.list.deleteAll(${recv.code}, ${args[0]?.code ?? 'undefined'})`);
-  if (method === 'duplicate') return call(`shim.list.duplicate(${recv.code})`);
+  // A query receiver has not been fetched yet: shim.list.duplicate's runtime
+  // guard (isPlain excludes `__query`) returns it unchanged rather than a
+  // copy, so mutatesOnlyFreshLocals' assumption that every duplicate() call
+  // is a fresh, decoupled value would be false for this one receiver shape.
+  // Keeping the query case out of this fast path (as subList already does)
+  // means the shim is never asked to "duplicate" something it cannot copy.
+  if (method === 'duplicate' && !recv.query) return call(`shim.list.duplicate(${recv.code})`);
   if (method === 'sortKey') return call(`shim.list.sortKey(${recv.code})`, { map: true });
   if (method === 'containValue') return call(`shim.list.containsValue(${recv.code}, ${args[0]?.code ?? 'undefined'})`);
   if (method === 'notContains') return call(`shim.list.notContains(${recv.code}, ${args[0]?.code ?? 'undefined'})`);
