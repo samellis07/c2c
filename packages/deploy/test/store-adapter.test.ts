@@ -372,9 +372,13 @@ test('env_variables carry the kept console environment, sorted, and C2C_DEPLOY_M
   assert.equal(text(reversed, 'functions/c2c_api/catalyst-config.json'), text(files, 'functions/c2c_api/catalyst-config.json'));
 });
 
-test('readFunctionEnv: --confirm needs the console env (or "new"); values must be strings; only key names are reported', () => {
+test('readFunctionEnv: --confirm needs the complete console env; values must be strings; only key names are reported', () => {
   assert.equal(readFunctionEnv(undefined, false), undefined);
-  assert.throws(() => readFunctionEnv(undefined, true), /--confirm needs --function-env <file>.*or --function-env new/);
+  assert.throws(() => readFunctionEnv(undefined, true), (err: Error) => {
+    assert.match(err.message, /--confirm needs --function-env <your COMPLETE file>/);
+    assert.doesNotMatch(err.message, /\bnew\b/);
+    return true;
+  });
   assert.deepEqual(readFunctionEnv('new', true), {});
   const dir = mkdtempSync(join(tmpdir(), 'c2c-fenv-'));
   try {

@@ -877,7 +877,7 @@ export function readFunctionEnv(value: string | undefined, confirm: boolean, mai
   if (value === undefined) {
     if (!confirm) return undefined;
     throw new Error(
-      `--confirm needs --function-env <file> (the ${API_FUNCTION} console environment as a JSON object; catalyst deploy replaces it with catalyst-config.json env_variables) or --function-env new for a first deploy`,
+      `--confirm needs --function-env <your COMPLETE file> (the ${API_FUNCTION} console environment as a JSON object; catalyst deploy replaces it with catalyst-config.json env_variables)`,
     );
   }
   if (value === 'new') return {};
