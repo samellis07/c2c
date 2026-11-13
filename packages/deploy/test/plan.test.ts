@@ -603,7 +603,9 @@ test('the plan budgets the mover write calls against the stated Dev write rate',
   assert.ok(overBudget);
   assert.equal(overBudget.status, 'warn');
   assert.match(overBudget.detail ?? '', new RegExp(`${rate} insert calls`));
-  assert.match(overBudget.fix ?? '', /P-RATE/);
+  assert.match(overBudget.fix ?? '', /re-run the mover on a refusal.*checkpoints.*resumes/);
+  assert.match(overBudget.fix ?? '', /pace or stage the load if 429s fire/);
+  assert.doesNotMatch(overBudget.fix ?? '', /c2c probe/);
 
   const under = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows(10)] });
   const underBudget = under.plan.budgets.find((item) => item.id === 'dev-write-rate');
