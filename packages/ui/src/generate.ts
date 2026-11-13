@@ -24,7 +24,7 @@ import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } 
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
 import { lookupFormats, lookupSorts, type SortDir } from './decorations/lookups.js';
-import { actionDispatchTarget, buildModel, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
+import { actionDispatchTarget, buildModel, relatedSortKeys, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
 import { iconColorRgb, paletteFor } from './theme-map.js';
 import { pwaFiles, pwaServiceWorkerSource } from './pwa.js';
 import { BASE_CSS, SHELL_BACKGROUND } from './styles.js';
@@ -1747,6 +1747,61 @@ export function dateFieldKinds(app: App, formName: string): Record<string, 'date
  * fold under the empty key, two-decimal sums), so a chart report and a page
  * chart read one bounded aggregate instead of every row.
  */
+/**
+ * Generated helper for a report sorted through a lookup
+ * (`<Lookup>.<Field>`): reads every matching row in ROWID pages (at most
+ * AGGREGATE_ROW_CAP rows), resolves each related key through
+ * resolveLookupPaths (the caller's parent read scope; an unreadable or
+ * missing parent sorts as blank), orders the rows by the sort keys in turn
+ * (blanks first, numbers by value, ROWID last), and returns the requested
+ * page. Past the cap it returns null and the caller keeps the paged read.
+ */
+const relatedSortHelper = `async function relatedSortRead(readPage, datastore, keys, principal, offset, pageSize) {
+  const all = [];
+  for (let off = 0; ; off += AGG_PAGE) {
+    const list = await readPage(off, AGG_PAGE);
+    const rows = Array.isArray(list) ? list : [];
+    for (const row of rows) if (row && typeof row === "object") all.push(row);
+    if (rows.length < AGG_PAGE) break;
+    if (all.length >= AGGREGATE_ROW_CAP) return null;
+  }
+  const paths = keys.filter((key) => key.head);
+  const own = all.map((row) => paths.map((path) => row[path.key]));
+  await resolveLookupPaths(datastore, all, paths, principal);
+  const NUMERIC = /^-?\\d+(\\.\\d+)?$/;
+  const textOf = (value) => (value == null || typeof value === "object" ? "" : String(value));
+  const rowIdOf = (row) => {
+    const id = String(row.ROWID ?? row.rowid ?? "");
+    return /^[0-9]+$/.test(id) ? BigInt(id) : 0n;
+  };
+  const order = all.map((row, index) => ({
+    row,
+    index,
+    id: rowIdOf(row),
+    values: keys.map((key) => (key.head ? textOf(row[key.key]) : key.field === "ROWID" || key.field === "ID" ? String(rowIdOf(row)) : textOf(row[key.field]))),
+  }));
+  order.sort((a, b) => {
+    for (let i = 0; i < keys.length; i += 1) {
+      const x = a.values[i];
+      const y = b.values[i];
+      let cmp = 0;
+      if (x === "" || y === "") cmp = x === y ? 0 : x === "" ? -1 : 1;
+      else if (NUMERIC.test(x) && NUMERIC.test(y)) cmp = Number(x) - Number(y);
+      else cmp = x < y ? -1 : x > y ? 1 : 0;
+      if (cmp !== 0) return keys[i].dir === "desc" ? -cmp : cmp;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : a.index - b.index;
+  });
+  const page = order.slice(offset, offset + pageSize);
+  for (const item of page) {
+    paths.forEach((path, i) => {
+      if (own[item.index][i] === undefined) delete item.row[path.key];
+    });
+  }
+  return page.map((item) => item.row);
+}
+`;
+
 const aggregateHelpers = `const AGGREGATE_ROW_CAP = ${LIMITS.zcqlRowsPerQuery * 10};
 const AGG_PAGE = ${LIMITS.zcqlRowsPerQuery};
 const AGG_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -2064,33 +2119,80 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
     parentForms.push(form);
   }
   const parentDecimals = Object.fromEntries(parentForms.flatMap((form) => (Object.hasOwn(appDecimals, form) ? [[form, appDecimals[form]!]] : [])));
-  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\nconst navPaths = ${JSON.stringify(navPaths)};\n`;
+  // A report sort through a lookup (model.ts relatedSortKeys): the list read
+  // orders by every sort entry in memory, the related ones resolved from the
+  // parent under the caller's scope. Emitted only when every related entry
+  // reads a stored parent column through a projected lookup column.
+  const relatedKeys = relatedSortKeys(app, formName, report.sort);
+  const sortKeys =
+    relatedKeys &&
+    relatedKeys.every(
+      (key) =>
+        !key.head ||
+        (projection.includes(key.head) &&
+          (Object.prototype.hasOwnProperty.call(parentColumns, key.form!) ? parentColumns[key.form!]! : []).includes(key.field)),
+    )
+      ? relatedKeys
+      : undefined;
+  const sortPathConst = sortKeys ? `const sortKeys = ${JSON.stringify(sortKeys)};\n${relatedSortHelper}` : '';
+  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\nconst navPaths = ${JSON.stringify(navPaths)};\n${sortPathConst}`;
   const attachRows = subformLinks.length ? `\n      if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried);` : '';
+  // The related sort replaces the paged read only when the caller did not
+  // pick a sort and may read the lookup column; the scan is bounded (see
+  // relatedSortRead) and falls back to the paged read past the cap.
+  const sortedPage = sortKeys
+    ? `// A key the caller cannot read never orders the rows: a plain column
+      // needs the caller's read, a lookup path its lookup column (the parent
+      // leaf is checked again by resolveLookupPaths).
+      const relatedSort = Array.isArray(body.sort) && body.sort.length
+        ? null
+        : sortKeys.filter((key) => readableField(key.head || key.field, readableFields) || key.field === "ROWID" || key.field === "ID");
+      const sortedRows = relatedSort && relatedSort.length
+        ? await relatedSortRead(
+            (off, limit) =>
+              needsExactRead(resolved, undefined, decimalColumns)
+                ? queryExact((form, w, l, o, ob) => datastore.query(form, w, l, o, ob, projection), formName, where, {
+                    criteria: resolved,
+                    decimals: decimalColumns,
+                    range: { from: off + 1, to: off + limit },
+                  })
+                : datastore.query(formName, where, limit, off, "ORDER BY ROWID", projection),
+            datastore,
+            relatedSort,
+            principal,
+            offset,
+            pageSize,
+          )
+        : null;
+      `
+    : '';
+  const sortedPick = sortKeys ? 'sortedRows ?? (' : '';
+  const sortedClose = sortKeys ? ')' : '';
   const liveQuery = exact
     ? `const resolved = await resolveLookupCriteria(datastore, ${criteriaRef}, principal);
       const where = zcqlPredicate(compileCriteria(resolved, undefined, decimalColumns));
       const sort = sortOf(requestSort);
       const orderBy = orderByOf(requestSort);
       const offset = page * pageSize;
-      const queried = needsExactRead(resolved, sort || undefined, decimalColumns)
+      ${sortedPage}const queried = ${sortedPick}needsExactRead(resolved, sort || undefined, decimalColumns)
         ? await queryExact((form, w, limit, off, ob) => datastore.query(form, w, limit, off, ob, projection), formName, where, {
             criteria: resolved,
             decimals: decimalColumns,
             ...(sort ? { sort } : {}),
             range: { from: offset + 1, to: offset + pageSize },
           })
-        : await datastore.query(formName, where, pageSize, offset, orderBy, projection);`
+        : await datastore.query(formName, where, pageSize, offset, orderBy, projection)${sortedClose};`
     : `const resolved = await resolveLookupCriteria(datastore, ${criteriaRef}, principal);
       const where = zcqlPredicate(compileCriteria(resolved));
       const orderBy = orderByOf(requestSort);
       const offset = page * pageSize;
-      const queried = needsExactRead(resolved, undefined, decimalColumns)
+      ${sortedPage}const queried = ${sortedPick}needsExactRead(resolved, undefined, decimalColumns)
         ? await queryExact((form, w, limit, off, ob) => datastore.query(form, w, limit, off, ob, projection), formName, where, {
             criteria: resolved,
             decimals: decimalColumns,
             range: { from: offset + 1, to: offset + pageSize },
           })
-        : await datastore.query(formName, where, pageSize, offset, orderBy, projection);`;
+        : await datastore.query(formName, where, pageSize, offset, orderBy, projection)${sortedClose};`;
   // One bounded page read for the aggregate op: ORDER BY ROWID keeps the fold
   // stable; the decimal shadow/exact-read path is the same as the list read.
   const aggQuery = exact
