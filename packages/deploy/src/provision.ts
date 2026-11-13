@@ -487,7 +487,7 @@ function readArtifactNoFollow(path: string): string | undefined {
 }
 
 /** Replace a file atomically: a fresh temp file in the same directory, then rename over the path (a link is replaced, never written through). */
-function writeArtifactAtomic(path: string, text: string, mode?: number): void {
+export function writeArtifactAtomic(path: string, text: string, mode?: number): void {
   const tmp = join(dirname(path), `.${basename(path)}.tmp.${process.pid}.${randomBytes(4).toString('hex')}`);
   writeFileSync(tmp, text, { flag: 'wx', ...(mode !== undefined ? { mode } : {}) });
   try {
@@ -570,13 +570,11 @@ function applyBucketIdentity(plan: ProvisionPlanFile, bucket: string): void {
   bucketStep.readBack.match = { ...bucketStep.readBack.match, bucket_name: bucket };
 }
 
-/** Atomic enough for a kill mid-write: tmp file in the same directory, then rename. */
+/** Atomic enough for a kill mid-write: tmp file in the same directory, then rename. Owner-only (0600). */
 function writeProvisionState(out: string, state: ProvisionState): void {
   const dir = join(out, 'provision');
   mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.state.json.tmp.${process.pid}`);
-  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
-  renameSync(tmp, join(dir, 'state.json'));
+  writeArtifactAtomic(join(dir, 'state.json'), `${JSON.stringify(state, null, 2)}\n`, 0o600);
 }
 
 function readProvisionInputs(out: string): ProvisionInputs {
@@ -1361,7 +1359,7 @@ function storeResult(out: string, id: string, result: unknown): string {
   const dir = join(out, ...RESULTS_DIR);
   mkdirSync(dir, { recursive: true });
   const rel = `provision/results/${id}.json`;
-  writeFileSync(join(out, rel), `${JSON.stringify(redactEvidence(result), null, 2)}\n`);
+  writeArtifactAtomic(join(out, rel), `${JSON.stringify(redactEvidence(result), null, 2)}\n`, 0o600);
   return rel;
 }
 

@@ -5,8 +5,8 @@
  * checks --confirm will enforce. X_ZC_CREDENTIAL_PATH is never printed.
  */
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { withCliLock } from './cli-lock.js';
@@ -677,7 +677,16 @@ function readState(dir: string): DeployState | undefined {
 
 export function writeState(dir: string, state: DeployState): void {
   const delta = state.delta ?? readStateDelta(join(dir, STATE_FILE));
-  writeFileSync(join(dir, STATE_FILE), `${JSON.stringify(delta === undefined ? state : { ...state, delta }, null, 2)}\n`);
+  // Owner-only (0600) and atomic: a fresh same-directory temp file renamed over the state file.
+  const path = join(dir, STATE_FILE);
+  const tmp = join(dir, `.${STATE_FILE}.tmp.${process.pid}.${randomBytes(4).toString('hex')}`);
+  writeFileSync(tmp, `${JSON.stringify(delta === undefined ? state : { ...state, delta }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  try {
+    renameSync(tmp, path);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 /** The delta checkpoint already in a state file, so a deploy never drops it. */
