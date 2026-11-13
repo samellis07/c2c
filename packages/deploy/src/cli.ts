@@ -547,9 +547,16 @@ async function verifyFirstUseGates(io: Io, rest: RestFn, guard: GuardOk, gates: 
   return pending;
 }
 
-function redact(text: string, secret: string | undefined): string {
-  if (!secret) return text;
-  return text.split(secret).join('[credential]');
+/**
+ * Mask the credential path and any secret --function-env value (exact match)
+ * in text that came from a child process or an error. Longer values are
+ * masked first so a value that contains a shorter one is masked whole.
+ */
+export function redact(text: string, secret: string | undefined, secretValues: readonly string[] = []): string {
+  let out = secret ? text.split(secret).join('[credential]') : text;
+  const values = [...new Set(secretValues.filter((value) => value.length > 0))].sort((a, b) => b.length - a.length);
+  for (const value of values) out = out.split(value).join('[secret]');
+  return out;
 }
 
 export function fail(io: Io, err: unknown): number {
@@ -1595,7 +1602,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           continue;
         }
         if (command.id === 'ui-build' || command.id === 'ui-deps') {
-          const detail = redact(`${result.stdout}\n${result.stderr}`, secret).trim();
+          const detail = redact(`${result.stdout}\n${result.stderr}`, secret, Object.values(secretsToApply)).trim();
           const lines = detail ? detail.split(/\r?\n/).filter((l) => l.trim().length > 0) : [];
           const tail = lines.slice(-20);
           io.stderr(`c2c: build command failed: ${commandLine(command)}\n`);
@@ -1605,7 +1612,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           io.stderr(`next step: fix the build error in web/ and rerun deploy --confirm\n`);
           return await finish(result.code || 1);
         }
-        const detail = redact(`${result.stderr}${result.stdout}`, secret).trim();
+        const detail = redact(`${result.stderr}${result.stdout}`, secret, Object.values(secretsToApply)).trim();
         if (detail) io.stderr(`${detail}\n`);
         // The recorded fresh-project refusal is an activation step, not a code
         // failure — report the console instruction as fallback guidance only.
@@ -1643,7 +1650,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           secretsApplied = true;
           if (applied.length) io.stdout(`function env: set ${applied.length} secret variable(s) on ${API_FUNCTION}; the values never entered the generated files\n`);
         } catch (err) {
-          io.stderr(`c2c: ${redact(err instanceof Error ? err.message : String(err), secret)}\n`);
+          io.stderr(`c2c: ${redact(err instanceof Error ? err.message : String(err), secret, Object.values(secretsToApply))}\n`);
           io.stderr(`next step: set the secret variables on ${API_FUNCTION} (Catalyst console env vars or the MCP env tools), then re-run deploy --confirm --resume --out ${cwd}\n`);
           return await finish(1);
         }
