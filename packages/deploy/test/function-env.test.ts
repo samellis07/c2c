@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
-import { applyFunctionEnvSecrets, buildFunctionEnv, deployFunctionEnv, functionIdFromList, liveFunctionVariables } from '../src/function-env.js';
+import { applyFunctionEnvSecrets, buildFunctionEnv, deployFunctionEnv, functionIdFromList, liveEnvDroppedByDeploy, liveFunctionVariables } from '../src/function-env.js';
 import { provisionFunctionEnvInput, type ProvisionPlanFile } from '../src/provision.js';
 import { deployCli, readFunctionEnv } from '../src/cli.js';
 import { assertEnvVariablesWithinLimit, ENV_VARIABLES_MAX, envVariables, envVariablesSize, isSecretEnvName, RESERVED_ENV_KEYS, secretEnvValues } from '../src/function-dir.js';
@@ -401,7 +401,7 @@ function restStub(handlers: (call: RestCall) => { status: number; body: unknown 
   return { rest, calls };
 }
 
-const functionList = { data: [{ function_name: 'c2c_api', function_id: '2001' }, { function_name: 'other', function_id: '2002' }] };
+const functionList = { status: 'success', data: [{ name: 'c2c_api', api_name: 'c2c_api', id: '2001', is_deployed: false, configuration: { environment: { variables: { C2C_DEPLOY_MODE: 'live', TABLE_ID: '55' } } } }, { name: 'other', api_name: 'other', id: '2002', is_deployed: false }], total_size: 2 };
 
 test('isSecretEnvName marks token/secret/key/password/credential names', () => {
   for (const name of ['C2C_OWNER_APPROVAL_TOKEN', 'API_KEY', 'client_secret', 'DB_PASSWORD', 'oauth_credential', 'SERVICE_TOKEN'])
@@ -444,6 +444,42 @@ test('applyFunctionEnvSecrets accepts Catalyst omitting empty seeded placeholder
     return undefined;
   });
   assert.deepEqual(await applyFunctionEnvSecrets(rest, '1001', { C2C_OWNER_APPROVAL_TOKEN: '' }, ['C2C_DEPLOY_MODE'], { tries: 1 }), ['C2C_OWNER_APPROVAL_TOKEN']);
+});
+
+test('liveEnvDroppedByDeploy names live variables the deploy set omits, never values', async () => {
+  const listWithLiveEnv = { ...functionList, data: [{ ...functionList.data[0], configuration: { environment: { variables: { C2C_DEPLOY_MODE: 'live', KEPT: 'a', LOST_TOKEN: 'v', PROJECT_ID: '1' } } } }, functionList.data[1]] };
+  const live = restStub((call) => (call.path === `${PREFIX}/function` ? { status: 200, body: listWithLiveEnv } : undefined));
+  assert.deepEqual(await liveEnvDroppedByDeploy(live.rest, '1001', ['C2C_DEPLOY_MODE', 'KEPT'], { tries: 1 }), ['LOST_TOKEN']);
+  assert.deepEqual(live.calls.map((call) => call.path), [`${PREFIX}/function`]);
+  // Not deployed yet: an empty list or a 404 list has nothing to erase.
+  const empty = restStub(() => ({ status: 200, body: { status: 'success', data: [], total_size: 0 } }));
+  assert.deepEqual(await liveEnvDroppedByDeploy(empty.rest, '1001', [], { tries: 1 }), []);
+  const absent = restStub(() => undefined);
+  assert.deepEqual(await liveEnvDroppedByDeploy(absent.rest, '1001', [], { tries: 1 }), []);
+  // Any other failure leaves the live env unknown, so the deploy stops.
+  const refused = restStub(() => ({ status: 401, body: {} }));
+  await assert.rejects(() => liveEnvDroppedByDeploy(refused.rest, '1001', [], { tries: 1 }), /HTTP 401/);
+  const unknownList = { ...functionList, data: [{ ...functionList.data[0], configuration: {} }, functionList.data[1]] };
+  const unknown = restStub((call) => (call.path === `${PREFIX}/function` ? { status: 200, body: unknownList } : undefined));
+  await assert.rejects(() => liveEnvDroppedByDeploy(unknown.rest, '1001', [], { tries: 1 }), /unknown shape|lacks configuration\.environment\.variables/);
+  assert.equal(unknown.calls.length, 1);
+  // A 2xx list in an unknown envelope, or one page of a paginated list, cannot prove absence.
+  for (const body of [{ status: 'success' }, { status: 'success', data: 'none' }, { status: 'success', data: [1] }, [{ function_name: 'c2c_api', function_id: '2001' }]]) {
+    const odd = restStub(() => ({ status: 200, body }));
+    await assert.rejects(() => liveEnvDroppedByDeploy(odd.rest, '1001', [], { tries: 1 }), /unknown shape/);
+  }
+  for (const body of [{ status: 'success', data: [], next_token: 'abc' }, { status: 'success', data: [], has_more: true }, { status: 'success', data: { functions: [], page: 1, total_pages: 2 } }]) {
+    const paged = restStub(() => ({ status: 200, body }));
+    await assert.rejects(() => liveEnvDroppedByDeploy(paged.rest, '1001', [], { tries: 1 }), /paginated/);
+  }
+  const nested = restStub((call) => (call.path === `${PREFIX}/function` ? { status: 200, body: { status: 'success', data: { functions: [{ ...functionList.data[0], configuration: { environment: { variables: { GONE: 'x' } } } }, functionList.data[1]] } } } : undefined));
+  assert.deepEqual(await liveEnvDroppedByDeploy(nested.rest, '1001', [], { tries: 1 }), ['GONE']);
+});
+
+test('liveEnvDroppedByDeploy fails closed when the list entry omits its environment', async () => {
+  const missing = restStub(() => ({ status: 200, body: { ...functionList, data: [{ name: 'c2c_api', id: '2001', is_deployed: false }, functionList.data[1]] } }));
+  await assert.rejects(() => liveEnvDroppedByDeploy(missing.rest, '1001', [], { tries: 1 }), /list entry lacks configuration\.environment\.variables/);
+  assert.equal(missing.calls.length, 1);
 });
 
 test('unknown or incomplete live env refuses before POST', async () => {
@@ -500,6 +536,33 @@ test('functionIdFromList and liveFunctionVariables tolerate envelope shapes', ()
   assert.equal(functionIdFromList({ data: [] }), undefined);
   assert.deepEqual(liveFunctionVariables({ data: { configuration: { environment: { variables: { A: '1' } } } } }), { A: '1' });
   assert.throws(() => liveFunctionVariables({}), /unknown shape/);
+});
+
+test('function preflight requires success status and rejects explicit failures', async () => {
+  const noStatus = restStub((call) =>
+    call.path === `${PREFIX}/function`
+      ? { status: 200, body: { status: 'success', data: [{ function_name: 'other', function_id: '9' }], total_size: 1 } }
+      : { status: 200, body: { data: { configuration: { environment: { variables: {} } } } } },
+  );
+  await assert.rejects(
+    () => liveEnvDroppedByDeploy(noStatus.rest, '1001', [], { tries: 1 }),
+    /absent from a complete non-empty function list/,
+  );
+  for (const status of ['error', 500]) {
+    const failed = restStub((call) =>
+      call.path === `${PREFIX}/function`
+        ? { status: 200, body: { status, data: [] } }
+        : undefined,
+    );
+    await assert.rejects(() => liveEnvDroppedByDeploy(failed.rest, '1001', [], { tries: 1 }), /status is not success/);
+  }
+  for (const body of [
+    { status: 'success', data: [], total_size: 1 },
+    { status: 'success', data: [], total_size: '0' },
+  ]) {
+    const malformed = restStub((call) => (call.path === `${PREFIX}/function` ? { status: 200, body } : undefined));
+    await assert.rejects(() => liveEnvDroppedByDeploy(malformed.rest, '1001', [], { tries: 1 }), /total_size/);
+  }
 });
 
 // Catalyst refused a deploy whose env_variables carried these names:

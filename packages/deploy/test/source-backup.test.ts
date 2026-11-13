@@ -872,6 +872,8 @@ function provisionStore() {
   // APP_LIVE has a file column, so the provisioned function env carries the
   // app bucket name — the post-deploy read-back requires C2C_STRATUS_BUCKET.
   let functionVariables: Record<string, string> = { C2C_DEPLOY_MODE: 'live', C2C_ZOHO_DC: 'in', C2C_STRATUS_BUCKET: 'c2c-test-app-00000000', C2C_MAIL_FROM: 'owner@example.test', API_KEY: '' };
+  // c2c_api is listed only once a `catalyst deploy --only functions:c2c_api` lands.
+  let deployed = false;
   let seq = 1;
   const prefix = `/baas/v1/project/${SCOPE.projectId}`;
   const columnDetails = (table: LiveTable) =>
@@ -900,7 +902,7 @@ function provisionStore() {
         body: { data: [...tables].map(([table_name, table]) => ({ table_name, table_id: table.id, column_details: columnDetails(table) })) },
       };
     }
-    if (call.method === 'GET' && call.path === `${prefix}/function`) return { status: 200, body: { data: [{ function_name: 'c2c_api', function_id: 'f1' }] } };
+    if (call.method === 'GET' && call.path === `${prefix}/function`) return { status: 200, body: { status: 'success', data: deployed ? [{ name: 'c2c_api', api_name: 'c2c_api', id: 'f1', configuration: { environment: { variables: functionVariables } } }] : [], total_size: deployed ? 1 : 0 } };
     // The project's one app bucket, which deploy reads back before it writes C2C_STRATUS_BUCKET.
     if (call.method === 'GET' && call.path === `${prefix}/bucket`) return { status: 200, body: { status: 'success', data: [{ bucket_name: 'c2c-test-app-00000000' }] } };
     if (call.method === 'GET' && call.path === `${prefix}/function/f1`) return { status: 200, body: { data: { configuration: { environment: { variables: functionVariables } } } } };
@@ -931,7 +933,7 @@ function provisionStore() {
     if (call.method === 'GET' && /^\/(slate|baas)\/v1\/project\/[0-9]+\/(app|bucket)$/.test(call.path)) return { status: 200, body: { status: 'success', data: [] } };
     return { status: 404, body: {} };
   };
-  return { tables, rest, restCalls, functionVariables: () => functionVariables };
+  return { tables, rest, restCalls, functionVariables: () => functionVariables, deploy: () => void (deployed = true) };
 }
 
 /** The plan directory provision leaves behind: the project-bound bucket deploy must reuse. */
@@ -976,6 +978,7 @@ function confirmIo(store: ReturnType<typeof provisionStore>): {
         } satisfies SpawnResult;
       }
       if (args.includes('slate:link')) return { code: 0, stdout: 'App Url: https://test-app-abc123.onslate.in\n', stderr: '' } satisfies SpawnResult;
+      if (args.includes('functions:c2c_api')) store.deploy();
       return { code: 0, stdout: '', stderr: '' } satisfies SpawnResult;
     },
     fetch: (async (url: string) => {

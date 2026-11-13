@@ -335,3 +335,95 @@ export async function applyFunctionEnvSecrets(
   }
   return names;
 }
+
+/**
+ * Names on the live function that the coming `catalyst deploy` would erase:
+ * the deploy replaces the whole environment with catalyst-config.json
+ * env_variables, so a live variable missing from that set is lost. Empty when
+ * the function is not deployed yet. Reserved names are Catalyst's own and never
+ * part of the replace. Names only: the values are never returned or printed.
+ */
+export async function liveEnvDroppedByDeploy(
+  rest: RestFn,
+  projectId: string,
+  deployedKeys: readonly string[],
+  opts: RetryOptions = {},
+): Promise<string[]> {
+  const prefix = `/baas/v1/project/${projectId}`;
+  // A project with no function yet answers the list with 404; any other
+  // failure leaves the live env unknown, so the deploy stops.
+  const { result } = await restWithRetry(rest, { method: 'GET', path: `${prefix}/function` }, opts);
+  if (result.status === 404) return [];
+  if (result.status < 200 || result.status >= 300) throw new Error(`listing functions in project ${projectId} failed (HTTP ${result.status})`);
+  const listed = strictFunctionFromList(result.body);
+  if (!listed) return [];
+  // The function list already carries the live environment.  Do not make a
+  // detail GET: the list is the authoritative, allowlisted response and a
+  // second request would reintroduce a race with deployment.
+  if (!asRecord(asRecord(asRecord(listed.entry.configuration)?.environment)?.variables)) {
+    throw new Error(`the ${API_FUNCTION} function list entry lacks configuration.environment.variables; refusing to deploy over an unread environment`);
+  }
+  const live = liveFunctionVariables({ data: listed.entry });
+  const kept = new Set(deployedKeys);
+  return Object.keys(live)
+    .filter((key) => !kept.has(key) && !isReservedEnvKey(key))
+    .sort();
+}
+
+/** The only top-level keys an observed Catalyst function list carries. */
+const LIST_ENVELOPE_KEYS = new Set(['status', 'data', 'total_size']);
+
+function unreadableList(detail: string): Error {
+  return new Error(`the ${API_FUNCTION} function list has an unknown shape or is paginated (${detail}); refusing to deploy over an unread environment`);
+}
+
+/**
+ * The c2c_api id from a function list read strictly, for the pre-deploy check.
+ * Allowlist only: the body holds `status` and `data` and nothing else; `data`
+ * is an array, or an object whose only key is `functions` holding an array;
+ * every entry has a string name and a string or integer id. Anything else (an
+ * unknown key, a pagination marker, an unreadable entry) throws, so a list the
+ * deploy cannot fully read never counts as "not deployed". Absence is accepted
+ * only from a complete `data` array.
+ */
+function strictFunctionFromList(body: unknown): { id: string; entry: Record<string, unknown> } | undefined {
+  const record = asRecord(body);
+  if (!record || Array.isArray(body)) throw unreadableList('body is not an object');
+  const extra = Object.keys(record).filter((key) => !LIST_ENVELOPE_KEYS.has(key));
+  if (extra.length) throw unreadableList(`unexpected key(s) ${extra.sort().join(', ')}`);
+  if (record.status !== 'success') throw unreadableList('status is not success');
+  if (record.total_size !== undefined && (!Number.isSafeInteger(record.total_size) || (record.total_size as number) < 0)) {
+    throw unreadableList('total_size is not a non-negative safe integer');
+  }
+  const data = record.data;
+  let entries: unknown[];
+  let complete = false;
+  if (Array.isArray(data)) {
+    entries = data;
+    complete = true;
+  } else {
+    const dataRecord = asRecord(data);
+    const keys = dataRecord ? Object.keys(dataRecord) : [];
+    if (!dataRecord || keys.length !== 1 || keys[0] !== 'functions' || !Array.isArray(dataRecord.functions)) throw unreadableList('data is not a function array');
+    entries = dataRecord.functions;
+  }
+  if (record.total_size !== undefined && record.total_size !== entries.length) throw unreadableList('total_size does not match the complete data array');
+  const matches = new Map<string, Record<string, unknown>>();
+  entries.forEach((raw, index) => {
+    const entry = asRecord(raw);
+    if (!entry || Array.isArray(raw)) throw unreadableList(`entry ${index} is not an object`);
+    const named = entry.function_name ?? entry.name ?? entry.api_name;
+    if (typeof named !== 'string' || !named) throw unreadableList(`entry ${index} has no readable function name`);
+    const rawId = entry.function_id ?? entry.id;
+    const id = typeof rawId === 'string' && rawId ? rawId : typeof rawId === 'number' && Number.isSafeInteger(rawId) ? String(rawId) : undefined;
+    if (!id) throw unreadableList(`entry ${index} has no readable function id`);
+    if (named === API_FUNCTION) matches.set(id, entry);
+  });
+  if (matches.size > 1) throw unreadableList(`${API_FUNCTION} is listed with more than one id`);
+  const [id, entry] = [...matches.entries()][0] ?? [];
+  if (!id && !complete) throw unreadableList(`${API_FUNCTION} is absent from a list that is not the whole data array`);
+  if (!id && complete && entries.length > 0) {
+    throw new Error(`the ${API_FUNCTION} function is absent from a complete non-empty function list; refusing to deploy because the existing functions cannot prove a safe c2c_api update`);
+  }
+  return id && entry ? { id, entry } : undefined;
+}

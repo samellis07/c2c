@@ -283,6 +283,8 @@ for (const [name, rest] of [
       cap.io.rest = async (call) => {
         calls.push(`${call.method} ${call.path}`);
         if (call.path === '/baas/v1/project/1001/email') return rest();
+        // First deploy: c2c_api is not listed yet, so the live env check has nothing to keep.
+        if (call.method === 'GET' && call.path === '/baas/v1/project/1001/function') return { status: 404, body: {} };
         if (call.method === 'GET' && call.path === '/baas/v1/project/1001') {
           return { status: 200, body: { data: { id: '1001', project_name: 'c2c-mailer', env_details: [{ env_name: 'Development', env_zgid: '10000000000', id: '10000000000' }] } } };
         }

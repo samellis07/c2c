@@ -229,7 +229,8 @@ function memoryRest(detailsOrg: string = SCOPE.org): {
       return { status: 200, body: projectDetails(call.path.split('/').at(-1) ?? '', detailsOrg) };
     }
     if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+\/function$/.test(call.path)) {
-      return { status: 200, body: { status: 'success', data: [...deployed].map(([name, id]) => ({ id, name })) } };
+      const data = [...deployed].map(([name, id]) => ({ id, name, api_name: name, is_deployed: false, configuration: { environment: { variables: functionEnv.get(id) ?? {} } } }));
+      return { status: 200, body: { status: 'success', data, total_size: data.length } };
     }
     const functionId = /^\/baas\/v1\/project\/[0-9]+\/function\/([^/?]+)$/.exec(call.path)?.[1];
     if (call.method === 'GET' && functionId) {
@@ -328,6 +329,7 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, deta
   fetched: string[];
   restCalls: { method: string; path: string; body?: unknown }[];
   functionEnv: Map<string, Record<string, string>>;
+  deployed: Map<string, string>;
 } {
   let out = '';
   let err = '';
@@ -375,7 +377,7 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, deta
     rest: store.rest,
     accessToken: async () => CLI_TOKEN,
   };
-  return { io, stdout: () => out, stderr: () => err, spawned, fetched, restCalls: store.calls, functionEnv: store.functionEnv };
+  return { io, stdout: () => out, stderr: () => err, spawned, fetched, restCalls: store.calls, functionEnv: store.functionEnv, deployed: store.deployed };
 }
 
 /** Persist a green doctor.json for one scope so a confirmed bin run passes the doctor gate. */
@@ -614,7 +616,7 @@ test('a deploy with schedules reads c2c_jobs back after its deploy and records i
   const code = await deployCli([...baseArgs(ds), '--async-on-success', '--triggers-wired', '--confirm', '--function-env', 'new', '--out', out], cap.io);
   assert.equal(code, 0, cap.stderr());
   const listed = cap.restCalls.filter((call) => call.method === 'GET' && /\/function$/.test(call.path));
-  assert.equal(listed.length, 1, 'one function-list read-back, after functions-jobs');
+  assert.equal(listed.length, 2, 'the pre-deploy live env check, then the read-back after functions-jobs');
   const state = JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { done: string[]; jobsFunctionId?: string };
   assert.ok(state.done.includes('functions-jobs'));
   assert.match(state.jobsFunctionId ?? '', /^[0-9]+$/);
@@ -635,6 +637,84 @@ test('a deploy whose c2c_jobs does not land in the function list stops with the 
   assert.equal(state.jobsFunctionId, undefined);
   // Nothing after functions-jobs ran: no Slate step was spawned.
   assert.equal(cap.spawned.some((spawn) => spawn.args.some((arg) => arg.startsWith('slate'))), false);
+  rmSync(out, { recursive: true, force: true });
+});
+
+// catalyst deploy replaces the function's whole environment, so a redeploy
+// whose --function-env does not name a live variable must stop before the
+// functions step instead of erasing it, and never print the value.
+test('a redeploy refuses to erase a live c2c_api variable the --function-env file does not name', async () => {
+  const ds = writeDs();
+  for (const envArg of ['new', 'partial']) {
+    const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
+    const cap = capture();
+    cap.deployed.set('c2c_api', '1000000000009001');
+    cap.functionEnv.set('1000000000009001', { C2C_DEPLOY_MODE: 'live', CUSTOMER_WEBHOOK: 'https://hooks.example.test/live-value', PARTNER_API_KEY: 'live-secret-value' });
+    const envFile = join(out, 'env.json');
+    writeFileSync(envFile, JSON.stringify({ PARTNER_API_KEY: '' }));
+    const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', envArg === 'new' ? 'new' : envFile, '--out', out], cap.io);
+    assert.equal(code, 1, envArg);
+    assert.match(cap.stderr(), envArg === 'new' ? /c2c_api already has environment variable\(s\) the deploy would erase: CUSTOMER_WEBHOOK, PARTNER_API_KEY/ : /would erase: CUSTOMER_WEBHOOK\n/);
+    assert.match(cap.stderr(), /next step: add them to the --function-env file/);
+    assert.equal(cap.spawned.some((spawn) => spawn.args.includes('functions:c2c_api')), false, 'catalyst deploy never ran');
+    const printed = `${cap.stdout()}${cap.stderr()}`;
+    assert.equal(printed.includes('live-value') || printed.includes('live-secret-value'), false, 'values are never printed');
+    assert.equal(cap.functionEnv.get('1000000000009001')?.CUSTOMER_WEBHOOK, 'https://hooks.example.test/live-value');
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+// A function list the deploy cannot fully read (unknown 2xx envelope, or the
+// first page of a paginated list) must not read as "not deployed".
+for (const [name, body] of [
+  ['has an unknown 2xx shape', { status: 'success', result: [] }],
+  ['is the first page of a paginated list', { status: 'success', data: [], next_token: 'page-2' }],
+  ['carries a next link', { data: [], next: '/function?page=2' }],
+  ['carries a camelCase next token', { data: [], nextToken: 'p2' }],
+  ['carries a cursor', { data: [], cursor: 'abc' }],
+  ['reports a total larger than its rows', { data: [], total: 5 }],
+  ['reports a count larger than its rows', { data: [], count: 5 }],
+  ['reports total_size larger than its rows', { data: [], total_size: 1 }],
+  ['reports a non-number total_size', { data: [], total_size: '0' }],
+  ['carries links', { data: [], links: { next: 'x' } }],
+  ['carries offset and limit', { data: [], offset: 0, limit: 1 }],
+  ['carries a next marker beside data.functions', { data: { functions: [], next: 'p2' } }],
+  ['names c2c_api with no id', { data: [{ function_name: 'c2c_api' }] }],
+  ['names c2c_api with an object id', { data: [{ name: 'c2c_api', id: { v: 1 } }] }],
+  ['holds an empty entry', { data: [{}] }],
+  ['names a function under another key', { data: [{ fn_name: 'c2c_api', fn_id: '1' }] }],
+  ['holds only data.functions without c2c_api', { data: { functions: [] } }],
+] as const) {
+  test(`a confirmed deploy stops before the functions step when the function list ${name}`, async () => {
+    const ds = writeDs();
+    const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
+    const cap = capture();
+    const inner = cap.io.rest!;
+      cap.io.rest = async (call) => (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+\/function$/.test(call.path) ? { status: 200, body: Object.assign({}, body, { status: 'success' }) } : inner(call));
+    let outcome: number | string;
+    try {
+      outcome = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
+    } catch (error) {
+      outcome = (error as Error).message;
+    }
+    assert.notEqual(outcome, 0, 'the deploy does not succeed');
+    assert.match(`${typeof outcome === 'string' ? outcome : ''}${cap.stderr()}`, /unknown shape|paginated/);
+    assert.equal(cap.spawned.some((spawn) => spawn.args.includes('functions:c2c_api')), false, 'catalyst deploy never ran');
+    rmSync(out, { recursive: true, force: true });
+  });
+}
+
+test('a redeploy whose --function-env names every live variable proceeds', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
+  const cap = capture();
+  cap.deployed.set('c2c_api', '1000000000009001');
+  cap.functionEnv.set('1000000000009001', { C2C_DEPLOY_MODE: 'live', C2C_ADMIN_USER_ID: '', CUSTOMER_WEBHOOK: 'https://hooks.example.test/live-value' });
+  const envFile = join(out, 'env.json');
+  writeFileSync(envFile, JSON.stringify({ C2C_ADMIN_USER_ID: '', CUSTOMER_WEBHOOK: 'https://hooks.example.test/live-value' }));
+  const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', envFile, '--out', out], cap.io);
+  assert.equal(code, 0, cap.stderr());
+  assert.equal(cap.spawned.some((spawn) => spawn.args.includes('functions:c2c_api')), true);
   rmSync(out, { recursive: true, force: true });
 });
 
