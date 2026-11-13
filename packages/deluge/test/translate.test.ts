@@ -619,6 +619,25 @@ test('direct control flow, collections, and string/math stay in generated JS', (
   assert.doesNotMatch(stripComments(t.client), /\bfetch\s*\(/);
 });
 
+test('a typed List/Map constructor carries its literal seed into the shim call', () => {
+  const t = translate([
+    'empty_typed = List:String();',
+    'seeded_list = List:String({"<a>Monday</a>"});',
+    'seeded_map = Map:String({"Monday":seeded_list,"Tuesday":seeded_list});',
+    'local = {"x"};',
+    'dropped = List:String(local);',
+  ].join('\n'));
+  const server = stripComments(t.server);
+  // Empty-arg typed constructors are unchanged.
+  assert.match(server, /empty_typed = shim\.list\("String"\)/);
+  // A literal list/map argument seeds the collection instead of being discarded.
+  assert.match(server, /seeded_list = shim\.list\("String", \["<a>Monday<\/a>"\]\)/);
+  assert.match(server, /seeded_map = shim\.map\("String", \{ \["Monday"\]: seeded_list, \["Tuesday"\]: seeded_list \}\)/);
+  // A non-literal argument is never silently dropped: it stays a counted TODO.
+  assert.match(server, /dropped = await shim\.todo\(ctx, "call:List"\)/);
+  assert.ok(t.todos.some((item) => item.construct === 'call:List'));
+});
+
 test('record, mail, http, zoho, thisapp, dates, and decimals go through the shim', () => {
   const t = translate([
     'id = insert into Orders[Name = "A" Amount = 2];',

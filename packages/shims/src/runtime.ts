@@ -639,7 +639,7 @@ export interface Shim {
     prepare(ctx: ShimContext, formName: string, kind?: 'insert' | 'update'): Promise<void>;
   };
   list: {
-    (elementType?: string): unknown[];
+    (elementType?: string, seed?: readonly unknown[]): unknown[];
     get(value: unknown, index: unknown): unknown;
     remove(value: unknown, a?: unknown, b?: unknown): unknown;
     removeAll(value: unknown, drop: unknown): unknown;
@@ -679,7 +679,7 @@ export interface Shim {
     aggregate(rows: unknown, fn: unknown, field?: unknown, exact?: unknown): unknown;
     numberList(value: unknown, fn: unknown): unknown[];
   };
-  map(elementType?: string): Record<string, unknown>;
+  map(elementType?: string, seed?: Record<string, unknown>): Record<string, unknown>;
   /**
    * Deluge `for each`. An empty collection iterates zero times
    * (https://www.zoho.com/deluge/help/datatypes/collection.html).
@@ -2730,8 +2730,8 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     aggregate: lists.aggregate,
     numberList: lists.numberList,
   };
-  function listCollection(elementType?: string): unknown[] {
-    const arr: unknown[] = [];
+  function listCollection(elementType?: string, seed?: readonly unknown[]): unknown[] {
+    const arr: unknown[] = seed ? [...seed] : [];
     if (elementType) note({ op: 'list', elementType });
     return arr;
   }
@@ -3158,9 +3158,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
     },
     list: listApi,
-    map(elementType?: string) {
+    map(elementType?: string, seed?: Record<string, unknown>) {
       if (elementType) note({ op: 'map', elementType });
-      return {};
+      return seed ? { ...seed } : {};
     },
     each(_ctx, value) {
       return eachOf(value);
