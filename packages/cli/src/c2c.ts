@@ -187,7 +187,7 @@ import { generateReactApp, HandEditedError, writeReactApp } from '../../ui-react
 import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyBehaviorCli, verifyCli } from '../../deploy/src/index.js';
 import { cutoverCli } from './cutover.js';
 import { ARGV_SPEC, argvShapeProblems, seedArgsProblem } from './argv.js';
-import { GATE_EXIT, defaultDoctorIo, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
+import { GATE_EXIT, c2cVersion, defaultDoctorIo, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
 import { FillTodoError, fillTodosMain } from '../../deluge/src/fill-todos.js';
 import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
 import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
@@ -248,6 +248,8 @@ const USAGE =
       // Operator-only `doctor --record-mcp <file> --operator` stays dispatchable
       // but out of customer help; see plugin/references/doctor-spec.md.
       '       c2c --verify-vendor <dir>\n' +
+      '       c2c --version\n' +
+      '       c2c -V\n' +
       '       c2c migration-report <dir> [--label name] [--out file] [--json]\n' +
       '       c2c deluge <dir> [--label name] [--out file] [--top n]\n' +
       '       c2c ui <file|dir> --out <dir>\n' +
@@ -457,12 +459,12 @@ function doctorGateRefusal(args: readonly string[], opts: { createsProject?: boo
 function main(argv: string[]): number {
   const [cmd, ...restAll] = argv;
   if (!cmd) usage();
-  if (cmd === '--version' || cmd === '-V') {
-    process.stdout.write('0.2.0\n');
-    return 0;
-  }
   if (cmd === '--help' || cmd === '-h') return printHelp();
   if (helpRequested(cmd, restAll)) return printHelp((DISPATCH_COMMANDS as readonly string[]).includes(cmd) ? cmd : undefined);
+  if (cmd === '--version' || cmd === '-V') {
+    process.stdout.write(`${c2cVersion()}\n`);
+    return 0;
+  }
   if (!(DISPATCH_COMMANDS as readonly string[]).includes(cmd)) return unknownCommand(cmd);
   // A flag the command does not know is refused, never silently ignored.
   const unknown = argvShapeProblems(cmd, restAll).filter((problem) => problem.startsWith('unknown flag '));
