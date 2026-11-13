@@ -8314,8 +8314,11 @@ test('a function has no client half: no client module, prefetch or call endpoint
   assert.doesNotMatch(check.source, /actions\.push|client-condition-uses-server|client-loop-uses-server/);
   // OpenForm.Review's comment-only body produces no server, client, or
   // prefetch code; the generator counts it as a todo instead of leaving it a
-  // silent drop.
-  assert.deepEqual(g.todos.map((t) => t.construct), ['function-untranslated']);
+  // silent drop. Check's own openUrl sits in an if that is not the function
+  // body's final statement (a for-each and a second if follow the guard
+  // read), which classifyClientOpenUrl's whole-function shape does not
+  // recognise either — also a counted todo, not a silent drop.
+  assert.deepEqual(g.todos.map((t) => t.construct), ['function-untranslated', 'openurl-dropped-unrecognized-branch-shape']);
 });
 
 test('a function that reads a value then conditionally navigates is a counted manual item, not a silent drop', () => {
@@ -8353,6 +8356,130 @@ test('a function that reads a value then conditionally navigates is a counted ma
   assert.ok(todo, 'the dropped navigation is a counted manual item');
   assert.match(todo!.manualStep ?? '', /Vote\.vote/);
   assert.match(todo!.manualStep ?? '', /Voting_Page/);
+});
+
+test('a nested if ahead of a branch openUrl is a counted manual item, not a silent drop', () => {
+  // classifyClientOpenUrl's whole-function shape requires each if arm to be
+  // one openUrl (after plain local assigns). A nested if ahead of the arm's
+  // trailing openUrl breaks that pattern, so the outer if still produces real
+  // server code (the nested if's own body) and the dropped navigation used to
+  // leave no todo at all.
+  const fn: FunctionDef = {
+    name: 'Nav.nestedGuard',
+    kind: 'creator',
+    signature: 'void Nav.nestedGuard(int recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'if (recID > 0) {',
+          '  if (recID > 5) {',
+          '    info "deep";',
+          '  }',
+          '  openUrl("#Report:Orders", "same window");',
+          '} else {',
+          '  openUrl("#Report:Orders2", "same window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [fn] }));
+  const module = g.files.find((f) => f.path === 'functions/custom/nav-nestedguard.mjs');
+  assert.ok(module, 'the nested if still produces a server module');
+  assert.doesNotMatch(module!.source, /Client action openUrl/);
+  assert.doesNotMatch(stripComments(module!.source), /openUrl/);
+  const todo = g.todos.find((t) => t.construct === 'openurl-dropped-unrecognized-branch-shape');
+  assert.ok(todo, 'the dropped navigation is a counted manual item, not a silent drop');
+  assert.match(todo!.manualStep ?? '', /Nav\.nestedGuard/);
+});
+
+test('a statement after a branch openUrl is a counted manual item, not a silent drop', () => {
+  // openUrlAfterLocals only allows plain local assigns *before* the trailing
+  // openUrl in a branch. An assign placed after the openUrl breaks that
+  // pattern: the assign still produces real server code, so `server` is
+  // never empty, and the dropped navigation used to leave no todo at all.
+  const fn: FunctionDef = {
+    name: 'Nav.trailingAssign',
+    kind: 'creator',
+    signature: 'void Nav.trailingAssign(int recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'if (recID > 0) {',
+          '  openUrl("#Report:Orders", "same window");',
+          '  y = 1;',
+          '} else {',
+          '  openUrl("#Report:Orders2", "same window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [fn] }));
+  const module = g.files.find((f) => f.path === 'functions/custom/nav-trailingassign.mjs');
+  assert.ok(module, 'the trailing assign still produces a server module');
+  assert.doesNotMatch(module!.source, /Client action openUrl/);
+  assert.doesNotMatch(stripComments(module!.source), /openUrl/);
+  const todo = g.todos.find((t) => t.construct === 'openurl-dropped-unrecognized-branch-shape');
+  assert.ok(todo, 'the dropped navigation is a counted manual item, not a silent drop');
+  assert.match(todo!.manualStep ?? '', /Nav\.trailingAssign/);
+});
+
+test('two openUrl calls in one branch, and an openUrl ahead of the if, are already counted (not a silent drop)', () => {
+  // These two branch shapes also break classifyClientOpenUrl's whole-function
+  // pattern, but unlike the nested-if and trailing-assign shapes above, they
+  // leave `server` empty, so the generic function-untranslated path already
+  // counts them. Regression control for the other two confirmed silent drops.
+  const twoCalls: FunctionDef = {
+    name: 'Nav.twoCalls',
+    kind: 'creator',
+    signature: 'void Nav.twoCalls(int recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'if (recID > 0) {',
+          '  openUrl("#Report:Orders", "same window");',
+          '  openUrl("#Report:OrdersAlt", "same window");',
+          '} else {',
+          '  openUrl("#Report:Orders2", "same window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const earlierCall: FunctionDef = {
+    name: 'Nav.earlierCall',
+    kind: 'creator',
+    signature: 'void Nav.earlierCall(int recID)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'openUrl("#Report:OrdersEarly", "same window");',
+          'if (recID > 0) {',
+          '  openUrl("#Report:Orders", "same window");',
+          '} else {',
+          '  openUrl("#Report:Orders2", "same window");',
+          '}',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [twoCalls, earlierCall] }));
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/nav-twocalls.mjs'), false);
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/nav-earliercall.mjs'), false);
+  assert.equal(g.todos.filter((t) => t.construct === 'function-untranslated').length, 2);
 });
 
 test('a guard-read function whose branch assigns a local then navigates to an own-app page is lifted into a returned navigate instruction', () => {
