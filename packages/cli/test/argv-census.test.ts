@@ -144,7 +144,9 @@ test('deploy: --function-env is validated offline and never echoes a value', (t)
     writeFileSync(at, text);
     return at;
   };
-  assert.match(argvProblems('deploy', ['app.ds', '--confirm']).join('\n'), /^--confirm needs --function-env <file> /);
+  const missingEnv = argvProblems('deploy', ['app.ds', '--confirm']).join('\n');
+  assert.match(missingEnv, /^--confirm needs --function-env <your COMPLETE file> /);
+  assert.doesNotMatch(missingEnv, /\bnew\b/);
   assert.deepEqual(argvProblems('deploy', ['app.ds', '--confirm', '--function-env', 'new']), []);
   assert.deepEqual(argvProblems('deploy', ['app.ds']), []);
   assert.deepEqual(argvProblems('deploy', ['app.ds', '--function-env', file('ok.json', '{"API_TOKEN":"s3cr3t-value"}')]), []);
@@ -191,7 +193,9 @@ test('cutover-checklist, proof, rollback-export and iac-drift refuse a flag they
 
 test('deploy: --backfill-shadows --confirm does not need --function-env; a plain --confirm still does', () => {
   assert.deepEqual(argvProblems('deploy', ['app.ds', '--backfill-shadows', '--confirm']), []);
-  assert.match(argvProblems('deploy', ['app.ds', '--confirm']).join('\n'), /^--confirm needs --function-env <file> /);
+  const missingEnv = argvProblems('deploy', ['app.ds', '--confirm']).join('\n');
+  assert.match(missingEnv, /^--confirm needs --function-env <your COMPLETE file> /);
+  assert.doesNotMatch(missingEnv, /\bnew\b/);
 });
 
 test('plan: the schema-change flags pass the shape check and a misspelled one does not', () => {
