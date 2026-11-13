@@ -1739,7 +1739,7 @@ function renderElement(el, doc, parentReport, appModel) {
       )
       .join('');
     const inner = el.src ? `<div data-snippet-src="${escapeHtml(el.src)}">${clean}</div>` : clean;
-    const includes = (el.includes || []).filter((item) => /^[A-Za-z_]\w*$/.test(item));
+    const includes = (el.includes || []).filter((item) => typeof item === 'string' && parseIncludeSpec(item) !== null);
     const declared = includes.length ? ` data-page-includes="${escapeHtml(includes.join(' '))}"` : '';
     const components = (el.components || []).filter((item) => item && (item.kind === 'form' || item.kind === 'report') && /^[A-Za-z_]\w*$/.test(item.name));
     const componentDecl = components.length ? ` data-page-components="${escapeHtml(components.map((item) => `${item.kind}:${item.name}`).join(' '))}"` : '';
@@ -1838,6 +1838,62 @@ export function renderPage(page, doc, appModel) {
 }
 
 const PAGE_INCLUDE_PREFIX = 'page-include:';
+const INCLUDE_PARAM = /^[A-Za-z_]\w*=(?:@[A-Za-z_]\w*|[A-Za-z0-9_.-]{0,64})$/;
+const INCLUDE_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * `Page` or `Page?key=@param,key=literal`: the include spec the compiler
+ * proved (declared target parameters, bounded literals, forwarded page
+ * parameters). Anything else is null and the marker is never filled.
+ */
+export function parseIncludeSpec(spec) {
+  const text = String(spec || '');
+  const q = text.indexOf('?');
+  const name = q < 0 ? text : text.slice(0, q);
+  if (!/^[A-Za-z_]\w*$/.test(name)) return null;
+  const params = [];
+  if (q >= 0) {
+    const seen = new Set();
+    for (const part of text.slice(q + 1).split(',')) {
+      if (!INCLUDE_PARAM.test(part)) return null;
+      const eq = part.indexOf('=');
+      const key = part.slice(0, eq);
+      const value = part.slice(eq + 1);
+      if (INCLUDE_RESERVED.has(key) || seen.has(key)) return null;
+      seen.add(key);
+      if (value.startsWith('@')) {
+        if (INCLUDE_RESERVED.has(value.slice(1))) return null;
+        params.push({ key, from: value.slice(1) });
+      } else params.push({ key, value });
+    }
+  }
+  return { name, params };
+}
+
+/** Page input scoped to an included page, set where the include is drawn. */
+const INCLUDE_INPUT = new WeakMap();
+
+/** The page input of the nearest enclosing include, or null outside one. */
+export function includeInputFor(node) {
+  for (let at = node; at; at = at.parentElement) if (INCLUDE_INPUT.has(at)) return INCLUDE_INPUT.get(at);
+  return null;
+}
+
+/**
+ * The included page's input: only the proven parameters, each a literal or
+ * the embedding page's own input value. It replaces the document's URL
+ * input, the way a framed page sees only its own URL; the included page's
+ * snippet routes re-check the caller per record, so a value here can do no
+ * more than the same value typed into that page's URL.
+ */
+function includeInput(params, outer) {
+  const input = Object.create(null);
+  for (const param of params) {
+    const value = 'from' in param ? (Object.prototype.hasOwnProperty.call(outer, param.from) ? outer[param.from] : undefined) : param.value;
+    if (typeof value === 'string') input[param.key] = value;
+  }
+  return input;
+}
 
 /**
  * Inline includes of other app pages (a translated `page-embed` iframe). A
@@ -1851,10 +1907,14 @@ export function hydratePageIncludes(root, appModel, viewRef) {
   if (!root || !root.querySelectorAll) return;
   for (const slot of root.querySelectorAll(`[data-zml^="${PAGE_INCLUDE_PREFIX}"]`)) {
     if (slot.getAttribute('data-include-done') === 'true') continue;
-    const name = (slot.getAttribute('data-zml') || '').slice(PAGE_INCLUDE_PREFIX.length);
+    const spec = (slot.getAttribute('data-zml') || '').slice(PAGE_INCLUDE_PREFIX.length);
     const host = slot.closest('[data-page-includes]');
     const declared = host ? (host.getAttribute('data-page-includes') || '').split(' ') : [];
-    if (!name || !declared.includes(name)) continue;
+    // The whole spec, parameters included, must be one the compiled snippet
+    // declared: markup (or a server-rendered value) cannot add a parameter.
+    const parsed = parseIncludeSpec(spec);
+    if (!parsed || !declared.includes(spec)) continue;
+    const name = parsed.name;
     slot.setAttribute('data-include-done', 'true');
     const page = (appModel.pages || []).find((item) => item.name === name);
     if (!page) {
@@ -1873,7 +1933,10 @@ export function hydratePageIncludes(root, appModel, viewRef) {
       slot.innerHTML = '<p data-access-status="403">This page is not available.</p>';
       continue;
     }
+    const outer = includeInputFor(slot) || snippetPageInput(slot.ownerDocument || null);
     slot.innerHTML = `<div class="page-include" data-page="${escapeHtml(page.name)}">${pageBody(page, slot.ownerDocument, appModel)}</div>`;
+    // A plain include keeps the surrounding input, as before.
+    if (parsed.params.length && slot.firstElementChild) INCLUDE_INPUT.set(slot.firstElementChild, includeInput(parsed.params, outer));
     hydrateCharts(slot, appModel, viewRef);
     hydratePopups(slot, appModel, viewRef);
     hydrateSnippets(slot, appModel, viewRef);
@@ -2257,7 +2320,7 @@ export function hydrateSnippets(root, appModel, viewRef) {
     apiCall(call, viewRef, src, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify({ input: includeInputFor(host) || input }),
     })
       .then((res) => {
         if (!res || res.status === 404 || res.status === 405 || res.status === 501) return null;

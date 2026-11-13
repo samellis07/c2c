@@ -464,20 +464,71 @@ const IFRAME_ATTR = `[${TAG_WS}]+[A-Za-z_:][\\w:.-]*(?:[${TAG_WS}]*=[${TAG_WS}]*
 const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?[${TAG_WS}]+src[${TAG_WS}]*=[${TAG_WS}]*(["'])$`, 'i');
 const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
 
+/** A forwarded page parameter: exactly one `<%=input.<name>%>` island. */
+const FORWARD_ISLAND = /^<%=[ \t]*input[ \t]*\.[ \t]*([A-Za-z_]\w*)[ \t]*%>$/;
+/** Literal include parameter values: no delimiter, quote, percent escape, scheme colon or slash. */
+const LITERAL_PARAM = /^[A-Za-z0-9_.-]{0,64}$/;
+/** Grammar of one include parameter in a marker: `key=@param` (forward) or `key=literal`. */
+export const INCLUDE_PARAM = /^[A-Za-z_]\w*=(?:@[A-Za-z_]\w*|[A-Za-z0-9_.-]{0,64})$/;
+
+/**
+ * The include parameters of an embed query, or null when any part cannot be
+ * proven safe. Names must be parameters the target page declares (matched
+ * case-insensitively, emitted under the declared spelling) and appear once;
+ * a value is a bounded literal or one `<%=input.p%>` island forwarding a
+ * parameter the embedding page declares. `zc_*` display flags are dropped.
+ * Percent escapes, entities, nested islands, other expressions and unknown
+ * names all refuse, so the iframe stays a counted snippet.
+ */
+function includeParams(query: string, target: readonly string[], own: ReadonlySet<string>): string[] | null {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of query.split('&')) {
+    if (part === '') continue;
+    if (/^zc_\w+(=[^&<%]*)?$/i.test(part)) continue;
+    const eq = part.indexOf('=');
+    if (eq <= 0) return null;
+    const key = part.slice(0, eq);
+    const raw = part.slice(eq + 1);
+    if (!/^[A-Za-z_]\w*$/.test(key)) return null;
+    const matches = target.filter((name) => name.toLowerCase() === key.toLowerCase());
+    if (matches.length !== 1) return null;
+    const name = matches[0];
+    if (seen.has(name.toLowerCase())) return null;
+    seen.add(name.toLowerCase());
+    const forward = FORWARD_ISLAND.exec(raw);
+    if (forward) {
+      if (!own.has(forward[1])) return null;
+      out.push(`${name}=@${forward[1]}`);
+    } else if (LITERAL_PARAM.test(raw)) {
+      out.push(`${name}=${raw}`);
+    } else {
+      return null;
+    }
+  }
+  return out;
+}
+
 /**
  * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` (or the older
  * `view-embed/<Page>` spelling) of another page
  * of this app becomes an inline include of that page's generated view. Creator
  * draws the named page inside the frame [UNVERIFIED]; `zc_*` query keys are
  * Creator display flags (header, footer) [UNVERIFIED] with no view effect
- * here, so they may stay. Anything else is left as written, and the iframe
- * keeps the snippet counted: an unknown page, the page embedding itself, any
- * other query parameter, an island in the URL or the tag, frame content, or a
- * position that is not plain text (a comment, a raw-text or dropped element).
+ * here, so they may stay. Other query parameters pass only through
+ * `includeParams`: names the target page declares, bounded literal values or
+ * a forwarded parameter of this page. The included page's snippets receive
+ * them as their page input, exactly what a user could put in that page's own
+ * URL, so their server routes re-check the caller per record and a parameter
+ * never widens a read. Anything else is left as written, and the iframe
+ * keeps the snippet counted: an unknown page, the page embedding itself, an
+ * undeclared or repeated parameter, an encoded or expression value, an island
+ * elsewhere in the URL or the tag, frame content, or a position that is not
+ * plain text (a comment, a raw-text or dropped element).
  */
-function inlinePageEmbeds(template: string, app: App, page: string): { template: string; includes: string[] } {
+function inlinePageEmbeds(template: string, app: App, page: string, ownParams: ReadonlySet<string> = new Set()): { template: string; includes: string[] } {
   const includes: string[] = [];
-  const known = new Set(app.pages.map((item) => item.name));
+  const pages = new Map(app.pages.map((item) => [item.name, item]));
   let out = '';
   let at = 0;
   APPURI_ISLAND.lastIndex = 0;
@@ -490,23 +541,26 @@ function inlinePageEmbeds(template: string, app: App, page: string): { template:
     const quote = open[1];
     const rest = template.slice(m.index + m[0].length);
     const tail = new RegExp(
-      `^(?:page-embed|view-embed)/([A-Za-z_]\\w*)(?:\\?([^"'<>%${TAG_WS}]*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
+      `^(?:page-embed|view-embed)/([A-Za-z_]\\w*)(?:\\?((?:[^"'<>%${TAG_WS}]|<%=[ \\t]*input[ \\t]*\\.[ \\t]*[A-Za-z_]\\w*[ \\t]*%>)*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
       'i',
     ).exec(rest);
     if (!tail) continue;
     const name = tail[1];
     const query = tail[2] ?? '';
-    if (!known.has(name) || name === page) continue;
-    if (query && !query.split('&').every((part) => part === '' || /^zc_\w+(=[^&]*)?$/i.test(part))) continue;
+    const target = pages.get(name);
+    if (!target || name === page) continue;
+    const params = includeParams(query, target.params ?? [], ownParams);
+    if (!params) continue;
     // The tag must open in a text position of an element the sanitizer keeps.
     const before = out + template.slice(at, at + start);
     const pieces = splitChunks(before);
     if (!pieces) continue;
     if (slotContext(pieces.map((c) => (c.kind === 'static' ? c.text : 'x')).join('')) !== 'text') continue;
-    out = `${before}<div data-zml="${PAGE_INCLUDE_PREFIX}${name}"></div>`;
+    const spec = params.length ? `${name}?${params.join(',')}` : name;
+    out = `${before}<div data-zml="${PAGE_INCLUDE_PREFIX}${spec}"></div>`;
     at = m.index + m[0].length + tail[0].length;
     APPURI_ISLAND.lastIndex = at;
-    if (!includes.includes(name)) includes.push(name);
+    if (!includes.includes(spec)) includes.push(spec);
   }
   return { template: out + template.slice(at), includes };
 }
@@ -2631,7 +2685,7 @@ export function compileHtmlpage(
   // A template that already writes the include marker could name a page the
   // compiler never checked: it stays the counted snippet.
   if (head.template.toLowerCase().includes(PAGE_INCLUDE_PREFIX)) return fail('marker collision');
-  const embeds = inlinePageEmbeds(head.template, app, page);
+  const embeds = inlinePageEmbeds(head.template, app, page, new Set(head.params));
   head.template = embeds.template;
   const includes = embeds.includes;
   if (head.template.toLowerCase().includes('component-form:') || head.template.toLowerCase().includes('component-report:')) return fail('marker collision');
