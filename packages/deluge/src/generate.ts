@@ -2598,11 +2598,26 @@ function containsOpenUrlStmt(nodes: readonly Stmt[]): boolean {
   return found;
 }
 
-/** A bare `openUrl(...)` statement, or a `{ openUrl(...) }` block with no other statement — never a local-assign substitution, since the replacement this backs must splice the ORIGINAL source text verbatim. */
+/**
+ * A bare `openUrl(...)` statement, or a `{ ...; openUrl(...) }` block whose
+ * only statements before the trailing `openUrl` are plain local assigns
+ * (`name = expr;`) — the same shape `trailingLocalsSlice` tolerates at the
+ * function's own top level, now also inside a single if/elif/else branch
+ * (e.g. Creator's own `url = "#Page:X?Y=" + id; openUrl(url, ...);`
+ * branch body). This is never a local-assign SUBSTITUTION: the replacement
+ * this backs splices only the ORIGINAL `openUrl` statement's own span, so
+ * the branch's preceding assigns are left untouched in the output and the
+ * returned navigate instruction still reads the same local by name.
+ */
 function bareOpenUrl(stmt: Stmt): Stmt | undefined {
   if (stmt.kind === 'openUrl') return stmt;
-  if (stmt.kind === 'block' && stmt.body.length === 1 && stmt.body[0]?.kind === 'openUrl') return stmt.body[0];
-  return undefined;
+  if (stmt.kind !== 'block' || !stmt.body.length) return undefined;
+  for (let i = 0; i < stmt.body.length - 1; i++) {
+    const s = stmt.body[i]!;
+    if (s.kind !== 'assign' || s.op !== '=' || s.target.kind !== 'name') return undefined;
+  }
+  const last = stmt.body[stmt.body.length - 1]!;
+  return last.kind === 'openUrl' ? last : undefined;
 }
 
 /**
