@@ -202,11 +202,13 @@ test('openUrl notes the URL and opens a new window; same window assigns location
   };
   const notes = runtime.applyActions([{ op: 'openUrl', args: ['https://example.test/x', 'new window'] }], formEl);
   assert.deepEqual(notes, ['https://example.test/x']);
-  assert.deepEqual(opened, [['https://example.test/x', '_blank', undefined]]);
+  // `noopener,noreferrer` keeps the opened page from reaching back via
+  // `window.opener` (reverse tabnabbing).
+  assert.deepEqual(opened, [['https://example.test/x', '_blank', 'noopener,noreferrer']]);
   // A popup window opens a named popup; a same-window navigation assigns the
   // page location and opens nothing.
   runtime.applyActions([{ op: 'openUrl', args: ['https://example.test/p', 'popup window'] }], formEl);
-  assert.deepEqual(opened[1], ['https://example.test/p', '_blank', 'popup']);
+  assert.deepEqual(opened[1], ['https://example.test/p', '_blank', 'popup,noopener,noreferrer']);
   assert.deepEqual(nav.assigned, []);
   const same = runtime.applyActions([{ op: 'openUrl', args: ['https://example.test/s', 'same window'] }], formEl);
   assert.deepEqual(same, ['https://example.test/s']);
@@ -266,7 +268,30 @@ test('openUrl still navigates anchors, relative paths, and scheme-relative addre
   // `//host/path` inherits the page's scheme — https on a deployed app — so
   // it reaches the same place an `https:` URL does and stays allowed.
   runtime.applyActions([{ op: 'openUrl', args: ['//cdn.example.test/x', 'new window'] }], formEl);
-  assert.deepEqual(opened[4], ['//cdn.example.test/x', '_blank', undefined]);
+  assert.deepEqual(opened[4], ['//cdn.example.test/x', '_blank', 'noopener,noreferrer']);
+});
+
+test('openUrl never opens a new tab or popup without noopener,noreferrer', async () => {
+  const { runtime, doc, win } = await setup(`\tform Order\n\t{\n${field('Name', 'text')}\n\t}`);
+  const formEl = doc.querySelector('form');
+  const opened: string[][] = [];
+  (win as unknown as { open: (...a: string[]) => null }).open = (...a: string[]) => {
+    opened.push(a);
+    return null;
+  };
+  for (const target of ['new window', 'popup window']) {
+    runtime.applyActions([{ op: 'openUrl', args: ['https://example.test/x', target] }], formEl);
+  }
+  for (const call of opened) {
+    const features = String(call[2] ?? '');
+    assert.ok(features.includes('noopener'), `${JSON.stringify(call)} must include noopener`);
+    assert.ok(features.includes('noreferrer'), `${JSON.stringify(call)} must include noreferrer`);
+  }
+  assert.equal(opened.length, 2);
+  // `parent window` targets an existing frame, not a new top-level browsing
+  // context, so there is no `window.opener` to deny.
+  runtime.applyActions([{ op: 'openUrl', args: ['https://example.test/x', 'parent window'] }], formEl);
+  assert.deepEqual(opened[2], ['https://example.test/x', '_parent']);
 });
 
 test('reload is recorded and reloads the page', async () => {
