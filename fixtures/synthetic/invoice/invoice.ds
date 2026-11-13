@@ -1,0 +1,88 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2026 09:00:00
+ * Version      : 1.0
+ */
+application "Invoice_Studio"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+
+	forms
+	{
+		form Invoice
+		{
+			displayname = "Invoice"
+			must have Invoice_Number
+			(
+				type = text
+				displayname = "Invoice Number"
+			)
+			Invoice_Date
+			(
+				type = date
+				displayname = "Invoice Date"
+			)
+			Customer_Name
+			(
+				type = text
+				displayname = "Customer Name"
+			)
+			Customer_Email
+			(
+				type = email
+				displayname = "Customer Email"
+			)
+			Lines
+			(
+				type = grid
+				displayname = "Lines"
+				Description
+				(
+					type = text
+					displayname = "Description"
+				)
+				Quantity
+				(
+					type = number
+					displayname = "Quantity"
+				)
+				Amount
+				(
+					type = decimal
+					displayname = "Amount"
+				)
+			)
+			Total
+			(
+				type = decimal
+				displayname = "Total"
+			)
+
+			print template
+			{
+				Invoice_Layout
+				{
+					displayname = "Invoice"
+					content = {"mainLayout":[{"elements":[{"type":"columns","element":{"split":"50,50","collayouts":[{"colElements":[{"type":"text","element":{"content":"<div><h1>INVOICE</h1><p>No. ${Invoice_Number}</p><p>${Invoice_Date}</p></div>"}}]},{"colElements":[{"type":"text","element":{"content":"<div><p>${Customer_Name}</p><p>${Customer_Email}</p></div>"}}]}]}},{"type":"lookupfields","element":{"Label_Name":"Lines","labelText":"Items","refFields":[{"Label_Name":"Description","labelText":"Description"},{"Label_Name":"Quantity","labelText":"Quantity"},{"Label_Name":"Amount","labelText":"Amount"}]}},{"type":"fields","element":{"Label_Name":"Total","labelText":"Total"}}]}],"templateStyle":"text-align: left; width: 100%; margin: 0 auto;"}
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		list Invoices
+		{
+			displayName = "Invoices"
+			print template = Invoice_Layout
+			show all rows from Invoice
+			(
+				Invoice_Number as "Invoice Number"
+				Customer_Name as "Customer"
+				Total as "Total"
+			)
+		}
+	}
+}

@@ -1,0 +1,49 @@
+{
+  "name": "Invoice_Layout",
+  "label": "Invoice",
+  "style": "text-align: left; width: 100%; margin: 0 auto;",
+  "elements": [
+    {
+      "type": "columns",
+      "split": "50,50",
+      "columns": [
+        [
+          {
+            "type": "text",
+            "html": "<div><h1>INVOICE</h1><p>No. ${Invoice_Number}</p><p>${Invoice_Date}</p></div>"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "html": "<div><p>${Customer_Name}</p><p>${Customer_Email}</p></div>"
+          }
+        ]
+      ]
+    },
+    {
+      "type": "lookup",
+      "field": "Lines",
+      "label": "Items",
+      "fields": [
+        {
+          "field": "Description",
+          "label": "Description"
+        },
+        {
+          "field": "Quantity",
+          "label": "Quantity"
+        },
+        {
+          "field": "Amount",
+          "label": "Amount"
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "field": "Total",
+      "label": "Total"
+    }
+  ]
+}

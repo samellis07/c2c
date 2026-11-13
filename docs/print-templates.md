@@ -63,15 +63,16 @@ ordinary reason: user data. Both get checked before they reach the page:
   placeholder that gets filled again, and a value that lands inside an
   attribute (`href`, `src`, `style`) is escaped first and only then subject
   to the same URL/style checks as the template's own markup.
-- **The filled HTML goes through the page's own sanitizer**, the same
-  allowlist the generator already applies to every other HTML snippet in the
-  app (`sanitizeSnippet` — an allowed-tag/allowed-attribute list, `on*` and
-  `srcdoc` attributes refused, `href`/`src` refused when they start with
-  `javascript:`, `data:` or `vbscript:`, and an inline `style` attribute run
-  through the same declaration-by-declaration allowlist report conditional
-  formatting uses). React's `PrintSheet` imports the same
-  `pages/sanitize.ts` module `PageView` uses; nothing is parsed or rendered
-  with a second, bespoke rule set.
+- **A `text` element's filled HTML goes through the page's own snippet
+  sanitizer**, the same `pages/sanitize.ts` module `PageView` uses for every
+  other HTML snippet in the app: an allowed-tag/allowed-attribute list, `on*`
+  and `srcdoc` attributes refused, `href`/`src` refused when they start with
+  `javascript:`, `data:` or `vbscript:`, and a `style` attribute that
+  contains any dangerous token (`url(`, `expression(`, `@import`, …) refused
+  *as a whole* — this sanitizer checks a style value once, not declaration
+  by declaration, so one bad declaration in a `text` element's own inline
+  style loses the whole attribute, not just that declaration. Nothing in
+  `PrintSheet` parses or re-implements this; it imports the same module.
 - **A `field`/`lookup` element's label and value are plain React/DOM text
   nodes**, never HTML — React escapes them by construction, so there is
   nothing to sanitize there.
@@ -79,20 +80,26 @@ ordinary reason: user data. Both get checked before they reach the page:
   the same `javascript:`/`data:`/`vbscript:` refusal before it reaches an
   `<img>` tag, independently of the sanitizer pass (it is a plain attribute,
   not HTML the sanitizer parses).
-- **Every inline style** (`style`, `labelStyle`, `valueStyle`,
-  `valueTextStyle`, `wrapperStyle`, `labelTextStyle`, a `templateStyle` on the
-  layout container) is split into declarations and each one is checked
-  against the same property/value allowlist as report conditional formatting
+- **Every *native* element's own style** (a `field`/`lookup`/`image`/`spacer`
+  element's `style`, `labelStyle`, `valueStyle`, `valueTextStyle`,
+  `wrapperStyle`, `labelTextStyle`, and the layout container's own
+  `templateStyle`) is split into declarations and each one is checked against
+  the same property/value allowlist report conditional formatting uses
   (`style-allowlist.ts`): `url(`, `expression(`, `@import`, `-moz-binding`,
   quotes and CSS comments are refused, and a `calc()`/colour/transform
-  function call is only kept when its own arguments are plain numbers. A
-  declaration the allowlist refuses is dropped from the rendered style and
-  counted once at generation time (`Print template "X": Inline style
-  declarations not carried over ...`) — the *rendered* page never shows which
-  declaration was dropped; that record lives in the migration report, not in
-  the page's DOM, since a `data-style-dropped` attribute visible to every
-  reader would advertise exactly what content a builder tried and failed to
-  inject.
+  function call is only kept when its own arguments are plain numbers. This
+  is finer-grained than the `text`-element case above because these styles
+  never pass through HTML at all — `printStyle()` (`PrintSheet.tsx`) builds a
+  React style object directly, one declaration at a time, the same way
+  `ReportView`'s `parseFormat` turns a conditional-formatting string into a
+  style object. A declaration either allowlist refuses is dropped from the
+  rendered style and counted once at generation time (`Print template "X":
+  Inline style declarations not carried over ...`, naming the property). The
+  vanilla target additionally marks the dropped property on the element
+  itself (`data-style-dropped`, same convention as the mail-template shim);
+  React's `printStyle()` only drops the declaration, since the migration
+  report already names it and nothing in the generated React app's DOM
+  otherwise carries a `data-*` debugging trail like this.
 
 This is the same two-layer shape the vanilla target and the sendmail
 `template:` attachment renderer (`packages/shims/src/print-template.ts`) both
