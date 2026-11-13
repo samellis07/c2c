@@ -707,7 +707,7 @@ test('the plan exposes source-level form, field, and workflow counts', () => {
 `));
   const { plan } = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false });
   assert.equal(plan.counts.forms, app.forms.length);
-  assert.equal(plan.counts.fields, app.forms.reduce((sum, form) => sum + form.fields.length, 0));
+  assert.equal(plan.counts.sourceFields, app.forms.reduce((sum, form) => sum + form.fields.length, 0));
   assert.equal(plan.counts.workflows, app.workflows.length);
 });
 

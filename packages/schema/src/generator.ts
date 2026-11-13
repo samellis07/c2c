@@ -159,6 +159,11 @@ export interface SchemaSummary {
   tables: number;
   nosqlCollections: number;
   columns: number;
+  /**
+   * Generated field outcomes: one per Creator form field, plus one per subform row field
+   * (inline subforms expand into their own outcomes). Not comparable to `c2c plan`'s
+   * `counts.sourceFields`, which counts only top-level Creator form fields.
+   */
   fields: number;
   supported: number;
   partial: number;
@@ -1412,7 +1417,7 @@ export function schemaAsReport(plan: SchemaPlan): string {
     '',
     `Tables: ${s.tables} (NoSQL collections: ${s.nosqlCollections})`,
     `Columns: ${s.columns}`,
-    `Fields: ${s.fields} — Supported ${s.supported} (${pct(s.supported)}), Partial ${s.partial} (${pct(s.partial)}), Unsupported ${s.unsupported} (${pct(s.unsupported)})`,
+    `Generated fields (Creator fields after subform rows and composites expand, not \`c2c plan\`'s source field count): ${s.fields} — Supported ${s.supported} (${pct(s.supported)}), Partial ${s.partial} (${pct(s.partial)}), Unsupported ${s.unsupported} (${pct(s.unsupported)})`,
     `Mapped (supported + partial): ${s.mappedPct === null ? 'n/a' : `${s.mappedPct.toFixed(1)}%`}`,
     '',
     '## Generated (supported)',
