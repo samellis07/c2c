@@ -147,6 +147,6 @@ test('a render-time embed or link value names the element and attribute that car
     "<p title='<%=rec.Status%>'>x</p>\n<%\n}%>";
   const guidance = serverSnippetGuidance(source, 'island in an unsafe position', 'snippet hp on page Home');
   assert.ok(guidance.reasons.includes('dynamic-url'), JSON.stringify(guidance.reasons));
-  assert.match(guidance.step, /\(zc-component Calls params, iframe src\)/);
+  assert.match(guidance.step, /\(zc-component Calls params, iframe src to page Week with Deluge values in from\)/);
   assert.doesNotMatch(guidance.step, /p title/, 'a plain attribute value is not a URL or embed');
 });

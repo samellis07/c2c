@@ -123,11 +123,29 @@ function islandEmbedValues(source: string): string[] {
     const link = attrs.find((a) => /^(?:form|view|report|page|component)linkname$/i.test(a.name) && /^[A-Za-z_]\w*$/.test(a.value));
     const element = component ? `zc-component${link ? ` ${link.value}` : ''}` : (tag[1] ?? '').toLowerCase();
     for (const name of dynamic) {
-      const label = `${element} ${name}`;
+      const value = attrs.find((a) => a.name === name)?.value ?? '';
+      const label = `${element} ${name}${pageEmbedDetail(value)}`;
       if (!out.includes(label)) out.push(label);
     }
   }
   return out;
+}
+
+/**
+ * For an embed URL of another page (`<appuri>page-embed/<Page>?...`), name the
+ * target page and the query parameters whose value holds Deluge, so the
+ * counted step points at exactly what was not carried. Empty otherwise.
+ */
+function pageEmbedDetail(value: string): string {
+  const m = /^\u0001(?:page|view)-embed\/([A-Za-z_]\w*)(?:\?(.*))?$/.exec(value);
+  if (!m) return '';
+  const keys = (m[2] ?? '')
+    .split('&')
+    .filter((part) => part.includes('\u0001'))
+    .map((part) => part.slice(0, Math.max(part.indexOf('='), 0)))
+    .filter((key) => /^[A-Za-z_]\w*$/.test(key));
+  const unique = [...new Set(keys)];
+  return ` to page ${m[1]}${unique.length ? ` with Deluge values in ${unique.join(' and ')}` : ''}`;
 }
 
 /** Deluge code inside the snippet's `<% %>` islands. */
