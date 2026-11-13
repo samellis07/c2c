@@ -47,7 +47,7 @@ test('an unknown verb keeps exit 2 and prints the short customer entry', () => {
   for (const step of ['c2c doctor', 'c2c analyze', 'c2c plan', 'c2c migrate-data', 'c2c verify']) {
     assert.match(result.stderr, new RegExp(step), `missing journey step: ${step}`);
   }
-  assert.match(result.stderr, /docs\/guide\//);
+  assert.match(result.stderr, /See https:\/\/github\.com\/samellis07\/c2c\/tree\/main\/docs\/guide for the walkthrough/);
   assert.doesNotMatch(result.stderr, /usage: c2c parse/);
   const lines = result.stderr.trimEnd().split('\n');
   assert.ok(lines.length < 10, `unknown-verb output is ${lines.length} lines, want under 10`);
