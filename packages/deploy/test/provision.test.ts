@@ -1845,6 +1845,21 @@ test('--record does not learn long secret-keyed names from a read-back', async (
   rmSync(out, { recursive: true, force: true });
 });
 
+test('--record writes provision/state.json and the stored result owner-only (0600) under umask 022', async () => {
+  const previous = process.umask(0o022);
+  const out = writeMiniPlan();
+  try {
+    const c = cap();
+    const raw = writeResult(out, 'bucket', mcpRows([{ bucket_name: 'c2c-widget-deadbeef' }]));
+    assert.equal(await provisionCli(['--out', out, '--record', 'bucket', '--result', raw, ...SCOPE], c.io), 0, c.err());
+    assert.equal(statSync(join(out, 'provision', 'state.json')).mode & 0o777, 0o600);
+    assert.equal(statSync(join(out, 'provision', 'results', 'bucket.json')).mode & 0o777, 0o600);
+  } finally {
+    process.umask(previous);
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('a corrupt provision/state.json refuses instead of silently resetting', async () => {
   const out = writeMiniPlan();
   const c = cap();

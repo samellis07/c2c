@@ -11,6 +11,7 @@ import { assertLiveProject, fail, flag, loadApp, planGuard, prepareGuard, resolv
 import { readSourceBackup } from './backup.js';
 import { readSourceCsv, readSourceJson, type CsvLoad } from './csv.js';
 import { catalystBaseFor } from './dc.js';
+import { writeArtifactAtomic } from './provision.js';
 import {
   applyDelta,
   computeDelta,
@@ -65,10 +66,10 @@ export function readDeltaCheckpoint(path: string): DeltaCheckpoint | undefined {
   return parseDeltaCheckpoint(readStateFile(path).delta);
 }
 
-function writeState(path: string, patch: Record<string, unknown>): void {
+export function writeState(path: string, patch: Record<string, unknown>): void {
   const state = readStateFile(path);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ ...state, ...patch }, null, 2)}\n`);
+  writeArtifactAtomic(path, `${JSON.stringify({ ...state, ...patch }, null, 2)}\n`, 0o600);
 }
 
 function writeDeltaCheckpoint(path: string, checkpoint: DeltaCheckpoint): void {
