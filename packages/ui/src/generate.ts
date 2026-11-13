@@ -2056,7 +2056,10 @@ export function relatedSortPlan(
   if (!formName || !keys) return undefined;
   const parentColumns = storedColumnsOfParents(app, lookupParentsOf(app, formName), schemaOf(app));
   const readable = keys.every(
-    (key) => !key.head || (projection.includes(key.head) && (Object.hasOwn(parentColumns, key.form!) ? parentColumns[key.form!]! : []).includes(key.field)),
+    (key) =>
+      key.part
+        ? projection.includes(key.field)
+        : !key.head || (projection.includes(key.head) && (Object.hasOwn(parentColumns, key.form!) ? parentColumns[key.form!]! : []).includes(key.field)),
   );
   if (!readable) return { unapplied: 'unreadable' };
   let staged: boolean;
@@ -2191,7 +2194,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
       // leaf is checked again by resolveLookupPaths).
       const relatedSort = Array.isArray(body.sort) && body.sort.length
         ? null
-        : sortKeys.filter((key) => readableField(key.head || key.field, readableFields) || key.field === "ROWID" || key.field === "ID");
+        : sortKeys.filter((key) => readableField(key.head || key.part || key.field, readableFields) || key.field === "ROWID" || key.field === "ID");
       const sortedRows = relatedSort && relatedSort.length
         ? await relatedSortRead(
             (off, limit) =>
