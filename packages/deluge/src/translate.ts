@@ -6724,12 +6724,28 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
   if (name === 'List' || name === 'Collection') {
     if (!CONSTRUCTORS.has(name)) return mergeFx(`await shim.todo(ctx, ${JSON.stringify('call:' + name)})`, args, { shim: true, todo: true, constructs: [`call:${name}`] });
     if (!typeArg) return mergeFx('[]', args, { list: true });
-    return mergeFx(`shim.list(${JSON.stringify(typeArg)})`, args, { shim: true, list: true });
+    if (!e.args.length) return mergeFx(`shim.list(${JSON.stringify(typeArg)})`, args, { shim: true, list: true });
+    // A typed constructor's single argument seeds the collection
+    // (https://www.zoho.com/deluge/help/create-list-datatype.html). Only a
+    // literal `{...}` list is a known-order seed; anything else (a variable,
+    // a call, more than one argument) cannot be inlined without silently
+    // guessing its value, so it stays a counted TODO instead of being dropped.
+    if (e.args.length === 1 && e.args[0]!.kind === 'list') {
+      return mergeFx(`shim.list(${JSON.stringify(typeArg)}, ${args[0]!.code})`, args, { shim: true, list: true });
+    }
+    return mergeFx(`await shim.todo(ctx, ${JSON.stringify('call:' + name)})`, args, { shim: true, todo: true, constructs: [`call:${name}`] });
   }
   if (name === 'Map') {
     if (!CONSTRUCTORS.has('Map')) return mergeFx(`await shim.todo(ctx, ${JSON.stringify('call:' + name)})`, args, { shim: true, todo: true, constructs: [`call:${name}`] });
     if (!typeArg) return mergeFx('{}', args, { map: true });
-    return mergeFx(`shim.map(${JSON.stringify(typeArg)})`, args, { shim: true, map: true });
+    if (!e.args.length) return mergeFx(`shim.map(${JSON.stringify(typeArg)})`, args, { shim: true, map: true });
+    // Same seeding rule as the typed list above: only a literal `{...}` map
+    // is inlined; anything else stays a counted TODO rather than a silently
+    // dropped argument.
+    if (e.args.length === 1 && e.args[0]!.kind === 'map') {
+      return mergeFx(`shim.map(${JSON.stringify(typeArg)}, ${args[0]!.code})`, args, { shim: true, map: true });
+    }
+    return mergeFx(`await shim.todo(ctx, ${JSON.stringify('call:' + name)})`, args, { shim: true, todo: true, constructs: [`call:${name}`] });
   }
   if (name === 'abs') return mergeFx(`shim.math.abs(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
   if (name === 'toHex') return mergeFx(`shim.number.toHex(${args[0]?.code ?? 'null'})`, args, { shim: true });
