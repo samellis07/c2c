@@ -21,8 +21,8 @@
  * always empty in practice today; the check stays in place for when a
  * trustworthy allowlist source exists.
  */
-import type { AppWindow } from './api';
-import { navigate as navigateHash } from './router';
+import type { AppWindow } from './api.js';
+import { navigate as navigateHash } from './router.js';
 
 export interface ActionNavInstruction {
   kind: 'navigate';
@@ -39,7 +39,8 @@ export function navigableUrl(view: AppWindow | undefined, url: unknown): boolean
   const base = typeof view?.location?.href === 'string' ? view.location.href : 'https://localhost/';
   let parsed: URL;
   try { parsed = new URL(url, base); } catch { return false; }
-  if (parsed.username || parsed.password || !parsed.hostname) return false;
+  const authority = /^https?:\/\/([^/?#\\]+)/i.exec(url)?.[1] ?? '';
+  if (authority.includes('@') || parsed.username || parsed.password || !parsed.hostname) return false;
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }
 
