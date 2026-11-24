@@ -4994,7 +4994,7 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
   const calleesBehind = (b: Binding, walked: Set<Binding>): string => {
     if (walked.has(b)) return '';
     walked.add(b);
-    for (const dep of b.deps.values()) {
+    for (const [, dep] of [...b.deps.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
       if (!dep) continue;
       const found = callees(dep.code) || calleesBehind(dep, walked);
       if (found) return found;
