@@ -18,6 +18,7 @@
 
 import { decimalAuditSink } from './audit.js';
 import type { Expr, Param, Stmt } from './ast.js';
+import { escapeRegExp } from './regex.js';
 import {
   AGGREGATE_METHODS,
   BLANK_FUNCTIONS,
@@ -2683,7 +2684,7 @@ export function mutatesOnlyFreshLocals(code: string, mutableParams: readonly str
     const inputRead = recv ? /^shim\.input\.get\(ctx,\s*"([A-Za-z_$][\w$]*)"\)$/.exec(recv) : null;
     if (inputRead && mutableParams.includes(inputRead[1]!)) recv = inputRead[1]!;
     if (!recv || !/^[A-Za-z_$][\w$]*$/.test(recv)) return false;
-    const esc = recv.replace(/\$/g, '\\$');
+    const esc = escapeRegExp(recv);
     const bind = `(?:^|[^\\w$.])${esc}\\s*=(?!=)`;
     if (mutableParams.includes(recv)) {
       // A rebind of the parameter itself (`var givenList = …` or `givenList
