@@ -18,6 +18,7 @@
 
 import type { FieldOutcome } from '../../schema/src/generator.js';
 import type { DropKind, SilentDrop } from '../../quality/src/no-silent-drop.js';
+import { MANUAL_STEP_ANCHORS, manualStepWithAnchor } from '../../ui/src/manual-step-anchors.js';
 import { CONVERTER_GAP_FIX } from './precheck.js';
 
 export interface GuidedResidual {
@@ -63,7 +64,7 @@ export function specificResidualStep(drop: Pick<SilentDrop, 'kind' | 'name' | 'f
   }
   if (drop.kind === 'report-feature' && / block report properties$/.test(drop.name)) {
     const report = drop.name.replace(/ block report properties$/, '');
-    return `The report properties for ${report} were not converted. In the Catalyst console, open the ${report} report and configure its report properties, then preview it and verify the layout and visible data match the source app.`;
+    return manualStepWithAnchor(`The report properties for ${report} were not converted. In the Catalyst console, open the ${report} report and configure its report properties, then preview it and verify the layout and visible data match the source app.`, MANUAL_STEP_ANCHORS.reportProperties);
   }
   if (drop.kind === 'report-feature' && / column .+$/.test(drop.name)) {
     const match = /^(.*) column (.+)$/.exec(drop.name);

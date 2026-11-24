@@ -20,6 +20,7 @@ import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '
 import { criteriaHasTodo, sealRelativeCriteria, type Criteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
+import { MANUAL_STEP_ANCHORS, manualStepWithAnchor } from './manual-step-anchors.js';
 import { parseAllowedDays } from '../../shims/src/write-rules.js';
 import { derivedFieldColumns, isMultiChoiceField } from '../../schema/src/generator.js';
 import {
@@ -617,7 +618,7 @@ function recordPrivacyFlags(formName: string, field: Field, todos: UiTodo[], dep
     .map((item) => `${item.field} (${item.flags.map((flag) => `${flag} = true`).join(', ')})`)
     .join(', ');
   const reason = `Fields "${formatted}" are flagged for data privacy; Catalyst generates no privacy or access control for these fields.`;
-  const manualStep = `In the Catalyst console, apply the data-privacy protection needed for ${formatted} by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.`;
+  const manualStep = manualStepWithAnchor(`In the Catalyst console, apply the data-privacy protection needed for ${formatted} by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.`, MANUAL_STEP_ANCHORS.fieldPrivacy);
   if (existing) {
     existing.reason = reason;
     existing.manualStep = manualStep;
@@ -1948,7 +1949,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           area: 'field',
           name,
           reason: `Field ${field.name} sets \`timedisplayoptions = ${timeDisplay}\`; the generated ${widget} input has no seconds step and never shows seconds.`,
-          manualStep: `Add a seconds-precision time control for ${field.name} by hand (the native ${widget} input shows only hours and minutes) — this is not generated.`,
+          manualStep: manualStepWithAnchor(`Add a seconds-precision time control for ${field.name} by hand (the native ${widget} input shows only hours and minutes) — this is not generated.`, MANUAL_STEP_ANCHORS.fieldTimePrecision),
         });
       }
     }
@@ -2665,7 +2666,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
         area: 'report',
         name: `${report.name} block options`,
         reason: `Report "${report.name}" has an \`options\` setting (${settings}) that Catalyst does not carry into the generated ${view} report.`,
-        manualStep: `In the Catalyst console, apply the \`options\` setting by hand on report ${report.name}: ${settings}.`,
+        manualStep: manualStepWithAnchor(`In the Catalyst console, apply the \`options\` setting by hand on report ${report.name}: ${settings}.`, MANUAL_STEP_ANCHORS.reportOptions),
       });
     }
   }
@@ -3137,7 +3138,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
         area: 'zml',
         name: `${page.name}.${elementName}`,
         reason: `ZML <${el.tag}> "${elementName}" click parameters "${el.droppedParameters}" are not generated; wire them to the click handler by hand`,
-        manualStep: `On page "${page.name}", wire click parameters "${el.droppedParameters}" to the generated <${el.tag}> "${elementName}" click handler.`,
+        manualStep: manualStepWithAnchor(`On page "${page.name}", wire click parameters "${el.droppedParameters}" to the generated <${el.tag}> "${elementName}" click handler.`, MANUAL_STEP_ANCHORS.zmlClickParameters),
       });
       delete el.droppedParameters;
     }
