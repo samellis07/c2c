@@ -4707,3 +4707,24 @@ test('a deployed function whose list row says is_deployed:false is still read ba
   const body = { data: [{ function_name: 'c2c_api', function_id: '1000000000000001', is_deployed: false }] };
   assert.equal(functionIdFromList(body, 'c2c_api'), '1000000000000001');
 });
+
+test('a failing function deploy never echoes a --function-env secret value', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-fenv-redact-'));
+  const cap = capture();
+  const secret = 'function-secret-DO-NOT-PRINT';
+  const envFile = join(out, 'env.json');
+  writeFileSync(envFile, JSON.stringify({ C2C_ADMIN_USER_ID: '', FUNCTION_TOKEN: secret }));
+  const originalSpawn = cap.io.spawn!;
+  cap.io.spawn = async (command, args, opts) => {
+    if (args.includes('functions:c2c_api')) {
+      cap.spawned.push({ command, args, env: opts.env });
+      return { code: 1, stdout: `failed with ${secret}\n`, stderr: `error: ${secret}\n` };
+    }
+    return originalSpawn(command, args, opts);
+  };
+  assert.equal(await deployCli([...baseArgs(ds), '--confirm', '--function-env', envFile, '--out', out], cap.io), 1);
+  assert.equal(`${cap.stdout()}${cap.stderr()}`.includes(secret), false);
+  assert.match(cap.stderr(), /\[secret\]/);
+  rmSync(out, { recursive: true, force: true });
+});
