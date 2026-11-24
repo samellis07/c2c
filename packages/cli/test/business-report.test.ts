@@ -79,6 +79,14 @@ test('business report duplicate-name output is deterministic across repeated ser
   assert.equal(businessReportAsJson(first), businessReportAsJson(second));
 });
 
+test('business report disambiguation avoids collisions with pre-suffixed and case-distinct names', () => {
+  const workflow = (name: string): Workflow => ({ name, form: 'Orders', event: 'on success', deluge: { text: '', span: { start: 0, end: 0 } }, properties: [], span: { start: 0, end: 0 } });
+  const names = ['Name', 'Name (2)', 'Name (2)', 'Name', 'Name (2)', 'é', 'É'];
+  const report = buildBusinessMigrationReport({ ...emptyApp('empty'), workflows: names.map(workflow) }, { dc: 'in' });
+  assert.equal(new Set(report.converted.workflows.names).size, names.length);
+  assert.deepEqual(report.converted.workflows.names, ['é', 'É', 'Name', 'Name (2)', 'Name (2) (2)', 'Name (2) (3)', 'Name (3)']);
+});
+
 test('markdown distinguishes converted pages from pages requiring manual work', () => {
   const report = {
     schema: 'c2c-business-migration-report/1' as const,
