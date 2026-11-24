@@ -206,6 +206,8 @@ export interface WriteField {
    * `mandatory-missing`, the same as any required field left empty.
    */
   required?: boolean;
+  /** Creator `alloweddays` values (Sunday = 0); restricted date widgets reject other days. */
+  allowedDays?: readonly number[];
   /**
    * Static Creator initial value (unquoted literal text), applied by the
    * submit handler to fields absent from the request on insert.
