@@ -62,9 +62,19 @@ function flatUrl(value) {
 }
 
 function safeUrl(value) {
-  const flat = flatUrl(value);
-  if (!flat) return true;
-  return !flat.startsWith('javascript:') && !flat.startsWith('data:') && !flat.startsWith('vbscript:');
+  let detected = String(value ?? '');
+  for (let pass = 0; pass < 4; pass++) {
+    const flat = flatUrl(detected);
+    if (flat.startsWith('javascript:') || flat.startsWith('data:') || flat.startsWith('vbscript:')) return false;
+    try {
+      const next = decodeURIComponent(detected);
+      if (next === detected) break;
+      detected = next;
+    } catch {
+      detected = detected.replace(/%([0-9a-fA-F]{2})/g, (_m, hex) => String.fromCharCode(parseInt(hex, 16)));
+    }
+  }
+  return true;
 }
 
 /** CSS functions an inline style value may call: colour notations and numeric transforms and filters. None can fetch. */
@@ -3159,7 +3169,7 @@ function navigableUrl(view, url) {
     return false;
   }
   if (parsed.username || parsed.password) return false;
-  if (/^https?:\/\/\s*@/i.test(url)) return false;
+  if ((/^https?:\/\/([^/?#\\]+)/i.exec(url)?.[1] ?? '').includes('@')) return false;
   if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !parsed.hostname) return false;
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }

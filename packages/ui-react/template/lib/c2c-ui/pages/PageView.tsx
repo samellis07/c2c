@@ -95,7 +95,7 @@ function Element({ el }: { el: PageElement }): ReactNode {
         <div className="c2c-snippet">
           {el.html ? <div dangerouslySetInnerHTML={{ __html: sanitizeSnippet(el.html, doc) }} /> : null}
           {el.links.map((link) => (
-            {navigableUrl(undefined, link.href) ? <a key={link.href} className="c2c-page-link" href={link.href}>{link.label}</a> : null}
+            navigableUrl(undefined, link.href) ? <a key={link.href} className="c2c-page-link" href={link.href}>{link.label}</a> : null
           ))}
         </div>
       );

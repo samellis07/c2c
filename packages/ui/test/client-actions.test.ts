@@ -293,6 +293,14 @@ test('openUrl refuses browser-normalized authority and whitespace tricks', async
   assert.deepEqual(nav.assigned, []);
 });
 
+test('openUrl refuses encoded schemes and empty userinfo', async () => {
+  const { formEl, runtime } = await setup(`\tform Order\n\t{\n${field('Name', 'text')}\n\t}`);
+  for (const url of ['javascript%3Aalert(1)', '%6aavascript:alert(1)', 'https://:@host/x']) {
+    const notes = runtime.applyActions([{ op: 'openUrl', args: [url, 'new window'] }], formEl);
+    assert.deepEqual(notes, ['openUrl refused'], url);
+  }
+});
+
 test('openUrl never opens a new tab or popup without noopener,noreferrer', async () => {
   const { runtime, doc, win } = await setup(`\tform Order\n\t{\n${field('Name', 'text')}\n\t}`);
   const formEl = doc.querySelector('form');
