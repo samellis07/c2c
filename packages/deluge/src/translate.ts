@@ -6767,6 +6767,10 @@ function connectionArgs(e: Extract<Expr, { kind: 'call' }>, path: string[], args
 
 function thisappCall(e: Extract<Expr, { kind: 'call' }>, args: Fx[]): Fx | null {
   if (rootName(e) !== 'thisapp') return null;
+  // A trailing method on an app call (`thisapp.F(x).get(..).toList()`) is not
+  // an app function: the member chain ends at the inner call, and that call is
+  // translated on its own as the object of the method.
+  if (!directMemberChain(e.callee)) return null;
   const path = callPath(e);
   // `thisapp.permissions.loginUserProfile()` reads the caller's own profile
   // name: an identity constant like `zoho.loginuserid`, not an app function
@@ -6786,6 +6790,13 @@ function isLoginUserProfile(path: readonly string[]): boolean {
 }
 
 /** Properties from `zoho.books.getRecords` → [books, getRecords], ignoring the root name. */
+/** True when the callee is a plain `name.a.b` chain with no call inside it. */
+function directMemberChain(callee: Expr): boolean {
+  let cur: Expr = callee;
+  while (cur.kind === 'member') cur = cur.object;
+  return cur.kind === 'name';
+}
+
 function callPath(e: Extract<Expr, { kind: 'call' }>): string[] {
   const path: string[] = [];
   let cur: Expr = e.callee;
