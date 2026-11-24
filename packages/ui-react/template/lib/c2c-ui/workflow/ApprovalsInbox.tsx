@@ -17,7 +17,7 @@ import { Button } from '../arc/components/button/button';
 import { EmptyState } from '../arc/components/empty-state/empty-state';
 import { Timeline } from '../arc/components/timeline/timeline';
 import type { ThreadComment } from '../arc/components/comment-thread/comment-thread';
-import { formatValue } from '../report/ReportView';
+import { formatValue } from '../report/format';
 import { hrefFor } from '../runtime/router';
 import { useEnv } from '../runtime/env';
 import type { FlowSpec, ReportSpec } from '../types';
