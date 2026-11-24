@@ -57,3 +57,30 @@ steps: `c2c plan` lists them in `plan.md` under *Human steps*, and
 the same items. A confirmed `deploy` prints the same wording; the deploy
 report's `humanChecklist` field uses the item text in
 `packages/deploy/src/human-steps.ts` (`humanChecklist`).
+
+
+## Analysis manual-step instructions
+
+Capture-related manual steps are explained in [Device capture limits](device-capture-limits.md).
+
+Analysis items are manual steps. Open the named location in the report, apply the matching instruction, and preview the affected screen.
+
+## <a id="manual-kind-field-time-precision"></a>Time precision
+
+Add a time control that accepts and displays seconds; submit a value containing seconds and confirm it is stored unchanged.
+
+## <a id="manual-kind-field-privacy"></a>Field privacy
+
+In Catalyst Console, apply masking, access restriction, or encryption to each named field; verify it as authorised and unauthorised users.
+
+## <a id="manual-kind-report-options"></a>Report options
+
+Open the named report in Catalyst Console and recreate each listed display option; preview it to confirm persistence.
+
+## <a id="manual-kind-report-properties"></a>Report properties
+
+Set each listed property, including export, drill-down, and underlying-data access; test with an appropriate user.
+
+## <a id="manual-kind-zml-click-parameters"></a>Button or text click parameters
+
+Wire each named parameter to the generated click handler input; exercise the control and confirm the target receives it.
