@@ -295,11 +295,27 @@ test('the built app draws the dashboard from the report rows', { skip: haveBuild
     // React's scheduler must capture Node's event-loop-backed channel, not a
     // channel left behind by a prior jsdom helper mount.
     const { MessageChannel } = require('node:worker_threads') as typeof import('node:worker_threads');
-    (globalThis as typeof globalThis & { MessageChannel: unknown }).MessageChannel = MessageChannel;
+    (globalThis as unknown as { MessageChannel: unknown }).MessageChannel = MessageChannel;
+    // Vite's lazy-chunk preload appends <link rel=stylesheet> for each route's CSS and
+    // awaits its load event before importing the chunk. jsdom (no `resources: "usable"`)
+    // never loads stylesheets, so that event never fires and every React.lazy route
+    // would stay on its Suspense fallback. Stand in for the browser's stylesheet load.
+    const settleLinks = (): void => {
+      for (const link of dom.window.document.querySelectorAll('link[rel="stylesheet"],link[rel="preload"],link[rel="modulepreload"]')) {
+        if (!link.hasAttribute('data-settled')) {
+          link.setAttribute('data-settled', '');
+          link.dispatchEvent(new dom.window.Event('load'));
+        }
+      }
+    };
+    new dom.window.MutationObserver(settleLinks).observe(dom.window.document.documentElement, { childList: true, subtree: true });
     const mod = (await import(pathToFileURL(join(out, 'dist/assets', runtime)).href)) as { boot: (spec: undefined, doc: Document) => void };
     mod.boot(undefined, dom.window.document);
     const doc = dom.window.document;
-    for (let i = 0; i < 100 && doc.querySelectorAll('[data-state="loading"]').length; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    // The route is lazy: wait for the page (not just data-state=loading, which the Suspense fallback lacks).
+    for (let i = 0; i < 500 && (doc.querySelector('[data-route-loading]') || doc.querySelectorAll('[data-state="loading"]').length || !doc.querySelector('[data-page="Dashboard"]')); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     const page = doc.querySelector('[data-page="Dashboard"]');
     assert.ok(page, 'the page renders');
     assert.equal(page.querySelector('h1')?.textContent, 'Dashboard');
