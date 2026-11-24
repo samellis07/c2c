@@ -1000,12 +1000,12 @@ test('probe names: one deterministic bucket per project or org, legacy fallback 
 });
 
 test('probeSignedPut: the signed-PUT host carries the scope data centre\'s zohostratus TLD', () => {
-  assert.equal(probeSignedPut('bucket1', 'nonce1').url.includes('.zohostratus.in/'), true);
-  assert.equal(probeSignedPut('bucket1', 'nonce1', 'in').url.includes('.zohostratus.in/'), true);
-  assert.equal(probeSignedPut('bucket1', 'nonce1', 'us').url.includes('.zohostratus.com/'), true);
-  assert.equal(probeSignedPut('bucket1', 'nonce1', 'au').url.includes('.zohostratus.com.au/'), true);
-  assert.equal(probeSignedPut('bucket1', 'nonce1', 'eu').url.includes('.zohostratus.eu/'), true);
-  assert.equal(probeSignedPut('bucket1', 'nonce1', 'jp').url.includes('.zohostratus.jp/'), true);
+  assert.equal(new URL(probeSignedPut('bucket1', 'nonce1').url).hostname.endsWith('.zohostratus.in'), true);
+  assert.equal(new URL(probeSignedPut('bucket1', 'nonce1', 'in').url).hostname.endsWith('.zohostratus.in'), true);
+  assert.equal(new URL(probeSignedPut('bucket1', 'nonce1', 'us').url).hostname.endsWith('.zohostratus.com'), true);
+  assert.equal(new URL(probeSignedPut('bucket1', 'nonce1', 'au').url).hostname.endsWith('.zohostratus.com.au'), true);
+  assert.equal(new URL(probeSignedPut('bucket1', 'nonce1', 'eu').url).hostname.endsWith('.zohostratus.eu'), true);
+  assert.equal(new URL(probeSignedPut('bucket1', 'nonce1', 'jp').url).hostname.endsWith('.zohostratus.jp'), true);
   // A us-DC project must never be probed against the .in host: the signed PUT
   // would target the wrong region's bucket.
   assert.equal(probeSignedPut('bucket1', 'nonce1', 'us').url.includes('.zohostratus.in'), false);
