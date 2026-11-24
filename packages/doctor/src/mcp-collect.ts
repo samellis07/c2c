@@ -7,10 +7,11 @@
  * server was recorded"; an incomplete tool list → D-B5). Offline: it makes no
  * call and records nothing itself.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ObservationRejected, OBSERVATION_KIND, OBSERVATION_MAX_BYTES, OBSERVATION_SCHEMA, mcpRequestPath, readMcpRequest } from './observed.js';
 import { REQUIRED_MCP_TOOLS } from './required-tools.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 
 export function mcpObservationPath(workspace: string): string {
   return join(dirname(mcpRequestPath(workspace)), 'mcp-observation.json');
@@ -53,7 +54,6 @@ export function collectObservation(resultsFile: string, workspace: string, env: 
   const missingTools = REQUIRED_MCP_TOOLS.base.filter((name) => !listed.has(name));
   const observation = { ...results, kind: OBSERVATION_KIND, schema: OBSERVATION_SCHEMA, request: request.request };
   const file = mcpObservationPath(workspace);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(observation, null, 2)}\n`, { mode: 0o600 });
+  writeSafeState(file, `${JSON.stringify(observation, null, 2)}\n`);
   return { file, request: request.request, missingTools };
 }
