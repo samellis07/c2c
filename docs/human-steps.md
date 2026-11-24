@@ -61,8 +61,6 @@ report's `humanChecklist` field uses the item text in
 
 ## Analysis manual-step instructions
 
-Capture-related manual steps are explained in [Device capture limits](device-capture-limits.md).
-
 Analysis items are manual steps. Open the named location in the report, apply the matching instruction, and preview the affected screen.
 
 ## <a id="manual-kind-field-time-precision"></a>Time precision
@@ -81,6 +79,6 @@ Open the named report in Catalyst Console and recreate each listed display optio
 
 Set each listed property, including export, drill-down, and underlying-data access; test with an appropriate user.
 
-## <a id="manual-kind-zml-click-parameters"></a>Button or text click parameters
+## <a id="manual-kind-page-click-parameters"></a>Button or text click parameters
 
 Wire each named parameter to the generated click handler input; exercise the control and confirm the target receives it.
