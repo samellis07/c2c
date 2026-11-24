@@ -3093,7 +3093,7 @@ export const TODO_MANUAL_STEPS: Record<string, string> = {
 function account(
   stats: TranslateStats,
   todos: TodoItem[],
-  flags: { todo: boolean; shim: boolean; constructs: string[]; note?: string; notes?: readonly string[] },
+  flags: { todo: boolean; shim: boolean; constructs: string[]; note?: string; notes?: readonly string[]; manualStep?: string },
   span: { start: number; end: number },
 ): void {
   stats.statements++;
@@ -3104,7 +3104,7 @@ function account(
   const names = flags.constructs ?? [];
   const listed = names.length ? names : ['unknown'];
   for (const construct of listed) {
-    const manualStep = TODO_MANUAL_STEPS[construct];
+    const manualStep = construct === 'client-condition-uses-server' && flags.manualStep ? flags.manualStep : TODO_MANUAL_STEPS[construct];
     todos.push({ construct, start: span.start, end: span.end, note: flags.note, ...(manualStep ? { manualStep } : {}) });
   }
 }
@@ -4934,6 +4934,65 @@ function choiceTask(e: Expr, scope: Scope): { method: string; target: string[] }
   return null;
 }
 
+/**
+ * The exact manual step for a `:ui` argument that stayed a counted
+ * `client-condition-uses-server` todo: name the cause the dependency closure
+ * of the argument reaches (an app function not proved read-only, a write or
+ * mail result, a binding that does not dominate the use) so the operator
+ * sees which statement to change. The generic step follows, so the guided
+ * residual copy is unchanged. Returns undefined when no cause is named.
+ */
+function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undefined {
+  const callees = (code: string): string => {
+    const names = (emittedThisappCalls(code) ?? []).map((path) => `thisapp.${path.join('.')}`);
+    // determinism-allow: Set keeps first-seen order of the call paths, which is source order
+    return [...new Set(names)].join(', ');
+  };
+  const seen = new Set<string>();
+  let write: string | undefined;
+  let fn: { local?: string; callees: string } | undefined;
+  let unbound: string | undefined;
+  // Binding-first: the nearest named local carrying the cause beats the
+  // argument's own propagated flags, so the step can name the statement.
+  const visit = (names: string[], unboundReads: string[]): void => {
+    if (unboundReads.length && unbound === undefined) unbound = unboundReads[0];
+    for (const name of names) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const b = scope.bindings.get(name);
+      if (!b) continue;
+      // The binding left after an if arm assigned the name: it holds no value on the other paths.
+      if (b.flow === -1 && b.code === 'undefined') {
+        unbound ??= name;
+        continue;
+      }
+      if (b.appFunction || b.todo) fn ??= { local: name, callees: callees(b.code) };
+      else if (b.sideEffect) write ??= name;
+      visit(b.reads, b.unboundReads);
+    }
+  };
+  for (const a of args) {
+    visit(a.reads, a.unboundReads);
+    if (!fn && !write && unbound === undefined) {
+      if (a.appFunction) fn = { callees: callees(a.code) };
+      else if (a.sideEffect) write = '';
+    }
+  }
+  const generic = TODO_MANUAL_STEPS['client-condition-uses-server']!;
+  const via = (local?: string): string => (local ? ` through \`${local}\`` : '');
+  if (fn) {
+    const f = fn as { local?: string; callees: string };
+    return `\`${call}\` takes its value${via(f.local)} from ${f.callees ? f.callees : 'an app function'}, which the generator could not prove read-only (it writes, sends mail, calls out, changes a parameter, or calls a function that does) or could not call from the browser. Move the read into a function that only reads records, or compute the list in this handler, then add the choices from that value. ${generic}`;
+  }
+  if (write !== undefined) {
+    return `\`${call}\` takes its value${via(write)} from a write, mail or outbound call in this handler, which the prefetch must not run a second time. Keep the write in the handler, store the value it creates (for example the new record's ID) in a field or return it from a read-only function, and add the choice from that stored value. ${generic}`;
+  }
+  if (unbound !== undefined) {
+    return `\`${call}\` reads \`${unbound}\`, which is not assigned on every path that reaches this statement (it is set in an if arm, after this point, or not at all). Assign \`${unbound}\` before the branch or move the \`${call}\` call into the arm that assigns it. ${generic}`;
+  }
+  return undefined;
+}
+
 function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   const args = e.args.map((a) => expr(a, scope));
   const obj = memberPath(e.object);
@@ -4947,7 +5006,8 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   const constructs = args.flatMap((a) => a.constructs);
   if (!ui) constructs.push(`colon:${method}`);
   if (clientArgs.some((c) => c.todo)) constructs.push('client-condition-uses-server');
-  account(stats, todos, { todo: !ui || args.some((a) => a.todo) || clientArgs.some((c) => c.todo), shim: true, constructs }, span);
+  const manualStep = ui && clientArgs.some((c) => c.todo) ? uiAddManualStep(`${(obj ? (obj.root === 'input' || obj.root === 'row' ? obj.path : [obj.root, ...obj.path]) : ['field']).join('.')}:${method}`, args, scope) : undefined;
+  account(stats, todos, { todo: !ui || args.some((a) => a.todo) || clientArgs.some((c) => c.todo), shim: true, constructs, ...(manualStep ? { manualStep } : {}) }, span);
   if (!ui) {
     const line = `await shim.todo(ctx, ${JSON.stringify(`colon:${method}`)}, { start: ${span.start}, end: ${span.end} });`;
     return { server: line, client: '' };
