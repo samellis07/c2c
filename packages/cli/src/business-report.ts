@@ -82,7 +82,20 @@ export interface BusinessReportOptions {
 }
 
 const sorted = (names: readonly string[]): string[] => [...names].sort(compareEnUs);
-const section = (names: readonly string[]): ReportSection => ({ count: names.length, names: sorted(names) });
+/** Keep every source object visible when Creator exports duplicate display names. */
+function disambiguate(names: readonly string[]): string[] {
+  const seen = new Map<string, number>();
+  return names.map((name) => {
+    const occurrence = (seen.get(name) ?? 0) + 1;
+    seen.set(name, occurrence);
+    return occurrence === 1 ? name : `${name} (${occurrence})`;
+  });
+}
+
+const section = (names: readonly string[]): ReportSection => {
+  const distinct = disambiguate(names);
+  return { count: distinct.length, names: sorted(distinct) };
+};
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
 const names = (items: readonly string[]): string => (items.length ? items.join(', ') : 'none');
 
