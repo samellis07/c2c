@@ -59,7 +59,7 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 | `fill-todos` | none | `skills/c2c-logic/SKILL.md` | `fill-todos` | none |
 | `status/troubleshoot` | `commands/troubleshoot.md` | `skills/c2c-troubleshooting/SKILL.md` | `support-bundle` | none |
 | `status/troubleshoot` | none | `skills/c2c-status/SKILL.md` | `status` | none |
-| `maintainer-only` | none | none | `parse`, `corpus`, `features`, `iac-drift`, `schema-corpus`, `migration-report`, `deluge`, `score-ui`, `ui-corpus`, `--verify-vendor` | none |
+| `maintainer-only` | none | none | `parse`, `corpus`, `features`, `iac-drift`, `schema-corpus`, `migration-report`, `deluge`, `score-ui`, `ui-corpus`, `--verify-vendor`, `--version`, `-V` | none |
 
 The command map lists the current public CLI surface and all public command and skill files. Corpus and aggregate verbs live in the maintainer-only row: they are maintainer and CI tools, not customer steps. Operator-only `c2c doctor --record-mcp <file> --operator` stays out of customer help on purpose (see `references/doctor-spec.md`); the plugin path is `doctor --mcp-begin` plus `doctor --mcp-observed -`. `c2c --help` is the source of truth for exact flags. Probe and verification work is guided by the verify skill; data rollback export is `c2c rollback-export`.
 
