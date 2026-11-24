@@ -4,12 +4,14 @@ import { JSDOM } from 'jsdom';
 import { dangerousStyle, safeUrl, sanitizeSnippet } from '../template/lib/c2c-ui/pages/sanitize.js';
 
 test('template sanitizer URL policy keeps navigation URLs and rejects dangerous variants', () => {
-  const kept = ['http://example.test', 'https://example.test/a', 'mailto:a@example.test', 'tel:+12025550123', '#route', '../x', '?q=1', '/path'];
+  // Non-ASCII hostnames are accepted: browsers normalize them to IDN/punycode,
+  // and HTTPS remains an allowed navigation scheme under this policy.
+  const kept = ['http://example.test', 'https://example.test/a', 'https://例え.テスト', 'mailto:a@example.test', 'tel:+15550123', '#route', '../x', '?q=1', '/path'];
   const rejected = ['file:///tmp/x', 'ftp://example.test', '//host/x', 'javascript:alert(1)', 'data:text/html,x', 'vbscript:msgbox(1)', 'blob:https://x', 'http:\u0000//x', 'http:\\x', 'java%73cript:alert(1)', 'JAVASCRIPT:alert(1)'];
   for (const value of kept) assert.equal(safeUrl(value), true, value);
   for (const value of rejected) assert.equal(safeUrl(value), false, value);
   const dom = new JSDOM('');
-  assert.equal(sanitizeSnippet('<a href="&#106;avascript:alert(1)">x</a>', dom.window.document), '<a>x</a>');
+  assert.equal(sanitizeSnippet('<a href="&#106;avascript:alert(1)">x</a>', dom.window.document as unknown as Document), '<a>x</a>');
 });
 
 test('template sanitizer CSS policy keeps plain properties and rejects executable syntax', () => {
