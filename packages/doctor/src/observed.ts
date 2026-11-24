@@ -55,6 +55,7 @@ import { NEVER_CALL_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, type Dc } from './scope.js';
 import { isProbeName, PROBE_CREATE_CALL, PROBE_DELETE_CALL, PROBE_OBJECT_CALL, probeCreateCall, probeDeleteCall, probeNameOf, probeNonceCleanup, probeObjectCall, probeScopeOf, probeSignedPut, type ProbeNonceCleanup, type ProbeScope, type ProbeTarget } from './mcp-probe.js';
 import { mcpSigningKey } from './mcp-state.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 
 export const OBSERVATION_KIND = 'c2c-mcp-observation';
 export const OBSERVATION_SCHEMA = 1;
@@ -181,7 +182,7 @@ export function beginMcpRequest(
   for (const stale of readdirSync(dirname(path))) {
     if (/^mcp-request\.[0-9a-f]+\.closed$/.test(stale)) rmSync(join(dirname(path), stale), { force: true });
   }
-  writeFileSync(path, `${JSON.stringify(request, null, 2)}\n`);
+  writeSafeState(path, `${JSON.stringify(request, null, 2)}\n`);
   return request;
 }
 

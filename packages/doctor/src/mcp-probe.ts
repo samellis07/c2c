@@ -38,9 +38,10 @@
  * project exists is handled separately, and leftover-bucket cleanup) still
  * match the bucket list only. A repeated run reuses the one bucket.
  */
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUCKET_LIST_MAX_PAGES, readBucketList, type RestFn } from '../../deploy/src/tables.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 
 export const PROBE_PREFIX = 'c2cprobe';
 /**
@@ -454,7 +455,7 @@ export function readPendingCleanups(workspace: string): PendingCleanup[] {
 
 function writePendingCleanups(workspace: string, pending: PendingCleanup[]): void {
   if (pending.length === 0) rmSync(cleanupPath(workspace), { force: true });
-  else writeFileSync(cleanupPath(workspace), `${JSON.stringify(pending, null, 2)}\n`);
+  else writeSafeState(cleanupPath(workspace), `${JSON.stringify(pending, null, 2)}\n`);
 }
 
 /** Add (or refresh) a pending record; existing records for other probes are kept. */
