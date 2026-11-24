@@ -30,7 +30,7 @@
  * re-run, so a kill mid-run or a second run is idempotent.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { App } from '../../core/src/index.js';
 import { canonicalUserIdentity, userIdentityAliasRules } from '../../schema/src/identity.js';
@@ -40,6 +40,7 @@ import { parseCsv } from './csv.js';
 import { adminFirstName, alreadyDone, errorCode, failureInfo, idString, projectUsers, roleIdFromUsers, sanitizeMessage } from './auth.js';
 import { restWithRetry, type RetryOptions } from './retry.js';
 import type { RestCall, RestFn } from './tables.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 
 export const USERS_PLAN_JSON = 'users/plan.json';
 export const USERS_PLAN_MD = 'users/plan.md';
@@ -598,12 +599,10 @@ export function readUsersState(path: string): UsersState | undefined {
 /** Atomic write (tmp + rename) — a kill mid-invite leaves the last consistent state. */
 export function writeUsersState(path: string, state: UsersState): void {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
   const invited = [...state.invited].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   // Explicit fields only — a legacy saltHash carried by an old file is dropped
   // rather than re-published.
-  writeFileSync(tmp, `${JSON.stringify({ version: 1, project: state.project, ...(state.salt ? { salt: state.salt } : {}), invited }, null, 2)}\n`);
-  renameSync(tmp, path);
+  writeSafeState(path, `${JSON.stringify({ version: 1, project: state.project, ...(state.salt ? { salt: state.salt } : {}), invited }, null, 2)}\n`);
 }
 
 /** Why a '+' address is refused before any request (live Add User reply). */
