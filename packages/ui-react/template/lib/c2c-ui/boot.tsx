@@ -4,7 +4,7 @@
  * harness (the UI scorer, a smoke test) may call it again for another
  * document. The first render commits synchronously.
  */
-import { StrictMode, type ComponentType } from 'react';
+import { StrictMode, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { AppSpec, NavSection } from './types';
@@ -20,7 +20,7 @@ import { AppBoundary, rootErrorOptions } from './shell/ScreenBoundary';
 
 /** Screen components by route key (`form/<name>`, `report/<name>`, `page/<name>`, `flow/<name>[/<view>]`), written by the generator. */
 export type ScreenProps = { edit?: string; row?: string; record?: string; view?: string };
-export type RouteTable = Record<string, ComponentType<ScreenProps>>;
+export type RouteTable = Record<string, ComponentType<ScreenProps> | LazyExoticComponent<ComponentType<ScreenProps>>>;
 
 /**
  * Screen names hidden from this profile by a Creator `hide = true` section —
@@ -74,13 +74,15 @@ function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; cust
         {denied ? (
           <p data-access-status="403">This page is not available.</p>
         ) : Screen ? (
-          <Screen
+          <Suspense fallback={<p data-route-loading="true">Loading…</p>}>
+            <Screen
             key={route.name === 'form' ? `${key}/${route.edit ?? ''}` : route.name === 'report' ? `${key}/${route.row ?? ''}` : route.name === 'flow' ? `flow/${route.id}` : key}
             edit={route.name === 'form' ? route.edit : undefined}
             row={route.name === 'report' ? route.row : undefined}
             record={route.name === 'record' ? route.row : undefined}
             view={route.name === 'flow' ? route.view : undefined}
-          />
+            />
+          </Suspense>
         ) : (
           <section className="c2c-card">
             <h1>Not found</h1>
