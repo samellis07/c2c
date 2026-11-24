@@ -113,7 +113,7 @@ test('smoke --confirm with no browser automation prints the one guided step with
       assert.ok(out.includes(`open ${PAGE} in your own browser, signed in to the app as the project owner`), out);
       assert.match(out, /press Copy beside the result code it shows and paste the code back here \(your AI chat checks it with c2c smoke --result-code <code>\)/);
       assert.match(out, /save the c2c-smoke\/1 block it shows as smoke-result\.txt and run: c2c smoke .*widget\.ds --result smoke-result\.txt/);
-      assert.match(out, new RegExp(`^c2c-blocker: smoke-page ${PAGE.replace(/[.#/]/g, '\\$&')}$`, 'm'));
+      assert.match(out, new RegExp(`^c2c-blocker: smoke-page ${PAGE.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}$`, 'm'));
       assert.equal(out.split('\n').filter((line) => line.startsWith('  open ')).length, 1, 'one step');
       assert.doesNotMatch(out + cap.stderr(), ASKS_FOR_SECRET);
       assert.deepEqual(browser.opened, [], 'no browser is driven');
