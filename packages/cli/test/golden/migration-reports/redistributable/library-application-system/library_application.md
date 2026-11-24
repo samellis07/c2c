@@ -54,21 +54,21 @@ App: Library_System_Application
 ## Residual TODO steps
 
 - `report Book_Report block options` — Report "Book_Report" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.
-  - Step: In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46. See [Report options](human-steps#manual-kind-report-options).
 - `report Book_by_Genre block options` — Report "Book_by_Genre" has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.
-  - Step: In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music. See [Report options](human-steps#manual-kind-report-options).
 - `report All_Member_Infos block options` — Report "All_Member_Infos" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
-  - Step: In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
 - `report All_Book_Transactions block options` — Report "All_Book_Transactions" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
-  - Step: In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
 - `report All_Staff_Members block options` — Report "All_Staff_Members" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
-  - Step: In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world.
+  - Step: In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
 - `page DashBoard.Book_Report` — ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "View all Books" to the generated <button> "Book_Report" click handler.
+  - Step: On page "DashBoard", wire click parameters "View all Books" to the generated <button> "Book_Report" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters).
 - `page DashBoard.All_Book_Transactions` — ZML <text> "All_Book_Transactions" click parameters "Borrowed Book" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "Borrowed Book" to the generated <text> "All_Book_Transactions" click handler.
+  - Step: On page "DashBoard", wire click parameters "Borrowed Book" to the generated <text> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters).
 - `page DashBoard.All_Book_Transactions` — ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "Overdue transactions" to the generated <button> "All_Book_Transactions" click handler.
+  - Step: On page "DashBoard", wire click parameters "Overdue transactions" to the generated <button> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters).
 
 ## Hidden from end users
 
