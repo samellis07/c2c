@@ -276,7 +276,8 @@ export function cleanPrintStyle(value: string): { style: string; dropped: string
       prop !== '-moz-binding' &&
       !flat.includes('javascript:') &&
       !flat.includes('vbscript:') &&
-      safeStyleValue(body, prop);
+      safeStyleValue(body, prop) &&
+      (!(/^transform$|^-(?:webkit|moz|o|ms)-transform$/.test(prop)) || (!text.includes('\\') && !text.includes('/*')));
     if (safe) kept.push(text);
     else dropped.push(/^-?[-a-z]+$/.test(prop) ? prop : '?');
   }

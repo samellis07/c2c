@@ -1148,6 +1148,20 @@ test('static transform declarations carry for modern and legacy prefixes, but ne
   }
 });
 
+test('transform declarations fail closed on CSS escapes and comment splitting', () => {
+  for (const property of ['transform', '-moz-transform', '-o-transform', '-webkit-transform']) {
+    for (const value of ['\\75rl(x)', '\\000075rl(x)', 'u/**/rl(x)', 'var(--x, url(x))', 'calc(1 + url(x))']) {
+      const refused = carryStaticStyle(`.a { ${property}: ${value} }`, '[data-page="a"]');
+      assert.equal(refused.css, '', `${property}: ${value}`);
+    }
+  }
+  const escapedProperty = carryStaticStyle('.a { \\74 ransform: rotate(1deg) }', '[data-page="a"]');
+  assert.equal(escapedProperty.css, '');
+  for (const fn of ['rotate(10deg)', 'scale(1.2)', 'translate(1px, 2px)', 'matrix(1, 0, 0, 1, 0, 0)']) {
+    assert.match(carryStaticStyle(`.a { transform: ${fn} }`, '[data-page="a"]').css, new RegExp(fn.replace(/[()]/g, '\\$&')));
+  }
+});
+
 test('legacy digit-named properties carry with a checked value, like scrollbar-3dlight-color', () => {
   const result = carryStaticStyle('.a { scrollbar-3dlight-color: #fff; scrollbar-face-color: #eee }', '[data-page="a"]');
   assert.deepEqual(result.dropped, []);
