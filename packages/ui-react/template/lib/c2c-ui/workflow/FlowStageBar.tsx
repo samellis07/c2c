@@ -10,7 +10,7 @@ import { Button } from '../arc/components/button/button';
 import { Stepper } from '../arc/components/stepper/stepper';
 import { Timeline } from '../arc/components/timeline/timeline';
 import type { ThreadComment } from '../arc/components/comment-thread/comment-thread';
-import { formatValue } from '../report/ReportView';
+import { formatValue } from '../report/format';
 import { useEnv } from '../runtime/env';
 import type { FormSpec } from '../types';
 import { flowsForForm, recordStage, stageBarStages, transitionsFrom, transitionLabel, type FlowEvent } from './flows';
