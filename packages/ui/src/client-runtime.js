@@ -6628,8 +6628,9 @@ function showCapturePreview(input) {
   // parsing also lets us reject userinfo tricks (https://user:pass@host).
   let preview = img;
   const block = input.closest ? input.closest('[data-field]') : null;
-  const linkInput = block && input.ownerDocument && input.ownerDocument.querySelector
-    ? block.querySelector(`input[name="${CSS.escape(input.name.replace(/__camera$/, ''))}_link"]`)
+  const linkName = `${input.name.replace(/__camera$/, '')}_link`;
+  const linkInput = block && typeof block.querySelectorAll === 'function'
+    ? Array.from(block.querySelectorAll('input')).find((candidate) => candidate.name === linkName) ?? null
     : null;
   const linkValue = linkInput && typeof linkInput.value === 'string' ? linkInput.value.trim() : '';
   if (linkValue) {
