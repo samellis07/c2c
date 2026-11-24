@@ -6623,6 +6623,28 @@ function showCapturePreview(input) {
   img.className = 'capture-preview';
   img.alt = 'Captured preview';
   if (objectUrl) img.src = objectUrl;
+  // Creator image fields with `enable = link` let the user supply a URL for
+  // the image.  Only turn the preview into a link for an explicit web URL;
+  // parsing also lets us reject userinfo tricks (https://user:pass@host).
+  let preview = img;
+  const block = input.closest ? input.closest('[data-field]') : null;
+  const linkInput = block && input.ownerDocument && input.ownerDocument.querySelector
+    ? block.querySelector(`input[name="${CSS.escape(input.name.replace(/__camera$/, ''))}_link"]`)
+    : null;
+  const linkValue = linkInput && typeof linkInput.value === 'string' ? linkInput.value.trim() : '';
+  if (linkValue) {
+    try {
+      const parsed = new URL(linkValue);
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !parsed.username && !parsed.password) {
+        const anchor = doc.createElement('a');
+        anchor.href = parsed.href;
+        anchor.rel = 'noopener noreferrer';
+        anchor.target = '_blank';
+        anchor.append(img);
+        preview = anchor;
+      }
+    } catch { /* an invalid or hostile typed URL leaves the image inert */ }
+  }
   const retake = doc.createElement('button');
   retake.type = 'button';
   retake.className = 'capture-retake';
@@ -6631,7 +6653,7 @@ function showCapturePreview(input) {
     input.value = '';
     showCapturePreview(input);
   });
-  nameEl.append(img, retake);
+  nameEl.append(preview, retake);
   const seconds = Number(input.getAttribute('data-preview-duration'));
   if (Number.isFinite(seconds) && seconds > 0) {
     const delay = Math.min(seconds, CAPTURE_PREVIEW_DURATION_MAX_SECONDS) * 1000;
