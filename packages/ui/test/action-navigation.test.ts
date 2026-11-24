@@ -1734,9 +1734,9 @@ test('interpolated own-app URLs, collection .getall() IDs, and 2-segment record-
   assert.deepEqual(
     unsupported.map((t) => t.manualStep),
     [
-      'In Catalyst, open Functions → CustomAction.BrokenShortEdit and replace the unsupported open-link target with a supported form, report, or page route; if it must open an external destination, add a reviewed allowlisted link. The original navigation is carried in the report as a manual step and is not generated (invalid record-edit link).',
-      'In Catalyst, open Functions → Foreign_Slug_Btn and replace the unsupported open-link target with a supported form, report, or page route; if it must open an external destination, add a reviewed allowlisted link. The original navigation is carried in the report as a manual step and is not generated (target is not an own-app #Form, #Report, or #Page route).',
-      'In Catalyst, open Functions → Typo_Field_Btn and replace the unsupported open-link target with a supported form, report, or page route; if it must open an external destination, add a reviewed allowlisted link. The original navigation is carried in the report as a manual step and is not generated (target form Add_Quotation has no field Titl).',
+      'Reconfigure function CustomAction.BrokenShortEdit: its openUrl target is not a supported own-app form, report, or page link (invalid record-edit link).',
+      'Reconfigure function Foreign_Slug_Btn: its openUrl target is not a supported own-app form, report, or page link (target is not an own-app #Form, #Report, or #Page route).',
+      'Reconfigure function Typo_Field_Btn: its openUrl target is not a supported own-app form, report, or page link (target form Add_Quotation has no field Titl).',
     ],
   );
 
