@@ -1128,6 +1128,26 @@ test('translateZ and scaleZ carry like the other 3D transform functions', () => 
   assert.equal(result.css, '[data-page="a"] .a{-webkit-transform: translateZ(0);transform: translateZ(0) scaleZ(1) rotateY(180deg)}');
 });
 
+test('static transform declarations carry for modern and legacy prefixes, but never URL/script vectors', () => {
+  const safe = carryStaticStyle(
+    '.a { transform: translate3d(10px, 20px, 0); -moz-transform: rotate(10deg); -o-transform: scale(1.2); -webkit-transform: matrix(1, 0, 0, 1, 4, 5) }',
+    '[data-page="a"]',
+  );
+  assert.equal(safe.droppedRules, 0);
+  assert.match(safe.css, /transform: translate3d\(10px, 20px, 0\)/);
+  assert.match(safe.css, /-moz-transform: rotate\(10deg\)/);
+  assert.match(safe.css, /-o-transform: scale\(1\.2\)/);
+  assert.match(safe.css, /-webkit-transform: matrix\(1, 0, 0, 1, 4, 5\)/);
+
+  for (const property of ['transform', '-moz-transform', '-o-transform', '-webkit-transform']) {
+    for (const value of ['url(x)', 'expression(alert(1))', 'url(javascript:alert(1))']) {
+      const refused = carryStaticStyle(`.a { ${property}: ${value} }`, '[data-page="a"]');
+      assert.equal(refused.css, '', `${property}: ${value}`);
+      assert.deepEqual(refused.dropped, [`${property} declaration`], `${property}: ${value}`);
+    }
+  }
+});
+
 test('legacy digit-named properties carry with a checked value, like scrollbar-3dlight-color', () => {
   const result = carryStaticStyle('.a { scrollbar-3dlight-color: #fff; scrollbar-face-color: #eee }', '[data-page="a"]');
   assert.deepEqual(result.dropped, []);

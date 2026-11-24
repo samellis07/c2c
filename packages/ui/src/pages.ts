@@ -959,6 +959,13 @@ function cleanSheetDeclaration(part: string, colon: number): string | undefined 
   // `scrollbar-3dlight-color`; a value still passes the same checks.
   if ((!hack && !/^-?[-a-z0-9]+$/.test(prop)) || base === 'behavior' || base === '-moz-binding') return undefined;
   const body = part.slice(colon + 1).replace(/!\s*important\s*$/i, '');
+  // Transform values are numeric geometry only.  The general sheet value
+  // checker permits same-origin url() for paint properties, but transforms
+  // have no URL-bearing grammar; keeping this property-specific guard avoids
+  // carrying a relative url() (or a custom-property value that can resolve to
+  // one) through the sheet fallback.
+  if ((base === 'transform' || /^-(?:webkit|moz|o|ms)-transform$/.test(base)) &&
+      /(?:url\s*\(|expression\s*\(|behavior\b|-moz-binding\b|javascript\s*:|vbscript\s*:)/i.test(flatCss(body))) return undefined;
   // IE's alpha(opacity) filter predates the opacity property; N/100 is its
   // modern equivalent. Only that one argument is rewritten — other legacy
   // filters can fetch (AlphaImageLoader) or run script and stay refused.
