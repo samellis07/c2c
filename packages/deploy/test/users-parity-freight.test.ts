@@ -46,6 +46,20 @@ const MATRIX: Record<string, { clone: 'App User' | 'App Administrator'; portal: 
 };
 const PROFILE_NAMES = Object.keys(MATRIX);
 
+/**
+ * Fields the export flags `personal data = true`, read by hand from the .ds
+ * (14 flags, none on any other form). A profile that reads every row (not
+ * Administrator, not the own-records-only Customer portal profile) and has no
+ * visibility grant on them gets the form's other fields only.
+ */
+const PERSONAL_DATA: Record<string, string[]> = {
+  New_Account: ['Email', 'Phone_Number'],
+  New_User: ['Email'],
+  New_Contact: ['Contact_Name', 'Mobile', 'Assistant_Phone', 'Email', 'Phone_Number'],
+  New_Vendor: ['Phone_Number', 'Email'],
+  New_Lead: ['Phone_Number', 'Name', 'Email', 'Mobile'],
+};
+
 function freightApp() {
   return deriveIr(parse(readFileSync(join(repoRoot(), DS_PATH), 'utf8')));
 }
@@ -95,11 +109,35 @@ test('freight parity: table permissions stay the least-privilege baseline on all
 });
 
 test('freight parity: the shim access policy writes each preset out on every form', () => {
-  const policy = authPlan(freightApp()).accessPolicy;
+  const app = freightApp();
+  const policy = authPlan(app).accessPolicy;
   assert.deepEqual(policy.roles, ['CEO']);
   assert.deepEqual(policy.admins, ['Administrator']);
-  const expected = Object.fromEntries(Object.entries(MATRIX).map(([name, row]) => [name, Object.fromEntries(FORMS.map((form) => [form, row.grant]))]));
+  const expected = Object.fromEntries(
+    Object.entries(MATRIX).map(([name, row]) => [
+      name,
+      Object.fromEntries(
+        FORMS.map((form) => {
+          const hidden = PERSONAL_DATA[form] ?? [];
+          // Administrator and the own-records-only portal profile reach personal data.
+          if (hidden.length === 0 || name === 'Administrator' || row.grant.ownerScope) return [form, row.grant];
+          const visible = app.forms.find((item) => item.name === form)!.fields.map((field) => field.name).filter((field) => !hidden.includes(field));
+          return [form, { ...row.grant, fields: visible, ...(row.grant.write ? { writable: visible } : {}) }];
+        }),
+      ),
+    ]),
+  );
   assert.deepEqual(policy.profiles, expected);
+});
+
+test('freight parity: personal-data fields are the only ones the preset policy withholds', () => {
+  const profiles = authPlan(freightApp()).accessPolicy.profiles as Record<string, Record<string, { fields?: string[] }>>;
+  for (const name of ['Administrator', 'Customer']) {
+    for (const form of FORMS) assert.equal(profiles[name]![form]!.fields, undefined, `${name} ${form}`);
+  }
+  for (const form of FORMS) {
+    assert.equal(profiles.Read![form]!.fields === undefined, !PERSONAL_DATA[form], form);
+  }
 });
 
 test('freight parity: backup users land on their profile role and invites POST that role id', async () => {
