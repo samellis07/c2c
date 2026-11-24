@@ -6,8 +6,8 @@ import { dangerousStyle, safeUrl, sanitizeSnippet } from '../template/lib/c2c-ui
 test('template sanitizer URL policy keeps navigation URLs and rejects dangerous variants', () => {
   // Non-ASCII hostnames are accepted: browsers normalize them to IDN/punycode,
   // and HTTPS remains an allowed navigation scheme under this policy.
-  const kept = ['http://example.test', 'https://example.test/a', 'https://例え.テスト', 'mailto:a@example.test', 'tel:+15550123', '#route', '../x', '?q=1', '/path'];
-  const rejected = ['file:///tmp/x', 'ftp://example.test', '//host/x', 'javascript:alert(1)', 'data:text/html,x', 'vbscript:msgbox(1)', 'blob:https://x', 'http:\u0000//x', 'http:\\x', 'java%73cript:alert(1)', 'JAVASCRIPT:alert(1)'];
+  const kept = ['http://example.test', 'https://example.test/a', 'https://例え.テスト', 'https://ex.com/a%20b', 'mailto:a@example.test', 'mailto:x@y.z?subject=hi%20there', 'https://ex.com/?q=a%26b', '/p%2Fq', '#a%20b', 'tel:+15550123', '#route', '../x', '?q=1', '/path'];
+  const rejected = ['file:///tmp/x', 'ftp://example.test', '//host/x', 'javascript:alert(1)', 'data:text/html,x', 'vbscript:msgbox(1)', 'blob:https://x', 'http:\u0000//x', 'http:\\x', 'java%73cript:alert(1)', '%0ajavascript:alert(1)', 'java%09script:alert(1)', '%2F%2Fhost', '%5C%5Chost', '%00https://host', 'java%2573cript:alert(1)', 'JAVASCRIPT:alert(1)'];
   for (const value of kept) assert.equal(safeUrl(value), true, value);
   for (const value of rejected) assert.equal(safeUrl(value), false, value);
   const dom = new JSDOM('');

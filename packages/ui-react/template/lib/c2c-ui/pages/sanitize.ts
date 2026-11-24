@@ -36,7 +36,10 @@ export function safeUrl(value: string): boolean {
   if (/[\u0000-\u0020\\]/.test(raw) || raw.startsWith('//')) return false;
   let text = raw;
   for (let pass = 0; pass <= 4; pass++) {
-    if (/[\u0000-\u0020\\]/.test(text)) return false;
+    // The raw value is strict, but decoded URL data may contain ordinary
+    // spaces (%20) legitimately. Only reject decoded control characters
+    // (excluding space), backslashes, and structures that become dangerous.
+    if (pass > 0 && /[\u0000-\u001f\u007f\\]/.test(text)) return false;
     const flatText = flat(text);
     if (flatText.startsWith('//') || /^(?:javascript|data|vbscript|file|ftp|blob):/.test(flatText)) return false;
     if (/^[a-z][a-z0-9+.-]*:/.test(flatText) && !/^(?:https?|mailto|tel):/.test(flatText)) return false;

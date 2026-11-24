@@ -22,11 +22,12 @@
  * https://docs.catalyst.zoho.com/en/cloud-scale/help/mail/introduction/
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { generate as generateDeluge } from '../../deluge/src/generate.js';
 import type { RestFn, TableCreateStep } from './tables.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 
 export interface MailConfig {
   enabled: boolean;
@@ -196,7 +197,7 @@ export function readMailSenderEvidence(workspace: string): MailSenderEvidence | 
 export function writeMailSenderEvidence(workspace: string, evidence: MailSenderEvidence): void {
   const path = join(workspace, MAIL_SENDER_EVIDENCE);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(evidence, null, 2)}\n`);
+  writeSafeState(path, `${JSON.stringify(evidence, null, 2)}\n`);
 }
 
 /**
