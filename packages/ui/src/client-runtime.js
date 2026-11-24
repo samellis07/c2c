@@ -3143,12 +3143,14 @@ function fillFormValues(formEl, form, record) {
  * `openUrl` only navigates to a web address: `http:`, `https:`, a `#…`
  * anchor such as the `#Form:`/`#Report:` links a page emits, or a relative
  * path — never `javascript:`, `data:`, `vbscript:` or another non-web
- * scheme. `//host/path` inherits the page's scheme (https on a deployed
- * app), so it names the same destination an `https:` URL does and stays
- * allowed.
+ * scheme. Reject ambiguous URL spellings before the browser normalizes them:
+ * protocol-relative authorities, backslashes, controls/whitespace, and
+ * userinfo (which can disguise the actual destination host).
  */
 function navigableUrl(view, url) {
   if (!safeUrl(url)) return false;
+  if (/[\u0000-\u0020\\]/.test(url) || url.startsWith('//')) return false;
+  if (/^https?:/i.test(url) && !/^https?:\/\/[^/?#\\]+(?:[/?#]|$)/i.test(url)) return false;
   const base = view && view.location && typeof view.location.href === 'string' ? view.location.href : 'https://localhost/';
   let parsed;
   try {
@@ -3156,6 +3158,8 @@ function navigableUrl(view, url) {
   } catch {
     return false;
   }
+  if (parsed.username || parsed.password) return false;
+  if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !parsed.hostname) return false;
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }
 

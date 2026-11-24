@@ -248,7 +248,7 @@ test('openUrl refuses a non-web scheme and says so instead of navigating', async
   }
 });
 
-test('openUrl still navigates anchors, relative paths, and scheme-relative addresses', async () => {
+test('openUrl still navigates anchors, relative paths, and ordinary web addresses', async () => {
   const { runtime, doc, win } = await setup(`\tform Order\n\t{\n${field('Name', 'text')}\n\t}`);
   const formEl = doc.querySelector('form');
   const opened: string[][] = [];
@@ -265,10 +265,31 @@ test('openUrl still navigates anchors, relative paths, and scheme-relative addre
     opened.map((a) => a[0]),
     ['#Form:Add_Firm', '#Report:Report_Stock', '/reports/Report_Stock', '?view=grid'],
   );
-  // `//host/path` inherits the page's scheme — https on a deployed app — so
-  // it reaches the same place an `https:` URL does and stays allowed.
-  runtime.applyActions([{ op: 'openUrl', args: ['//cdn.example.test/x', 'new window'] }], formEl);
-  assert.deepEqual(opened[4], ['//cdn.example.test/x', '_blank', 'noopener,noreferrer']);
+  assert.equal(opened.length, 4);
+});
+
+test('openUrl refuses browser-normalized authority and whitespace tricks', async () => {
+  const { runtime, nav, doc, win } = await setup(`\tform Order\n\t{\n${field('Name', 'text')}\n\t}`);
+  const formEl = doc.querySelector('form');
+  const opened: string[][] = [];
+  (win as unknown as { open: (...a: string[]) => null }).open = (...a: string[]) => { opened.push(a); return null; };
+  const refused = [
+    '//evil.example/x',
+    'https:\\\\evil.example/x',
+    'https://trusted.example@evil.example/x',
+    ' https://evil.example/x',
+    '\\thttps://evil.example/x',
+    '\\u0000https://evil.example/x',
+    ' https://evil.example/x ' + '\\u0000',
+    ' data:text/html,x',
+    ' javascript:alert(1)',
+  ];
+  for (const url of refused) {
+    const notes = runtime.applyActions([{ op: 'openUrl', args: [url, 'new window'] }], formEl);
+    assert.deepEqual(notes, ['openUrl refused'], JSON.stringify(url));
+  }
+  assert.deepEqual(opened, []);
+  assert.deepEqual(nav.assigned, []);
 });
 
 test('openUrl never opens a new tab or popup without noopener,noreferrer', async () => {
