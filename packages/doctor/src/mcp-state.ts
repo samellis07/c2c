@@ -35,6 +35,7 @@ import { isProbeName } from './mcp-probe.js';
 import { NO_FOLLOW_READ_FLAGS, isSymlinkRefusedError, isUnopenableError } from '../../core/src/fs-kind.js';
 import type { Observed } from './observed.js';
 import { c2cVersion } from './report.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 
 /** Reused evidence expires this many hours after it was observed; then a re-check is required. */
 export const MCP_EVIDENCE_MAX_AGE_HOURS = 12;
@@ -211,8 +212,7 @@ export function writeMcpEvidence(
     ...(origin.source === 'observed' ? { observed: origin.observed } : {}),
   };
   const path = mcpStatePath(workspace);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ ...body, mac: macOf(signer.key, body) }, null, 2)}\n`);
+  writeSafeState(path, `${JSON.stringify({ ...body, mac: macOf(signer.key, body) }, null, 2)}\n`);
   return path;
 }
 

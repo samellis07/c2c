@@ -1,8 +1,9 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { unquote, type App, type PropertyBlock } from '../../core/src/ir.js';
 import { API_FUNCTION, assertEnvVariablesWithinLimit, isReservedEnvKey } from './function-dir.js';
 import { restWithRetry, type RetryOptions } from './retry.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 import type { RestFn } from './tables.js';
 
 export interface DeclaredConnectionSecret {
@@ -199,12 +200,7 @@ export function writeOrUpdateFunctionEnv(
   }
 
   const env = buildFunctionEnv({ ...input, existingEnv: existing });
-  const tmpPath = `${fenvPath}.tmp-${process.pid}`;
-  writeFileSync(tmpPath, `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmpPath, fenvPath);
-  // Replacing an existing file inherits the temporary file's mode; explicitly
-  // enforce the secret-file permissions in case the destination predated this fix.
-  chmodSync(fenvPath, 0o600);
+  writeSafeState(fenvPath, `${JSON.stringify(env, null, 2)}\n`);
 
   const connectionSecretKeys: string[] = [];
   if (input.connectionSecrets) {
