@@ -23,25 +23,14 @@
  */
 import type { AppWindow } from './api.js';
 import { navigate as navigateHash } from './router.js';
+import { navigableUrl } from './navigable-url.js';
+
+export { navigableUrl };
 
 export interface ActionNavInstruction {
   kind: 'navigate';
   url: string;
   target?: 'same' | 'new';
-}
-
-/** Shared gate for every openUrl/location navigation in the React client. */
-export function navigableUrl(view: AppWindow | undefined, url: unknown): boolean {
-  if (typeof url !== 'string' || !url || /[\u0000-\u0020\\]/.test(url) || url.startsWith('//')) return false;
-  const flat = url.replace(/[\u0000-\u0020]+/g, '').toLowerCase();
-  if (/^(javascript|data|vbscript|blob|file):/.test(flat)) return false;
-  if (/^https?:/i.test(url) && !/^https?:\/\/[^/?#\\]+(?:[/?#]|$)/i.test(url)) return false;
-  const base = typeof view?.location?.href === 'string' ? view.location.href : 'https://localhost/';
-  let parsed: URL;
-  try { parsed = new URL(url, base); } catch { return false; }
-  const authority = /^https?:\/\/([^/?#\\]+)/i.exec(url)?.[1] ?? '';
-  if (authority.includes('@') || parsed.username || parsed.password || !parsed.hostname) return false;
-  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }
 
 /** This app's own hash route or a single-leading-slash relative path — never `//host/...`, a protocol-relative open redirect wearing a relative path's clothes. */
