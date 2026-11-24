@@ -98,3 +98,26 @@ test('a blank typed link or title still posts as an empty string, like any other
   assert.equal(record[photo.imageLinkColumn!], '');
   assert.equal(record[photo.imageTitleColumn!], '');
 });
+
+test('image preview links only to http(s) URLs without userinfo', async () => {
+  const model = imageApp('\t\t\tenable = link\n\t\t\tpreview duration = 5\n');
+  const form = model.forms[0]!;
+  const photo = form.fields[0]!;
+  const rt: any = await runtime();
+  const view: any = new JSDOM(`<!doctype html><body>${rt.renderForm(form)}</body>`, { url: 'https://app.example.test/' });
+  const formEl: any = view.window.document.querySelector('form')!;
+  const link: any = formEl.querySelector(`input[name="${photo.imageLinkColumn}"]`);
+  link.value = 'https://example.test/photo';
+  const file = new (view.window as any).File(['x'], 'photo.png', { type: 'image/png' });
+  const input: any = formEl.querySelector('input[type="file"]');
+  Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+  rt.attachCapturePreviews(formEl);
+  input.dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  assert.equal(formEl.querySelector('a[rel="noopener noreferrer"]')?.getAttribute('href'), 'https://example.test/photo');
+  link.value = 'javascript:alert(1)';
+  input.dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  assert.equal(formEl.querySelector('a'), null);
+  link.value = 'https://user:pass@example.test/photo';
+  input.dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  assert.equal(formEl.querySelector('a'), null);
+});
