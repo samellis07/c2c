@@ -221,7 +221,7 @@ const FIELD_GAP_WORDING: Record<string, BusinessWording> = {
   },
   barcode: {
     notice: 'The code value is stored as text; the code image is not rendered in the generated app.',
-    workaround: 'Enter or paste the code value into the generated text field, or add a reviewed scanning flow if the device workflow is required.',
+    workaround: 'For a code saved as a photo, first scan it with the device camera or a reviewed barcode app, then paste the decoded value into the generated text field and verify the saved value matches the label; add a reviewed in-app scanner if direct scanning is required.',
   },
   geolocation: {
     notice: 'There is no separate map-location field; coordinates travel inside the address field instead.',
