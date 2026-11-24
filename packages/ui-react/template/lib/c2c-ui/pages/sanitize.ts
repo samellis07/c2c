@@ -31,14 +31,30 @@ function flat(value: string): string {
 }
 
 function safeUrl(value: string): boolean {
-  const text = flat(value);
-  return !text || (!text.startsWith('javascript:') && !text.startsWith('data:') && !text.startsWith('vbscript:'));
+  const raw = String(value ?? '');
+  if (!raw) return true;
+  if (/[\u0000-\u0020\\]/.test(raw) || raw.startsWith('//')) return false;
+  let text = raw;
+  for (let pass = 0; pass <= 4; pass++) {
+    if (/[\\u0000-\\u0020\\\\]/.test(text)) return false;
+    const flatText = flat(text);
+    if (flatText.startsWith('//') || /^(?:javascript|data|vbscript|file|ftp|blob):/.test(flatText)) return false;
+    if (/^[a-z][a-z0-9+.-]*:/.test(flatText) && !/^(?:https?|mailto|tel):/.test(flatText)) return false;
+    if (!/^(?:https?|mailto|tel):/.test(flatText) && !flatText.startsWith('#') && !flatText.startsWith('/')) {
+      // Plain relative routes (including ../) are allowed.
+    }
+    let decoded: string;
+    try { decoded = decodeURIComponent(text); } catch { decoded = text.replace(/%([0-9a-fA-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))); }
+    if (decoded === text) break;
+    text = decoded;
+  }
+  return true;
 }
 
 function dangerousStyle(value: string): boolean {
   if (value.includes('\\') || value.includes('/*')) return true;
   const text = flat(value);
-  return ['url(', 'image-set(', 'src(', 'expression(', 'behavior', '-moz-binding', '', 'javascript:', 'vbscript:', 'data:', 'attr('].some((bad) => text.includes(bad));
+  return ['url(', 'image-set(', 'src(', 'expression(', 'behavior', '-moz-binding', '@import', 'javascript:', 'vbscript:', 'data:', 'attr('].some((bad) => text.includes(bad));
 }
 
 function allowedAttr(tag: string, name: string): boolean {
