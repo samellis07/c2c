@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { deriveIr, parse, parseFile } from '../../core/src/index.js';
+import { emptyApp, deriveIr, parse, parseFile } from '../../core/src/index.js';
+import type { Workflow } from '../../core/src/ir.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { buildBusinessMigrationReport, businessReportAsJson, businessReportAsMarkdown } from '../src/business-report.js';
 
@@ -55,6 +56,27 @@ test('c2c report refuses an unknown flag and a missing source cleanly', () => {
   const missing = spawnSync(process.execPath, [cli, 'report', join(root, 'missing.ds'), '--dc', 'in'], { encoding: 'utf8' });
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /no such file or directory/);
+});
+
+test('business report disambiguates duplicate workflow and schedule names without changing counts', () => {
+  const workflow = (name: string, container?: string): Workflow => ({ name, form: 'Orders', event: 'on success', container, deluge: { text: '', span: { start: 0, end: 0 } }, properties: [], span: { start: 0, end: 0 } });
+  const app = { ...emptyApp('empty'), name: 'Duplicate_Names', workflows: [workflow('Same_Workflow'), workflow('Same_Workflow'), workflow('Same_Schedule', 'schedule'), workflow('Same_Schedule', 'schedule')] };
+  const report = buildBusinessMigrationReport(app, { dc: 'in' });
+  assert.deepEqual(report.converted.workflows, { count: 2, names: ['Same_Workflow', 'Same_Workflow (2)'] });
+  assert.deepEqual(report.converted.schedules, { count: 2, names: ['Same_Schedule', 'Same_Schedule (2)'] });
+  assert.match(businessReportAsMarkdown(report), /Workflows: 2 — Same_Workflow, Same_Workflow \(2\)/);
+  assert.match(businessReportAsMarkdown(report), /Schedules: 2 — Same_Schedule, Same_Schedule \(2\)/);
+});
+
+test('business report duplicate-name output is deterministic across repeated serialization', () => {
+  const app = { ...emptyApp('empty'), name: 'Duplicate_Names', workflows: [
+    { name: 'Same', form: 'Orders', event: 'on success', deluge: { text: '', span: { start: 0, end: 0 } }, properties: [], span: { start: 0, end: 0 } },
+    { name: 'Same', form: 'Orders', event: 'on success', deluge: { text: '', span: { start: 0, end: 0 } }, properties: [], span: { start: 0, end: 0 } },
+  ] };
+  const first = buildBusinessMigrationReport(app, { dc: 'in' });
+  const second = buildBusinessMigrationReport(app, { dc: 'in' });
+  assert.equal(businessReportAsMarkdown(first), businessReportAsMarkdown(second));
+  assert.equal(businessReportAsJson(first), businessReportAsJson(second));
 });
 
 test('markdown distinguishes converted pages from pages requiring manual work', () => {
