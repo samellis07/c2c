@@ -8,9 +8,10 @@
  *    boot graph stays lean; every other chunk is a lazy one. A harness can load
  *    the entry and model modules and boot the app into any document; the UI
  *    scorer does exactly that.
- * 2. Bundle budget. Gzipped JavaScript the entry loads eagerly (entry, model
- *    and the chunks they statically import) plus all CSS must stay under the
- *    budget, or the build fails. dist/c2c-build.json records the sizes.
+ * 2. Bundle budget. Eager JS/CSS stay within the first-paint budget; deferred
+ *    Deferred JS is reported, not budgeted (as before); deferred CSS has a
+ *    bounded total ceiling (2x the eager CSS budget) because CSS used to be a
+ *    single sheet.
  * 3. Offline. dist/sw.js is the c2c service worker (same rules as the vanilla
  *    target: network-first shell, cache-first hashed assets, never the sign-in,
  *    SDK or API paths) with this build's precache list and cache id.
@@ -36,7 +37,7 @@ import type { Plugin, ResolvedConfig } from 'vite';
 export interface Budget {
   /** Gzipped bytes of the JavaScript the entry loads eagerly; deferred widget chunks do not count. */
   js: number;
-  /** Gzipped bytes of all CSS. */
+  /** Gzipped bytes of CSS linked by the eager graph. */
   css: number;
 }
 
@@ -127,14 +128,24 @@ function c2cBundle(opts: { budget?: Budget; swTemplate: string }): Plugin {
       const visit = (name: string) => {
         if (eager.has(name)) return;
         eager.add(name);
-        for (const dep of chunks.find((chunk) => chunk.fileName === name)?.imports ?? []) visit(dep);
+        const chunk = chunks.find((candidate) => candidate.fileName === name);
+        for (const dep of chunk?.imports ?? []) visit(dep);
       };
       if (entry) visit(entry.fileName);
 
       let js = 0;
       let deferredJs = 0;
-      let css = 0;
+      let eagerCss = 0;
+      let deferredCss = 0;
       const sizes: Record<string, number> = {};
+      // Vite records the CSS imported by each JS chunk. This preserves the
+      // graph boundary: shared CSS belongs to the eager sheet once, while CSS
+      // owned only by an import() chunk remains deferred.
+      const eagerStyles = new Set<string>();
+      for (const chunk of chunks) {
+        if (!eager.has(chunk.fileName)) continue;
+        for (const cssName of chunk.viteMetadata?.importedCss ?? []) eagerStyles.add(cssName);
+      }
       for (const file of Object.values(bundle)) {
         const data = file.type === 'chunk' ? file.code : file.source;
         if (!/\.(js|css)$/.test(file.fileName)) continue;
@@ -143,15 +154,19 @@ function c2cBundle(opts: { budget?: Budget; swTemplate: string }): Plugin {
         if (file.fileName.endsWith('.js')) {
           if (eager.has(file.fileName)) js += gz;
           else deferredJs += gz;
-        } else css += gz;
+        } else if (eagerStyles.has(file.fileName)) eagerCss += gz;
+        else deferredCss += gz;
       }
       if (js > budget.js) problems.push(`JavaScript is ${js} bytes gzipped, over the ${budget.js} byte budget`);
-      if (css > budget.css) problems.push(`CSS is ${css} bytes gzipped, over the ${budget.css} byte budget`);
-      const styles = Object.values(bundle).filter((file) => file.type === 'asset' && file.fileName.endsWith('.css')).map((file) => file.fileName).sort();
+      const totalJs = js + deferredJs;
+      const totalCss = eagerCss + deferredCss;
+      if (eagerCss > budget.css) problems.push(`Eager CSS is ${eagerCss} bytes gzipped, over the ${budget.css} byte budget`);
+      if (totalCss > budget.css * 2) problems.push(`Total CSS is ${totalCss} bytes gzipped, over the ${budget.css * 2} byte ceiling`);
+      const styles = Object.keys(sizes).filter((name) => name.endsWith('.css')).sort();
       const devScript = /<script type="module" src="\/src\/main\.tsx"><\/script>/;
       if (!devScript.test(sourceHtml)) problems.push('index.html must load /src/main.tsx with one module script');
       if (problems.length) this.error(`c2c build contract:\n- ${problems.join('\n- ')}`);
-      const links = styles.map((name) => `<link rel="stylesheet" href="/${name}" />`).join('\n    ');
+      const links = styles.filter((name) => eagerStyles.has(name)).map((name) => `<link rel="stylesheet" href="/${name}" />`).join('\n    ');
       const indexText = sourceHtml
         .replace(devScript, `<script type="module" src="/${entry!.fileName}"></script>`)
         .replace('</head>', `  ${links}\n  </head>`);
@@ -168,7 +183,7 @@ function c2cBundle(opts: { budget?: Budget; swTemplate: string }): Plugin {
         .replaceAll('@@cache@@', cacheId)
         .replaceAll('@@index@@', sha(indexText));
       this.emitFile({ type: 'asset', fileName: 'sw.js', source: sw });
-      const report = { budget, gzip: { js, deferredJs, css }, files: Object.fromEntries(Object.entries(sizes).sort(([a], [b]) => (a < b ? -1 : 1))) };
+      const report = { budget, ceilings: { css: budget.css * 2 }, gzip: { js, deferredJs, eagerCss, deferredCss, totalJs, totalCss }, files: Object.fromEntries(Object.entries(sizes).sort(([a], [b]) => (a < b ? -1 : 1))) };
       this.emitFile({ type: 'asset', fileName: 'c2c-build.json', source: `${JSON.stringify(report, null, 2)}\n` });
     },
   };

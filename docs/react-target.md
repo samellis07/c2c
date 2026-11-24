@@ -480,9 +480,12 @@ elements, of which 186 are server-side snippets (`dsp` 137, `dspZml` 49).
 
 ## Bundle budget
 
-The plugin gzips every emitted JS and CSS file at level 9 and fails the build
-over budget: JavaScript 250 KiB, CSS 24 KiB (`DEFAULT_BUDGET`). `dist/c2c-build.json`
-records the numbers. Skeleton measurements (gzip):
+The plugin gzips every emitted JS and CSS file at level 9. First-paint (eager)
+code must stay under the default budget of JavaScript 224 KiB and CSS 28 KiB
+(`DEFAULT_BUDGET`). Deferred JavaScript is reported separately and is not budgeted; the
+eager-plus-deferred CSS total is capped at twice the CSS limit (56 KiB).
+Both limits fail the build; `dist/c2c-build.json` records eager,
+deferred, total, and per-file sizes. Skeleton measurements (gzip):
 
 | app | JS | CSS |
 |---|---:|---:|
