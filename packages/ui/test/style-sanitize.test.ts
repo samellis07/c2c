@@ -1158,7 +1158,7 @@ test('transform declarations fail closed on CSS escapes and comment splitting', 
   const escapedProperty = carryStaticStyle('.a { \\74 ransform: rotate(1deg) }', '[data-page="a"]');
   assert.equal(escapedProperty.css, '');
   for (const fn of ['rotate(10deg)', 'scale(1.2)', 'translate(1px, 2px)', 'matrix(1, 0, 0, 1, 0, 0)']) {
-    assert.match(carryStaticStyle(`.a { transform: ${fn} }`, '[data-page="a"]').css, new RegExp(fn.replace(/[()]/g, '\\$&')));
+    assert.match(carryStaticStyle(`.a { transform: ${fn} }`, '[data-page="a"]').css, new RegExp(fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 });
 
