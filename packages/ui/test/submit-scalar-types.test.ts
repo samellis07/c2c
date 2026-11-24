@@ -36,8 +36,8 @@ ${field('Qty', 'number')}
 ${field('Price', 'decimal')}
 ${field('Pct', 'percent')}
 ${field('Cost', 'currency')}
-${field('Due', 'date')}
-${field('At', 'datetime')}
+${field('Due', 'date', `${tab(3)}alloweddays = 1,3`)}
+${field('At', 'datetime', `${tab(3)}alloweddays = 1,3`)}
 ${field('Alarm', 'time')}
 ${field('Flag', 'decision box')}
 ${field('Tags', 'multiselect', `${tab(3)}values = {"a","b"}`)}
@@ -187,6 +187,17 @@ test('date, datetime and time take only the posted format text', async () => {
     assert.equal((await post({ At: '2026-11-04 10:30:00' })).status, 200);
     assert.equal((await post({ Alarm: '10:30' })).status, 200);
     assert.equal((await post({ Alarm: '10:30:05' })).status, 200);
+  });
+});
+
+test('generated server rejects disallowed UTC weekdays for date and datetime writes', async () => {
+  await withSubmit(async (post) => {
+    assert.equal((await post({ Due: '2026-11-04', At: '2026-11-04 10:30:00' })).status, 200); // Wednesday UTC
+    for (const record of [{ Due: '2026-11-05' }, { At: '2026-11-05 10:30:00' }]) {
+      const res = await post(record);
+      assert.ok(res.status === 400 || res.status === 403, `${JSON.stringify(record)} -> ${res.status}`);
+      assert.notEqual(res.body.wrote, true);
+    }
   });
 });
 
