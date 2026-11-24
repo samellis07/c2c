@@ -534,12 +534,14 @@ export function generateReactApp(app: App, opts: ReactGenerateOptions = {}): Rea
     routes.push({ key: 'flow/approvals', component, module });
     routes.push({ key: 'flow/approvals/completed', component, module });
   }
-  // Both inbox views share one module; import each module once.
-  const imported = new Set<string>();
-  const imports = routes.filter((r) => !imported.has(r.module) && (imported.add(r.module), true));
+  // Keep every route key, including aliases sharing a module, while deferring
+  // each screen until its route is visited.  A module-deduped import list is
+  // deliberately avoided here: aliases must each point at the same lazy
+  // component promise.
+  const imports = routes.filter((r, i, all) => all.findIndex((x) => x.module === r.module) === i);
   gen(
     'src/generated/routes.tsx',
-    `${HEADER}import type { RouteTable } from '@c2c/ui';\n${imports.map((r) => `import ${r.component} from './${r.module}';`).join('\n')}\n\nexport const routes: RouteTable = {\n${routes.map((r) => `  ${q(r.key)}: ${r.component},`).join('\n')}\n};\n`,
+    `${HEADER}import { lazy } from 'react';\nimport type { RouteTable } from '@c2c/ui';\n${imports.map((r) => `const ${r.component} = lazy(() => import('./${r.module}').then((m) => ({ default: m.default })));`).join('\n')}\n\nexport const routes: RouteTable = {\n${routes.map((r) => `  ${q(r.key)}: ${r.component},`).join('\n')}\n};\n`,
   );
   gen('src/generated/theme.css', themeCss(ui.model));
   gen('index.html', indexHtml(spec, opts.apiBase));

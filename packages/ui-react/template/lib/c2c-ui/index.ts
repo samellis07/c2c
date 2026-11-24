@@ -11,8 +11,8 @@ import './styles/shell.css';
 export type * from './types';
 export { bootApp, navSections, deniedTargets, type RouteTable, type ScreenProps } from './boot';
 export { AppShell } from './shell/AppShell';
-export { FormView } from './form/FormView';
-export { RecordSummary } from './form/RecordSummary';
+export const FormView = lazy(() => import('./form/FormView').then((m) => ({ default: m.FormView })));
+export const RecordSummary = lazy(() => import('./form/RecordSummary').then((m) => ({ default: m.RecordSummary })));
 export {
   Field,
   defaultWidget,
@@ -48,15 +48,18 @@ export const LookupControl = lazy(() => import('./lookup/LookupField').then((m) 
 export const LookupMultiControl = lazy(() => import('./lookup/LookupField').then((m) => ({ default: m.LookupMultiControl })));
 export const SubformGrid = lazy(() => import('./subform/SubformGrid').then((m) => ({ default: m.SubformGrid })));
 export { subformRows, validateRows, validateSubforms, type SubformRow } from './subform/rows';
-export { ReportView, formatValue, buildQuery, groupRows, parseFormat } from './report/ReportView';
+export const ReportView = lazy(() => import('./report/ReportView').then((m) => ({ default: m.ReportView })));
+export { formatValue, buildQuery, groupRows, parseFormat } from './report/ReportView';
 export { matchCriteria, criteriaTodo } from './report/criteria';
 export { SmokePage } from './smoke/SmokePage';
 export { mountSmoke, runSmokePlan, sealSmokeBlock, smokeCanonical, smokeModel, readJson } from './smoke/run';
 export type { SmokeFieldPlan, SmokeLine, SmokeModel, SmokeRun, SmokeStep } from './smoke/run';
-export { ChartReport, ChartPanel, ChartBody } from './charts/ChartView';
+export const ChartReport = lazy(() => import('./charts/ChartView').then((m) => ({ default: m.ChartReport })));
+export const ChartPanel = lazy(() => import('./charts/ChartView').then((m) => ({ default: m.ChartPanel })));
+export const ChartBody = lazy(() => import('./charts/ChartView').then((m) => ({ default: m.ChartBody })));
 export { MetricTile } from './charts/MetricTile';
 export { RowsScope, useRows, readRows } from './charts/rows';
-export { PageView } from './pages/PageView';
+export const PageView = lazy(() => import('./pages/PageView').then((m) => ({ default: m.PageView })));
 export { sanitizeSnippet } from './pages/sanitize';
 export { createApi, apiCall, apiUrl, bridgeSignOut, type Api, type ApiInit, type ApiReply, type ApiResponse, type AppWindow } from './runtime/api';
 export { useEnv, type AppEnv } from './runtime/env';
@@ -107,7 +110,7 @@ export { Stepper } from './arc/components/stepper/stepper';
 export { Timeline } from './arc/components/timeline/timeline';
 export { Dialog, DialogContent, DialogTrigger } from './arc/components/dialog/dialog';
 export { CommentThread, type ThreadComment, type CommentAuthor } from './arc/components/comment-thread/comment-thread';
-export { ApprovalsInbox } from './workflow/ApprovalsInbox';
+export const ApprovalsInbox = lazy(() => import('./workflow/ApprovalsInbox').then((m) => ({ default: m.ApprovalsInbox })));
 export { FlowStageBar } from './workflow/FlowStageBar';
 export { DecisionDialog, type FlowDecision, type FlowOutcome } from './workflow/DecisionDialog';
 export {
