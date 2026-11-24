@@ -99,3 +99,45 @@ test('a value derived from an app call names that call', () => {
   const text = manual('m = thisapp.Rooms.book(input.N);\nrooms = m.get("Rooms").toList();\ninput.Room:ui.add(rooms);')[0] ?? '';
   assert.match(text, /through `rooms` from thisapp\.Rooms\.book/);
 });
+
+// Chained leaves: trailing methods on an app call, on a write, or on a local
+// function call. The oracle is the source: every `thisapp.X` named in the text
+// is a root call as written, never a trailing method.
+const SUFFIXES = ['.get("R")', '.toList()', '.get("R").toList()', '.size()', '.get("R").get("S").toList()', '.first()', '.contains("A")'];
+const TRAILING = new Set(['get', 'toList', 'size', 'first', 'contains']);
+
+test('a chain on an app call, write or local function names the root call, never a trailing method', () => {
+  let cases = 0;
+  let named = 0;
+  for (const suffix of SUFFIXES) {
+    const depth = suffix.split('.').length - 1;
+    assert.ok(depth >= 1 && depth <= 3, suffix);
+    for (const root of ['thisapp.Rooms.f3(input.N)', 'thisapp.F(input.N)']) {
+      for (const shape of ['direct', 'derived', 'loop']) {
+        const assign = shape === 'derived' ? `b = ${root};\nm = b${suffix};` : `m = ${root}${suffix};`;
+        const src = shape === 'loop' ? `for each r in Rooms[ID != 0] { ${assign} }\ninput.Room:ui.add(m);` : `${assign}\ninput.Room:ui.add(m);`;
+        for (const text of manual(src)) {
+          cases++;
+          const root0 = root.replace(/\(.*$/, '');
+          for (const c of text.matchAll(/thisapp\.[\w.]+/g)) {
+            const callee = c[0].replace(/[.,]$/, '');
+            assert.ok(callee === root0, `callee ${callee} is the root call: ${src}\n${text}`);
+            assert.ok(!TRAILING.has(callee.split('.').pop()!), `not a trailing method: ${src}`);
+            named++;
+          }
+          assert.ok(!/thisapp\.F\b/.test(text) || root0 === 'thisapp.F', src);
+        }
+      }
+    }
+    for (const src of [
+      `w = insert into Staff [Name = input.N];\nm = w${suffix};\ninput.Room:ui.add(m);`,
+      `m = helper(input.N)${suffix};\ninput.Room:ui.add(m);`,
+    ]) {
+      for (const text of manual(src)) {
+        cases++;
+        assert.doesNotMatch(text, /thisapp\./, `no invented callee: ${src}\n${text}`);
+      }
+    }
+  }
+  assert.ok(cases >= 40 && named >= 30, `cases ${cases}, named ${named}`);
+});
