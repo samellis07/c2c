@@ -4984,9 +4984,22 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
       }
       return;
     }
-    if (b.appFunction || b.todo) fn ??= { local: name, callees: callees(b.code) };
+    if (b.appFunction || b.todo) fn ??= { local: name, callees: callees(b.code) || calleesBehind(b, new Set()) };
     else if (b.sideEffect) write ??= name;
     visit(b.reads, b.unboundReads);
+  };
+  // A value derived from an app call (`rooms = result.get("Rooms")`) carries the
+  // call's flags but not its text: follow the bindings it read, as recorded when
+  // it was assigned, to the call that produced it.
+  const calleesBehind = (b: Binding, walked: Set<Binding>): string => {
+    if (walked.has(b)) return '';
+    walked.add(b);
+    for (const dep of b.deps.values()) {
+      if (!dep) continue;
+      const found = callees(dep.code) || calleesBehind(dep, walked);
+      if (found) return found;
+    }
+    return '';
   };
   const visit = (names: string[], unboundReads: string[]): void => {
     if (unboundReads.length && unbound === undefined) unbound = displayName(unboundReads[0]!);

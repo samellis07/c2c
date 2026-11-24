@@ -94,3 +94,8 @@ test('nested if/else with an assignment in every arm names the origin, not a mis
   assert.match(text, /through `m` from a write, mail or outbound call/);
   assert.doesNotMatch(text, /not assigned/);
 });
+
+test('a value derived from an app call names that call', () => {
+  const text = manual('m = thisapp.Rooms.book(input.N);\nrooms = m.get("Rooms").toList();\ninput.Room:ui.add(rooms);')[0] ?? '';
+  assert.match(text, /through `rooms` from thisapp\.Rooms\.book/);
+});
