@@ -1,0 +1,113 @@
+{
+  "schema": "c2c-fixture-migration-report/1",
+  "fixture": "synthetic/invoice/invoice",
+  "app": "Invoice_Studio",
+  "scope": [
+    {
+      "feature": "Payments",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Offline",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Form Email",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "C8 dialect",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Cliq bots",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Native mobile / MDM",
+      "label": "not supported in this version (counted; on the roadmap)"
+    },
+    {
+      "feature": "Marketplace publishing",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "Zia AI builder",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "On-prem Data Bridge",
+      "label": "not applicable (out of scope)"
+    }
+  ],
+  "converted": {
+    "forms": 1,
+    "reports": 1,
+    "pages": 0,
+    "functions": 0,
+    "catalyst": {
+      "tables": 2,
+      "nosqlCollections": 0,
+      "functions": 1,
+      "cronJobs": 0,
+      "slatePages": 2
+    },
+    "deluge": {
+      "statements": 0,
+      "translated": 0,
+      "shimmed": 0
+    }
+  },
+  "todoCount": 0,
+  "todoKinds": [],
+  "fieldGaps": [
+    {
+      "matrixId": "decimal",
+      "count": 2,
+      "reason": "Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "Invoice",
+          "field": "Amount"
+        },
+        {
+          "form": "Invoice",
+          "field": "Total"
+        }
+      ]
+    },
+    {
+      "matrixId": "email",
+      "count": 1,
+      "reason": "There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
+      "fields": [
+        {
+          "form": "Invoice",
+          "field": "Customer_Email"
+        }
+      ]
+    },
+    {
+      "matrixId": "subform",
+      "count": 1,
+      "reason": "The .ds token is grid. Every inline subform (nested fields, no values = Form.Field) becomes its own child table with a parent_id foreign key to the parent ROWID (ON-DELETE-CASCADE) and a row_order Int (0-based Creator row position). A form with several subforms gets one child table per subform; it is not a NoSQL collection. A nested subform inside a subform is not expanded. A grid whose values point at another form is a relation to that form’s table, not a second copy of it.",
+      "fields": [
+        {
+          "form": "Invoice",
+          "field": "Lines"
+        }
+      ]
+    }
+  ],
+  "manualSteps": [],
+  "hiddenParts": [],
+  "todoSteps": [],
+  "humanSteps": [
+    "Accept invite: accept the app invite mail",
+    "Sign in once: sign in to the deployed app once",
+    "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
+    "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
+  ],
+  "silentDrops": 0,
+  "residuals": []
+}
