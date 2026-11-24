@@ -4,10 +4,11 @@
  * same place bin/c2c writes its vendor-ok marker). Holds no emails, no tokens,
  * no URL paths.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DoctorFile } from './types.js';
+import { writeSafeState } from '../../core/src/safe-write.js';
 
 export function workspaceDir(env: NodeJS.ProcessEnv): string {
   const named = env.C2C_WORKSPACE;
@@ -99,8 +100,7 @@ export function staleScopeNotice(previous: DoctorFile | undefined, next: DoctorF
 export function writeDoctorFile(workspace: string, file: DoctorFile): string {
   const path = doctorJsonPath(workspace);
   const merged = mergeDoctorFile(readDoctorFile(workspace), file);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(merged, null, 2)}\n`);
+  writeSafeState(path, `${JSON.stringify(merged, null, 2)}\n`);
   return path;
 }
 
