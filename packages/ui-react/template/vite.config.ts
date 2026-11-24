@@ -23,7 +23,7 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     modulePreload: false,
-    cssCodeSplit: false,
+    cssCodeSplit: true,
     rollupOptions: {
       // The entry keeps its exports: boot(spec, document) is part of the bundle contract.
       preserveEntrySignatures: 'exports-only',
