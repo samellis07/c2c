@@ -3159,6 +3159,7 @@ function navigableUrl(view, url) {
     return false;
   }
   if (parsed.username || parsed.password) return false;
+  if (/^https?:\/\/\s*@/i.test(url)) return false;
   if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !parsed.hostname) return false;
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }

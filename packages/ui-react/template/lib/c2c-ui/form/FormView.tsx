@@ -30,6 +30,7 @@ import { Button } from '../arc/components/button/button';
 import type { FieldSpec, FormRecord, FormSpec, RecordValue } from '../types';
 import { routePrefill } from '../runtime/router';
 import { SESSION_EXPIRED_EVENT, pageHash, watchAuthCall, type AppWindow } from '../runtime/api';
+import { navigableUrl } from '../runtime/navigation';
 import { useEnv } from '../runtime/env';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { Slot, useCustomization } from '../runtime/extend';
@@ -279,6 +280,7 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
         },
         openUrl: (url, target) => {
           try {
+            if (!navigableUrl(view, url)) return;
             // `noopener`/`noreferrer` keep the opened page from reaching
             // back via `window.opener` (reverse tabnabbing).
             if (target === '_blank') view.open?.(url, '_blank', 'noopener,noreferrer');
