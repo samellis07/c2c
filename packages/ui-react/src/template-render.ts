@@ -92,7 +92,7 @@ export async function mountTemplateScreen(out: string, spec: AppSpec, screen: Te
   const savedGlobals = new Map<string, PropertyDescriptor | undefined>();
   for (const key of [...globals, 'IS_REACT_ACT_ENVIRONMENT']) savedGlobals.set(key, Object.getOwnPropertyDescriptor(host, key));
   const restoreGlobals = () => {
-    for (const [key, descriptor] of savedGlobals) {
+    for (const [key, descriptor] of [...savedGlobals.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
       try {
         if (descriptor) Object.defineProperty(host, key, descriptor);
         else delete host[key];
