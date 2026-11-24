@@ -38,7 +38,7 @@ This list covers everything the converter can see in the export. A check inside 
 - Artifact_Intake.Old_Crm_Reference — The link to the old customer-record system is kept as its display text.
   - What to do: Ask the person who owns the external account to authorize the matching connection during migration; otherwise keep the value as text and complete the lookup after launch.
 - Artifact_Intake.Shelf_Code — The code value is stored as text; the code image is not rendered in the generated app.
-  - What to do: Enter or paste the code value into the generated text field, or add a reviewed scanning flow if the device workflow is required.
+  - What to do: For a code saved as a photo, first scan it with the device camera or a reviewed barcode app, then paste the decoded value into the generated text field and verify the saved value matches the label; add a reviewed in-app scanner if direct scanning is required.
 - Artifact_Intake.Site_Location — There is no separate map-location field; coordinates travel inside the address field instead.
   - What to do: Capture the needed address or location in the supported address fields instead of a separate location field.
 - Artifact_Intake.Text_From_Image — Text is no longer read out of uploaded images automatically.

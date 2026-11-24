@@ -111,7 +111,9 @@ function featureWorkaround(name: string): string {
 
 function todoWorkaround(item: DelugeLocation): string {
   if (item.manualStep) return scrubBusiness(item.manualStep);
-  return `Open ${item.location} in the generated app, complete the marked item, and verify the affected flow once before go-live.`;
+  // Keep the fallback actionable even when the translator did not provide a
+  // bespoke sentence: name the source object, the action, and the check.
+  return `Open ${item.location} in the generated app, replace the unsupported ${scrubBusiness(item.construct)} behavior for this object, then run the affected flow and confirm its result matches the source app before go-live.`;
 }
 
 function unsupportedItems(analysis: AnalyzeReport, manualUiLocations: ReadonlySet<string>): AttentionItem[] {
