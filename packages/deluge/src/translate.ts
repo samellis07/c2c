@@ -473,6 +473,14 @@ interface Binding {
   /** The binding a previous-value dep key copies; replay compares this, not the copy. */
   origin?: Binding;
   /**
+   * Set on the merged binding left after an if/else chain: the definition
+   * each path reaching the join leaves for this name (an arm's last binding,
+   * or the binding from before the if on a path that does not assign it;
+   * `null` when that path has no binding at all). Used only to word manual
+   * steps; the merged binding itself is never replayed.
+   */
+  reaching?: (Binding | null)[];
+  /**
    * The code applies list mutators only to a fresh copy of the receiver
    * (`shim.list.duplicate`), so replaying it changes no value the program
    * holds. Only the effect calls in {@link NON_READ_EFFECT} refuse it.
@@ -3491,6 +3499,7 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
   const translated: Out[] = [];
   const perArm: { assigns: Set<string>; classes: ArmClasses }[] = [];
   const armBindings: (Binding | undefined)[] = [];
+  const armFinals: Map<string, Binding | null>[] = [];
   const armTests = [test, ...elifTests];
   for (let bi = 0; bi < bodies.length; bi++) {
     const body = bodies[bi]!;
@@ -3515,6 +3524,8 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
     perArm.push({ assigns: assignedNames(body), classes: copyClasses(scope) });
     const only = singleAssignName(body);
     armBindings.push(only === null ? undefined : scope.bindings.get(only));
+    // determinism-allow: each iteration only records the arm's last binding keyed by that same name
+    armFinals.push(new Map([...assigned].map((name) => [name, scope.bindings.get(name) ?? null])));
   }
   // A name is client-ready after the if only when every arm — and the
   // fall-through path when there is no else — leaves it client-ready with the
@@ -3571,12 +3582,11 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
       appFunction: false,
       todo: false,
       sideEffect: true,
-      // Keep each arm's binding so manual-step wording can name the actual
-      // app function or write that made the merged value unsafe.
-      deps: new Map(armBindings.filter((item): item is Binding => !!item).map((item, index) => [`${name}#arm${index}`, item])),
+      deps: new Map(),
       seq: scope.clock.seq++,
       flow: -1,
-      ...(prior ? { origin: prior } : {}),
+      // Every path that reaches the join, for the manual-step wording.
+      reaching: [...armFinals.map((finals) => finals.get(name) ?? null), ...(s.else ? [] : [prior ?? null])],
     });
   }
   // `if (tot == null) { tot = 0; }`: one arm assigns one name from a read-only
@@ -4953,39 +4963,38 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
     // determinism-allow: Set keeps first-seen order of the call paths, which is source order
     return [...new Set(names)].filter((name) => !/\.get$/.test(name)).join(', ') || (names.length ? 'thisapp.F' : '');
   };
+  // The cause is chosen from the set of definitions that reach this point.
+  // Each leaf definition has one origin class: an app function that is not
+  // proved read-only, a write or mail result, a deterministic value (literal,
+  // read, parameter), or no definition at all. The merged binding after an
+  // if/else chain has no origin of its own; it stands for its `reaching` set,
+  // which is flattened to any nesting depth.
   const seen = new Set<string>();
+  const seenDefs = new Set<Binding>();
   let write: string | undefined;
   let fn: { local?: string; callees: string } | undefined;
   let unbound: string | undefined;
-  // Binding-first: the nearest named local carrying the cause beats the
-  // argument's own propagated flags, so the step can name the statement.
+  const leaves = (name: string, b: Binding): void => {
+    if (seenDefs.has(b)) return;
+    seenDefs.add(b);
+    if (b.reaching) {
+      for (const def of b.reaching) {
+        if (def) leaves(name, def);
+        else if (!scope.prefetchBound.has(name) && name !== 'row') unbound ??= displayName(name);
+      }
+      return;
+    }
+    if (b.appFunction || b.todo) fn ??= { local: name, callees: callees(b.code) };
+    else if (b.sideEffect) write ??= name;
+    visit(b.reads, b.unboundReads);
+  };
   const visit = (names: string[], unboundReads: string[]): void => {
-    if (unboundReads.length && unbound === undefined) unbound = unboundReads[0];
+    if (unboundReads.length && unbound === undefined) unbound = displayName(unboundReads[0]!);
     for (const name of names) {
       if (seen.has(name)) continue;
       seen.add(name);
       const b = scope.bindings.get(name);
-      if (!b) continue;
-      // The binding left after an if arm assigned the name: it holds no value on the other paths.
-      if (b.flow === -1 && b.code === 'undefined') {
-        // A merge of two arm bindings has no single `origin`; inspect the
-        // recorded arm dependencies so an app function/write is named rather
-        // than incorrectly reported as an unassigned local.
-        const origins = [b.origin, ...b.deps.values()].filter((item): item is Binding => !!item);
-        let causeFound = false;
-        if (origins.length) {
-          for (const origin of origins) {
-            if (origin.appFunction || origin.todo) { fn ??= { local: name, callees: callees(origin.code) }; causeFound = true; }
-            else if (origin.sideEffect) { write ??= name; causeFound = true; }
-            visit(origin.reads, origin.unboundReads);
-          }
-        }
-        if (!causeFound) unbound ??= displayName(name);
-        continue;
-      }
-      if (b.appFunction || b.todo) fn ??= { local: name, callees: callees(b.code) };
-      else if (b.sideEffect) write ??= name;
-      visit(b.reads, b.unboundReads);
+      if (b) leaves(name, b);
     }
   };
   for (const a of args) {
