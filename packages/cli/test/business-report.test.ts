@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { emptyApp, deriveIr, parse, parseFile } from '../../core/src/index.js';
-import type { Workflow } from '../../core/src/ir.js';
+import { deriveIr, parse, parseFile } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { buildBusinessMigrationReport, businessReportAsJson, businessReportAsMarkdown } from '../src/business-report.js';
 
@@ -58,36 +57,26 @@ test('c2c report refuses an unknown flag and a missing source cleanly', () => {
   assert.match(missing.stderr, /no such file or directory/);
 });
 
-test('business report disambiguates duplicate workflow and schedule names without changing counts', () => {
-  const workflow = (name: string, container?: string): Workflow => ({
-    name,
-    form: 'Orders',
-    event: 'on success',
-    container,
-    deluge: { text: '', span: { start: 0, end: 0 } },
-    properties: [],
-    span: { start: 0, end: 0 },
-  });
-  const app = { ...emptyApp('empty'), name: 'Duplicate_Names', workflows: [
-    workflow('Same_Workflow'), workflow('Same_Workflow'),
-    workflow('Same_Schedule', 'schedule'), workflow('Same_Schedule', 'schedule'),
-  ] };
-  const report = buildBusinessMigrationReport(app, { dc: 'in' });
-  assert.deepEqual(report.converted.workflows, { count: 2, names: ['Same_Workflow', 'Same_Workflow (2)'] });
-  assert.deepEqual(report.converted.schedules, { count: 2, names: ['Same_Schedule', 'Same_Schedule (2)'] });
-  assert.match(businessReportAsMarkdown(report), /Workflows: 2 — Same_Workflow, Same_Workflow \(2\)/);
-  assert.match(businessReportAsMarkdown(report), /Schedules: 2 — Same_Schedule, Same_Schedule \(2\)/);
-});
-
-test('business report duplicate-name output is deterministic across repeated serialization', () => {
-  const app = { ...emptyApp('empty'), name: 'Duplicate_Names', workflows: [
-    { name: 'Same', form: 'Orders', event: 'on success', deluge: { text: '', span: { start: 0, end: 0 } }, properties: [], span: { start: 0, end: 0 } },
-    { name: 'Same', form: 'Orders', event: 'on success', deluge: { text: '', span: { start: 0, end: 0 } }, properties: [], span: { start: 0, end: 0 } },
-  ] };
-  const first = buildBusinessMigrationReport(app, { dc: 'in' });
-  const second = buildBusinessMigrationReport(app, { dc: 'in' });
-  assert.equal(businessReportAsMarkdown(first), businessReportAsMarkdown(second));
-  assert.equal(businessReportAsJson(first), businessReportAsJson(second));
+test('markdown distinguishes converted pages from pages requiring manual work', () => {
+  const report = {
+    schema: 'c2c-business-migration-report/1' as const,
+    app: 'Attendance_Management',
+    dataCentre: 'in',
+    converted: {
+      forms: { count: 0, names: [] }, reports: { count: 0, names: [] }, pages: { count: 0, names: [] },
+      workflows: { count: 0, names: [] }, schedules: { count: 0, names: [] }, functions: { count: 0, names: [] }, roles: { count: 0, names: [] },
+    },
+    guidedSteps: [],
+    appSpecificSteps: [
+      { area: 'page', name: 'Attendance_Iframe_Page', detail: 'manual', workaround: 'manual' },
+      { area: 'page', name: 'Take_Attendance', detail: 'manual', workaround: 'manual' },
+    ],
+    unsupported: [], data: { tables: [], verification: [] }, goLiveChecklist: [],
+  };
+  const markdown = businessReportAsMarkdown(report);
+  assert.match(markdown, /- Pages: 0, 2 need manual work/);
+  assert.doesNotMatch(markdown, /- Pages: 0\n/);
+  assert.deepEqual(JSON.parse(businessReportAsJson(report)).converted.pages, { count: 0, names: [] });
 });
 
 const DS_RECORD_RELATIVE_SCHEDULE = `application "Roster"

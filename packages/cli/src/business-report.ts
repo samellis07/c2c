@@ -352,8 +352,10 @@ export function businessReportAppendixAsJson(report: BusinessMigrationReport): s
   return `${JSON.stringify(businessReportAppendix(report), null, 2)}\n`;
 }
 
-function sectionLines(title: string, item: ReportSection): string[] {
-  return [`- ${title}: ${item.count}${item.names.length ? ` — ${names(item.names)}` : ''}`];
+function sectionLines(title: string, item: ReportSection, manualCount = 0): string[] {
+  const converted = `${item.count}${item.names.length ? ` — ${names(item.names)}` : ''}`;
+  const suffix = manualCount ? `, ${manualCount} need manual work` : '';
+  return [`- ${title}: ${converted}${suffix}`];
 }
 
 function attentionLines(items: readonly AttentionItem[], empty: string): string[] {
@@ -371,7 +373,7 @@ export function businessReportAsMarkdown(report: BusinessMigrationReport): strin
     '',
     ...sectionLines('Forms', report.converted.forms),
     ...sectionLines('Reports', report.converted.reports),
-    ...sectionLines('Pages', report.converted.pages),
+    ...sectionLines('Pages', report.converted.pages, report.appSpecificSteps.filter((item) => item.area === 'page').length),
     ...sectionLines('Workflows', report.converted.workflows),
     ...sectionLines('Schedules', report.converted.schedules),
     ...sectionLines('Functions', report.converted.functions),
