@@ -80,6 +80,22 @@ test('a ui.add reading a binding that does not dominate it names the local', () 
   assert.match(one ?? '', /reads `m`, which is not assigned on every path/);
 });
 
+test('manual steps name the precise dependency cause for every binding shape', () => {
+  const cases = [
+    ['app function then arm mutation', 'rooms = thisapp.Rooms.book(input.N).get("Rooms"); if (input.N == "A") { rooms.add("X"); } input.Room:ui.add(rooms);', /takes its value through `rooms` from thisapp\./],
+    ['write result', 'if (input.N == "A") { r = insert into Staff [Name = input.N]; input.Assignee:ui.add(r); }', /through `r` from a write, mail or outbound call/],
+    ['non-dominating binding', 'if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); } input.Room:ui.add(m);', /reads `m`, which is not assigned on every path/],
+    ['pre-branch mutated in arm', 'rooms = thisapp.Rooms.book(input.N).get("Rooms"); if (input.N == "A") { rooms.add("X"); } input.Room:ui.add(rooms);', /takes its value through `rooms` from thisapp\./],
+    ['loop-carried (fully replayable)', 'rooms = Rooms[ID != 0].Room_No.getAll(); for each r in Rooms[ID != 0] { rooms.add(r.Room_No); } input.Room:ui.add(rooms);', /^$/],
+    ['shadowed internal name', 'rooms = Rooms[ID != 0].Room_No.getAll(); if (input.N == "A") { rooms = thisapp.Rooms.book(input.N).get("Rooms"); } input.Room:ui.add(rooms);', /prefetch cannot replay safely/],
+  ] as const;
+  for (const [label, src, expected] of cases) {
+    const [manual] = step(src);
+    assert.match(manual ?? '', expected, label);
+    assert.doesNotMatch(manual ?? '', /\u0000|#[0-9]+/, label);
+  }
+});
+
 test('a ui.add that translates (pure read, read loop) carries no todo', () => {
   assert.deepEqual(step('l = List(); for each r in Rooms[ID != 0] { l.add(r.Room_No); } input.Room:ui.add(l);'), []);
   assert.deepEqual(step('l = Rooms[ID != 0].Room_No.getAll(); input.Room:ui.add(l);'), []);

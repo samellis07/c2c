@@ -3563,6 +3563,7 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
   // dominate a use after the if, whether or not the last arm assigned it.
   // determinism-allow: each iteration only sets scope.bindings keyed by that same name
   for (const name of assigned) {
+    const prior = atTest.bindings.get(name);
     scope.bindings.set(name, {
       code: 'undefined',
       reads: [],
@@ -3573,6 +3574,7 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
       deps: new Map(),
       seq: scope.clock.seq++,
       flow: -1,
+      ...(prior ? { origin: prior } : {}),
     });
   }
   // `if (tot == null) { tot = 0; }`: one arm assigns one name from a read-only
@@ -4943,6 +4945,7 @@ function choiceTask(e: Expr, scope: Scope): { method: string; target: string[] }
  * residual copy is unchanged. Returns undefined when no cause is named.
  */
 function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undefined {
+  const displayName = (name: string): string => name.replace(/^\u0000/, '').replace(/#\d+$/, '');
   const callees = (code: string): string => {
     const names = (emittedThisappCalls(code) ?? []).map((path) => `thisapp.${path.join('.')}`);
     // determinism-allow: Set keeps first-seen order of the call paths, which is source order
@@ -4963,7 +4966,12 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
       if (!b) continue;
       // The binding left after an if arm assigned the name: it holds no value on the other paths.
       if (b.flow === -1 && b.code === 'undefined') {
-        unbound ??= name;
+        if (b.origin) {
+          if (b.origin.appFunction || b.origin.todo) fn ??= { local: name, callees: callees(b.origin.code) };
+          else if (b.origin.sideEffect) write ??= name;
+          visit(b.origin.reads, b.origin.unboundReads);
+        }
+        else unbound ??= displayName(name);
         continue;
       }
       if (b.appFunction || b.todo) fn ??= { local: name, callees: callees(b.code) };
@@ -4979,7 +4987,7 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
     }
   }
   const generic = TODO_MANUAL_STEPS['client-condition-uses-server']!;
-  const via = (local?: string): string => (local ? ` through \`${local}\`` : '');
+  const via = (local?: string): string => (local ? ` through \`${displayName(local)}\`` : '');
   if (fn) {
     const f = fn as { local?: string; callees: string };
     return `\`${call}\` takes its value${via(f.local)} from ${f.callees ? f.callees : 'an app function'}, which the generator could not prove read-only (it writes, sends mail, calls out, changes a parameter, or calls a function that does) or could not call from the browser. Move the read into a function that only reads records, or compute the list in this handler, then add the choices from that value. ${generic}`;
