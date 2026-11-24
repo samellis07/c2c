@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { navigableUrl } from '../template/lib/c2c-ui/runtime/navigation.js';
+import { navigableUrl } from '../template/lib/c2c-ui/runtime/navigable-url.js';
 
 const allowed = [
   ['#/home', true], ['./x', true], ['../x', true], ['?q=1', true],
