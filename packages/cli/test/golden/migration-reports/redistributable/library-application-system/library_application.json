@@ -264,17 +264,17 @@
     {
       "location": "page DashBoard.Book_Report",
       "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
-      "step": "On page \"DashBoard\", wire click parameters \"View all Books\" to the generated <button> \"Book_Report\" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters)."
+      "step": "On page \"DashBoard\", wire click parameters \"View all Books\" to the generated <button> \"Book_Report\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
     },
     {
       "location": "page DashBoard.All_Book_Transactions",
       "construct": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
-      "step": "On page \"DashBoard\", wire click parameters \"Borrowed Book\" to the generated <text> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters)."
+      "step": "On page \"DashBoard\", wire click parameters \"Borrowed Book\" to the generated <text> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
     },
     {
       "location": "page DashBoard.All_Book_Transactions",
       "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
-      "step": "On page \"DashBoard\", wire click parameters \"Overdue transactions\" to the generated <button> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters)."
+      "step": "On page \"DashBoard\", wire click parameters \"Overdue transactions\" to the generated <button> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
     }
   ],
   "humanSteps": [

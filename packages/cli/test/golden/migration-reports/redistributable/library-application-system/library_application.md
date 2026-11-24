@@ -64,11 +64,11 @@ App: Library_System_Application
 - `report All_Staff_Members block options` — Report "All_Staff_Members" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
   - Step: In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
 - `page DashBoard.Book_Report` — ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "View all Books" to the generated <button> "Book_Report" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters).
+  - Step: On page "DashBoard", wire click parameters "View all Books" to the generated <button> "Book_Report" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 - `page DashBoard.All_Book_Transactions` — ZML <text> "All_Book_Transactions" click parameters "Borrowed Book" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "Borrowed Book" to the generated <text> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters).
+  - Step: On page "DashBoard", wire click parameters "Borrowed Book" to the generated <text> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 - `page DashBoard.All_Book_Transactions` — ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "Overdue transactions" to the generated <button> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-zml-click-parameters).
+  - Step: On page "DashBoard", wire click parameters "Overdue transactions" to the generated <button> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 
 ## Hidden from end users
 
