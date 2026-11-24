@@ -408,7 +408,8 @@ d9ccc7287c47cf306ab0d210b8b0214db0f7554ecf5107526f66b4e62892ab64  web/lib/c2c-ui
 da26fd59d213cb8951453c927b5f246b4e6daab536d7ce70916e4b99755b1982  web/lib/c2c-ui/runtime/auth.tsx
 4c68aeab426496a055991f5a31184bb61b63c458a3b068a92cb081aa7c2ae729  web/lib/c2c-ui/runtime/env.tsx
 e92711b4d35987a7896db0c94c7606221e89b1098b0f22a3cf2656fb418293f7  web/lib/c2c-ui/runtime/extend.tsx
-5639195212d744e08c58bdae7b2a5717743af17e55ccf0294801cb45bdc35519  web/lib/c2c-ui/runtime/navigation.ts
+1a49cc7efa437e1110a3e2f46d8bd0b2cb0c9b2b180734ff9b17a8d446cad397  web/lib/c2c-ui/runtime/navigable-url.ts
+5791c0b0a7ebc1c4482aeb5979cdc2c9a986a503445d3070a8397f9aca666363  web/lib/c2c-ui/runtime/navigation.ts
 c473c3e8dfa3850b3cb0500107f3264ce7e6546e9c8a01cd1807bba9c936dbf7  web/lib/c2c-ui/runtime/observers.ts
 2981347142fff9cc1aa556e533b92a18e061f8d5a26d5e3b36c64d9d09ca81a4  web/lib/c2c-ui/runtime/router.ts
 716f5ad206ab0a899423dcc2aa1388f182aaa5212b4a2037379b1e770cd91998  web/lib/c2c-ui/shell/AppShell.tsx
