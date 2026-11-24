@@ -292,6 +292,10 @@ test('the built app draws the dashboard from the report rows', { skip: haveBuild
       return new Response(JSON.stringify({ rows }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
     const runtime = readdirSync(join(out, 'dist/assets')).find((name) => name.startsWith('runtime.'))!;
+    // React's scheduler must capture Node's event-loop-backed channel, not a
+    // channel left behind by a prior jsdom helper mount.
+    const { MessageChannel } = require('node:worker_threads') as typeof import('node:worker_threads');
+    (globalThis as typeof globalThis & { MessageChannel: unknown }).MessageChannel = MessageChannel;
     const mod = (await import(pathToFileURL(join(out, 'dist/assets', runtime)).href)) as { boot: (spec: undefined, doc: Document) => void };
     mod.boot(undefined, dom.window.document);
     const doc = dom.window.document;

@@ -87,7 +87,20 @@ export async function mountTemplateScreen(out: string, spec: AppSpec, screen: Te
   const { JSDOM } = (await import(jsdomName)) as { JSDOM: new (html: string, opts: Record<string, unknown>) => { window: Window } };
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
   const view = dom.window as unknown as Record<string, unknown> & Window;
-  const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'CustomEvent', 'DocumentFragment', 'SVGElement', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLTableElement', 'getComputedStyle', 'CSS', 'self'];
+  const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'CustomEvent', 'DocumentFragment', 'SVGElement', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLTableElement', 'getComputedStyle', 'CSS', 'self', 'matchMedia', 'ResizeObserver'];
+  const host = globalThis as unknown as Record<string, unknown>;
+  const savedGlobals = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of [...globals, 'IS_REACT_ACT_ENVIRONMENT']) savedGlobals.set(key, Object.getOwnPropertyDescriptor(host, key));
+  const restoreGlobals = () => {
+    for (const [key, descriptor] of savedGlobals) {
+      try {
+        if (descriptor) Object.defineProperty(host, key, descriptor);
+        else delete host[key];
+      } catch {
+        if (descriptor) host[key] = descriptor.value;
+      }
+    }
+  };
   for (const key of globals) {
     try {
       (globalThis as Record<string, unknown>)[key] = view[key as keyof typeof view];
@@ -98,6 +111,7 @@ export async function mountTemplateScreen(out: string, spec: AppSpec, screen: Te
   const w = view as unknown as Record<string, unknown>;
   if (typeof w.matchMedia !== 'function') {
     w.matchMedia = () => ({ matches: false, media: '', addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false });
+    host.matchMedia = w.matchMedia;
   }
   if (typeof w.ResizeObserver !== 'function') {
     w.ResizeObserver = class {
@@ -105,11 +119,11 @@ export async function mountTemplateScreen(out: string, spec: AppSpec, screen: Te
       unobserve() {}
       disconnect() {}
     };
-    (globalThis as Record<string, unknown>).ResizeObserver = w.ResizeObserver;
+    host.ResizeObserver = w.ResizeObserver;
   }
   if (typeof w.CSS !== 'object' || w.CSS === null) {
     w.CSS = { escape: (text: string) => text.replace(/["\\]/g, '\\$&') };
-    (globalThis as Record<string, unknown>).CSS = w.CSS;
+    host.CSS = w.CSS;
   }
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -156,6 +170,8 @@ export async function mountTemplateScreen(out: string, spec: AppSpec, screen: Te
     flush,
     unmount: async () => {
       await act(async () => root.unmount());
+      restoreGlobals();
+      dom.window.close();
     },
   };
 }
