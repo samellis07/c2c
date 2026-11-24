@@ -3063,6 +3063,7 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
     if (scalar) node.scalar = scalar;
     const input = inputOf(field.widget);
     if (input) node.input = input;
+    if (field.allowedDays) node.allowedDays = field.allowedDays;
     // A multi select (select list or checkboxes) is the plain leaf that
     // takes a JSON array; every other leaf refuses one.
     if (field.widget === 'multiselect') node.multi = true;
