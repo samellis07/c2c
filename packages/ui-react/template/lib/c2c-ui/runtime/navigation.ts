@@ -30,6 +30,19 @@ export interface ActionNavInstruction {
   target?: 'same' | 'new';
 }
 
+/** Shared gate for every openUrl/location navigation in the React client. */
+export function navigableUrl(view: AppWindow | undefined, url: unknown): boolean {
+  if (typeof url !== 'string' || !url || /[\u0000-\u0020\\]/.test(url) || url.startsWith('//')) return false;
+  const flat = url.replace(/[\u0000-\u0020]+/g, '').toLowerCase();
+  if (/^(javascript|data|vbscript|blob|file):/.test(flat)) return false;
+  if (/^https?:/i.test(url) && !/^https?:\/\/[^/?#\\]+(?:[/?#]|$)/i.test(url)) return false;
+  const base = typeof view?.location?.href === 'string' ? view.location.href : 'https://localhost/';
+  let parsed: URL;
+  try { parsed = new URL(url, base); } catch { return false; }
+  if (parsed.username || parsed.password || !parsed.hostname) return false;
+  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+}
+
 /** This app's own hash route or a single-leading-slash relative path — never `//host/...`, a protocol-relative open redirect wearing a relative path's clothes. */
 function isSameAppTarget(url: string): boolean {
   if (url.startsWith('#')) return true;
@@ -48,11 +61,14 @@ function httpsHost(url: string): string | undefined {
 
 export function navOk(url: unknown, allowedHosts: readonly string[]): boolean {
   const raw = String(url ?? '');
+  if (!raw || /[\u0000-\u0020\\]/.test(raw)) return false;
   const flat = raw.replace(/[\u0000- ]+/g, '').toLowerCase();
-  if (flat.startsWith('javascript:') || flat.startsWith('data:') || flat.startsWith('vbscript:') || flat.startsWith('file:') || flat.startsWith('//')) return false;
+  if (flat.startsWith('javascript:') || flat.startsWith('data:') || flat.startsWith('vbscript:') || flat.startsWith('blob:') || flat.startsWith('file:') || flat.startsWith('//')) return false;
   if (isSameAppTarget(raw)) return !/[\u0000- \\]/.test(raw);
   const host = httpsHost(raw);
-  return !!host && allowedHosts.includes(host);
+  if (!host || !allowedHosts.includes(host)) return false;
+  const authority = /^https:\/\/([^/?#\\]+)/i.exec(raw)?.[1] ?? '';
+  return !authority.startsWith('@');
 }
 
 /**

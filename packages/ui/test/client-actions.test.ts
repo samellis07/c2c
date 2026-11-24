@@ -277,6 +277,7 @@ test('openUrl refuses browser-normalized authority and whitespace tricks', async
     '//evil.example/x',
     'https:\\\\evil.example/x',
     ['https://trusted.example', 'evil.example/x'].join(String.fromCharCode(64)),
+    ['https://', 'evil.example/x'].join(String.fromCharCode(64)),
     ' https://evil.example/x',
     '\\thttps://evil.example/x',
     '\\u0000https://evil.example/x',
