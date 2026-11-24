@@ -151,10 +151,16 @@ test('parity: page access matches tab-enabled modules and preset all-pages', () 
 test('parity: the shim access policy enforces the same grants the roles plan', () => {
   const policy = authPlan(libraryApp()).accessPolicy;
   assert.deepEqual(policy.roles, ['CEO', 'Librarian', 'Assistant']);
+  // The export flags Staff_Name, Staff_Email and Phone_Number on Staff_Members
+  // `personal data = true` (the only privacy flags in the app). A profile that
+  // reads every row and has no visibility grant on them gets the form's other
+  // fields: Section, Staff_ID, Role. Own-records-only grants and Administrator
+  // reach them, so only Write and Librarians carry the lists.
+  const STAFF_VISIBLE = { fields: ['Section', 'Staff_ID', 'Role'], writable: ['Section', 'Staff_ID', 'Role'] };
   // Module grants carry the hierarchy-shared "own records" scope; presets don't.
-  const expectedProfiles: Record<string, Record<string, { write?: true; delete?: true; ownerScope?: string; edit?: boolean }>> = {
+  const expectedProfiles: Record<string, Record<string, { write?: true; delete?: true; ownerScope?: string; edit?: boolean; fields?: string[]; writable?: string[] }>> = {
     Read: Object.fromEntries(FORMS.map((form) => [form, { ownerScope: 'view' }])),
-    Write: Object.fromEntries(FORMS.map((form) => [form, { write: true }])),
+    Write: Object.fromEntries(FORMS.map((form) => [form, form === 'Staff_Members' ? { write: true, ...STAFF_VISIBLE } : { write: true }])),
     Administrator: Object.fromEntries(FORMS.map((form) => [form, { write: true, delete: true }])),
     Assistant: {
       Staff_Members: { ownerScope: 'view' },
@@ -163,7 +169,7 @@ test('parity: the shim access policy enforces the same grants the roles plan', (
       Member_Info: { write: true, edit: false },
     },
     Developer: {},
-    Librarians: Object.fromEntries(FORMS.map((form) => [form, { write: true, delete: true }])),
+    Librarians: Object.fromEntries(FORMS.map((form) => [form, form === 'Staff_Members' ? { write: true, delete: true, ...STAFF_VISIBLE } : { write: true, delete: true }])),
     Customer: Object.fromEntries(FORMS.map((form) => [form, { write: true, ownerScope: 'view' }])),
   };
   assert.deepEqual(policy.profiles, expectedProfiles);
