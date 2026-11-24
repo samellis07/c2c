@@ -7,6 +7,7 @@ const allowed = [
   ['https://example.com/a%20b', true], ['http://host:8080/p', true],
   ['//host/x', false], ['\\\\host\\x', false], ['https:\\\\host\\x', false],
   ['https://@host/x', false], ['https://%40@host/x', false], ['https://u@host/x', false],
+  ['https://:@host/x', false], ['javascript%3Aalert(1)', false], ['%6aavascript:alert(1)', false],
   [' javascript:alert(1)', false], ['java\tscript:alert(1)', false], ['java\nscript:alert(1)', false],
   ['data:text/html,x', false], ['vbscript:msgbox(1)', false], ['blob:https://x/y', false], ['file:///etc/passwd', false],
   ['HTTPS://example.com/x', true], ['http:', false], ['http:///x', false],
