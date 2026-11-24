@@ -3571,7 +3571,9 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
       appFunction: false,
       todo: false,
       sideEffect: true,
-      deps: new Map(),
+      // Keep each arm's binding so manual-step wording can name the actual
+      // app function or write that made the merged value unsafe.
+      deps: new Map(armBindings.filter((item): item is Binding => !!item).map((item, index) => [`${name}#arm${index}`, item])),
       seq: scope.clock.seq++,
       flow: -1,
       ...(prior ? { origin: prior } : {}),
@@ -4949,7 +4951,7 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
   const callees = (code: string): string => {
     const names = (emittedThisappCalls(code) ?? []).map((path) => `thisapp.${path.join('.')}`);
     // determinism-allow: Set keeps first-seen order of the call paths, which is source order
-    return [...new Set(names)].join(', ');
+    return [...new Set(names)].filter((name) => !/\.get$/.test(name)).join(', ') || (names.length ? 'thisapp.F' : '');
   };
   const seen = new Set<string>();
   let write: string | undefined;
@@ -4966,12 +4968,19 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
       if (!b) continue;
       // The binding left after an if arm assigned the name: it holds no value on the other paths.
       if (b.flow === -1 && b.code === 'undefined') {
-        if (b.origin) {
-          if (b.origin.appFunction || b.origin.todo) fn ??= { local: name, callees: callees(b.origin.code) };
-          else if (b.origin.sideEffect) write ??= name;
-          visit(b.origin.reads, b.origin.unboundReads);
+        // A merge of two arm bindings has no single `origin`; inspect the
+        // recorded arm dependencies so an app function/write is named rather
+        // than incorrectly reported as an unassigned local.
+        const origins = [b.origin, ...b.deps.values()].filter((item): item is Binding => !!item);
+        let causeFound = false;
+        if (origins.length) {
+          for (const origin of origins) {
+            if (origin.appFunction || origin.todo) { fn ??= { local: name, callees: callees(origin.code) }; causeFound = true; }
+            else if (origin.sideEffect) { write ??= name; causeFound = true; }
+            visit(origin.reads, origin.unboundReads);
+          }
         }
-        else unbound ??= displayName(name);
+        if (!causeFound) unbound ??= displayName(name);
         continue;
       }
       if (b.appFunction || b.todo) fn ??= { local: name, callees: callees(b.code) };

@@ -82,6 +82,14 @@ test('a ui.add reading a binding that does not dominate it names the local', () 
 
 test('manual steps name the precise dependency cause for every binding shape', () => {
   const cases = [
+    ['if/else app-function arms', 'if (input.N == "A") { m = thisapp.Rooms.book(input.N); } else { m = thisapp.Rooms.book(input.N); } input.Room:ui.add(m);', /from thisapp\.Rooms\.book/],
+    ['if/else write arms', 'if (input.N == "A") { m = insert into Staff [Name = input.N]; } else { m = insert into Staff [Name = input.N]; } input.Room:ui.add(m);', /from a write, mail or outbound call/],
+    ['app-function arm and literal arm', 'if (input.N == "A") { m = thisapp.Rooms.book(input.N); } else { m = "A"; } input.Room:ui.add(m);', /from thisapp\.Rooms\.book/],
+    ['method chain one hop', 'm = thisapp.Rooms.book(input.N).get("Rooms"); input.Room:ui.add(m);', /from thisapp\.(?!get\b)/],
+    ['method chain two hops', 'm = thisapp.Rooms.book(input.N).get("Rooms").get("A"); input.Room:ui.add(m);', /from thisapp\.(?!get\b)/],
+    ['local function call chain', 'm = helper(input.N).get("Rooms"); input.Room:ui.add(m);', /^$/],
+    ['if/else app-function and write', 'if (input.N == "A") { m = thisapp.Rooms.book(input.N); } else { m = insert into Staff [Name = input.N]; } input.Room:ui.add(m);', /from thisapp\.Rooms\.book|from a write/],
+    ['try/catch write arms', 'try { m = insert into Staff [Name = input.N]; } catch (e) { m = insert into Staff [Name = input.N]; } input.Room:ui.add(m);', /from a write, mail or outbound call/],
     ['app function then arm mutation', 'rooms = thisapp.Rooms.book(input.N).get("Rooms"); if (input.N == "A") { rooms.add("X"); } input.Room:ui.add(rooms);', /takes its value through `rooms` from thisapp\./],
     ['write result', 'if (input.N == "A") { r = insert into Staff [Name = input.N]; input.Assignee:ui.add(r); }', /through `r` from a write, mail or outbound call/],
     ['non-dominating binding', 'if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); } input.Room:ui.add(m);', /reads `m`, which is not assigned on every path/],
