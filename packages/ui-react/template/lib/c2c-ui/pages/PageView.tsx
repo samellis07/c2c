@@ -6,6 +6,7 @@
  * where it stood.
  */
 import type { CSSProperties, ReactNode } from 'react';
+import { navigableUrl } from '../runtime/navigation';
 import { BarChart3, Calendar, CheckSquare, Clock, Coins, FileText, Package, RefreshCw, ShoppingCart, Square, Truck, User, Users, Wallet } from 'lucide-react';
 import type { PageElement, PageSpec } from '../types';
 import { useEnv } from '../runtime/env';
@@ -77,7 +78,7 @@ function Element({ el }: { el: PageElement }): ReactNode {
           ))}
         </div>
       );
-      return el.href ? (
+      return el.href && navigableUrl(undefined, el.href) ? (
         <a className="c2c-zml-link" href={el.href}>
           {inner}
         </a>
@@ -94,7 +95,7 @@ function Element({ el }: { el: PageElement }): ReactNode {
         <div className="c2c-snippet">
           {el.html ? <div dangerouslySetInnerHTML={{ __html: sanitizeSnippet(el.html, doc) }} /> : null}
           {el.links.map((link) => (
-            <a key={link.href} className="c2c-page-link" href={link.href}>{link.label}</a>
+            {navigableUrl(undefined, link.href) ? <a key={link.href} className="c2c-page-link" href={link.href}>{link.label}</a> : null}
           ))}
         </div>
       );
@@ -120,13 +121,13 @@ function Element({ el }: { el: PageElement }): ReactNode {
       );
     case 'link':
       return (
-        <a className="c2c-page-link" href={el.href} target="_blank" rel="noopener noreferrer">
+        <a className="c2c-page-link" href={navigableUrl(undefined, el.href) ? el.href : '#'} target="_blank" rel="noopener noreferrer">
           {el.label}
         </a>
       );
     case 'button':
       return (
-        <a className="c2c-page-button" href={el.href} style={cssOf(el.style)} {...(el.href?.startsWith('#') ? {} : { target: '_blank', rel: 'noopener noreferrer' })}>
+        <a className="c2c-page-button" href={navigableUrl(undefined, el.href) ? el.href : '#'} style={cssOf(el.style)} {...(el.href?.startsWith('#') ? {} : { target: '_blank', rel: 'noopener noreferrer' })}>
           {el.label}
         </a>
       );

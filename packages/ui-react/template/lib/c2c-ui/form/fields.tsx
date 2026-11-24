@@ -22,6 +22,7 @@ import { failureText } from '../runtime/StatusScreens';
 import type { InkStroke } from '../arc/components/signature-pad/signature-pad';
 import type { RichTextValue } from '../arc/components/rich-text-editor/rich-text-editor';
 import { FormContext } from './context';
+import { navigableUrl } from '../runtime/navigation';
 
 export { FormContext, type FormState } from './context';
 
@@ -611,7 +612,7 @@ function StoredFileLink({ form, field, rowId }: { form: FormSpec; field: FieldSp
     try {
       const reply = await api.post<{ url?: string | null }>(signedFilePath(form, field), { rowId });
       const url = reply.ok ? reply.body?.url : undefined;
-      if (typeof url === 'string' && url && win) {
+      if (typeof url === 'string' && url && win && navigableUrl(view, url)) {
         win.location.href = url;
       } else {
         show(downloadError(reply, label), win);
