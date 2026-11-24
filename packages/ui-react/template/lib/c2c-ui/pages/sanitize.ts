@@ -57,7 +57,7 @@ export function safeUrl(value: string): boolean {
 export function dangerousStyle(value: string): boolean {
   if (value.includes('\\') || value.includes('/*')) return true;
   const text = flat(value);
-  return ['url(', 'image-set(', 'src(', 'expression(', 'behavior', '-moz-binding', '@import', 'javascript:', 'vbscript:', 'data:', 'attr('].some((bad) => text.includes(bad));
+  return ['url(', 'image-set(', 'image(', 'cross-fade(', 'src(', 'expression(', 'behavior', '-moz-binding', '@import', 'javascript:', 'vbscript:', 'data:', 'attr('].some((bad) => text.includes(bad));
 }
 
 function allowedAttr(tag: string, name: string): boolean {
