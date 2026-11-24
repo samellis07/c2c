@@ -1309,31 +1309,31 @@
         "location": "field New_SOF.Time property timedisplayoptions",
         "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
         "scope": "ui",
-        "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated."
+        "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
       },
       {
         "location": "field New_SOF.FROM property timedisplayoptions",
         "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
         "scope": "ui",
-        "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated."
+        "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
       },
       {
         "location": "field New_SOF.TO property timedisplayoptions",
         "construct": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
         "scope": "ui",
-        "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated."
+        "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
       },
       {
         "location": "field New_SOF.FROM2 property timedisplayoptions",
         "construct": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
         "scope": "ui",
-        "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated."
+        "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
       },
       {
         "location": "field New_SOF.TO2 property timedisplayoptions",
         "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
         "scope": "ui",
-        "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated."
+        "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
       },
       {
         "location": "report Container_Movement_Tracking block report properties",
@@ -1345,127 +1345,127 @@
         "location": "report SOFs block options",
         "construct": "Report \"SOFs\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Leads block options",
         "construct": "Report \"Leads\" has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Converted_Leads block options",
         "construct": "Report \"Converted_Leads\" has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Accounts block options",
         "construct": "Report \"Accounts\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Contacts block options",
         "construct": "Report \"Contacts\" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Deals block options",
         "construct": "Report \"Deals\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Quotations block options",
         "construct": "Report \"Quotations\" has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Delivery_Orders block options",
         "construct": "Report \"Delivery_Orders\" has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Invoices block options",
         "construct": "Report \"Invoices\" has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Airports block options",
         "construct": "Report \"Airports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Ports block options",
         "construct": "Report \"Ports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report HS_Codes block options",
         "construct": "Report \"HS_Codes\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Users block options",
         "construct": "Report \"Users\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Containers block options",
         "construct": "Report \"Containers\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Vendors block options",
         "construct": "Report \"Vendors\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Products block options",
         "construct": "Report \"Products\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Vessels block options",
         "construct": "Report \"Vessels\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Tax_Rates block options",
         "construct": "Report \"Tax_Rates\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Mode_to_SubMode block options",
         "construct": "Report \"Mode_to_SubMode\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Submode_to_CT_ST_CMT block options",
         "construct": "Report \"Submode_to_CT_ST_CMT\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options)."
       },
       {
         "location": "report Table_of_Containers block options",
         "construct": "Report \"Table_of_Containers\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
         "scope": "ui",
-        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71."
+        "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
       }
     ]
   },
@@ -1475,56 +1475,56 @@
       "label": "field New_SOF.FROM property timedisplayoptions",
       "detail": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
       "scope": "ui",
-      "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated."
+      "manualStep": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "kind": "ui",
       "label": "field New_SOF.FROM2 property timedisplayoptions",
       "detail": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
       "scope": "ui",
-      "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated."
+      "manualStep": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "kind": "ui",
       "label": "field New_SOF.Time property timedisplayoptions",
       "detail": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
       "scope": "ui",
-      "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated."
+      "manualStep": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "kind": "ui",
       "label": "field New_SOF.TO property timedisplayoptions",
       "detail": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
       "scope": "ui",
-      "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated."
+      "manualStep": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "kind": "ui",
       "label": "field New_SOF.TO2 property timedisplayoptions",
       "detail": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
       "scope": "ui",
-      "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated."
+      "manualStep": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "kind": "ui",
       "label": "report Accounts block options",
       "detail": "Report \"Accounts\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Airports block options",
       "detail": "Report \"Airports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Contacts block options",
       "detail": "Report \"Contacts\" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
@@ -1538,126 +1538,126 @@
       "label": "report Containers block options",
       "detail": "Report \"Containers\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Converted_Leads block options",
       "detail": "Report \"Converted_Leads\" has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Deals block options",
       "detail": "Report \"Deals\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Delivery_Orders block options",
       "detail": "Report \"Delivery_Orders\" has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report HS_Codes block options",
       "detail": "Report \"HS_Codes\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Invoices block options",
       "detail": "Report \"Invoices\" has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Leads block options",
       "detail": "Report \"Leads\" has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Mode_to_SubMode block options",
       "detail": "Report \"Mode_to_SubMode\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Ports block options",
       "detail": "Report \"Ports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Products block options",
       "detail": "Report \"Products\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Quotations block options",
       "detail": "Report \"Quotations\" has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report SOFs block options",
       "detail": "Report \"SOFs\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Submode_to_CT_ST_CMT block options",
       "detail": "Report \"Submode_to_CT_ST_CMT\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Table_of_Containers block options",
       "detail": "Report \"Table_of_Containers\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Tax_Rates block options",
       "detail": "Report \"Tax_Rates\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Users block options",
       "detail": "Report \"Users\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Vendors block options",
       "detail": "Report \"Vendors\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     },
     {
       "kind": "ui",
       "label": "report Vessels block options",
       "detail": "Report \"Vessels\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
       "scope": "ui",
-      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add."
+      "manualStep": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
     }
   ],
   "determinism": {
