@@ -1269,6 +1269,8 @@ const REPORT_VIEW: Record<string, string> = {
 
 interface ReportFeature {
   label: string;
+  /** The Creator view this feature stands for, when it is a record view. */
+  view?: ReportView;
   start: number;
   end: number;
   /** 'counted' when the artefact exists but only as an explicit fidelity hole. */
@@ -1309,7 +1311,17 @@ function auditReportFeatures(app: App, out: AuditOutputs, rows: CoverageRow[]): 
         rows.push({ kind: 'report-feature', name, status: 'counted', via: 'UI report todo' });
         continue;
       }
-      const verdict = built ? feature.prove(built, bag) : 'dropped';
+      let verdict = built ? feature.prove(built, bag) : 'dropped';
+      // A quickview that shows a field the report has no column for is not a
+      // silent drop when that column is itself a counted manual item: the
+      // quickview shares the report's columns, so the same manual step covers it.
+      if (verdict === 'dropped' && built && feature.view?.kind === 'quickview') {
+        const missing = quickviewOmittedFields(built, feature.view);
+        const counted = new Set(
+          rows.filter((r) => r.kind === 'report-feature' && r.status === 'counted').map((r) => r.name),
+        );
+        if (missing.length && missing.every((field) => counted.has(`${report.name} column ${field}`))) verdict = 'counted';
+      }
       if (verdict === 'dropped') {
         rows.push({
           kind: 'report-feature',
@@ -1434,6 +1446,7 @@ function reportFeatures(report: Report): ReportFeature[] {
     ...report.views.map(
       (view): ReportFeature => ({
         label: `${view.kind}${view.device ? ` ${view.device}` : ''}`,
+        view,
         start: view.span.start,
         end: view.span.end,
         prove: (built) => (viewProved(built, view) ? 'emitted' : 'dropped'),
@@ -1552,13 +1565,15 @@ function criteriaIsTodo(criteria: unknown): boolean {
   return !!criteria && typeof criteria === 'object' && (criteria as { op?: string }).op === 'todo';
 }
 
+/** The fields a quickview lists that the built report shows in no column. */
+function quickviewOmittedFields(built: UiReport, view: ReportView): string[] {
+  const fields = view.blocks.flatMap((block) => block.fields.map((field) => field.field).filter(Boolean));
+  const shown = new Set([...built.columns.map((column) => column.field), ...(built.phoneColumns ?? []).map((column) => column.field)]);
+  return fields.filter((field) => !shown.has(field));
+}
+
 function viewProved(built: UiReport, view: ReportView): boolean {
-  if (view.kind === 'quickview') {
-    const fields = view.blocks.flatMap((block) => block.fields.map((field) => field.field).filter(Boolean));
-    if (!fields.length) return true;
-    const shown = new Set([...built.columns.map((column) => column.field), ...(built.phoneColumns ?? []).map((column) => column.field)]);
-    return fields.every((field) => shown.has(field));
-  }
+  if (view.kind === 'quickview') return quickviewOmittedFields(built, view).length === 0;
   if (!built.detail) return false;
   if (!view.blocks.length) return true;
   // The layout the generator kept for this device: `detailBlocks` holds the

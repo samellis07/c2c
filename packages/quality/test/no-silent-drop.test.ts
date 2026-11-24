@@ -4050,6 +4050,58 @@ test('a quickview that omits declared columns does not drop them', () => {
   }
 });
 
+test('a quickview field that is a counted built-in record column is not a drop', () => {
+  const source = dsApp(`
+	form Appointment_Booking
+	{
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Added_Location as "Added Location"
+		)
+	}
+	web
+	{
+		reports
+		{
+			report All_Appointments
+			{
+				quickview
+				(
+					layout
+					(
+						datablock1
+						(
+							fields
+							(
+								Phone_Number
+								Added_Location as "Added Location"
+							)
+						)
+					)
+				)
+			}
+		}
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'All_Appointments column Added_Location'), 'counted');
+  assert.equal(rowStatus(source, out, 'All_Appointments quickview web'), 'counted');
+  assert.deepEqual(auditApp(source, out), []);
+  // Mutation: with the column's manual item gone the quickview is a drop again.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => !(t.area === 'report' && t.name.includes('Added_Location')));
+  assert.equal(rowStatus(source, mutated, 'All_Appointments column Added_Location'), 'dropped');
+  assert.equal(rowStatus(source, mutated, 'All_Appointments quickview web'), 'dropped');
+});
+
 test('a report column is proved only by the generated view (mutation)', () => {
   const source = dsApp(CARRY_REPORT);
   const out = collectOutputs(source);
