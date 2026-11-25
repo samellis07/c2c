@@ -1693,6 +1693,7 @@ function optionProved(built: UiReport, property: Property): boolean {
   if (key === 'record count') return (value.toLowerCase() === 'enable') === (built.showRecordCount === true);
   if (key === 'radius') return built.mapRadius === reportRadiusOption(value);
   if (key === 'display type') return (value.toLowerCase() === 'week' || value.toLowerCase() === 'day') && built.displayType === value.toLowerCase();
+  if (key === 'week start day') return (value.toLowerCase() === 'monday' || value.toLowerCase() === 'sunday') && built.weekStartDay === value.toLowerCase();
   if (key === 'sort order') return (value.toLowerCase() === 'ascending' || value.toLowerCase() === 'descending') && built.sortOrder === value.toLowerCase();
   return false;
 }
