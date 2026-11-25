@@ -80,8 +80,10 @@ export function decodeXmlEntities(raw: string): string {
 interface Chunk {
   kind: 'static' | 'expr' | 'stmts';
   text: string;
+  /** A `<% %>` island that parses as one bare expression, printed like `<%= %>`. */
+  wasStmts?: boolean;
   /** Where the island sits in the markup. */
-  context?: 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'comment' | 'reject';
+  context?: 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'cssbody' | 'comment' | 'reject';
 }
 
 // A word marker stands for an island in text or an attribute. An island in a
@@ -222,7 +224,7 @@ type SlotMode =
  * island inside an attribute the sanitizer allowlist will remove (a dropped
  * island must stay a counted item, never vanish from a compiled page).
  */
-function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'comment' | 'reject' {
+function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'cssbody' | 'comment' | 'reject' {
   let mode: SlotMode = 'data';
   let tag = '';
   let name = '';
@@ -469,7 +471,8 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'style
     // comment island, and the page's dropped-CSS manual step counts the loss.
     // Text of a `<script>` element: the sanitizer removes it the same way, and the
     // page's dropped-markup step already lists `<script>`.
-    if (t === 'style' || t === 'script') return 'sheet';
+    if (t === 'style') return 'cssbody';
+    if (t === 'script') return 'sheet';
     // An expression island under an unwrapped text-level tag renders its
     // escaped value in place; a statement island there stays refused.
     if (UNWRAPPED_TEXT_TAGS.has(t)) return 'unwrapped';
@@ -3018,7 +3021,10 @@ export function compileHtmlpage(
     try {
       const script = parse(isl.text.trim());
       const only = script.body.length === 1 ? script.body[0] : undefined;
-      if (only && (only.kind === 'expr' || (only.kind === 'unknown' && only.reason === 'no-effect'))) isl.kind = 'expr';
+      if (only && (only.kind === 'expr' || (only.kind === 'unknown' && only.reason === 'no-effect'))) {
+        isl.kind = 'expr';
+        isl.wasStmts = true;
+      }
     } catch {
       /* stays a statement island */
     }
@@ -3027,8 +3033,14 @@ export function compileHtmlpage(
   // A quoted attribute value accepts an expression island only. A statement
   // island is written into the value, and an openUrl there becomes a link
   // between the quotes. The page stays the counted snippet.
+  // A statement island in a `<style>` body only computes: the sanitizer
+  // removes the element, so nothing it does reaches the output, and the page's
+  // dropped-CSS step still counts every tag in the stylesheet. One that opens a
+  // URL would be a redirect the removed element hides, so it stays refused.
   for (const isl of islands) {
-    if (isl.kind !== 'expr' && isl.context !== 'text' && isl.context !== 'comment') return fail('island in an unsafe position');
+    if (isl.kind === 'expr' || isl.context === 'text' || isl.context === 'comment') continue;
+    if (isl.context === 'cssbody' && !/\bopenUrl\b/i.test(isl.text)) continue;
+    return fail('island in an unsafe position');
   }
 
   // Marker-sanitize-split: sanitize the whole document once, then read which
@@ -3057,7 +3069,7 @@ export function compileHtmlpage(
   // a Deluge slot, so the whole template stays the counted snippet. Comment
   // islands are the documented exception: they produce no output by design.
   for (let i = 0; i < islands.length; i++) {
-    if (islands[i].context !== 'comment' && islands[i].context !== 'sheet' && !survived.has(i)) return fail('island in an unsafe position');
+    if (islands[i].context !== 'comment' && islands[i].context !== 'sheet' && islands[i].context !== 'cssbody' && !survived.has(i)) return fail('island in an unsafe position');
   }
 
   // Reassemble the Deluge script: static pushes, verbatim statement islands,
@@ -3110,7 +3122,11 @@ export function compileHtmlpage(
       pushPart('H', i, rest);
     }
     if (!isl) break;
-    if (isl.context === 'comment' || isl.context === 'sheet') {
+    if (isl.context === 'cssbody' && (isl.kind === 'stmts' || isl.wasStmts)) {
+      // The statements run (their reads and conditions are checked like any
+      // island's) but print nothing: the element they sit in is removed.
+      scriptParts.push(isl.wasStmts ? `${isl.text.trim().replace(/;$/, '')};` : isl.text);
+    } else if (isl.context === 'comment' || isl.context === 'sheet' || isl.context === 'cssbody') {
       // An island inside an HTML comment produces no output (drop it, with a note).
       scriptParts.push('c2c_out.add({"k":"D","v":0});');
     } else if (isl.kind === 'expr') {
@@ -3142,6 +3158,8 @@ export function compileHtmlpage(
     return fail('Deluge islands do not parse');
   }
   const isShapeC = hasShapeCWrites(ast);
+  // A guarded write belongs where its output shows; one hidden in a removed `<style>` body is refused.
+  if (isShapeC && islands.some((isl) => isl.kind !== 'expr' && isl.context === 'cssbody')) return fail('island in an unsafe position');
   // A write or external action on render (`insert into`, `update`, `sendmail`,
   // `invokeUrl`, ...) is never read-only, whatever else the island holds —
   // except the Shape C setup writes, which carry their own guard rules.

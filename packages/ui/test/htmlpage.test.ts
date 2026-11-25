@@ -4357,3 +4357,62 @@ content
     live.restore();
   }
 });
+
+test('a statement island inside a style body only computes and never reaches the output', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%{
+  open = Orders[Status == "open"];
+  %>
+<style>
+.a { color: red; }
+<%
+  if (open.count() > 5)
+  {
+    %>
+.b { color: blue; }
+<%
+  }
+  else if (input.v == "x")
+  {
+    %>
+.c { color: <%= input.v %>; }
+<%
+  }
+  %>
+</style>
+<p id="t">Hello <%= input.n %></p>
+<%}%>`)}`),
+  );
+  assert.equal(uiSnippetFiles(model).length, 1);
+  assert.equal(model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 0);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    for (const v of ['x', 'red;}</style><script>globalThis.__hit=1</script><style>']) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v, n: 'Ada' } } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      const html = String(out.body.html).replace(/\s+/g, ' ').trim();
+      assert.equal(html, '<p>Hello Ada</p>', html);
+    }
+    const rows = await live.datastore.query('Orders', 'true', 300);
+    assert.deepEqual(rows.map((row) => String(row.Status)), ['open', 'open', 'closed']);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a statement island inside a style body that writes or redirects stays a counted snippet', () => {
+  for (const body of [
+    '<style><% insert into Orders [ Status : "open" ]; %></style><p>x</p>',
+    '<style><% update Orders[Status == "open"] [ Status : "closed" ]; %></style><p>x</p>',
+    '<style><% openUrl("#Form:Orders", "same window"); %></style><p>x</p>',
+    '<style><% if (input.v == "x") { openUrl("#Form:Orders", "same window"); } %></style><p>x</p>',
+    '<style><% sendmail [ from : zoho.adminuserid to : input.v subject : "s" message : "m" ]; %></style><p>x</p>',
+    '<style><% r = invokeUrl [ url : "https://x.test" type : GET ]; %></style><p>x</p>',
+  ]) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
+    assert.equal(compiled.ok, false, body);
+  }
+});
