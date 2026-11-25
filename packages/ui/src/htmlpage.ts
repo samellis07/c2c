@@ -593,8 +593,9 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
  * nothing here to type-check against — only the same name/value grammar
  * {@link includeParams} already proves for an embed query. Each value is
  * carried into the generated link's query as a bounded literal, unchanged, or
- * as `encodeUrl(input.<p>)` forwarding one of this page's own parameters,
- * percent-encoded so a hostile value can never widen the query past the one
+ * as `encodeUrl(input.<p>)` forwarding one of this page's own parameters, or
+ * as `encodeUrl(<read>)` of a bare read the render supplies (a fetched
+ * record's `.ID`), percent-encoded so a hostile value can never widen the query past the one
  * key it is bound to. A name the target page does not declare is left out of
  * the link, and a page the app does not have keeps its route. Anything
  * `includeParams` cannot prove — a repeated parameter name, an expression other
@@ -618,13 +619,15 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
     const matches = app.pages.filter((item) => item.name === name || (name !== item.name && linkNameKey(item.name) === linkNameKey(name)));
     const target = matches.find((item) => item.name === name) ?? (matches.length === 1 ? matches[0] : undefined);
     if (matches.length > 1 && !target) return whole;
-    const params = includeParams(m[2] ?? '', target?.params ?? [], ownParams, 'omit');
+    const supplied: string[] = [];
+    const params = includeParams(m[2] ?? '', target?.params ?? [], ownParams, 'omit', supplied);
     if (params === null) return whole;
     const query = params
       .map((p) => {
         const eq = p.indexOf('=');
         const key = p.slice(0, eq);
         const value = p.slice(eq + 1);
+        if (value === '*') return `${key}=<%=encodeUrl(${supplied.shift()})%>`;
         return value.startsWith('@') ? `${key}=<%=encodeUrl(input.${value.slice(1)})%>` : `${key}=${value}`;
       })
       .join('&amp;');
