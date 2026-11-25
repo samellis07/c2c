@@ -642,7 +642,12 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   // does not open a camera: `false` matches that (no switch, no gallery) and
   // `true` is a counted manual step in model.ts. `camera` has no such match.
   if (key === 'switch camera') return ui?.scan === true && ui.widget !== 'image' && ['false', 'true'].includes(text.toLowerCase());
-  if (key === 'show gallery') return text.toLowerCase() === 'false' && ui?.scan === true && ui.widget !== 'image';
+  if (key === 'show gallery') {
+    if (ui?.scan !== true || ui.widget === 'image') return false;
+    return text.toLowerCase() === 'false' || (text.toLowerCase() === 'true' && ui.scanner?.gallery === true);
+  }
+  // The browser scanner opens the declared lens (primary or secondary).
+  if (key === 'camera' && ui?.scan === true && ui.widget !== 'image' && ui.scanner !== undefined) return ui.scanner.camera === text.toLowerCase();
   // `manual input = true` on a scan field is the generated text input itself:
   // the user can type a value before invoking the scanner, so it is already carried.
   if (key === 'manual input') return text.toLowerCase() === 'true' && ui?.scan === true;
@@ -666,10 +671,11 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   // `others option` lands as the generated select/radio "Others" free-text entry.
   if (key === 'others option') return text.toLowerCase() !== 'true' || ui?.othersOption === true;
   // `show onload = true` asks Creator to open the camera/scanner before the form
-  // displays; the generated field opens it only on a user tap, so only the `true`
-  // case is a gap (listed through model.ts's dedicated UI todo). A false/omitted
+  // displays; an image field opens it only on a user tap, so only the `true`
+  // case there is a gap (listed through model.ts's dedicated UI todo). A false/omitted
   // value matches the generated behavior already, on any field.
-  if (key === 'show onload') return text.toLowerCase() !== 'true';
+  // A scan field's onload is generated (ui.scanner.onload): the scanner opens as the form does.
+  if (key === 'show onload') return text.toLowerCase() !== 'true' || ui?.scanner?.onload === true;
   if (key === 'sortorder') return sortOrderProved(text, field, ui, app, out);
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');

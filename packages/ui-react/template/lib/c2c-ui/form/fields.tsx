@@ -9,7 +9,7 @@
  * customization (runtime/extend.tsx); the generated forms only ever render
  * <Field name="..." />.
  */
-import { lazy, Suspense, useContext, useEffect, useId, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useEffect, useId, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { Input } from '../arc/components/input/input';
 import { Textarea } from '../arc/components/textarea/textarea';
 import { Button } from '../arc/components/button/button';
@@ -23,6 +23,7 @@ import type { InkStroke } from '../arc/components/signature-pad/signature-pad';
 import type { RichTextValue } from '../arc/components/rich-text-editor/rich-text-editor';
 import { FormContext } from './context';
 import { navigableUrl } from '../runtime/navigation';
+import { createScanner } from './scanner';
 
 export { FormContext, type FormState } from './context';
 
@@ -234,9 +235,11 @@ function WidgetBox({ field, children, hidden }: { field: FieldSpec; children: Re
 export function TextField({ field, error, value, path }: FieldProps) {
   const name = path ?? field.name;
   const type = INPUT_TYPE[field.widget] ?? 'text';
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <Box field={field}>
       <Input
+        ref={inputRef}
         label={field.label}
         name={name}
         type={type}
@@ -246,9 +249,84 @@ export function TextField({ field, error, value, path }: FieldProps) {
         step={type === 'number' ? 'any' : undefined}
         defaultValue={text(value)}
         error={error}
+        {...(field.scanner ? { 'data-scan': 'true' } : {})}
       />
+      {field.scanner ? <ScanControls field={field} inputRef={inputRef} /> : null}
       <FieldError name={name} error={error} />
     </Box>
+  );
+}
+
+/**
+ * Creator's scan controls beside a scan field: a Scan button that opens the
+ * device camera, a camera switch, a gallery picker when declared, and open on
+ * load when declared. A refusal or a missing API shows a message and leaves
+ * the text input to type into. The camera stops on close, blur, page hide and
+ * unmount.
+ */
+function ScanControls({ field, inputRef }: { field: FieldSpec; inputRef: RefObject<HTMLInputElement | null> }) {
+  const spec = field.scanner!;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [message, setMessage] = useState('');
+  const [open, setOpen] = useState(false);
+  const scanner = useRef<ReturnType<typeof createScanner> | null>(null);
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    const win = input.ownerDocument.defaultView;
+    const s = createScanner(input, spec, { say: setMessage, active: (on) => setOpen(on) }, () => videoRef.current, field.switchCamera === true);
+    scanner.current = s;
+    const hide = () => s.stop();
+    const visibility = () => {
+      if (input.ownerDocument.visibilityState === 'hidden') s.stop();
+    };
+    win?.addEventListener('pagehide', hide);
+    input.ownerDocument.addEventListener('visibilitychange', visibility);
+    input.form?.addEventListener('reset', hide);
+    if (spec.onload) void s.start();
+    return () => {
+      win?.removeEventListener('pagehide', hide);
+      input.ownerDocument.removeEventListener('visibilitychange', visibility);
+      input.form?.removeEventListener('reset', hide);
+      s.stop();
+      scanner.current = null;
+    };
+  }, [field, spec, inputRef]);
+  return (
+    <div
+      ref={boxRef}
+      className="c2c-scan"
+      onBlur={(event) => {
+        const next = event.relatedTarget as Node | null;
+        if (open && next && !boxRef.current?.contains(next) && next !== inputRef.current) scanner.current?.stop();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && open) scanner.current?.stop();
+      }}
+    >
+      {open ? (
+        <Button type="button" onClick={() => { scanner.current?.stop(); setMessage(''); }}>Close scanner</Button>
+      ) : (
+        <Button type="button" onClick={() => void scanner.current?.start()}>Scan</Button>
+      )}
+      {open && field.switchCamera ? <Button type="button" onClick={() => scanner.current?.switchCamera()}>Switch camera</Button> : null}
+      {spec.gallery ? (
+        <input
+          type="file"
+          accept="image/*"
+          className="c2c-scan-gallery"
+          aria-label={`Scan ${field.label} from a saved photo`}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void scanner.current?.fromImage(file);
+            event.target.value = '';
+          }}
+        />
+      ) : null}
+      <video ref={videoRef} className="c2c-scan-video" playsInline muted hidden={!open} style={{ maxWidth: '100%' }} />
+      <p role="status" className="c2c-scan-status">{message}</p>
+    </div>
   );
 }
 
