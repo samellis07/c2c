@@ -1339,7 +1339,6 @@ test('a thisapp call stays a snippet unless every callee is proved read-only', (
     ['callee writes', [{ name: 'Util.mark', signature: 'int Util.mark()', deluge: 'insert into Orders [ Status = "open" ];\nreturn 1;' }], 'Util.mark()'],
     ['callee updates a fetched row', [{ name: 'Util.mark', signature: 'int Util.mark()', deluge: 'r = Orders[Status == "open"];\nr.Status = "closed";\nreturn 1;' }], 'Util.mark()'],
     ['callee sends mail', [{ name: 'Util.mark', signature: 'int Util.mark()', deluge: 'sendmail [ from: zoho.adminuserid to: "a@example.com" subject: "x" message: "y" ];\nreturn 1;' }], 'Util.mark()'],
-    ['callee builds markup', [{ name: 'Util.html', signature: 'string Util.html()', deluge: 'return "<b>" + Orders[Status == "open"].count() + "</b>";' }], 'Util.html()'],
     ['callee needs manual translation', [{ name: 'Util.bad', signature: 'int Util.bad()', deluge: 'x = median("abc");\nreturn 1;' }], 'Util.bad()'],
     ['callee recurses', [{ name: 'Util.loop', signature: 'int Util.loop()', deluge: 'return thisapp.Util.loop();' }], 'Util.loop()'],
     [
@@ -4525,14 +4524,30 @@ test('a markup literal and a markup function value print as markup, not as escap
   assert.match(html, /<div class="w"><b>Hi<\/b> <i>there<\/i><\/div>/);
 });
 
-test('a markup function called anywhere but as the whole right side of an assignment stays a snippet', () => {
+test('a markup function called anywhere but as the whole right side of an assignment or the whole text island stays a snippet', () => {
   for (const snippet of [
-    `htmlpage hp1()\ncontent\n<p><%= thisapp.Util.wrap("x") %></p>`,
+    `htmlpage hp1()\ncontent\n<p title="<%= thisapp.Util.wrap("x") %>">y</p>`,
+    `htmlpage hp1()\ncontent\n<p><%= thisapp.Util.wrap("x").length() %></p>`,
     `htmlpage hp1()\ncontent\n<%\nok = thisapp.Util.wrap("x");\nbad = thisapp.Util.wrap("y").length();\n%>\n<p><%= ok %></p>`,
   ]) {
     const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
     assert.equal(compileHtmlpage(app, 'Home', 'hp1', snippet).ok, false, snippet);
   }
+});
+
+test('a markup function printed whole by a text island, alone or joined with another, prints as markup and escapes its argument', async () => {
+  const style = { name: 'Util.style', signature: 'string Util.style()', deluge: 'return "<style>.w{color:red}</style>";' };
+  const snippet = `htmlpage hp1()\ncontent\n<%= thisapp.Util.style() + thisapp.Util.wrap(input.q) %>`;
+  const app = appWithFns([wrapFn, style], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(app, snippet, { q: 'x<script>alert(1)</script>' });
+  assert.match(html, /<div class="w">x&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/div>/);
+  assert.doesNotMatch(html, /<script/);
+  const single = `htmlpage hp1()\ncontent\n<p><%= thisapp.Util.wrap("a") %></p>`;
+  const plain = await renderPage(appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(single)}`), single);
+  assert.match(plain.html, /<p><div class="w">a<\/div><\/p>|<div class="w">a<\/div>/);
+  assert.doesNotMatch(plain.html, /&lt;div/);
 });
 
 test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
