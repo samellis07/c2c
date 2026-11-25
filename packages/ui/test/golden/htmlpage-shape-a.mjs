@@ -199,6 +199,7 @@ async function render(ctx) {
   shim.list.add(c2c_out, { ["k"]: "H", ["v"]: c2c_static_7 });
   const c2c_parts = [];
   const c2c_notes = [];
+  const c2c_vars = [];
   // A URL attribute value may span several parts (static pieces and islands).
   // The scheme check runs on the whole joined value, so the pieces accumulate
   // until the next non-URL part; a dropped island inside the value does not
@@ -233,6 +234,11 @@ async function render(ctx) {
       const num = c2cCssNumber(piece);
       if (!num && piece.trim()) c2c_notes.push("a style island value was not a safe number and rendered empty");
       c2c_parts.push(num);
+    } else if (item.k === "S") {
+      const piece = c2cStr(item.v);
+      const num = c2cCssNumber(piece);
+      if (num) c2c_vars.push(item.n + ":" + num + item.u);
+      else if (piece.trim()) c2c_notes.push("a style island value was not a safe number and rendered empty");
     } else if (item.k === "C") {
       const piece = c2cStr(item.v);
       const css = c2cCss(piece);
@@ -241,7 +247,8 @@ async function render(ctx) {
     } else if (item.k === "N") c2c_notes.push(String(item.v == null ? "" : item.v));
   }
   c2c_urlFlush();
-  return { html: c2c_parts.join(""), notes: c2c_notes };
+  const c2c_html = c2c_parts.join("");
+  return { html: c2c_vars.length ? '<div style="display:contents;' + c2c_vars.join(";") + '">' + c2c_html + "</div>" : c2c_html, notes: c2c_notes };
 }
 
 function modeOverride() {
