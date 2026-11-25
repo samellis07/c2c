@@ -169,6 +169,34 @@ test('a hardcoded host written ahead of the appuri island never survives into th
   assert.equal((out.html ?? '').split('other.example.com').length, 1, 'the written host text is never carried');
 });
 
+test('a view-embed or page-embed address in a link is the same page link, with the dialog flag left out', () => {
+  for (const kind of ['view-embed', 'page-embed']) {
+    const out = compile(`https://app.zohocreator.in<%=zoho.appuri%>${kind}/Inner?zc_LoadIn=dialog&date=<%=input.date%>`);
+    assert.equal(out.ok, true, out.reason ?? 'compile failed');
+    assert.match(out.file?.source ?? '', /shim\.string\.encodeUrl\(shim\.input\.get\(ctx, "date"\)\)/);
+    assert.match(out.file?.source ?? '', /"#\/page\/Inner\?date="/);
+    assert.doesNotMatch(out.file?.source ?? '', /view-embed|page-embed|zc_LoadIn|zohocreator/);
+  }
+  const literal = compile('<%=zoho.appuri%>view-embed/Inner?date=2024-01-05');
+  assert.match(literal.html ?? '', /href="#\/page\/Inner\?date=2024-01-05"/);
+  // No address island, a repeated parameter, a name that is no page route: none becomes a link.
+  for (const href of ['view-embed/Inner?date=1', '<%=zoho.appuri%>view-embed/Inner?date=1&date=2', '<%=zoho.appuri%>view-embed/../Inner', '<%=zoho.appuri%>view-embed/Inner/extra']) {
+    const out = compile(href);
+    assert.ok(!out.ok || !/href="#\/page\/Inner/.test(out.html ?? ''), href);
+  }
+});
+
+test('a link value read from a record or a declared input is percent-encoded into the page link', () => {
+  const out = compile('https://app.zohocreator.in<%=zoho.appuri%>view-embed/Inner?zc_LoadIn=dialog&date=<%=row.Day%>');
+  assert.equal(out.ok, true, out.reason ?? 'compile failed');
+  assert.match(out.file?.source ?? '', /shim\.string\.encodeUrl\(/);
+  assert.match(out.file?.source ?? '', /"#\/page\/Inner\?date="/);
+  for (const value of ['<%=row.Day + "x"%>', '<%=row.Day.toUpperCase()%>', 'a<%=row.Day%>', '<%=input.missing%>', '<%=row.__proto__%>']) {
+    const refused = compile(`<%=zoho.appuri%>view-embed/Inner?date=${value}`);
+    assert.ok(!refused.ok || !/href="#\/page\/Inner/.test(refused.html ?? '') && !/"#\/page\/Inner\?date="/.test(refused.file?.source ?? ''), value);
+  }
+});
+
 test('a page linking to itself with a different parameter value is a generated link too', () => {
   // A tabbed or filtered detail page commonly re-links to its own route with
   // a different query value (e.g. switching which tab renders); this is not

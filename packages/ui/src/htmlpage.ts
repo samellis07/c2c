@@ -89,6 +89,8 @@ interface Chunk {
   text: string;
   /** A `<% %>` island that parses as one bare expression, printed like `<%= %>`. */
   wasStmts?: boolean;
+  /** An island's source as written, from `<%` to its closer. */
+  raw?: string;
   /** Where the island sits in the markup. */
   context?: 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'cssbody' | 'comment' | 'reject';
 }
@@ -614,10 +616,12 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
 // Creator also emits same-app page links as a bare `#Page:` fragment (the
 // appuri island is optional in hand-authored markup). Both forms are scoped
 // to the generated app route below; no arbitrary URL is accepted here.
-const PAGE_HREF = /^(?:(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>)?#Page:([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
+// The embed spelling (`view-embed/<Page>`, `page-embed/<Page>`) is the same page behind the address island; Creator opens it in a
+// dialog under `zc_LoadIn=dialog`, which the page route has no counterpart for, so that flag is left out like any undeclared name.
+const PAGE_HREF = /^(?:(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>(?:#Page:|(?:view-embed|page-embed)\/)|#Page:)([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
 
 function rewritePageParamLinks(template: string, app: App, page: string, ownParams: ReadonlySet<string>): string {
-  if (!/#Page:/i.test(template)) return template;
+  if (!/#Page:|(?:view|page)-embed\//i.test(template)) return template;
   return replaceAnchorElements(template, (whole, attrs, inner) => {
     const hrefMatch = /\bhref\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
     if (!hrefMatch) return whole;
@@ -1293,20 +1297,21 @@ function splitChunks(template: string): Chunk[] | null {
       const plain = template.indexOf('%>', open + 3);
       if (brace < 0 && plain < 0) return null;
       if (brace >= 0 && (plain < 0 || brace < plain)) {
-        out.push({ kind: 'stmts', text: template.slice(open + 3, brace) });
+        const end = brace + (template.startsWith('%}>', brace) ? 3 : 2);
+        out.push({ kind: 'stmts', text: template.slice(open + 3, brace), raw: template.slice(open, end) });
         // Creator's paired empty wrapper closes with `%}>`; the final `>` is
         // part of the delimiter, not visible static markup.
-        at = brace + (template.startsWith('%}>', brace) ? 3 : 2);
+        at = end;
         continue;
       }
-      out.push({ kind: 'stmts', text: template.slice(open + 2, plain) });
+      out.push({ kind: 'stmts', text: template.slice(open + 2, plain), raw: template.slice(open, plain + 2) });
       at = plain + 2;
       continue;
     }
     const expr = template.startsWith('<%=', open);
     const close = template.indexOf('%>', open + 2);
     if (close < 0) return null;
-    out.push({ kind: expr ? 'expr' : 'stmts', text: template.slice(open + (expr ? 3 : 2), close) });
+    out.push({ kind: expr ? 'expr' : 'stmts', text: template.slice(open + (expr ? 3 : 2), close), raw: template.slice(open, close + 2) });
     at = close + 2;
   }
 }
@@ -3766,6 +3771,47 @@ function dropCutOffEndTag(template: string): string {
   return template.slice(0, tag) + template.slice(island);
 }
 
+/**
+ * Attributes a condition adds to a tag: `<div class="a"<% if(c) { %> style="b"<% } %>>`. Each arm of the condition is a tag of its own,
+ * so the markup never holds an island between attributes: `<% if(c) { %><div class="a" style="b"><% } else { %><div class="a"><% } %>`.
+ * Only one plain `if` block of static attribute text inside a tag whose other text is static is rewritten; anything else keeps its
+ * position check.
+ */
+// A tag the HTML parser never closes on its own account: the sanitizer reads both arms' tags as one document, and a second `<p>` or
+// `<li>` there would end the first one in a piece of markup that belongs to the other arm.
+const PLAIN_TAGS = new Set(['article', 'aside', 'b', 'br', 'div', 'em', 'font', 'footer', 'header', 'hr', 'i', 'img', 'main', 'nav', 'ol', 'section', 'small', 'span', 'strong', 'table', 'u', 'ul']);
+const TAG_HEAD = /<([A-Za-z][\w:-]*)[^<>]*$/;
+const IF_OPEN = /^\s*if\s*\([\s\S]*\)\s*\{\s*$/;
+const BLOCK_CLOSE = /^\s*\}\s*$/;
+function rewriteConditionalAttributes(template: string): string {
+  const chunks = splitChunks(template);
+  if (!chunks) return template;
+  const text = (chunk: Chunk | undefined) => chunk?.text ?? '';
+  const out: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const [head, open, attrs, close, tail] = chunks.slice(i, i + 5);
+    const tagAt = head?.kind === 'static' && PLAIN_TAGS.has((TAG_HEAD.exec(head.text)?.[1] ?? '').toLowerCase()) ? head.text.search(TAG_HEAD) : -1;
+    const gt = text(tail).indexOf('>');
+    const fits =
+      tagAt >= 0 &&
+      open?.kind === 'stmts' && IF_OPEN.test(open.text) && !open.text.includes('%') &&
+      attrs?.kind === 'static' && !/[<>]/.test(attrs.text) &&
+      close?.kind === 'stmts' && BLOCK_CLOSE.test(close.text) &&
+      tail?.kind === 'static' && gt >= 0 && !tail.text.slice(0, gt).includes('<');
+    if (!fits) {
+      out.push(chunks[i].raw ?? chunks[i].text);
+      continue;
+    }
+    const tag = text(head).slice(tagAt);
+    const end = text(tail).slice(0, gt + 1);
+    out.push(text(head).slice(0, tagAt), `<%${open.text}%>`, tag, attrs.text, end, '<% } else { %>', tag, end, '<% } %>');
+    // What follows the tag may open the next tag of the same kind, so it is looked at as a head of its own.
+    chunks[i + 4] = { kind: 'static', text: text(tail).slice(gt + 1) };
+    i += 3;
+  }
+  return out.join('');
+}
+
 /** `<%=zoho.appuri%>form-embed/<Form>` and the parameters Creator reads after it, behind `?` or a bare `/`. */
 const FORM_EMBED_SRC = /^<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>form-embed\/([A-Za-z_]\w*)(?:[/?]([\s\S]*))?$/i;
 const FORM_FRAME_ATTRS = new Set(['allowtransparency', 'class', 'frameborder', 'height', 'name', 'scrolling', 'src', 'style', 'width']);
@@ -3830,6 +3876,7 @@ export function compileHtmlpage(
   head.template = inlineConstantStyleCalls(head.template, app);
   head.template = head.template.replace(CREATOR_HOST_BEFORE_APPURI, '');
   head.template = dropCutOffEndTag(head.template);
+  head.template = rewriteConditionalAttributes(head.template);
   head.template = rewriteRecordSummaryFrames(inlineSummaryUrlVariable(head.template), app, decoded);
   head.template = rewriteBlankFrames(head.template);
   const fnFiles: HtmlpageFile[] = [];
