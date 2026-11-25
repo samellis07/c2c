@@ -6523,7 +6523,7 @@ const UI_EFFECT_METHODS = new Set(['add', 'append', 'clear', 'select', 'deselect
  */
 function isServerEffect(effect) {
   if (!effect) return false;
-  const names = (list) => Array.isArray(list) && list.length > 0 && list.every((part) => typeof part === 'string');
+  const names = (list) => Array.isArray(list) && list.length > 0 && list.every((part) => typeof part === 'string' && part !== '__proto__' && part !== 'prototype' && part !== 'constructor');
   if (effect.op === 'alert') return typeof effect.message === 'string';
   if (effect.op === 'show' || effect.op === 'hide' || effect.op === 'enable' || effect.op === 'disable') return names(effect.targets);
   if (!Array.isArray(effect.args)) return false;
@@ -6536,7 +6536,7 @@ function isServerEffect(effect) {
     effect.op === 'ui' &&
     UI_EFFECT_METHODS.has(effect.method) &&
     Array.isArray(effect.target) &&
-    effect.target.every((part) => typeof part === 'string')
+    effect.target.every((part) => typeof part === 'string' && part !== '__proto__' && part !== 'prototype' && part !== 'constructor')
   );
 }
 
