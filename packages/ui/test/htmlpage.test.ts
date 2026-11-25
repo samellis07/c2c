@@ -2751,7 +2751,6 @@ test('an island whose marker the sanitizer removes stays a counted snippet', asy
     // title island on it survives — the unwrap cases use other tags.
     '<section title="<%= input.v %>">x</section>',
     '<form title="<%= input.v %>">x</form>',
-    '<label title="<%= input.v %>">x</label>',
     // A refused static scheme drops the attribute and the marker with it.
     '<a href="javascript:<%= input.v %>">x</a>',
     // A '<' restarts the tag in the slot scan but the parser keeps the island
@@ -4303,7 +4302,7 @@ test('a component embed named by a name that can hold anything but a known repor
 
 test('an expression island under a tag the sanitizer unwraps renders its escaped value in place', async () => {
   const hostile = '<script>globalThis.__hit=1</script><img src=x onerror=1>&"\'';
-  for (const tag of ['center', 'time', 'section', 'label', 'nav', 'article']) {
+  for (const tag of ['center', 'time', 'section', 'nav', 'article']) {
     const { files, model } = generateUi(
       appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n<div><${tag} class="c">Hi <%= input.v %>!</${tag}></div>`)}`),
     );

@@ -48,7 +48,7 @@ const OPEN = ['id = insert into Users [Mail = "a"];', 'n = id.toString().length(
 test('an if over a count the server run took is answered by the server run', async () => {
   const r = translate(OPEN, options);
   assert.equal(counted(r), 0);
-  assert.doesNotMatch(r.client, /^if \(|shim\.todo\(|"openUrl"/m);
+  assert.doesNotMatch(r.client, /(?:^if \()|shim\.todo\(|"openUrl"/m);
   const key = keyOf(r);
   assert.match(r.server, new RegExp(`if \\(\\(n > 0\\)\\) \\{\\n  shim\\.client\\.effect\\(ctx, "${key}", \\{ op: "openUrl", args: \\["#Report:R", "same window"\\] \\}\\);\\n\\}`));
   assert.deepEqual((await run(r))[key], [{ op: 'openUrl', args: ['#Report:R', 'same window'] }]);
@@ -100,7 +100,7 @@ test('the arms of a server-decided if queue their field writes and visibility ch
   const r = translate(BOOK, options);
   assert.equal(counted(r), 0);
   assert.deepEqual(r.todos, []);
-  assert.doesNotMatch(r.client, /^if \(|shim\.input\.set/m);
+  assert.doesNotMatch(r.client, /(?:^if \()|shim\.input\.set/m);
   const key = keyOf(r);
   const effects = (await run(r))[key]!;
   assert.deepEqual(effects.map((e) => [e.op, e.targets]), [
