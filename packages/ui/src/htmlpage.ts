@@ -124,6 +124,14 @@ function localSlug(value: string): string {
   return out || 'page';
 }
 
+/**
+ * A Creator host written right before the app address (`https://app.zohocreator.in<%=zoho.appuri%>view-embed/Page`) names the same
+ * app whichever data centre it is: the address after it is this app's path. The host is left out so the one own-app address grammar
+ * decides the target. Only a Creator host that is the whole text before the island counts: a longer host, another scheme, or a host
+ * that continues a path does not match.
+ */
+const CREATOR_HOST_BEFORE_APPURI = /(?<![\w./:@-])https:\/\/(?:app\.zohocreator\.(?:com|in|eu|com\.au|jp|ca|sa|com\.cn)|creator\.zoho\.(?:com|in|eu|com\.au|jp|ca|sa|com\.cn))(?=<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>)/gi;
+
 /** The `htmlpage <name>(<params>)` header, optional property lines, then `content`. */
 function splitTemplate(decoded: string): { name: string; params: string[]; template: string } {
   const head = /^[ \t]*htmlpage\b[ \t]*([A-Za-z_]\w*)?[ \t]*(\(([^)]*)\))?/i.exec(decoded);
@@ -3820,6 +3828,7 @@ export function compileHtmlpage(
   });
   const head = splitTemplate(decoded);
   head.template = inlineConstantStyleCalls(head.template, app);
+  head.template = head.template.replace(CREATOR_HOST_BEFORE_APPURI, '');
   head.template = dropCutOffEndTag(head.template);
   head.template = rewriteRecordSummaryFrames(inlineSummaryUrlVariable(head.template), app, decoded);
   head.template = rewriteBlankFrames(head.template);
