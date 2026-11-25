@@ -103,6 +103,14 @@ test('a form embed prefilled from a record value compiles to a parameterised mar
   assert.ok(el?.src, 'the render rides the generated endpoint');
 });
 
+test('a form embed prefilled from a urlEncode-wrapped record value compiles to a parameterised marker', () => {
+  const { model } = buildUi(appWith(embed(FORM_TAG('zc_Header=false&amp;Name=<%=zoho.encryption.urlEncode(row.Name)%>'))));
+  assert.deepEqual(snippetTodos(model), []);
+  const el = snippetOf(model);
+  assert.deepEqual(el?.components, [{ kind: 'form', name: 'Intake', params: ['Name'] }]);
+  assert.match(el?.html ?? '', /data-zml="component-form:Intake:untitled\?Name=/);
+});
+
 test('a report embed filtered by a record value and a page input compiles', () => {
   const { model } = buildUi(appWith(embed(REPORT_TAG('zc_Header=false&amp;Name=<%=row.Name%>&amp;Status=<%=input.who%>'))));
   assert.deepEqual(snippetTodos(model), []);
@@ -478,4 +486,46 @@ test('a displayed-text marker filters the rows query on the lookup by the decode
     const refused = await painted(callsEmbed, `<div data-zml="component-report:All_Calls?${hostile}"></div>`, build);
     assert.equal(refused.main.querySelector('section[data-report="All_Calls"]'), null, hostile);
   }
+});
+
+const CASE_TAG = (read: string, params = 'Account') => `<div elName='zc-component' viewLinkName='All_Calls' params='${params}=<%=${read}%>'>Loading...</div>`;
+const caseEmbed = (tag: string, statements = '') => `htmlpage Outer1(who)\ncontent\n<%{\n\trow = Accounts[Account_Name == input.who];\n${statements}%>\n${tag}\n<% }%>`;
+
+test('a lookup shown as several stored fields filters on the shown field the page value reads', () => {
+  const format = '[Account_Name + " - " + First]';
+  for (const [read, path] of [['row.Account_Name', 'Account.Account_Name'], ['row.First', 'Account.First']] as const) {
+    const { model } = buildUi(lookupApp(format, caseEmbed(CASE_TAG(read))));
+    assert.deepEqual(snippetTodos(model), [], read);
+    assert.deepEqual(snippetOf(model)?.components, [{ kind: 'report', name: 'All_Calls', params: [path] }], read);
+  }
+  // Any other value stays on the one display marker, compared with the whole text.
+  const unshown = buildUi(lookupApp(format, caseEmbed(CASE_TAG('row.Last'))));
+  assert.deepEqual(snippetOf(unshown.model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account:display'] }], 'a field the lookup does not show');
+  const literal = buildUi(lookupApp(format, caseEmbed(`<div elName='zc-component' viewLinkName='All_Calls' params='Account=Acme'>Loading...</div>`)));
+  assert.deepEqual(snippetOf(literal.model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account:display'] }], 'a literal names no shown field');
+  const decorated = buildUi(lookupApp('["Acct " + Account_Name]', caseEmbed(CASE_TAG('row.Account_Name'))));
+  assert.deepEqual(snippetOf(decorated.model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account:display'] }], 'a single field with text around it');
+});
+
+test('a value pre-encoded in a variable reaches the marker as the bounded read, encoded once', () => {
+  const statements = '\tencoded = zoho.encryption.urlEncode(row.Account_Name);\n';
+  const { model } = buildUi(lookupApp('[Account_Name + " - " + First]', caseEmbed(CASE_TAG('encoded'), statements)));
+  assert.deepEqual(snippetTodos(model), []);
+  assert.deepEqual(snippetOf(model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account.Account_Name'] }]);
+  const html = snippetOf(model)?.html ?? '';
+  assert.match(html, /data-zml="component-report:All_Calls\?Account\.Account_Name="/);
+  const reassigned = buildUi(lookupApp('[Account_Name + " - " + First]', caseEmbed(CASE_TAG('encoded'), `${statements}\tencoded = "x";\n`)));
+  assert.deepEqual(snippetOf(reassigned.model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account:display'] }], 'a name set twice is not the one read: the render reads the variable');
+  const moved = buildUi(lookupApp('[Account_Name + " - " + First]', caseEmbed(CASE_TAG('encoded'), `${statements}\trow = Accounts[Account_Name == "other"];\n`)));
+  assert.deepEqual(snippetOf(moved.model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account:display'] }], 'the record the read starts from changes after the encode');
+});
+
+test('a link name chosen by a condition keeps the embed when its params carry a read', () => {
+  const tag = `<div elName='zc-component' viewLinkName='<%=link%>' params='Account=<%=row.Account_Name%>'></div>`;
+  const statements = '\tlink = "All_Calls";\n\tif(zoho.loginuserid != zoho.adminuserid)\n\t{\n\t\tlink = "All_Calls";\n\t}\n';
+  const { model } = buildUi(lookupApp('[Account_Name + " - " + First]', caseEmbed(tag, statements)));
+  assert.deepEqual(snippetTodos(model), []);
+  assert.deepEqual(snippetOf(model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account.Account_Name'] }]);
+  const other = tag.replace('params=', "title='<%=row.First%>' params=");
+  assert.equal(snippetTodos(buildUi(lookupApp('[Account_Name + " - " + First]', caseEmbed(other, statements))).model).length, 1, 'an island outside params');
 });

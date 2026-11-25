@@ -3297,6 +3297,151 @@ test('a view-embed iframe of an own page becomes an inline include like page-emb
   assert.equal(refusedReport.ok, false, 'a view-embed that names no own page stays counted');
 });
 
+const LAWYER_CASE_APP = `\tform Add_Lawyer
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tform Add_Other
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tform Add_Case
+\t{
+\t\tTitle
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tLawyer
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = Add_Lawyer.ID
+\t\t)
+\t\tOther
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = Add_Other.ID
+\t\t)
+\t}
+\tlist Lawyers
+\t{
+\t\tshow all rows from Add_Lawyer
+\t\t(
+\t\t\tName
+\t\t)
+\t}`;
+
+const POPUP_LOADER = (statements: string, frame = '<iframe style = "height:600px;width:800px" src="<%=src%>" name="popup-window">\n\t</iframe>') =>
+  `htmlpage html_snippet()\ncontent\n<%{\n\tcase_det = Add_Case[ID == input.caseID.toLong()];\n${statements}\n\t%>\n${frame}\n<%\n\n}%>`;
+const SUMMARY_SRC = '\tsrc = zoho.appuri + "/record-summary/Lawyers/" + case_det.Lawyer.ID;';
+
+test('a record-summary URL built in a variable from a page record lookup compiles to the authorized report route', () => {
+  const compiled = compileHtmlpage(appOf(LAWYER_CASE_APP), 'Home', 'html_snippet', POPUP_LOADER(SUMMARY_SRC), { id: 'x' });
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  assert.match(compiled.html ?? '', /href="#\/report\/Lawyers\/row\/"/);
+  assert.doesNotMatch(compiled.html ?? '', /iframe/);
+  const source = compiled.file?.source ?? '';
+  assert.match(source, /shim\.datastore\.query\(ctx, "Add_Case", \{ op: "==", field: "ID", value: shim\.convert\.toLong\(shim\.input\.get\(ctx, "caseID"\)/);
+  assert.match(source, /shim\.datastore\.field\(ctx, case_det, "Lawyer\.ID"\)/);
+  assert.match(source, /"#\/report\/Lawyers\/row\/"/);
+});
+
+test('a record-summary URL variable stays counted when its row or its use is not proved', () => {
+  const app = appOf(LAWYER_CASE_APP);
+  const refused = (statements: string, frame?: string) => compileHtmlpage(app, 'Home', 'html_snippet', POPUP_LOADER(statements, frame)).ok;
+  assert.equal(refused('\tsrc = zoho.appuri + "/record-summary/Lawyers/" + case_det.Other.ID;'), false, 'a lookup to another form');
+  assert.equal(refused('\tsrc = zoho.appuri + "/record-summary/Lawyers/" + case_det.Title.ID;'), false, 'a field that is no lookup');
+  assert.equal(refused(`${SUMMARY_SRC}\n\tsrc = "https://example.test/";`), false, 'a reassigned variable');
+  assert.equal(refused(SUMMARY_SRC, '<iframe src="<%=src%>"></iframe><b><%=src%></b>'), false, 'a variable printed elsewhere');
+});
+
+const CASE_FORMS = `\tform Add_Case
+\t{
+\t\tCase_Number
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tAssociated_Case_Number
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tCase_Status
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}`;
+
+function caseSummaryApp(snippet: string): App {
+  const zml = `<zml><layout><row><column width='100%'><dsp id='hp1'><![CDATA[${snippet}]]></dsp></column></row></layout></zml>`;
+  const pages = `\tpages\n\t{\n\t\tpage Case_Summary(case, url)\n\t\t{\n\t\t\tContent=${JSON.stringify(zml)}\n\t\t}\n\t\tpage Popup_Loader(caseID)\n\t\t{\n\t\t}\n\t}`;
+  return appOf(`${CASE_FORMS}\n${pages}`);
+}
+
+const CASE_SUMMARY = (open: string, link: string) => `htmlpage hp1()
+content
+<%{
+\tcase_det = Add_Case[Case_Number == input.case];
+\tif(input.url == "lawyer")
+\t{
+\t\t${open}
+\t}
+\t%>
+<a href="<%=zoho.appuri%>#Page:Case_Summary?case=<%=input.case%>&url=lawyer" target="_self">Lawyer</a>
+${link}
+<%
+}%>`;
+const POPUP_OPEN = 'openUrl(zoho.appuri + "#Page:Popup_Loader?caseID=" + case_det.ID,"popup window");';
+const ASSOCIATED_LINK = '<a href="<%=zoho.appuri%>#Page:Case_Summary?case=<%=case_det.Associated_Case_Number%>" target="_blank"><%=case_det.Associated_Case_Number%></a>';
+
+test('a page that opens a popup page on render renders the link to it, and a record value rides the page link', async () => {
+  const { files, model } = generateUi(caseSummaryApp(CASE_SUMMARY(POPUP_OPEN, ASSOCIATED_LINK)));
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({ Add_Case: [{ Case_Number: 'C-1', Associated_Case_Number: 'C 2/x', Case_Status: 'Running' }] });
+  try {
+    const asked = await invoke(mod.default as never, { ...USER, body: { input: { case: 'C-1', url: 'lawyer' } } });
+    assert.equal(asked.status, 200, JSON.stringify(asked.body));
+    const html = String(asked.body.html);
+    assert.match(html, new RegExp(`<a href="#/page/Popup_Loader\\?caseID=${FIRST_ID}">`), 'the popup page the render used to open is one click away');
+    assert.match(html, /<a href="#\/page\/Case_Summary\?case=C-1&amp;url=lawyer"/);
+    assert.match(html, /<a href="#\/page\/Case_Summary\?case=C\+2%2Fx"/, 'the record value is encoded once into the page link');
+    const plain = await invoke(mod.default as never, { ...USER, body: { input: { case: 'C-1', url: 'other' } } });
+    assert.doesNotMatch(String(plain.body.html), /Popup_Loader/, 'the condition still guards the link');
+  } finally {
+    live.restore();
+  }
+});
+
+test('a page link that carries a record value stays counted unless the read is bounded', () => {
+  const refused = (value: string) => generateUi(caseSummaryApp(CASE_SUMMARY(POPUP_OPEN, `<a href="<%=zoho.appuri%>#Page:Case_Summary?case=<%=${value}%>">x</a>`))).model.todos.length;
+  assert.equal(refused('case_det.Associated_Case_Number'), 0);
+  assert.equal(refused('case_det.Associated_Case_Number + "/admin"'), 1, 'an expression is no bounded read');
+  assert.equal(refused('case_det.__proto__.x'), 1, 'a reserved name');
+  assert.equal(refused('zoho.loginuser'), 1, 'the caller never rides a link');
+});
+
+test('a render prints zoho.encryption.urlEncode of a page value, the one zoho task that needs no connection', async () => {
+  const snippet = (call: string) => `htmlpage hp1(a)\ncontent\n<%{\n\te = ${call};\n\t%>\n<b><%=e%></b>\n<%\n}%>`;
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet('zoho.encryption.urlEncode(input.a)'))}`));
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({ Orders: [] });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { a: 'x y/z' } } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.match(String(out.body.html), /<b>x%20y%2Fz<\/b>/);
+  } finally {
+    live.restore();
+  }
+  const other = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet('zoho.encryption.base64Encode(input.a)'))}`));
+  assert.equal(other.model.todos.length, 1, 'another zoho task stays counted');
+});
+
 test('a page snippet reading zoho.loginuserid and generating an internal record-summary iframe compiles cleanly', () => {
   const employeeApp = `${ORDERS}
 \tform Add_Employee
