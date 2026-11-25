@@ -652,6 +652,32 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
 }
 
 /**
+ * A literal `href="<%=zoho.appuri%>#Form:<Form>"` or `#Report:<Report>` link to
+ * a form or report of this app (the address island and the host optional, as
+ * for a page link) is the route Creator opens: `#/form/<Form>` or
+ * `#/report/<Report>`. Only Creator's own `zc_` display flags may follow the
+ * name, so no filter or prefill is lost; a name the app does not have, or any
+ * other query, leaves the href as written.
+ */
+const OWN_ROUTE_HREF = /^(?:(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>)?#(Form|Report):([A-Za-z_]\w*)(?:\?([^"'<>%]*))?$/i;
+
+function rewriteOwnRouteLinks(template: string, app: App): string {
+  if (!/#(?:Form|Report):/i.test(template)) return template;
+  return replaceAnchorElements(template, (whole, attrs, inner) => {
+    const hrefMatch = /\bhref\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
+    const m = hrefMatch ? OWN_ROUTE_HREF.exec(hrefMatch[2].trim()) : null;
+    if (!hrefMatch || !m) return whole;
+    const isForm = m[1]!.toLowerCase() === 'form';
+    const name = m[2]!;
+    if (!(isForm ? app.forms : app.reports).some((item) => item.name === name)) return whole;
+    const flags = (m[3] ?? '').replace(/&amp;/g, '&').split('&').filter(Boolean);
+    if (!flags.every((part) => /^zc_/i.test(part))) return whole;
+    const href = `#/${isForm ? 'form' : 'report'}/${encodeURIComponent(name)}`;
+    return `<a${attrs.slice(0, hrefMatch.index)}href=${hrefMatch[1]}${href}${hrefMatch[1]}${attrs.slice(hrefMatch.index + hrefMatch[0].length)}>${inner}</a>`;
+  });
+}
+
+/**
  * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` (or the older
  * `view-embed/<Page>` spelling) of another page
  * of this app becomes an inline include of that page's generated view. Creator
@@ -3940,6 +3966,7 @@ export function compileHtmlpage(
   // already exposes as `input.<name>`, never a value a caller invents.
   const ownPageParams = new Set([...head.params, ...(app.pages.find((item) => item.name === page)?.params ?? [])]);
   head.template = rewritePageParamLinks(head.template, app, page, ownPageParams);
+  head.template = rewriteOwnRouteLinks(head.template, app);
   // A `#Page:` href the rewrite above could not prove safe (unknown page, an
   // undeclared or repeated parameter, a value other than a bounded literal or
   // one forwarded `input.p`, the page linking itself) must never reach the
