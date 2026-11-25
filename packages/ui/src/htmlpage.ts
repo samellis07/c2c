@@ -81,15 +81,18 @@ interface Chunk {
   kind: 'static' | 'expr' | 'stmts';
   text: string;
   /** Where the island sits in the markup. */
-  context?: 'text' | 'attr' | 'url' | 'style' | 'sheet' | 'comment' | 'reject';
+  context?: 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'comment' | 'reject';
 }
 
-const MARK_SPLIT = /ZZC2CSLOT\d+ZZ/g;
-const MARK_MATCH = /ZZC2CSLOT(\d+)ZZ/g;
-const MARK_CHECK = /ZZC2CSLOT\d+ZZ/;
+// A word marker stands for an island in text or an attribute. An island in a
+// CSS function argument (`rgb(<%=n%>,...)`) is a number marker instead: the
+// style sanitizer only keeps numbers there, so the marker is one.
+const MARK_SPLIT = /ZZC2CSLOT\d+ZZ|0\.7391\d{4}/g;
+const MARK_MATCH = /ZZC2CSLOT(\d+)ZZ|0\.7391(\d{4})/g;
+const MARK_CHECK = /ZZC2CSLOT\d+ZZ|0\.7391\d{4}/;
 
-function marker(i: number): string {
-  return `ZZC2CSLOT${i}ZZ`;
+function marker(i: number, numeric = false): string {
+  return numeric ? `0.7391${String(i).padStart(4, '0')}` : `ZZC2CSLOT${i}ZZ`;
 }
 
 function localSlug(value: string): string {
@@ -174,6 +177,18 @@ const RAW_TEXT_TAGS = new Set([
 /** Document-shell elements the sanitizer unwraps, keeping their children. */
 const DOCUMENT_SHELL_TAGS = new Set(['html', 'body']);
 
+/**
+ * Text-level elements the sanitizer unwraps (they are neither allowed nor
+ * dropped), keeping their children. Text under one of these is text of the
+ * element they sit in, so an expression island there renders its escaped value
+ * in place. The list is closed: an unlisted tag keeps the island refused, and
+ * every island must still survive sanitization where it stood.
+ */
+const UNWRAPPED_TEXT_TAGS = new Set([
+  'center', 'time', 'section', 'article', 'header', 'footer', 'nav', 'main', 'aside', 'label', 'address',
+  'details', 'summary', 'cite', 'dfn', 'bdi', 'bdo', 'data', 'big', 'tt', 'strike', 'nobr', 'output',
+]);
+
 /** Elements whose open tag ends before any content (HTML void elements). */
 const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 
@@ -207,11 +222,12 @@ type SlotMode =
  * island inside an attribute the sanitizer allowlist will remove (a dropped
  * island must stay a counted item, never vanish from a compiled page).
  */
-function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'sheet' | 'comment' | 'reject' {
+function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'comment' | 'reject' {
   let mode: SlotMode = 'data';
   let tag = '';
   let name = '';
   let quotedName = '';
+  let valueStart = 0;
   let unquotedQuote = false;
   let endBuf = '';
   const stack: string[] = [];
@@ -334,9 +350,11 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'sheet
         if (isTagWs(c)) break;
         if (c === '"') {
           quotedName = name;
+          valueStart = i + 1;
           mode = 'value-dq';
         } else if (c === "'") {
           quotedName = name;
+          valueStart = i + 1;
           mode = 'value-sq';
         } else if (c === '>') openTag();
         else {
@@ -419,7 +437,12 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'sheet
   const keptAttr = (n: string) => !!n && allowedAttr(tag.toLowerCase(), n.toLowerCase());
   if (mode === 'value-dq' || mode === 'value-sq') {
     if (!keptAttr(quotedName)) return 'reject';
-    if (/^style$/i.test(quotedName)) return 'style';
+    if (/^style$/i.test(quotedName)) {
+      // Inside the parentheses of a CSS function the island is an argument.
+      let depth = 0;
+      for (const ch of prefix.slice(valueStart)) depth = ch === '(' ? depth + 1 : ch === ')' ? Math.max(0, depth - 1) : depth;
+      return depth > 0 ? 'style-fn' : 'style';
+    }
     return URL_ATTRS.test(quotedName) ? 'url' : 'attr';
   }
   if (mode === 'value-unquoted' && unquotedQuote) {
@@ -447,6 +470,9 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'sheet
     // Text of a `<script>` element: the sanitizer removes it the same way, and the
     // page's dropped-markup step already lists `<script>`.
     if (t === 'style' || t === 'script') return 'sheet';
+    // An expression island under an unwrapped text-level tag renders its
+    // escaped value in place; a statement island there stays refused.
+    if (UNWRAPPED_TEXT_TAGS.has(t)) return 'unwrapped';
     if (t && (DROPPED_TAGS.has(t) || RAW_TEXT_TAGS.has(t) || !ALLOWED_TAGS.has(t))) return 'reject';
     return 'text';
   }
@@ -1356,6 +1382,14 @@ const C2C_CSS_WORDS = new Set((${JSON.stringify(
 const C2C_CSS_VALUE =
   /^(?:[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:px|em|rem|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ex|ch|s|ms|deg|rad|grad|turn|fr|%)?|#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla)\\(\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*(?:,\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*){2,3}\\)|[A-Za-z][A-Za-z0-9-]*)(?:[\\s,/]+(?:[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:px|em|rem|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ex|ch|s|ms|deg|rad|grad|turn|fr|%)?|#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla)\\(\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*(?:,\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*){2,3}\\)|[A-Za-z][A-Za-z0-9-]*))*$/i;
 
+// An island in a CSS function argument (rgb(<%=n%>,...)) renders one plain
+// number: digits with an optional short fraction, at most 9999.999. Signs,
+// exponents, units, words and every other character render empty.
+function c2cCssNumber(v) {
+  const text = String(v == null ? "" : v).trim();
+  return /^\\d{1,4}(?:\\.\\d{1,3})?$/.test(text) ? text : "";
+}
+
 function c2cCss(v) {
   const text = String(v == null ? "" : v).trim();
   if (!text) return "";
@@ -1426,7 +1460,12 @@ ${indented}
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)));
-    else if (item.k === "C") {
+    else if (item.k === "Q") {
+      const piece = c2cStr(item.v);
+      const num = c2cCssNumber(piece);
+      if (!num && piece.trim()) c2c_notes.push("a style island value was not a safe number and rendered empty");
+      c2c_parts.push(num);
+    } else if (item.k === "C") {
       const piece = c2cStr(item.v);
       const css = c2cCss(piece);
       if (!css && piece.trim()) c2c_notes.push("a style island value was not a safe CSS value and rendered empty");
@@ -2952,10 +2991,18 @@ export function compileHtmlpage(
   // Context for every island, from the static markup that precedes it.
   {
     let prefix = '';
-    for (const chunk of chunks) {
+    for (let n = 0; n < chunks.length; n++) {
+      const chunk = chunks[n];
       if (chunk.kind === 'static') prefix += chunk.text;
       else {
         chunk.context = slotContext(prefix);
+        // A CSS function argument is its own whole number: it stands between
+        // an opener or separator and a separator, closer, or unit, never
+        // inside a longer token, and the marker needs four digits of room.
+        if (chunk.context === 'style-fn') {
+          const after = chunks[n + 1]?.kind === 'static' ? chunks[n + 1].text.charAt(0) : '';
+          if (!/[(,/\s]$/.test(prefix) || !/^[,/)\s%A-Za-z]/.test(after) || islandOrdinal(chunks, chunk) > 9999) chunk.context = 'style';
+        }
         prefix += 'x';
       }
     }
@@ -2985,14 +3032,14 @@ export function compileHtmlpage(
   // Marker-sanitize-split: sanitize the whole document once, then read which
   // island slots survived and where the static fragments landed.
   let combined = '';
-  for (const chunk of chunks) combined += chunk.kind === 'static' ? chunk.text : marker(islandOrdinal(chunks, chunk));
+  for (const chunk of chunks) combined += chunk.kind === 'static' ? chunk.text : marker(islandOrdinal(chunks, chunk), chunk.context === 'style-fn');
   const nIslands = islands.length;
   const droppedTags: string[] = [];
   const sanitized = sanitizeSnippet(combined, undefined, droppedTags);
   MARK_SPLIT.lastIndex = 0;
   MARK_MATCH.lastIndex = 0;
   const pieces = sanitized.split(MARK_SPLIT);
-  const surviving = [...sanitized.matchAll(MARK_MATCH)].map((m) => Number(m[1]));
+  const surviving = [...sanitized.matchAll(MARK_MATCH)].map((m) => Number(m[1] ?? m[2]));
   const cleanStatics: string[] = new Array(nIslands + 1).fill('');
   {
     const bounds = [...surviving, nIslands];
@@ -3066,9 +3113,9 @@ export function compileHtmlpage(
       scriptParts.push('c2c_out.add({"k":"D","v":0});');
     } else if (isl.kind === 'expr') {
       if (survived.has(i)) {
-        const kind = isl.context === 'url' ? 'V' : isl.context === 'attr' ? 'A' : isl.context === 'style' ? 'C' : 'T';
+        const kind = isl.context === 'url' ? 'V' : isl.context === 'attr' ? 'A' : isl.context === 'style' ? 'C' : isl.context === 'style-fn' ? 'Q' : 'T';
         scriptParts.push(`c2c_out.add({"k":"${kind}","v":(${isl.text.trim()})});`);
-      } else if (isl.context === 'style') {
+      } else if (isl.context === 'style' || isl.context === 'style-fn') {
         scriptParts.push('c2c_out.add({"k":"N","v":"a style island did not survive markup sanitization and rendered empty"});');
       } else {
         scriptParts.push('c2c_out.add({"k":"D","v":0});');
