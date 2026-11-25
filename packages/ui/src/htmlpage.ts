@@ -1205,7 +1205,7 @@ function pageInputIdNames(template: string, own: ReadonlySet<string>): Set<strin
   for (const match of code.matchAll(INPUT_ID_ASSIGN)) {
     const [, name, param] = match as unknown as [string, string, string];
     if (!own.has(param)) continue;
-    const writes = [...code.matchAll(new RegExp(`(?<![\\w.])${name}[ \\t]*(?:=(?!=)|[-+*/]=|\\+\\+|--)`, 'g'))].length;
+    const writes = [...code.matchAll(new RegExp(`(?<![\\w.])${name}[ \\t\\r\\n]*(?:=(?!=)|[-+*/]=|\\+\\+|--)`, 'g'))].length;
     const looped = new RegExp(`\\bfor[ \\t\\r\\n]+each[ \\t\\r\\n]+${name}(?![\\w])`, 'i').test(code);
     if (writes === 1 && !looped && !insideLoop(code, match.index ?? 0)) names.add(name);
   }
