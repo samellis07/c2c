@@ -3554,6 +3554,99 @@ content
   assert.ok(compiledParamRead.manualReasons?.includes('dynamic-url'), 'page-parameter read retains dynamic-url guidance');
 });
 
+const EMPLOYEE_APP = `${ORDERS}
+\tform Add_Employee
+\t{
+\t\tOfficial_Email
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tlist Employee_Profile1
+\t{
+\t\tshow all rows from Add_Employee
+\t\t(
+\t\t\tOfficial_Email
+\t\t)
+\t}`;
+
+/** A profile page: the caller's own employee record, then its summary frame. */
+const profileSnippet = (read: string, idExpr = 'emp.ID', guard = 'emp.count() == 0') => `htmlpage hp1()
+content
+<%{
+\t${read}
+\tif(${guard})
+\t{
+\t\t%>
+<div>You are not a registered Employee!</div>
+<%
+\t}
+\t%>
+<iframe name='profile_frame' height='500px' width='100%' style="border:none;"src='https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/<%=${idExpr}%>' ></iframe>
+<%
+}%>`;
+
+test('record-summary frame over a caller-filtered record variable compiles to the authorized report row link', () => {
+  const snippet = profileSnippet('emp = Add_Employee[Official_Email == zoho.loginuserid];');
+  const app = appOf(EMPLOYEE_APP);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  assert.deepEqual(compiled.manualReasons, []);
+  assert.match(compiled.file?.source ?? '', /#\/report\/Employee_Profile1\/row\//);
+  const { model } = generateUi(appOf(`${EMPLOYEE_APP}\n${pageWithSnippet(snippet)}`));
+  assert.equal(model.todos.filter((t) => t.reason === SNIPPET_TODO).length, 0);
+});
+
+test('record-summary frame over a caller-filtered record variable links each signed-in user to their own row only', async () => {
+  const snippet = profileSnippet('emp = Add_Employee[Official_Email == zoho.loginuserid];');
+  const { files, model } = generateUi(appOf(`${EMPLOYEE_APP}\n${pageWithSnippet(snippet)}`));
+  const entry = uiSnippetFiles(model)[0];
+  assert.ok(entry, 'snippet compiled to an endpoint');
+  const handler = (await loadTree(files, entry.path)).default as (req: unknown, res: unknown) => Promise<void>;
+  const live = await liveStore({ Add_Employee: [{ Official_Email: 'ada@example.com' }, { Official_Email: 'bob@example.com' }] });
+  try {
+    const asAda = await invoke(handler, { user: { profile: 'Administrator', loginUser: 'ada@example.com', userId: 'ada@example.com' }, body: { input: {} } });
+    assert.equal(asAda.status, 200, JSON.stringify(asAda.body));
+    assert.match(String(asAda.body.html), /#\/report\/Employee_Profile1\/row\/1000/);
+    assert.doesNotMatch(String(asAda.body.html), /row\/1001/);
+    const asBob = await invoke(handler, { user: { profile: 'Administrator', loginUser: 'bob@example.com', userId: 'bob@example.com' }, body: { input: {} } });
+    assert.match(String(asBob.body.html), /#\/report\/Employee_Profile1\/row\/1001/);
+    assert.doesNotMatch(String(asBob.body.html), /row\/1000/);
+    // A caller with no employee record gets the message and no frame link.
+    const stranger = await invoke(handler, { user: { profile: 'Administrator', loginUser: 'eve@example.com', userId: 'eve@example.com' }, body: { input: {} } });
+    assert.match(String(stranger.body.html), /not a registered Employee/);
+    assert.doesNotMatch(String(stranger.body.html), /row\/100\d/);
+    // The criteria value is bound, never concatenated: a hostile login name matches nothing.
+    const hostile = await invoke(handler, { user: { profile: 'Administrator', loginUser: `x" || Official_Email != "`, userId: `x" || Official_Email != "` }, body: { input: {} } });
+    assert.match(String(hostile.body.html), /not a registered Employee/);
+    assert.doesNotMatch(String(hostile.body.html), /row\/100\d/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('record-summary frame refuses record variables that are not a single caller-filtered read of the report form', () => {
+  const app = appOf(EMPLOYEE_APP);
+  const cases: Array<[string, string, string?]> = [
+    ['unfiltered read', 'emp = Add_Employee[ID != 0];'],
+    ['page-parameter filter', 'emp = Add_Employee[ID == input.pid];'],
+    ['another form', 'emp = Orders[Name == zoho.loginuserid];'],
+    ['reassigned variable', 'emp = Add_Employee[Official_Email == zoho.loginuserid];\n\temp = Add_Employee[ID != 0];'],
+    ['chained read', 'emp = Add_Employee[Official_Email == zoho.loginuserid].Official_Email;'],
+    ['path suffix on the id', 'emp = Add_Employee[Official_Email == zoho.loginuserid];', 'emp.ID + "/../.."'],
+    ['member of a member', 'emp = Add_Employee[Official_Email == zoho.loginuserid];', 'emp.Other.ID'],
+  ];
+  for (const [label, read, idExpr] of cases) {
+    const snippet = profileSnippet(read, idExpr);
+    const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+    assert.equal(compiled.ok, false, `${label} must stay a counted snippet`);
+    assert.equal(compiled.file, undefined, `${label}: no route generated`);
+    assert.equal(rewriteRecordSummaryFrames(snippet, app), snippet, `${label}: rewrite leaves the frame unchanged`);
+    const { model } = generateUi(appOf(`${EMPLOYEE_APP}\n${pageWithSnippet(snippet)}`));
+    assert.ok(model.todos.some((t) => t.reason === SNIPPET_TODO), `${label} keeps its TODO`);
+  }
+});
+
 test('one page with carried <style> CSS, a <script>, an ExecuteFunction button and a ZML image counts only lost constructs', () => {
   const snippet = [
     '<style>.highlight { color: red; }</style>',

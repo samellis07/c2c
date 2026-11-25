@@ -190,6 +190,8 @@ interface KnownSummary {
   report: Report;
   form: string;
   varName?: string;
+  /** The variable holds the record collection itself and the URL reads `<var>.ID`. */
+  record?: boolean;
 }
 
 function isSummaryVarReadMatch(
@@ -206,8 +208,10 @@ function isSummaryVarReadMatch(
   if (!lhs) return false;
   const varName = lhs[1];
   const after = code.slice(matchIndex + matchLength);
-  if (!/^\s*\.\s*ID\s*(?:;|$|[\r\n}])/i.test(after)) return false;
-  return summaries.some((s) => s.varName === varName && s.form.toLowerCase() === form.toLowerCase());
+  const ids = /^\s*\.\s*ID\s*(?:;|$|[\r\n}])/i.test(after);
+  const whole = /^\s*(?:;|$|[\r\n}])/.test(after);
+  if (!ids && !whole) return false;
+  return summaries.some((s) => s.varName === varName && !!s.record === !ids && s.form.toLowerCase() === form.toLowerCase());
 }
 
 function readsForCaller(code: string, params: string[], summaries: KnownSummary[] = []): boolean {
@@ -237,9 +241,10 @@ function droppedTags(markup: string): string[] {
 /**
  * True when the snippet code assigns `varName` exactly once, and that single assignment
  * derives from `<Form>[<field> == zoho.loginuserid|zoho.loginuser].ID` where `form` matches
- * the report's base form.
+ * the report's base form. With `shape: 'record'` the assignment is the record read itself,
+ * `<Form>[<field> == zoho.loginuserid|zoho.loginuser]`, and the URL reads `<var>.ID`.
  */
-export function isCallerFilteredVariable(source: string, varName: string, form: string): boolean {
+export function isCallerFilteredVariable(source: string, varName: string, form: string, shape: 'id' | 'record' = 'id'): boolean {
   if (!/^[A-Za-z_]\w*$/.test(varName) || !/^[A-Za-z_]\w*$/.test(form)) return false;
   const code = source.includes('<%') ? islandCode(source) : source;
   const assignRe = new RegExp(`(?<![.\\w])${varName}(?![\\w])\\s*=(?!=)`, 'g');
@@ -266,12 +271,28 @@ export function isCallerFilteredVariable(source: string, varName: string, form: 
     !/^[A-Za-z_]\w*$/.test(rhsForm) ||
     criteria.length === 0 ||
     criteria.includes('[') ||
-    !/^\s*\.\s*ID$/i.test(rhs.slice(closeIdx + 1))
+    (shape === 'id' ? !/^\s*\.\s*ID$/i.test(rhs.slice(closeIdx + 1)) : rhs.slice(closeIdx + 1).trim() !== '')
   ) {
     return false;
   }
   if (rhsForm.toLowerCase() !== form.toLowerCase()) return false;
   return CALLER_FILTER_CRITERIA.test(criteria);
+}
+
+/**
+ * How a record-summary URL names its row, or null when the id is not one of the
+ * proved shapes: a form read `Form[...].ID`, a page parameter, a variable that
+ * holds exactly that read's id, or a variable that holds the caller-filtered
+ * record read and the URL takes its `.ID`. The generated route authorizes the
+ * row it is handed, so every shape stays a read the caller is allowed to make.
+ */
+export function recordSummaryIdShape(idExpr: string, form: string, source: string): { var?: string; record?: boolean } | null {
+  if (new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr)) return {};
+  if (/^input\.[A-Za-z_]\w*$/.test(idExpr)) return {};
+  if (/^[A-Za-z_]\w*$/.test(idExpr)) return isCallerFilteredVariable(source, idExpr, form) ? { var: idExpr } : null;
+  const recordVar = /^([A-Za-z_]\w*)\s*\.\s*ID$/i.exec(idExpr);
+  if (recordVar && isCallerFilteredVariable(source, recordVar[1], form, 'record')) return { var: recordVar[1], record: true };
+  return null;
 }
 
 export function isKnownReportSummaryUrl(url: string, app?: App, source?: string): boolean {
@@ -287,10 +308,7 @@ export function isKnownReportSummaryUrl(url: string, app?: App, source?: string)
   if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return false;
 
   const idExpr = match[2].trim();
-  const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
-  const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
-  const variable = /^[A-Za-z_]\w*$/.test(idExpr) && isCallerFilteredVariable(source ?? '', idExpr, form);
-  return read || param || variable;
+  return recordSummaryIdShape(idExpr, form, source ?? '') !== null;
 }
 
 function findKnownSummaries(source: string, app?: App): KnownSummary[] {
@@ -310,12 +328,8 @@ function findKnownSummaries(source: string, app?: App): KnownSummary[] {
     const criteria = reportCriteria(report.criteria?.trim() || 'true');
     if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) continue;
     const idExpr = match[2].trim();
-    const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
-    const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
-    const isVar = /^[A-Za-z_]\w*$/.test(idExpr) && isCallerFilteredVariable(source, idExpr, form);
-    if (read || param || isVar) {
-      results.push({ report, form, varName: isVar ? idExpr : undefined });
-    }
+    const shape = recordSummaryIdShape(idExpr, form, source);
+    if (shape) results.push({ report, form, varName: shape.var, ...(shape.record ? { record: true } : {}) });
   }
   return results;
 }
