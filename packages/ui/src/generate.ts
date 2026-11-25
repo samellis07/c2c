@@ -23,8 +23,9 @@ import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/s
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
-import { lookupFormats, lookupSorts, type SortDir } from './decorations/lookups.js';
+import { displayChoice, displayTerms, lookupFormats, lookupSorts, type DisplayTerm, type SortDir } from './decorations/lookups.js';
 import { actionDispatchTarget, buildModel, relatedSortKeys, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
+import type { UiElement } from './pages.js';
 import { iconColorRgb, paletteFor } from './theme-map.js';
 import { pwaFiles, pwaServiceWorkerSource } from './pwa.js';
 import { BASE_CSS, SHELL_BACKGROUND } from './styles.js';
@@ -157,7 +158,7 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
   for (const report of model.reports) {
     files.push({
       path: `functions/reports/${slug(report.name)}.mjs`,
-      data: reportStub(app, report, projectionByForm.get(report.form ?? '') ?? ['ROWID']),
+      data: reportStub(app, report, projectionByForm.get(report.form ?? '') ?? ['ROWID'], displayFilterHeads(model, report.name)),
     });
   }
   for (const report of model.reports) {
@@ -731,6 +732,66 @@ async function resolveLookupCriteria(datastore, criteria, principal) {
   const ids = await lookupParentIds(datastore, parent, rest, { op: criteria.op, field: rest, value: criteria.value }, principal);
   if (ids === null) return neverRows();
   return ids.length ? { op: "in", field: head, value: ids } : neverRows();
+}
+`;
+}
+
+/**
+ * A `display` filter leaf: the lookup rows whose shown text equals the value.
+ * The text is composed from the parent rows the caller may read, field by
+ * field, the way a report cell shows it; the leaf then narrows the lookup
+ * column to those rows' ids. A lookup the report was not generated for, a
+ * parent the caller cannot read or a text that matches no row reads nothing.
+ * Needs `lookupDisplays`, `lookupParents`, `parentParts`, readScoped,
+ * composeDisplay and lookupDisplayScope in scope.
+ */
+function lookupDisplayFilterSource(): string {
+  return `// A display filter leaf names a lookup this report filters on and a text.
+function displayLeaf(item, readable) {
+  const field = item.field;
+  if (typeof field !== "string" || typeof item.value !== "string" || !Object.prototype.hasOwnProperty.call(lookupDisplays, field) || !readableField(field, readable)) return null;
+  return { op: "display", field, value: item.value };
+}
+
+// ROWIDs of the parent rows whose composed text is the value, read under the
+// caller's scope on the parent form; null when that read is refused or fails.
+async function lookupDisplayIds(datastore, head, text, principal) {
+  const spec = lookupDisplays[head];
+  const form = lookupParents[head];
+  const scoped = form ? lookupDisplayScope(principal, form, spec.field, { op: "true" }) : null;
+  if (!scoped) return null;
+  const parts = Object.prototype.hasOwnProperty.call(parentParts, form) ? parentParts[form] : {};
+  const ids = [];
+  const page = ${LIMITS.zcqlRowsPerQuery};
+  for (let offset = 0; ; offset += page) {
+    let rows;
+    try {
+      rows = await readScoped(datastore, form, scoped.criteria, offset, page);
+    } catch (err) {
+      return null;
+    }
+    const list = Array.isArray(rows) ? rows : [];
+    for (const row of list) {
+      if (!row || typeof row !== "object" || row.ROWID == null || row.ROWID === "") continue;
+      if (composeDisplay(row, spec.format, parts, scoped.fields) === text) ids.push(String(row.ROWID));
+    }
+    if (list.length < page) break;
+    if (offset + page >= AGGREGATE_ROW_CAP) return null;
+  }
+  return ids;
+}
+
+async function resolveDisplayLeaves(datastore, criteria, principal) {
+  if (!criteria || typeof criteria !== "object") return criteria;
+  if (criteria.op === "and" || criteria.op === "or") {
+    const args = [];
+    for (const arg of criteria.args) args.push(await resolveDisplayLeaves(datastore, arg, principal));
+    return { ...criteria, args };
+  }
+  if (criteria.op === "not") return { ...criteria, arg: await resolveDisplayLeaves(datastore, criteria.arg, principal) };
+  if (criteria.op !== "display") return criteria;
+  const ids = await lookupDisplayIds(datastore, criteria.field, criteria.value, principal);
+  return ids && ids.length ? { op: "in", field: criteria.field, value: ids } : neverRows();
 }
 `;
 }
@@ -2086,13 +2147,46 @@ function unappliedSortTodo(report: UiModel['reports'][number], why: 'staged' | '
   };
 }
 
-function reportStub(app: App, report: UiModel['reports'][number], projection: readonly string[]): string {
+/**
+ * The lookup fields a page embeds the report filtered on, by the text the
+ * report shows for them (`Lookup:display` marker keys), sorted. Only those
+ * reports carry the display filter, so every other report stays as it was.
+ */
+function displayFilterHeads(model: UiModel, report: string): string[] {
+  const heads = new Set<string>();
+  const visit = (elements: readonly UiElement[]): void => {
+    for (const el of elements) {
+      for (const item of el.components ?? []) {
+        if (item.kind !== 'report' || item.name !== report) continue;
+        for (const key of item.params ?? []) if (key.endsWith(':display')) heads.add(key.slice(0, -':display'.length));
+      }
+      visit(el.children);
+    }
+  };
+  for (const page of model.pages) visit(page.elements);
+  return [...heads].sort(); // determinism-allow: the embedded lookup names are sorted on this line
+}
+
+/** Lookup head -> the parent field a lookup reads and the terms its text is composed from, for the heads a page filters on. */
+function lookupDisplaySpecs(app: App, form: string, names: readonly string[]): Record<string, { field: string; format: DisplayTerm[] }> {
+  const out: Record<string, { field: string; format: DisplayTerm[] }> = Object.create(null);
+  for (const head of names) {
+    const lookup = app.forms.find((item) => item.name === form)?.fields.find((item) => item.name === head)?.lookup;
+    if (!lookup?.displayFormat) continue;
+    out[head] = { field: displayChoice(lookup).field, format: displayTerms(lookup.displayFormat) };
+  }
+  return out;
+}
+
+function reportStub(app: App, report: UiModel['reports'][number], projection: readonly string[], displayFilters: readonly string[] = []): string {
   const formName = report.form ?? '';
   const ident = formName && /^[A-Za-z_][A-Za-z0-9_]*$/.test(formName) ? formName : '';
   const base = reportBaseCriteria(app, report);
   const named = namedFilterList(app, report);
   const wantsRelative = criteriaHasRelative(base) || named.some((item) => criteriaHasRelative(item.criteria));
   const criteriaRef = wantsRelative ? 'applied' : 'scoped.criteria';
+  const displaySpecs = lookupDisplaySpecs(app, formName, displayFilters);
+  const filtersByDisplay = Object.keys(displaySpecs).length > 0;
   const columns = report.columns.map((column) => column.field);
   // A Record_Status view column reads the form's machine status column; the
   // row keeps the value under the declared column name, like the ID fill.
@@ -2395,7 +2489,7 @@ export const baseCriteria = ${JSON.stringify(base)};
 export const sqlIdent = ${JSON.stringify(ident)};
 export const columnFields = ${JSON.stringify(columns)};
 export const lookupColumns = ${JSON.stringify(lookups)};
-/** Parent form of each lookup field on this form. A criteria leaf on a lookup display path resolves against it, and a staged display is checked against it. */
+${filtersByDisplay ? `/** Lookup field -> the parent field it reads and the terms its text is composed from: a \`display\` filter leaf compares a value with that text. */\nconst lookupDisplays = ${JSON.stringify(displaySpecs)};\n` : ''}/** Parent form of each lookup field on this form. A criteria leaf on a lookup display path resolves against it, and a staged display is checked against it. */
 export const lookupParents = ${JSON.stringify(parents)};
 /** Stored part column of each lookup parent's composite parts: "Name.first_name" -> "Name_first_name". */
 export const parentParts = ${JSON.stringify(parentParts)};
@@ -2433,7 +2527,7 @@ const FILTER_OPS = new Set(["==", "!=", "<", "<=", ">", ">="]);
 
 function filterLeaf(item, readable) {
   if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-  const field = item.field;
+${filtersByDisplay ? `  if (item.op === "display") return displayLeaf(item, readable);\n` : ''}  const field = item.field;
   // A Parent.Field path resolves through resolveLookupCriteria like the
   // same dotted leaf in a report's own criteria — the lookup's head column
   // must be readable, and an unresolvable path fails closed to neverRows.
@@ -2481,7 +2575,7 @@ ${aggregateHelpers}
 ${scopedReadSource()}
 ${composeDisplaySource()}
 ${lookupCriteriaSource()}
-// A lookup column stores the parent ROWID (a multi lookup a list of them); the
+${filtersByDisplay ? lookupDisplayFilterSource() : ''}// A lookup column stores the parent ROWID (a multi lookup a list of them); the
 // report shows the parent display value instead. One ROWID IN query per lookup
 // column, through the same authorizeRead scope as the lookup endpoint: the
 // caller's record filter is ANDed into the parent query and the display field
@@ -2605,7 +2699,7 @@ ${requirePrincipal()}
         filterCriteria(body.filter, readableFields),
         filterCriteria(body.filters, readableFields),
       ]);
-      const flat = await resolveLookupCriteria(datastore, criteria, principal);
+      const flat = await resolveLookupCriteria(datastore, ${filtersByDisplay ? 'await resolveDisplayLeaves(datastore, criteria, principal)' : 'criteria'}, principal);
       const scoped = authorizeRead(access, principal, formName, flat);
       if (criteriaHasTodo(scoped.criteria)) {
         send(res, 200, {

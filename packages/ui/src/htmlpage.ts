@@ -835,7 +835,7 @@ const PARAM_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
 /** One key of an embed's `params` that fills a field: a bounded literal or a bare read evaluated at render. */
 interface ComponentParam {
   key: string;
-  value: { literal: string } | { read: string };
+  value: { literal: string } | { read: string } | { pieces: ({ read: string } | { literal: string })[] };
 }
 
 /** The field keys a parameterised embed may name: top-level fields of the form (or the report's form). */
@@ -843,6 +843,8 @@ interface EmbedLookup {
   name: string;
   /** `Lookup.Target`: set only when one stored target field holds the display text. */
   path?: string;
+  /** Set when the text the report shows is composed from stored fields of the target form: the key is `Lookup:display`. */
+  display?: true;
 }
 
 function embedForm(app: App, kind: string, name: string) {
@@ -870,9 +872,30 @@ function embedLookupFields(app: App, kind: string, name: string): EmbedLookup[] 
     const terms = lookup.displayFormat ? displayTerms(lookup.displayFormat) : [];
     const shown = terms.length === 0 ? lookup.field : terms.length === 1 && 'ref' in terms[0] ? terms[0].ref : undefined;
     const target = shown && field.subfields.length === 0 ? app.forms.find((item) => item.name === lookup.form)?.fields.find((item) => item.name === shown) : undefined;
-    out.push({ name: field.name, ...(target && target.subfields.length === 0 && !target.lookup ? { path: `${field.name}.${target.name}` } : {}) });
+    const path = target && target.subfields.length === 0 && !target.lookup ? `${field.name}.${target.name}` : undefined;
+    out.push({ name: field.name, ...(path ? { path } : displayComposable(app, field) ? { display: true as const } : {}) });
   }
   return out;
+}
+
+/**
+ * True when a lookup's displayed text is built only from literals and stored
+ * fields of its target form (a name composite's part, a plain field): the
+ * report endpoint composes the same text from the parent rows it may read, so
+ * a filter value can be compared with it. A ref the target form lacks, a
+ * lookup of a lookup or no target form leaves the key counted.
+ */
+function displayComposable(app: App, field: { subfields: readonly unknown[]; lookup?: { form: string; field?: string; displayFormat?: string } }): boolean {
+  const lookup = field.lookup;
+  const parent = lookup ? app.forms.find((item) => item.name === lookup.form) : undefined;
+  if (!lookup || !parent || field.subfields.length > 0) return false;
+  const terms = lookup.displayFormat ? displayTerms(lookup.displayFormat) : [];
+  const refs = terms.flatMap((term) => ('ref' in term ? [term.ref] : []));
+  if (refs.length === 0) return false;
+  return refs.every((ref) => {
+    const top = parent.fields.find((item) => item.name === ref.split('.')[0]);
+    return !!top && !top.lookup && (ref.includes('.') ? top.subfields.some((part) => part.name === ref.split('.')[1]) : top.subfields.length === 0);
+  });
 }
 
 /**
@@ -900,10 +923,25 @@ function componentParams(
   const seenFlags = new Set<string>();
   const params: ComponentParam[] = [];
   const seenKeys = new Set<string>();
+  // One island of a value: a bare read of a record field or a declared page input, checked the same way wherever it stands.
+  const readOf = (slot: string): string | null => {
+    const found = SLOT_TOKEN.exec(slot);
+    const read = found ? (slots[Number(found[1])] ?? '').trim() : '';
+    if (!PARAM_READ.test(read)) return null;
+    const segments = read.split('.');
+    if (segments.some((segment) => PARAM_RESERVED.has(segment.toLowerCase()))) return null;
+    // A page input must be a parameter this snippet declares.
+    if (segments[0] === 'input' && (segments.length < 2 || !own.has(segments[1]))) return null;
+    return read;
+  };
   for (const part of text.split('&')) {
     if (!part) continue;
     const eq = part.indexOf('=');
-    if (eq < 0) return null;
+    // A lone island with no `=` names a key and gives it no value: it filters or fills nothing, but its read was checked.
+    if (eq < 0) {
+      if (SLOT_TOKEN.test(part.trim()) && readOf(part.trim()) !== null) continue;
+      return null;
+    }
     const rawKey = part.slice(0, eq).trim();
     const key = rawKey.toLowerCase();
     const rawValue = part.slice(eq + 1).trim();
@@ -923,28 +961,42 @@ function componentParams(
     const matches = fields.filter((field) => field.toLowerCase() === key);
     const looked = lookups.filter((lookup) => lookup.name.toLowerCase() === key);
     // A form prefill of a lookup would have to pick the option whose label is the text, and a label can name several rows.
-    if (looked.length && (kind === 'form' || !looked[0].path)) return null;
+    if (looked.length && (kind === 'form' || (!looked[0].path && !looked[0].display))) return null;
     // A report filter on a key that is no field would show more records than Creator does; a form prefill of one fills nothing.
     if (matches.length + looked.length > 1 || (matches.length + looked.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
     seenKeys.add(key);
-    const outKey = matches[0] ?? looked[0]?.path;
-    const slot = SLOT_TOKEN.exec(rawValue);
-    if (slot) {
-      const read = (slots[Number(slot[1])] ?? '').trim();
-      if (!PARAM_READ.test(read)) return null;
-      const segments = read.split('.');
-      if (segments.some((segment) => PARAM_RESERVED.has(segment.toLowerCase()))) return null;
-      // A page input must be a parameter this snippet declares.
-      if (segments[0] === 'input' && (segments.length < 2 || !own.has(segments[1]))) return null;
+    const outKey = matches[0] ?? looked[0]?.path ?? (looked[0]?.display ? `${looked[0].name}:display` : undefined);
+    if (SLOT_TOKEN.test(rawValue)) {
+      const read = readOf(rawValue);
+      if (read === null) return null;
       // A key that names no field of the form fills nothing, but its value was checked all the same.
       if (outKey) params.push({ key: outKey, value: { read } });
-    } else if (LITERAL_PARAM.test(rawValue) && !rawValue.includes('\u0001')) {
+    } else if (rawValue.includes('\u0001')) {
+      // Islands joined by an encoded space: one text, the way a person's first and last name are written.
+      const pieces: ({ read: string } | { literal: string })[] = [];
+      for (const piece of rawValue.split(/(\u0001\d+\u0001|%20)/).filter(Boolean)) {
+        if (piece === '%20') pieces.push({ literal: piece });
+        else {
+          const read = readOf(piece);
+          if (read === null) return null;
+          pieces.push({ read });
+        }
+      }
+      if (outKey) params.push({ key: outKey, value: { pieces } });
+    } else if (LITERAL_PARAM.test(rawValue)) {
       if (outKey) params.push({ key: outKey, value: { literal: rawValue } });
     } else {
       return null;
     }
   }
   return { untitled, hidden: [...hidden].sort(), params };
+}
+
+/** A param value as marker text: literals as written, each read encoded when the page renders. */
+function valueMarker(value: ComponentParam['value']): string {
+  if ('literal' in value) return value.literal;
+  if ('read' in value) return `<%=encodeUrl(${value.read})%>`;
+  return value.pieces.map((piece) => valueMarker(piece)).join('');
 }
 
 /**
@@ -1040,7 +1092,7 @@ function embeddedComponents(
       const keys = params.params.map((item) => item.key);
       const component: EmbeddedComponent = { kind: kind as 'form' | 'report', name, ...(keys.length ? { params: keys } : {}) };
       components.push(component);
-      const query = params.params.map((item) => ('literal' in item.value ? `${item.key}=${item.value.literal}` : `${item.key}=<%=encodeUrl(${item.value.read})%>`)).join('&');
+      const query = params.params.map((item) => `${item.key}=${valueMarker(item.value)}`).join('&');
       const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}${params.hidden.length ? `:hide-${params.hidden.join('-')}` : ''}${query ? `?${query}` : ''}`;
       markers.push(marker.replace(/<%=[^%]*%>/g, ''));
       if (!slots.length) return tag.replace(/>$/, ` data-zml="${marker}">`);
@@ -1467,6 +1519,8 @@ function endpointModule(opts: {
   images?: boolean;
   /** `navRoutesSource(app)`: the render resolves a link to one of this app's own routes through `shim.nav.resolve`. */
   routes?: string;
+  /** form -> composite field -> its parts, for the forms the render reads: a stored row carries one column per part. */
+  composites?: Record<string, Record<string, string[]>>;
 }): string {
   const banner = `/**\n${[
     `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to ${opts.hasWrites ? 'an endpoint with setup writes' : 'a read-only endpoint'}.`,
@@ -1519,7 +1573,7 @@ function c2cStr(v) {
     if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return v.toString();
     if (typeof v.label === "string") return v.label;
     if (v.constructor && v.constructor.name === "Decimal") return v.toString();
-    try {
+${opts.composites ? '    // A composite (a name, an address) prints its non-empty parts joined by spaces.\n    if (Object.prototype.hasOwnProperty.call(v, "toString")) return v.toString();\n' : ''}    try {
       return JSON.stringify(v, jsonReplacer);
     } catch (err) {
       return "";
@@ -1785,7 +1839,7 @@ ${opts.hasWrites ? `  // The page renders for any caller the read policy admits;
       dryRun: !live,
       appTimeZone,
       access,
-${opts.hasWrites ? '      adminUserId: mayWrite ? principal.userId || "" : ownerId,\n' : ''}${opts.appCalls ? '      functions,\n' : ''}      ...(datastore ? { datastore } : {}),
+${opts.hasWrites ? '      adminUserId: mayWrite ? principal.userId || "" : ownerId,\n' : ''}${opts.appCalls ? '      functions,\n' : ''}${opts.composites ? `      composites: ${JSON.stringify(opts.composites)},\n` : ''}      ...(datastore ? { datastore } : {}),
     });
     const ctx = runtime.context({ record: input, old: {}, principal, appTimeZone });
     const rendered = await render(ctx${env ? `, { ${[opts.images ? 'files: live ? await liveFileStore(req) : null, bytes: 0' : '', opts.hasWrites ? 'mayWrite' : '', 'notes: []'].filter(Boolean).join(', ')} }` : ''});
@@ -3579,9 +3633,22 @@ export function compileHtmlpage(
       markup: printed || images.reads > 0,
       images: images.reads > 0,
       ...(printed || images.reads > 0 || /#Page:/i.test(server) ? { routes: navRoutesSource(app) } : {}),
+      ...compositesOf(app, [...new Set(forms)].sort()),
     }),
   };
   return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file, ...(fnFiles.length ? { files: fnFiles } : {}) });
+}
+
+/** The composite fields (a name, an address) of the forms a render reads, by form, or nothing when they hold none. */
+function compositesOf(app: App, forms: readonly string[]): { composites?: Record<string, Record<string, string[]>> } {
+  const out: Record<string, Record<string, string[]>> = {};
+  for (const name of forms) {
+    for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
+      if (field.subfields.length === 0 || /^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')) continue;
+      (out[name] ??= {})[field.name] = field.subfields.map((part) => part.name);
+    }
+  }
+  return Object.keys(out).length ? { composites: out } : {};
 }
 
 function islandOrdinal(chunks: Chunk[], target: Chunk): number {

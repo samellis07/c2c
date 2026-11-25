@@ -141,13 +141,14 @@ test('embed parameters that cannot be proven keep the snippet counted', () => {
     ['a call', REPORT_TAG('Name=<%=row.Name.toUpperCase()%>')],
     ['an index', REPORT_TAG('Name=<%=row.Name[0]%>')],
     ['an island with text around it', REPORT_TAG('Name=a<%=row.Name%>')],
-    ['two islands in one value', REPORT_TAG('Name=<%=row.Name%><%=row.Status%>')],
     ['an input that the page does not declare', REPORT_TAG('Name=<%=input.other%>')],
     ['an island in the key', REPORT_TAG('<%=row.Name%>=x')],
     ['an island in another attribute', `<div elName='zc-component' viewLinkName='All_Rows' title='<%=row.Name%>' params='Name=<%=row.Name%>'></div>`],
     ['a repeated params attribute', `<div elName='zc-component' viewLinkName='All_Rows' params='Name=<%=row.Name%>' params='Status=<%=row.Status%>'></div>`],
     ['an unknown component', `<div elName='zc-component' viewLinkName='Nope' params='Name=<%=row.Name%>'></div>`],
-    ['a value that is not a bare read', REPORT_TAG('Name=<%=row.Name%>%20&amp;<%=row.Status%>')],
+    ['an island joined to text outside the encoded space', REPORT_TAG('Name=<%=row.Name%>%2F<%=row.Status%>')],
+    ['a lone island that is not a bare read', REPORT_TAG('Name=<%=row.Name%>&amp;<%=row.Status + "x"%>')],
+    ['a lone word with no value', REPORT_TAG('Name=<%=row.Name%>&amp;Status')],
     ['an island holding a quote', REPORT_TAG(`Name=<%=row["Name"]%>`)],
   ];
   for (const [label, tag] of cases) {
@@ -211,9 +212,9 @@ interface Main {
 }
 
 /** The booted app on the snippet's page, with the server render answering `rendered`. */
-async function painted(snippet: string, rendered: string) {
+async function painted(snippet: string, rendered: string, build: (snippet: string) => App = appWith) {
   const runtime = (await loadRuntime()) as Runtime & { boot(model: unknown, doc: unknown): Promise<void> };
-  const { model } = buildUi(appWith(snippet));
+  const { model } = buildUi(build(snippet));
   assert.deepEqual(snippetTodos(model), []);
   const dom = new JSDOM('<!doctype html><body><main id="main"></main></body>', { url: 'http://localhost/app/index.html#/page/Outer' });
   const bodies: Record<string, unknown>[] = [];
@@ -442,10 +443,39 @@ test('a lookup shown through a one-field displayformat filters on that target fi
   assert.deepEqual(snippetOf(model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account.Account_Name'] }]);
 });
 
-test('a lookup whose text is not exactly one stored target field stays counted', () => {
-  for (const format of ['[First + " " + Last]', '["Acct " + Account_Name]', '[Missing]', '[Account_Name.first]']) {
+test('a lookup shown through text built from several stored fields filters on that text', () => {
+  for (const format of ['[First + " " + Last]', '["Acct " + Account_Name]']) {
+    const { model } = buildUi(lookupApp(format, callsEmbed));
+    assert.deepEqual(snippetTodos(model), [], format);
+    assert.deepEqual(snippetOf(model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account:display'] }], format);
+    assert.match(snippetOf(model)?.html ?? '', /data-zml="component-report:All_Calls\?Account:display="/, format);
+  }
+});
+
+test('a lookup whose text reads a field the target form lacks stays counted', () => {
+  for (const format of ['[Missing]', '[Account_Name.first]', '[First + Missing]']) {
     const { model } = buildUi(lookupApp(format, callsEmbed));
     assert.equal(snippetOf(model)?.components, undefined, format);
     assert.equal(snippetTodos(model).length, 1, format);
+  }
+});
+
+test('a form embed never takes a displayed-text lookup as a key', () => {
+  const tag = `<div elName='zc-component' formLinkName='Calls' params='Account=<%=row.Account_Name%>'>Loading...</div>`;
+  const { model } = buildUi(lookupApp('[First + " " + Last]', `htmlpage Outer1(who)\ncontent\n<%{\n\trow = Accounts[Account_Name == input.who];\n%>\n${tag}\n<% }%>`));
+  assert.equal(snippetOf(model)?.components, undefined);
+  assert.equal(snippetTodos(model).length, 1);
+});
+
+test('a displayed-text marker filters the rows query on the lookup by the decoded text', async () => {
+  const build = (snippet: string) => lookupApp('[First + " " + Last]', snippet);
+  const { main, bodies } = await painted(callsEmbed, `<div data-zml="component-report:All_Calls?Account:display=Ann+Lee"></div>`, build);
+  assert.ok(main.querySelector('section[data-report="All_Calls"]'), main.innerHTML);
+  const query = bodies.find((body) => body.op === 'query');
+  assert.ok(query, JSON.stringify(bodies));
+  assert.deepEqual(query.filters, [{ field: 'Account', op: 'display', value: 'Ann Lee' }]);
+  for (const hostile of ['Account:display=x&Account:display=y', 'Other:display=x', 'Account:displays=x', 'Account:display.Name=x']) {
+    const refused = await painted(callsEmbed, `<div data-zml="component-report:All_Calls?${hostile}"></div>`, build);
+    assert.equal(refused.main.querySelector('section[data-report="All_Calls"]'), null, hostile);
   }
 });
