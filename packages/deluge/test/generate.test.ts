@@ -8677,6 +8677,110 @@ test('attack: a guard-read function whose branch builds a navigation target from
   assert.match(todo!.manualStep ?? '', /Voting_Page has no parameter Secret/);
 });
 
+test('a function builds its navigation URL from a criteria-lookup local, then navigates: lifted into a returned navigate instruction', () => {
+  // The real-world Incident_Tracker gallery app shape: a guard read looks up
+  // a related record's field into a local (`employee_id = Raise_Incident[ID
+  // == input.incident_id].Handled_By;`), then that local feeds the own-app
+  // URL the function navigates to. The lookup's criteria is never resolvable
+  // to a literal at generate time, so the local used to be substituted with
+  // an expression classifyOpenUrlStmt could not read at all ("complex
+  // dynamic expression"), and the whole navigation silently stayed a
+  // counted manual item even though the target route is perfectly safe.
+  const fn: FunctionDef = {
+    name: 'Incident.Closing_Incident',
+    kind: 'creator',
+    signature: 'void Incident.Closing_Incident(int incident_id)',
+    properties: [],
+    deluge: [
+      {
+        text: [
+          'employee_id = Raise_Incident[ID == input.incident_id].Handled_By;',
+          'url = "#Form:Incident_Reporting?Incident_Name=" + incident_id + "&Handled_By=" + employee_id;',
+          'openUrl(url,"popup window");',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Raise_Incident', [plainField('Handled_By')]), plainForm('Incident_Reporting', [plainField('Incident_Name'), plainField('Handled_By')])],
+      functions: [fn],
+    }),
+  );
+  const module = g.files.find((f) => f.path === 'functions/custom/incident-closing-incident.mjs');
+  assert.ok(module, 'the guard read still produces a server module');
+  assert.match(module!.source, /return \{ \["kind"\]: "navigate", \["url"\]: url, \["target"\]: "new" \};/);
+  assert.equal(g.todos.some((t) => t.construct === 'openurl-dropped-with-server-logic'), false);
+});
+
+test('a function navigates with an encodeUrl-wrapped lookup field: lifted into a returned navigate instruction', () => {
+  // The real-world Point_of_Sale gallery app shape: `cust = Customers[ID ==
+  // id]; openUrl(... + encodeUrl(cust.Phone) + ...)`. encodeUrl only
+  // percent-encodes its argument, never changing whether the target route is
+  // safe, so it must not block the lift the bare lookup field already gets.
+  const fn: FunctionDef = {
+    name: 'CustomAction.viewBill',
+    kind: 'creator',
+    signature: 'void CustomAction.viewBill(int currentCustomerID)',
+    properties: [],
+    deluge: [
+      {
+        text: ['cust = Customers[ID == currentCustomerID];', 'openUrl("#Form:Invoice_Lookup?Phone=" + encodeUrl(cust.Phone),"popup window");'].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Customers', [plainField('Phone')]), plainForm('Invoice_Lookup', [plainField('Phone')])],
+      functions: [fn],
+    }),
+  );
+  const module = g.files.find((f) => f.path === 'functions/custom/customaction-viewbill.mjs');
+  assert.ok(module, 'the guard read still produces a server module');
+  assert.match(module!.source, /\["kind"\]: "navigate"/);
+  assert.equal(g.todos.some((t) => t.construct === 'openurl-dropped-with-server-logic'), false);
+});
+
+test('a function navigates with a newly inserted record\'s ID, then navigates: lifted into a returned navigate instruction', () => {
+  // The real-world Project_Tracker gallery app shape:
+  // `qID = insert into Quote [...]; openUrl("#Report:Quote_Interface?quoteIDStr=" + qID, ...)`.
+  // The inserted record's own ID is always a plain string this function
+  // computed itself, not an attacker-chosen value — safe as a query param on
+  // an already-recognized own-app route.
+  const fn: FunctionDef = {
+    name: 'quote.Generate',
+    kind: 'creator',
+    signature: 'void quote.Generate(int projectID)',
+    properties: [],
+    deluge: [
+      {
+        text: ['qID = insert into Quote [ Project = projectID ];', 'openUrl("#Report:Quote_Interface?quoteIDStr=" + qID,"same window");'].join('\n'),
+        span: Z,
+      },
+    ],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Quote', [plainField('Project'), plainField('quoteIDStr')])],
+      reports: [{
+        name: 'Quote_Interface', type: 'list', modifiers: [], form: 'Quote', flags: [],
+        properties: [], columns: [], customActions: [], conditionalFormats: [], filters: [], groupBy: [], sortBy: [],
+        blocks: [], views: [], span: Z,
+      }],
+      functions: [fn],
+    }),
+  );
+  const module = g.files.find((f) => f.path === 'functions/custom/quote-generate.mjs');
+  assert.ok(module, 'the insert still produces a server module');
+  assert.match(module!.source, /\["kind"\]: "navigate"/);
+  assert.equal(g.todos.some((t) => t.construct === 'openurl-dropped-with-server-logic'), false);
+});
+
 test('an if/else of own-app openUrl on a form-typed param is client navigation, not function-untranslated', () => {
   const rejectTravel: FunctionDef = {
     name: 'CustomAction.rejectTravel',

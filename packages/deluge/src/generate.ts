@@ -2384,6 +2384,14 @@ function concatParts(expr: Expr): Expr[] {
   return parts;
 }
 
+/** `encodeUrl(x)` percent-encodes its argument for URL use — strictly safer than the bare value, never less — so it is transparent to this classification: unwrap it to judge the value it wraps. */
+function unwrapEncodeUrl(expr: Expr): Expr {
+  if (expr.kind === 'call' && expr.args.length === 1 && expr.callee.kind === 'name' && expr.callee.name.toLowerCase() === 'encodeurl') {
+    return unwrapEncodeUrl(expr.args[0]!);
+  }
+  return expr;
+}
+
 function formField(form: Form | undefined, fieldName: string): Field | undefined {
   return form?.fields.find((item) => item.name.toLowerCase() === fieldName.toLowerCase());
 }
@@ -2989,7 +2997,7 @@ function classifyOpenUrlStmt(
     return expr;
   };
   const rawParts = concatParts(openUrlStmt.args[0]!);
-  const parts: Expr[] = expandInterpolatedParts(rawParts, substituteArg);
+  const parts: Expr[] = expandInterpolatedParts(rawParts, substituteArg).map(unwrapEncodeUrl);
 
   if (parts[0]?.kind === 'string' && OWN_APP_HOST.test(parts[0].value) && isAppUri(parts[1])) {
     parts.splice(0, 2);
@@ -3079,6 +3087,33 @@ function classifyOpenUrlStmt(
       } else {
         return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
       }
+    } else if (
+      part.kind === 'member' &&
+      /^[A-Za-z_]\w*$/.test(part.property) &&
+      part.object.kind === 'criteria' &&
+      part.object.object.kind === 'name'
+    ) {
+      // `Form[Criteria].Field` — a single-record lookup read (e.g. a guard
+      // read's own local, substituted back in by substituteLocalReads). The
+      // criteria is never inspected here: it is always a server-side,
+      // read-only query, so its result is treated as an opaque dynamic
+      // value — the same placeholder treatment as `input.Field` above — not
+      // part of the URL's own literal route skeleton.
+      const lookupFormName = part.object.object.name.toLowerCase();
+      const lookupForm = app.forms.find((f) => f.name.toLowerCase() === lookupFormName);
+      const lookupField = lookupForm ? formField(lookupForm, part.property) : undefined;
+      if (!lookupForm || (part.property !== 'ID' && !lookupField)) {
+        return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
+      }
+      text += `\u0000${reads.length}\u0000`;
+      reads.push(part.property);
+    } else if (part.kind === 'insert') {
+      // `qID = insert into Form [...]; openUrl("...&ID=" + qID, ...)` — the
+      // new record's own ID, a plain string this function always computes
+      // itself. Like the lookup read above, this is an opaque dynamic value,
+      // not part of the URL's literal route skeleton.
+      text += `\u0000${reads.length}\u0000`;
+      reads.push('insert');
     } else {
       return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
     }
