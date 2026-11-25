@@ -22,7 +22,7 @@ export interface MarkupFlow {
 const MARKUP_TEXT = /<[A-Za-z/!]/;
 
 /** `thisapp.<A>.<B>` call target, else null. */
-function thisappPath(callee: Expr): string[] | null {
+export function thisappPath(callee: Expr): string[] | null {
   const path: string[] = [];
   let cur: Expr = callee;
   while (cur.kind === 'member') {
@@ -48,7 +48,7 @@ function childStmts(s: Stmt): Stmt[] {
   }
 }
 
-function allStmts(body: Stmt[]): Stmt[] {
+export function allStmts(body: Stmt[]): Stmt[] {
   return body.flatMap((s) => [s, ...allStmts(childStmts(s))]);
 }
 

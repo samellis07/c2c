@@ -3678,7 +3678,7 @@ const ACCOUNTS = `\tform Accounts
 \t\t)
 \t}`;
 
-test('shape C: non-administrator profile is refused before the write', async () => {
+test('shape C: a non-administrator profile gets the page and never the write', async () => {
   const snippet = `htmlpage hp1()
 content
 <p>
@@ -3701,7 +3701,8 @@ Ready
   const live = await liveStore({});
   try {
     const out = await invoke(mod.default as never, { ...CLERK, body: { input: {} } });
-    assert.equal(out.status, 403, JSON.stringify(out.body));
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.match(String(out.body.html), /Ready/, 'the page still renders for a caller who may not write');
     const rows = live.tables.get('Accounts') ?? [];
     assert.equal(rows.length, 0);
   } finally {
@@ -3915,8 +3916,8 @@ test('shape C endpoint accepts only this app\'s configured page origins, before 
     const malformed = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin: 'not-a-url' } });
     assert.equal(malformed.status, 403);
     const clerk = await invoke(mod.default as never, { ...CLERK });
-    assert.equal(clerk.status, 403);
-    assert.equal((live.tables.get('Accounts') ?? []).length, 2);
+    assert.equal(clerk.status, 200, 'a profile that may not write still gets the page');
+    assert.equal((live.tables.get('Accounts') ?? []).length, 2, 'and writes nothing');
   } finally {
     live.restore();
   }
@@ -4630,4 +4631,79 @@ test('a caller whose profile may not read the image field is refused and nothing
   assert.equal(out.status, 403, JSON.stringify(out.body));
   assert.deepEqual(signed, []);
   assert.deepEqual(fetched, []);
+});
+
+// A setup write may sit in an app function the page calls, and the existence check may be a count held in a name.
+
+const addAdminFn = { name: 'Setup.addAdmin', signature: 'void Setup.addAdmin()', deluge: 'insert into Accounts [\n  Email = zoho.adminuserid\n  Role = "Admin"\n]' };
+const COUNTED_SETUP = `htmlpage hp1()
+content
+<p>
+<%
+adminCount = Accounts[Email == zoho.adminuserid].count();
+if (adminCount == 0) {
+  thisapp.Setup.addAdmin();
+}
+%>
+Ready
+</p>`;
+
+async function renderSetup(user: typeof USER, extra: { snippet?: string; fns?: (typeof addAdminFn)[] } = {}) {
+  const readGrant = { Clerk: { Accounts: { read: true } } };
+  const snippet = extra.snippet ?? COUNTED_SETUP;
+  const app = appWithFns(extra.fns ?? [addAdminFn], `${ACCOUNTS}\n${pageWithSnippet(snippet)}`);
+  const ui = generateUi(app);
+  assert.deepEqual(ui.model.todos, []);
+  const uiPaths = new Set(ui.files.map((f) => f.path));
+  const files = [...ui.files, ...generate(app).files.filter((f) => !uiPaths.has(f.path)).map((f) => ({ path: f.path, data: f.source }))];
+  rewritePolicy(files, readGrant);
+  const mod = await loadTree(files, uiSnippetFiles(ui.model)[0]!.path);
+  const live = await liveStore({});
+  try {
+    const first = await invoke(mod.default as never, { ...user, body: { input: {} } });
+    const second = await invoke(mod.default as never, { ...user, body: { input: {} } });
+    return { first, second, rows: live.tables.get('Accounts') ?? [] };
+  } finally {
+    live.restore();
+  }
+}
+
+test('an owner who loads a page whose count check calls an insert-only function creates the record once', async () => {
+  const { first, second, rows } = await renderSetup(USER);
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  assert.match(String(first.body.html), /Ready/);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.Email, 'u1');
+  assert.equal(rows[0]!.Role, 'Admin');
+});
+
+test('a caller who is not the owner gets the page and the setup write is skipped', async () => {
+  const note = ['a setup write was skipped because the caller may not run it'];
+  for (const user of [CLERK, { user: { profile: 'Administrator', loginUser: 'eve@example.com', userId: 'u3' } }]) {
+    const { first, rows } = await renderSetup(user);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.match(String(first.body.html), /Ready/);
+    assert.deepEqual(first.body.notes, note);
+    assert.equal(rows.length, 0, `${user.user.userId} wrote a record`);
+  }
+});
+
+test('a setup call stays a snippet unless its callee only inserts and the check guards it', () => {
+  const stays: Array<[string, (typeof addAdminFn)[], string]> = [
+    ['callee takes a parameter', [{ ...addAdminFn, signature: 'void Setup.addAdmin(string who)' }], COUNTED_SETUP],
+    ['callee returns a value', [{ ...addAdminFn, signature: 'int Setup.addAdmin()' }], COUNTED_SETUP],
+    ['callee also mails', [{ ...addAdminFn, deluge: `${addAdminFn.deluge}\nsendmail [ from: zoho.adminuserid to: "a@b.c" subject: "x" message: "y" ]` }], COUNTED_SETUP],
+    ['callee updates', [{ ...addAdminFn, deluge: 'r = Accounts[Role == "Admin"];\nr.Role = "Owner";' }], COUNTED_SETUP],
+    ['count is reassigned', [addAdminFn], COUNTED_SETUP.replace('if (adminCount == 0)', 'adminCount = 0;\nif (adminCount == 0)')],
+    ['count is bound in a branch', [addAdminFn], COUNTED_SETUP.replace('adminCount = Accounts[Email == zoho.adminuserid].count();', 'if (input.x == 1) {\nadminCount = Accounts[Email == zoho.adminuserid].count();\n}')],
+    ['count is not zero-tested', [addAdminFn], COUNTED_SETUP.replace('adminCount == 0', 'adminCount > 0')],
+    ['count reads another field', [addAdminFn], COUNTED_SETUP.replace('Email == zoho.adminuserid', 'Role == "Admin"')],
+    ['insert binds the owner under a caller check', [addAdminFn], COUNTED_SETUP.replace(/zoho\.adminuserid\]/, 'zoho.loginuserid]')],
+  ];
+  for (const [label, fns, snippet] of stays) {
+    const { model } = buildUi(appWithFns(fns, `${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], label);
+    assert.equal(uiSnippetFiles(model).length, 0, label);
+  }
 });

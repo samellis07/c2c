@@ -13,8 +13,10 @@
  *        slot with no other operand — bound once to a variable directly, or
  *        spelled inline, and never reassigned. Under (b) the only write is an
  *        `insert into` the same form that binds the checked field exactly once
- *        to `zoho.loginuserid` (the server resolves it to the authenticated
- *        caller, never a client value). No other identity-like field in that
+ *        to `zoho.loginuserid` or to the slot the check read (the server
+ *        resolves either to the authenticated caller, never a client value;
+ *        an administrator check also requires the caller to be the owner).
+ *        No other identity-like field in that
  *        insert may read a client value. A `zoho.adminuserid`-scoped check (b)
  *        additionally requires the caller to be the application owner at
  *        runtime (the endpoint compares the principal to C2C_ADMIN_USER_ID).
@@ -29,6 +31,7 @@
 
 import type { Expr, Script, Stmt } from '../../deluge/src/ast.js';
 import {
+  appCallPath,
   assignsCriteriaField,
   assignsDatastoreRead,
   fieldNameOk,
@@ -301,11 +304,26 @@ function collectAssigns(ast: Script, meta: Map<Stmt, StmtMeta>): Map<string, Ass
 }
 
 /**
+ * The value a name is bound to by exactly one `=` assignment that precedes and
+ * dominates the if (its enclosing chain is a prefix of the if's chain, so no
+ * branch can skip it and no reassignment is possible), else null.
+ */
+function boundOnce(name: string, ifMeta: StmtMeta, assigns: Map<string, AssignInfo[]>): Expr | null {
+  const binds = assigns.get(name.toLowerCase());
+  if (!binds || binds.length !== 1 || binds[0]!.op !== '=') return null;
+  const bind = binds[0];
+  if (bind.meta.seq >= ifMeta.seq || bind.meta.chain.length > ifMeta.chain.length) return null;
+  for (let i = 0; i < bind.meta.chain.length; i++) {
+    if (bind.meta.chain[i] !== ifMeta.chain[i]) return null;
+  }
+  return bind.value;
+}
+
+/**
  * The provisioning existence check: `read.count() == 0` / `read.count() <= 0`
- * and nothing else. The receiver is an inline `Form[Field == zoho.*userid]`
- * read or a variable bound exactly once to that read by an assignment that
- * precedes and dominates the if (its enclosing chain is a prefix of the
- * if's chain, so no branch can skip it and no reassignment is possible).
+ * and nothing else, or the same test on a name bound once to `read.count()`.
+ * The receiver is an inline `Form[Field == zoho.*userid]` read or a variable
+ * bound once, before and above the if, to that read.
  */
 function provisioningRead(
   test: Expr,
@@ -316,21 +334,20 @@ function provisioningRead(
   if (test.kind !== 'binary' || (test.op !== '==' && test.op !== '<=')) return null;
   const right = unwrap(test.right);
   if (right.kind !== 'number' || Number(right.text) !== 0) return null;
-  const left = unwrap(test.left);
+  let left = unwrap(test.left);
+  if (left.kind === 'name') {
+    const counted = boundOnce(left.name, ifMeta, assigns);
+    if (!counted) return null;
+    left = unwrap(counted);
+  }
   if (left.kind !== 'call' || left.args.length !== 0) return null;
   const callee = unwrap(left.callee);
   if (callee.kind !== 'member' || callee.property.toLowerCase() !== 'count') return null;
   const recv = unwrap(callee.object);
   if (recv.kind === 'criteria') return identityRead(recv);
   if (recv.kind !== 'name') return null;
-  const binds = assigns.get(recv.name.toLowerCase());
-  if (!binds || binds.length !== 1 || binds[0]!.op !== '=') return null;
-  const bind = binds[0];
-  if (bind.meta.seq >= ifMeta.seq || bind.meta.chain.length > ifMeta.chain.length) return null;
-  for (let i = 0; i < bind.meta.chain.length; i++) {
-    if (bind.meta.chain[i] !== ifMeta.chain[i]) return null;
-  }
-  return identityRead(bind.value);
+  const read = boundOnce(recv.name, ifMeta, assigns);
+  return read ? identityRead(read) : null;
 }
 
 type WriteGuard =
@@ -379,7 +396,9 @@ function writeExprOk(e: Expr, guard: WriteGuard, assigns: Map<string, AssignInfo
   const form = unwrap(e.form);
   if (form.kind !== 'name' || form.name.toLowerCase() !== guard.read.form.toLowerCase()) return false;
   const checked = e.entries.filter((en) => en.key.toLowerCase() === guard.read.field.toLowerCase());
-  if (checked.length !== 1 || identityProp(checked[0]!.value) !== 'loginuserid') return false;
+  // The caller's own id, or the id the check read: under an administrator check the endpoint requires the caller to be the owner.
+  const bound = identityProp(checked[0]?.value as Expr);
+  if (checked.length !== 1 || (bound !== 'loginuserid' && bound !== guard.read.prop)) return false;
   return !e.entries.some((en) => IDENTITY_FIELD.test(en.key) && readsClientInput(en.value, assigns));
 }
 
@@ -665,12 +684,18 @@ export function shapeCStmtOk(s: Stmt): boolean {
 
 /**
  * Allows READ_ONLY_SHIM plus datastore.insert, datastore.update, and
- * datastore.setField, ensuring no functions.* and no unshimmed awaits.
+ * datastore.setField, ensuring no functions.* and no unshimmed awaits. A
+ * `thisapp.<fn>()` call passes only when `appCall` proves its callee read-only.
  */
-export function shapeCServerOk(server: string): boolean {
+export function shapeCServerOk(server: string, appCall?: (path: string[]) => boolean): boolean {
   if (/\bfunctions\./.test(server)) return false;
   for (const match of server.matchAll(/\bshim\.([A-Za-z_][\w.]*)\s*\(/g)) {
     const name = match[1] ?? '';
+    if (name === 'thisapp.call' && appCall) {
+      const path = appCallPath(server.slice((match.index ?? 0) + match[0].length));
+      if (!path || !appCall(path)) return false;
+      continue;
+    }
     if (!readOnlyShim(name) && !SHAPE_C_SHIM.has(name)) return false;
   }
   if (assignsDatastoreRead(server) || mutatesFetchedRead(server)) return false;
