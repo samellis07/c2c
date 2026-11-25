@@ -1691,8 +1691,32 @@ function scriptTodos(markup: string): string[] {
   return model.todos.filter((todo) => /<script> element/.test(todo.reason)).map((todo) => todo.reason);
 }
 
-test('a Bootstrap 3 script stays a counted removed script: a lifecycle attribute or a hook in another snippet could still act', () => {
-  assert.equal(scriptTodos(`<p>Hi</p><script src="${BOOTSTRAP_JS}" integrity="sha384-x" crossorigin="anonymous"></script>`).length, 1);
+function scriptTodosIn(pages: string[], functions = ''): string[] {
+  const body = pages
+    .map((html, i) => `\t\tpage P${i}\n\t\t{\n\t\t\tdisplayname = "P${i}"\n\t\t\tContent="${delugeString(`<zml><dsp id='s${i}'><![CDATA[${html}]]></dsp></zml>`)}"\n\t\t}\n`)
+    .join('');
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n${body}\t}\n${functions}}\n`));
+  return buildModel(app)
+    .todos.filter((todo) => /<script> element/.test(todo.reason))
+    .map((todo) => todo.name);
+}
+
+test('a Bootstrap 3 script in an app with no hook anywhere starts nothing, so removing it is not a loss', () => {
+  assert.deepEqual(scriptTodos(`<p>Hi</p><script src="${BOOTSTRAP_JS}" integrity="sha384-x" crossorigin="anonymous"></script>`), []);
+  const { html } = pageModel([`<p>Hi</p><script src="${BOOTSTRAP_JS}"></script>`]);
+  assert.doesNotMatch(html[0]?.html ?? '', /script|bootstrap/i);
+});
+
+test('a Bootstrap 3 script stays a counted removed script when any text in the app could hand it work', () => {
+  const lone = `<script src="${BOOTSTRAP_JS}"></script>`;
+  const hooks = ['<a data-toggle="modal" data-target="#m">Open</a>', '<b onclick="go()">x</b>', '<i>jQuery</i>', '<u>&#100;ata-toggle</u>'];
+  for (const hook of hooks) {
+    // the hook sits in a sibling snippet, on another page of the app, or in a function body
+    assert.equal(scriptTodos(`${lone}<p>x</p>`.concat(hook)).length, 1, hook);
+    assert.deepEqual(scriptTodosIn([lone, hook]), ['P0.dsp'], hook);
+    assert.deepEqual(scriptTodosIn([lone], `\tfunctions\n\t{\n\t\tvoid a.b()\n\t\t{\n\t\t\tinfo "${delugeString(hook)}";\n\t\t}\n\t}\n`), ['P0.dsp'], hook);
+  }
+  assert.deepEqual(scriptTodosIn([lone, '<p>plain</p>']), []);
   assert.equal(scriptTodos(`<script src="${BOOTSTRAP_JS}" onload="$('#m').modal('show')"></script>`).length, 1);
 });
 

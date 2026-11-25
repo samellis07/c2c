@@ -29,7 +29,7 @@ import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
-import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, inlineConstantStyleCalls, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, STYLE_VALUE_VAR_PREFIX, styleBranchId, styleBranchMarkers, styleValues, styleValueUnit } from './pages.js';
+import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, appHasNoScriptHook, droppedStyles, inlineConstantStyleCalls, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, STYLE_VALUE_VAR_PREFIX, styleBranchId, styleBranchMarkers, styleValues, styleValueUnit } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
@@ -4027,7 +4027,7 @@ export function compileHtmlpage(
     const staticMarkup = chunks.map((c) => c.text).join('');
     if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
     const droppedTags: string[] = [];
-    const html = sanitizeSnippet(staticMarkup, undefined, droppedTags);
+    const html = sanitizeSnippet(staticMarkup, undefined, droppedTags, appHasNoScriptHook(app));
     return withIncludes({ ok: true, staticOnly: true, html, ...(droppedTags.length ? { droppedTags } : {}), ...(fnFiles.length ? { files: fnFiles } : {}) });
   }
   // Legacy exports sometimes wrap entirely static markup in an empty
@@ -4050,7 +4050,7 @@ export function compileHtmlpage(
       .join('');
     if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
     const droppedTags: string[] = [];
-    const html = sanitizeSnippet(staticMarkup, undefined, droppedTags);
+    const html = sanitizeSnippet(staticMarkup, undefined, droppedTags, appHasNoScriptHook(app));
     return withIncludes({
       ok: true,
       staticOnly: true,
@@ -4167,7 +4167,7 @@ export function compileHtmlpage(
   for (const chunk of chunks) combined += chunk.kind === 'static' ? chunk.text : marker(islandOrdinal(chunks, chunk), chunk.context === 'style-fn');
   const nIslands = islands.length;
   const droppedTags: string[] = [];
-  const sanitized = sanitizeSnippet(combined, undefined, droppedTags);
+  const sanitized = sanitizeSnippet(combined, undefined, droppedTags, appHasNoScriptHook(app));
   MARK_SPLIT.lastIndex = 0;
   MARK_MATCH.lastIndex = 0;
   const pieces = sanitized.split(MARK_SPLIT);
