@@ -4948,29 +4948,16 @@ test('a duration field property stays a silent drop on a non-video, non-audio fi
   );
 });
 
-test('a show onload field property on a scan field is listed through a dedicated UI todo', () => {
+test('a show onload field property on a scan field is generated, not listed or dropped', () => {
   const withShowOnload = appWithField({
     ...field('Code', 'text'),
     flags: ['qr scan'],
     properties: [{ key: 'show onload', value: 'true', span: Z }],
   });
-  // The generator always notes it, so the audit passes.
-  assert.deepEqual(
-    auditApp(withShowOnload).filter((d) => d.name.includes('show onload')),
-    [],
-  );
-  const todo = collectOutputs(withShowOnload).model.todos.find((t) => t.name === 'Orders.Code property show onload');
-  assert.ok(todo, 'a UI todo names the show onload setting');
-  assert.ok(todo.manualStep, 'the todo names a manual step');
-
-  // Without the note, the same setting is a silent drop.
-  const unlisted = collectOutputs(withShowOnload);
-  unlisted.model = { ...unlisted.model, todos: [] };
-  const drops = auditApp(withShowOnload, unlisted);
-  assert.deepEqual(
-    drops.map((d) => d.name),
-    ['Orders.Code property show onload'],
-  );
+  const outputs = collectOutputs(withShowOnload);
+  assert.equal(outputs.model.todos.some((t) => t.name.includes('show onload')), false);
+  assert.deepEqual(auditApp(withShowOnload, outputs).filter((d) => d.name.includes('show onload')), []);
+  assert.equal(rowStatus(withShowOnload, outputs, 'Orders.Code property show onload'), 'emitted');
 });
 
 test('a show onload field property on an image field is listed through a dedicated UI todo', () => {
@@ -5166,7 +5153,7 @@ test('a target field property stays a silent drop on a non-image field', () => {
   );
 });
 
-test('camera and show gallery on a scan field are counted; switch camera is generated', () => {
+test('camera, switch camera and show gallery on a scan field are generated', () => {
   const scanned = appWithField({
     ...field('Code', 'text'),
     flags: ['qr scan'],
@@ -5176,23 +5163,12 @@ test('camera and show gallery on a scan field are counted; switch camera is gene
       { key: 'show gallery', value: 'true', span: Z },
     ],
   });
-  assert.deepEqual(
-    auditApp(scanned).filter((d) => /camera|gallery/.test(d.name)),
-    [],
-  );
-  const todos = collectOutputs(scanned).model.todos.filter((t) => /camera|gallery/.test(t.name));
-  assert.deepEqual(
-    todos.map((t) => t.name).sort(),
-    ['Orders.Code property camera', 'Orders.Code property show gallery'],
-  );
-  assert.ok(todos.every((t) => t.manualStep), 'each scan camera setting names a manual step');
-
-  const unlisted = collectOutputs(scanned);
-  unlisted.model = { ...unlisted.model, todos: [] };
-  assert.deepEqual(
-    auditApp(scanned, unlisted).filter((d) => /camera|gallery/.test(d.name)).map((d) => d.name).sort(),
-    ['Orders.Code property camera', 'Orders.Code property show gallery'],
-  );
+  const outputs = collectOutputs(scanned);
+  assert.equal(outputs.model.todos.some((t) => /camera|gallery/.test(t.name)), false);
+  assert.deepEqual(auditApp(scanned, outputs).filter((d) => /camera|gallery/.test(d.name)), []);
+  for (const name of ['camera', 'switch camera', 'show gallery']) {
+    assert.equal(rowStatus(scanned, outputs, `Orders.Code property ${name}`), 'emitted', name);
+  }
 });
 
 test('camera settings on a field that does not scan stay silent drops', () => {
@@ -5232,7 +5208,7 @@ test('switchCamera is serialized only on a scan field', () => {
   }
 });
 
-test('switch camera and show gallery set to false on a scan field are proved, and a secondary camera is counted', () => {
+test('switch camera and show gallery set to false on a scan field are proved, and an unsupported lens is counted', () => {
   const off = appWithField({
     ...field('Code', 'text'),
     flags: ['qr scan'],
@@ -5248,7 +5224,7 @@ test('switch camera and show gallery set to false on a scan field are proved, an
     ...field('Code', 'number'),
     properties: [
       { key: 'qrcode', value: 'true', span: Z },
-      { key: 'camera', value: 'secondary', span: Z },
+      { key: 'camera', value: 'wide', span: Z },
     ],
   });
   assert.equal(rowStatus(secondary, collectOutputs(secondary), 'Orders.Code property camera'), 'counted');
