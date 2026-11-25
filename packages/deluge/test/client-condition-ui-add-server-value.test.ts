@@ -48,13 +48,17 @@ test('a local bound to a read-only app call feeds ui.add through the client call
   }
 });
 
-test('a local bound to a writing app call keeps the counted todo', () => {
+test('a local bound to a writing app call is never a client call: the server run calls it once', () => {
   for (const [text, fns] of [
     ['room_map = thisapp.Rooms.book(input.Kind);\ninput.Room:ui.add(room_map.get("Rooms"));', [WRITER]],
   ] as [string, FunctionDef[]][]) {
     const g = build(text, fns);
-    assert.equal(todos(g).length, 1, text);
-    assert.match(client(g), /shim\.todo\(ctx, "client-condition-uses-server"\)/, text);
+    assert.equal(todos(g).length, 0, text);
+    assert.doesNotMatch(client(g), /shim\.client\.call\(|shim\.todo\(|thisapp/, text);
+    assert.match(client(g), /op: "serverEffect"/, text);
+    const server = stripComments(g.files.find((f) => f.path === 'functions/aio/orders/on-load.mjs')!.source);
+    assert.equal(server.split('shim.thisapp.call(').length - 1, 1, text);
+    assert.match(server, /shim\.client\.effect\(ctx, "e\d+", \{ op: "ui", method: "add", target: \["Room"\]/, text);
   }
 });
 

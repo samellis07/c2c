@@ -252,11 +252,11 @@ test('a guarded write is never hoisted into a page prefetch', async (t) => {
   // The write stays on the server path, under its source guard.
   const srv = stripComments(server.source);
   assert.match(srv, /if \(\(await shim\.datastore\.aggregate\([^)]*\) <= 0\)\) \{\s*var reecID = await shim\.datastore\.insert\(ctx, "Add_User"/);
-  // The client keeps the :ui.add under the prefetched slot, not the insert id.
+  // The client keeps a marker under the prefetched slot; the server run, after its insert, answers with the :ui.add.
   const cli = stripComments(client.source);
-  assert.doesNotMatch(cli, /datastore\.insert/);
-  assert.match(cli, /if \(slots\["c\d+"\]\)/);
-  assert.match(cli, /op: "ui", method: "add"/);
+  assert.doesNotMatch(cli, /datastore\.insert|reecID/);
+  assert.match(cli, /if \(slots\["c\d+"\]\) \{\s*actions\.push\(\{ op: "serverEffect", key: "e\d+" \}\);/);
+  assert.match(srv, /var reecID = await shim\.datastore\.insert\(ctx, "Add_User"[^]*shim\.client\.effect\(ctx, "e\d+", \{ op: "ui", method: "add", target: \["Organizers"\], args: \[reecID\] \}\);/);
 });
 
 test('insert-bearing on click and on-load thisapp.call keep writes off the prefetch', async (t) => {

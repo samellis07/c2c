@@ -41,9 +41,12 @@ test('a function that trims a list built from a column read is read-only for a c
   assert.equal(todos(g).length, 0);
 });
 
-test('a function that trims a fetched record collection keeps the counted todo', () => {
+test('a function that trims a fetched record collection is not a client call: the server run evaluates it once', () => {
   const g = build('room_map = thisapp.Rooms.alias(input.Kind);\ninput.Room:ui.add(room_map.get("Rooms"));', [ALIAS]);
-  assert.equal(todos(g).length, 1);
+  assert.equal(todos(g).length, 0);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!.source;
+  assert.doesNotMatch(client, /shim\.client\.call\(/);
+  assert.match(client, /op: "serverEffect"/);
 });
 
 const AVAIL = fn('Rooms.hasKind', 'bool Rooms.hasKind(string kind)', 'rows = Rooms[Kind == kind];\nfor each r in rows.Name\n{\n\tif(r.Name == "Main")\n\t{\n\t\treturn true;\n\t}\n}\nreturn false;');
