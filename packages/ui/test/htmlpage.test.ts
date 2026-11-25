@@ -4563,6 +4563,19 @@ test('a constant style element a text island prints is carried as page CSS and n
   assert.deepEqual(notes, []);
 });
 
+test('a font element in a markup value keeps a safe colour and drops any other attribute', async () => {
+  const tint = { name: 'Util.tint', signature: 'string Util.tint(string c)', deluge: 'return "<font color=\'" + c + "\' face=\'x\'>Pending</font>";' };
+  const snippet = `htmlpage hp1()\ncontent\n<%\ntinted = thisapp.Util.tint(input.c);\n%>\n<%= tinted %>`;
+  const app = appWithFns([tint], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  assert.equal(compileHtmlpage(app, 'Home', 'hp1', snippet).ok, true);
+  const green = await renderPage(app, snippet, { c: 'green' });
+  assert.match(green.html, /<font color="green">Pending<\/font>/);
+  assert.doesNotMatch(green.html, /&lt;font/);
+  const hostile = await renderPage(app, snippet, { c: 'red" onmouseover="x' });
+  assert.match(hostile.html, /<font>Pending<\/font>/);
+  assert.doesNotMatch(hostile.html, /onmouseover/);
+});
+
 test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
   const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "<li>" + thisapp.Util.wrap(input.q) + "</li>";\n%>\n<ul><%= row %></ul>`;
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
