@@ -18,18 +18,29 @@ const DROPPED_TAGS = new Set([
 
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'title']),
-  input: new Set(['id', 'type']),
+  input: new Set(['type', 'checked']),
   label: new Set(['for']),
   img: new Set(['src', 'alt', 'title', 'width', 'height']),
   font: new Set(['color', 'face', 'size']),
   td: new Set(['colspan', 'rowspan', 'title']),
   th: new Set(['colspan', 'rowspan', 'title']),
   ol: new Set(['start', 'title']),
-  '*': new Set(['class', 'title']),
+  '*': new Set(['class', 'title', 'id']),
 };
 
 /** Ids the page shell owns: a snippet control may not take one (getElementById would find it first, or a label for it would click a shell button). */
 const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title']);
+
+/**
+ * An id (or a label's `for`) a snippet may keep: one bounded token, a letter then letters, digits, `_` or `-`, at most 64 long, and
+ * never a shell id. The generated render builds a computed id from an encoded token, so the same rule closes quote, space, `#` or URL text
+ * in a value. The generator and the browser runtime keep identical copies.
+ */
+const ID_TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+function idTokenOk(value: unknown): boolean {
+  const text = String(value ?? '');
+  return ID_TOKEN.test(text) && !SHELL_IDS.has(text.toLowerCase());
+}
 
 /**
  * Classes a shell stylesheet lifts out of flow (fixed, absolute or z-indexed):
@@ -151,7 +162,12 @@ function cleanNode(node: Node, doc: Document): Node | null {
   for (const attr of Array.from(element.attributes)) {
     const name = attr.name.toLowerCase();
     if (!allowedAttr(tag, name)) continue;
-    if ((name === 'id' || (tag === 'label' && name === 'for')) && SHELL_IDS.has(String(attr.value).trim().toLowerCase())) continue;
+    if ((name === 'id' || (tag === 'label' && name === 'for')) && !idTokenOk(attr.value)) continue;
+    if (name === 'checked') {
+      // A boolean: the initial state of a checkbox, whatever text the author gave it.
+      out.setAttribute('checked', '');
+      continue;
+    }
     if ((name === 'href' || name === 'src') && !(tag === 'img' && name === 'src' && DATA_IMAGE_SRC.test(attr.value)) && !safeUrl(attr.value)) continue;
     if (name === 'style' && dangerousStyle(attr.value)) continue;
     if (name === 'class') {
