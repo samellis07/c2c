@@ -732,6 +732,8 @@ interface Scope {
   navCapture: boolean;
   /** TranslateOptions.serverEffects: the client posts the server half and applies the effects it answers with. */
   serverEffects: boolean;
+  /** Subforms whose `insert` the server run answers as an effect: the browser holds no copy of their rows. */
+  subformEffects: Set<string>;
   /** Raw source, for comment-tail lookup. */
   src: string;
   /**
@@ -3291,6 +3293,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     noClient: options.serverOnly ?? false,
     navCapture: !!options.navCapture && !!options.serverOnly,
     serverEffects: !!options.serverEffects && !options.serverOnly,
+    subformEffects: new Set(),
     src,
     commentTails: commentTails(src),
     schema: options.schema,
@@ -3693,19 +3696,19 @@ function serverOnlyAction(parts: { todo: boolean; constructs: string[] }[], span
 
 /**
  * Client code that only binds plain locals: each line is a comment, a brace
- * or else, an `if` head, `[var ]name = expr;`, or a list update `shim.list.<mutator>(name, …)`
+ * or else, an `if` head, `[var ]name = expr;`, a field write on a row of `rowVars`, or a list update `shim.list.<mutator>(name, …)`
  * (the caller taints the list, so a later client read is a server read). An
  * expression may call only the pure shim helpers (a whole-namespace entry or a
  * single helper of the element allowlist, never `each` or a list mutator), and never awaits, assigns, or touches
  * `input`, `row` or `actions`. Such a half has nothing the client can show or send.
  */
-function clientBindsLocalsOnly(code: string): boolean {
+function clientBindsLocalsOnly(code: string, rowVars: ReadonlySet<string> = new Set()): boolean {
   // Maps and lists this block declares itself: a `put` into one reaches
   // nothing the client can show or send, so it is as inert as a binding.
   const declared = new Set<string>();
   const pure = (e: string) => {
     const rest = e.replace(/\bshim\.([A-Za-z]+)(?:\.([A-Za-z]+))?\s*\(/g, (call, ns: string, fn?: string) =>
-      (fn === undefined ? ns !== 'each' && ELEMENT_SHIM_ALLOW_SINGLE.has(ns) : (ELEMENT_SHIM_ALLOW.get(ns) === true && !LIST_MUTATORS.has(fn.toLowerCase())) || (ns === 'record' && fn === 'get')) ? '(' : call,
+      (fn === undefined ? ns !== 'each' && ELEMENT_SHIM_ALLOW_SINGLE.has(ns) : (ELEMENT_SHIM_ALLOW.get(ns) === true && !(ns === 'list' && LIST_MUTATORS.has(fn.toLowerCase()))) || (ns === 'record' && fn === 'get')) ? '(' : call,
     );
     return !/[\w$\])]\s*\(|\b(?:await|shim|input|row|actions|function|new|delete|yield)\b|`|\+\+|--|[^=!<>]=(?!=)/.test(rest);
   };
@@ -3721,6 +3724,9 @@ function clientBindsLocalsOnly(code: string): boolean {
     // is a server read, not the stale list.
     const update = /^shim\.list\.([A-Za-z]+)\(([A-Za-z_$][\w$]*)(?:, (.*))?\);$/.exec(t);
     if (update) return LIST_MUTATORS.has(update[1]!.toLowerCase()) && pure(update[3] ?? '');
+    // A field write on a row the server run delivers (`rowVars`): the browser holds no copy of it.
+    const rowSet = /^shim\.record\.set\(([A-Za-z_$][\w$]*), \[(?:"[\w$]+"(?:, "[\w$]+")*)\], (.*)\);$/.exec(t);
+    if (rowSet) return rowVars.has(rowSet[1]!) && pure(rowSet[2]!);
     const bind = /^(var )?([A-Za-z_$][\w$]*) = (.*);$/.exec(t);
     if (bind?.[1]) declared.add(bind[2]!);
     return !!bind && pure(bind[3]!);
@@ -4220,7 +4226,11 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
       // client and sent as a request parameter to the deferred slot read
       // instead of making the whole loop a counted todo.
       rangeSlot = withBindings(scope, atCollection, () => rangeSlotFor(col, scope));
-      if (!rangeSlot && clientBindsLocalsOnly(body.client)) {
+      // The rows of a subform the server run inserts are the server's: it
+      // writes their fields, and the browser is told the result.
+      const loopPath = s.collection.kind === 'member' || s.collection.kind === 'name' ? memberPath(s.collection) : null;
+      const serverRows = !!loopPath && loopPath.root === 'input' && loopPath.path.length === 1 && scope.subformEffects.has(loopPath.path[0]!);
+      if (!rangeSlot && clientBindsLocalsOnly(body.client, serverRows ? new Set([s.name]) : undefined)) {
         // The body only binds locals: the server runs the loop and the
         // client keeps no copy of it.
         clientDropped = true;
@@ -4765,6 +4775,11 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     const fixed = lineFor(value.code);
     const client = clientFieldWrite(value, scope, lineFor);
     recordStateWrite(path.root === 'input' ? `input.${path.path[0]}` : `rec.${path.root}`, scope, fixed, value);
+    // A server value the browser cannot be handed as a slot: the server run answers
+    // with what it left in the field, where the write sat in the script.
+    if (!client && value.serverOnly && !value.todo && path.root === 'input' && path.path.length === 1 && scope.serverEffects && scope.replayBarrier === 0 && !scope.noClient && scope.writeGuards.every((g) => g.ok)) {
+      return serverEffectOut(scope, `{ op: "setValue", targets: [${JSON.stringify(path.path[0])}], args: [shim.input.get(ctx, ${JSON.stringify(path.path[0])})] }`, value.constructs, stats, todos, span, fixed);
+    }
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     return { server: fixed, client };
   }
@@ -5271,6 +5286,16 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
     const constructs = values.flatMap((v) => v.constructs);
     if (clientArgs.some((c) => c.todo)) constructs.push('client-condition-uses-server');
     const path = JSON.stringify(mutate.path);
+    // `insert(rows)` of a local the script built: the server run holds the real
+    // rows (the browser's copy of a loop over server data lacks the fields it
+    // dropped), so it answers with them, and the browser inserts what it is told.
+    const rowsLocal = e.kind === 'call' && e.args[0]?.kind === 'name' && scope.local.has(e.args[0].name) ? values[0] : undefined;
+    if (mutate.method === 'insert' && rowsLocal && scope.serverEffects && scope.replayBarrier === 0 && !rowsLocal.todo && !rowsLocal.sideEffect) {
+      scope.subformEffects.add(mutate.path[0]!);
+      const insert = `shim.input.insert(ctx, ${path}, ${rowsLocal.code});`;
+      recordStateWrite(`input.${mutate.path[0]}`, scope, insert, mergeFx('', [rowsLocal]));
+      return serverEffectOut(scope, `{ op: "subform", method: "insert", target: ${path}, args: [${rowsLocal.code}] }`, constructs.filter((c) => c !== 'client-condition-uses-server'), stats, todos, span, insert);
+    }
     const server =
       mutate.method === 'clear'
         ? `shim.list.clear(shim.input.get(ctx, ${mutate.path.map((p) => JSON.stringify(p)).join(', ')}));`
@@ -5467,10 +5492,10 @@ function serverEffectTask(scope: Scope, args: readonly Fx[], clientArgs: readonl
 }
 
 /** The server queues the task under a fresh key; the browser keeps a marker where the task sat, so the actions stay in script order. */
-function serverEffectOut(scope: Scope, task: string, constructs: string[], stats: TranslateStats, todos: TodoItem[], span: { start: number; end: number }): Out {
+function serverEffectOut(scope: Scope, task: string, constructs: string[], stats: TranslateStats, todos: TodoItem[], span: { start: number; end: number }, before = ''): Out {
   const key = JSON.stringify(`e${scope.slot++}`);
   account(stats, todos, { todo: false, shim: true, constructs }, span);
-  return { server: `shim.client.effect(ctx, ${key}, ${task});`, client: `actions.push({ op: "serverEffect", key: ${key} });` };
+  return { server: `${before ? `${before}\n` : ''}shim.client.effect(ctx, ${key}, ${task});`, client: `actions.push({ op: "serverEffect", key: ${key} });` };
 }
 
 function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
