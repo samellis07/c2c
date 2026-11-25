@@ -4329,3 +4329,31 @@ test('an island that is not a whole number argument of a CSS function stays a co
   const statement = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', 'htmlpage hp1()\ncontent\n<div style="background:rgb(<% x = 1; %>,2,3)">x</div>');
   assert.equal(statement.ok, false);
 });
+
+test('a typed empty list built inside a rendered page is a read-only render', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%{
+  seen = List:String();
+  for each  row in Orders[Status == "open"]
+  {
+    seen.add(row.Status);
+  }
+  %>
+<center>Open <%= seen.size() %></center>
+<%}%>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.match(String(out.body.html).replace(/\s+/g, ' '), /Open 2/);
+    const rows = await live.datastore.query('Orders', 'true', 300);
+    assert.deepEqual(rows.map((row) => String(row.Status)), ['open', 'open', 'closed']);
+  } finally {
+    live.restore();
+  }
+});
