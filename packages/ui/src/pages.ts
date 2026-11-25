@@ -1522,6 +1522,41 @@ function constantStyleElement(app: App | undefined, name: string): string | unde
   return element ? text.trim() : undefined;
 }
 
+/** Visit each `<%= … %>` island of `raw` (written raw or entity-escaped) in one linear pass; a visit that returns text replaces the island. */
+function scanExpressionIslands(raw: string, visit: (inner: string, at: number) => string | undefined): string {
+  const open = /(?:<|&lt;)%=/g;
+  const close = /%(?:>|&gt;)/g;
+  let out = '', i = 0;
+  for (;;) {
+    open.lastIndex = i;
+    const opened = open.exec(raw);
+    if (!opened) return out + raw.slice(i);
+    const bodyStart = opened.index + opened[0].length;
+    close.lastIndex = bodyStart;
+    const closed = close.exec(raw);
+    if (!closed) return out + raw.slice(i);
+    const end = closed.index + closed[0].length;
+    const replaced = visit(raw.slice(bodyStart, closed.index), opened.index);
+    out += raw.slice(i, opened.index) + (replaced ?? raw.slice(opened.index, end));
+    i = end;
+  }
+}
+
+const APP_FUNCTION_CALL = /^thisapp\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*\)/;
+
+/** The `thisapp.<fn>()` an island holds, and what a `+` after it adds (undefined when nothing); null when the island is anything else. */
+function appCallIsland(inner: string): { name: string; rest?: string } | null {
+  let text = inner.trim();
+  if (text.endsWith(';')) text = text.slice(0, -1).trimEnd();
+  const call = APP_FUNCTION_CALL.exec(text);
+  if (!call) return null;
+  const after = text.slice(call[0].length).trim();
+  if (!after) return { name: call[1]! };
+  if (!after.startsWith('+')) return null;
+  const rest = after.slice(1).trim();
+  return rest ? { name: call[1]!, rest } : null;
+}
+
 /**
  * Replace each `<%=thisapp.fn()%>` island (raw or XML-escaped) whose function returns constant CSS
  * (see constantStyleFunction) with that CSS, so the page's stylesheet carries
@@ -1533,12 +1568,17 @@ function constantStyleElement(app: App | undefined, name: string): string | unde
  */
 export function inlineConstantStyleCalls(raw: string, app: App | undefined): string {
   if (!app || !/<%|&lt;%/.test(raw)) return raw;
-  const bare = raw.replace(/(?:<|&lt;)%=\s*thisapp\.([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)\s*\(\s*\)\s*;?\s*%(?:>|&gt;)/g, (island, name: string) => constantStyleFunction(app, name) ?? island);
+  const bare = scanExpressionIslands(raw, (inner) => {
+    const call = appCallIsland(inner);
+    return call && call.rest === undefined ? constantStyleFunction(app, call.name) : undefined;
+  });
   const outside = (at: number) => (bare.slice(0, at).match(/<\s*style\b/gi)?.length ?? 0) === (bare.slice(0, at).match(/<\s*\/\s*style\b/gi)?.length ?? 0);
-  return bare.replace(/(?:<|&lt;)%=\s*thisapp\.([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)\s*\(\s*\)\s*(?:\+\s*((?:(?!%(?:>|&gt;))[\s\S])+?)\s*)?;?\s*%(?:>|&gt;)/g, (island, name: string, rest: string | undefined, at: number) => {
-    const element = outside(at) ? constantStyleElement(app, name) : undefined;
-    if (!element) return island;
-    return rest ? `${element}<%=${rest}%>` : element;
+  return scanExpressionIslands(bare, (inner, at) => {
+    const call = appCallIsland(inner);
+    if (!call) return undefined;
+    const element = outside(at) ? constantStyleElement(app, call.name) : undefined;
+    if (!element) return undefined;
+    return call.rest ? `${element}<%=${call.rest}%>` : element;
   });
 }
 
