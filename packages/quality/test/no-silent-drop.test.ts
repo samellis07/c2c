@@ -5400,15 +5400,16 @@ test(
     const eventManagement = parseProject(join(gallery, 'event-management')).ir;
     const out = collectOutputs(eventManagement);
     assert.deepEqual(auditApp(eventManagement, out), []);
-    // book_event, Admin_Dashboard, Event_Search_Result, and Map_View each
-    // keep a server-side snippet no safe translation covers; each stays a
-    // counted UI todo, never a silent drop.
-    for (const name of ['book_event.dsp', 'Admin_Dashboard.dsp', 'Event_Search_Result.dsp', 'Map_View.dsp']) {
+    // The four snippets compile; what the sanitizer still drops stays a counted
+    // UI todo, never a silent drop: the remote background images of book_event
+    // and Event_Search_Result, and Admin_Dashboard's Bootstrap script.
+    for (const name of ['book_event.dsp', 'Admin_Dashboard.dsp', 'Event_Search_Result.dsp']) {
       assert.ok(
         out.model.todos.some((t) => t.area === 'zml' && t.name === name),
-        `Event Management page ${name} should carry a counted UI todo for its uncovered server snippet`,
+        `Event Management page ${name} should carry a counted UI todo for what the sanitizer drops`,
       );
     }
+    assert.ok(!out.model.todos.some((t) => t.area === 'zml' && t.name === 'Map_View.dsp'), 'Map_View compiles to a map link');
   },
 );
 
