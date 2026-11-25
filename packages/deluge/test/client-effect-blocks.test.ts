@@ -249,3 +249,17 @@ test('the browser puts a row value into the row it names and refuses a row that 
     assert.deepEqual(settle(marker, { effects: { e0: [{ op: 'setValue', targets: ['Items.Pick'], args: ['x'], row }] } }), [], JSON.stringify(row));
   }
 });
+
+test('the browser drops hostile server effects instead of replaying writes or unknown operations', async () => {
+  const runtime = await browser();
+  const { settle } = runtime.browserShim().client;
+  const marker = [{ op: 'serverEffect', key: 'e0' }];
+  const hostile = [
+    { op: 'reload' },
+    { op: 'setValue', targets: ['Items.Pick'], args: ['x'], row: Infinity },
+    { op: 'setValue', targets: ['__proto__'], args: ['x'] },
+    { op: 'ui', method: 'remove', target: ['Items'], args: [] },
+    { op: 'subform', method: 'delete', target: ['Items'], args: [{}] },
+  ];
+  assert.deepEqual(settle(marker, { effects: { e0: hostile } }), []);
+});
