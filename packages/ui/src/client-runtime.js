@@ -6021,9 +6021,16 @@ export function browserShimSurface(fetchImpl) {
       },
     }),
     string: withStubFallback({
-      replaceAll(value, find, replacement) {
-        if (value == null || String(value) === '' || replacement == null || String(replacement) === '') return null;
-        return javaReplaceAll(String(value), String(find ?? ''), String(replacement));
+      // The same wrapper as shims/src/text.ts replaceAll: the optional fourth
+      // argument `true` makes the search text literal; an empty result is null.
+      replaceAll(value, find, replacement, escape) {
+        if (value == null) return null;
+        const text = String(value);
+        if (text === '') return null;
+        const pattern = find == null ? '' : String(find);
+        const repl = replacement == null ? '' : String(replacement);
+        if (escape === true || escape === 'true') return clientEmptyToNull(pattern === '' ? text : text.split(pattern).join(repl));
+        return clientEmptyToNull(javaReplaceAll(text, pattern, repl));
       },
       // ASCII letters, the same set both runtimes use (text.ts).
       getAlphaNumeric(value) {

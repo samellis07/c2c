@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { javaReplaceAll as serverReplaceAll } from '../../shims/src/java-regex.js';
+import { replaceAll as serverShimReplaceAll } from '../../shims/src/text.js';
 
 // The browser copy of the Java regex compiler (src/client/java-regex.js) is a
 // port of packages/shims/src/java-regex.ts. This corpus runs both copies and
@@ -81,6 +82,46 @@ test('the browser Java regex compiler gives the server shim output or error on e
       outcome(() => clientReplaceAll(text, pattern, replacement, first, ignoreCase)),
       outcome(() => serverReplaceAll(text, pattern, replacement, first, ignoreCase)),
       `replaceAll(${JSON.stringify(text.length > 40 ? `${text.slice(0, 40)}...` : text)}, ${JSON.stringify(pattern)}, ${JSON.stringify(replacement)}, first=${first ?? false}, ignoreCase=${ignoreCase ?? false})`,
+    );
+  }
+});
+
+// The browser string.replaceAll wrapper (client-runtime.js) must give the server
+// shim's result for the same arguments: null/empty text, empty replacement, the
+// optional fourth argument that makes the search literal, empty-result-is-null.
+const runtimeSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../packages/ui/src/client-runtime.js'), 'utf8');
+const wrapperStart = runtimeSource.indexOf('replaceAll(value, find, replacement, escape) {');
+const wrapperEnd = runtimeSource.indexOf('\n      },', wrapperStart);
+const emptyStart = runtimeSource.indexOf('function clientEmptyToNull(value) {');
+const emptyEnd = runtimeSource.indexOf('\n}\n', emptyStart);
+assert.ok(wrapperStart > 0 && wrapperEnd > wrapperStart && emptyStart > 0 && emptyEnd > emptyStart, 'the browser replaceAll wrapper moved: update this test');
+const clientWrapper = new Function(
+  `${clientSource}\n${runtimeSource.slice(emptyStart, emptyEnd + 2)}\nconst shim = { ${runtimeSource.slice(wrapperStart, wrapperEnd + 9)} };\nreturn shim.replaceAll;`,
+)() as (value: unknown, find: unknown, replacement: unknown, escape?: unknown) => string | null;
+
+const WRAPPER_CASES: [unknown, unknown, unknown, unknown?][] = [
+  [null, 'a', 'b'],
+  ['', 'a', 'b'],
+  ['abc', 'b', ''],
+  ['abc', 'b', null],
+  ['abc', null, 'x'],
+  ['abc', 'b', 'x', true],
+  ['a.b', '.', '-', true],
+  ['a.b', '.', '-', 'true'],
+  ['a.b', '.', '-', false],
+  ['a.b', '.', '-'],
+  ['abc', '', 'x', true],
+  ['aaa', 'a', '', true],
+  ['aaa', 'a', ''],
+  ['a.b', '.', '$1', true],
+];
+
+test('the browser string.replaceAll wrapper gives the server shim result or error on every case', () => {
+  for (const [value, find, replacement, escape] of WRAPPER_CASES) {
+    assert.equal(
+      outcome(() => String(clientWrapper(value, find, replacement, escape))),
+      outcome(() => String(serverShimReplaceAll(value, find, replacement, escape))),
+      `replaceAll(${JSON.stringify(value)}, ${JSON.stringify(find)}, ${JSON.stringify(replacement)}, ${JSON.stringify(escape)})`,
     );
   }
 });
