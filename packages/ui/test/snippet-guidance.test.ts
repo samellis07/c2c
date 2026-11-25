@@ -120,6 +120,18 @@ test('caller-filtered variable parse stays linear on adversarial right-hand side
   }
 });
 
+test('record-shaped caller-filtered variables are told apart from id-shaped ones', () => {
+  const record = 'emp = Add_Employee[Official_Email == zoho.loginuserid];';
+  const id = 'emp = Add_Employee[Official_Email == zoho.loginuserid].ID;';
+  assert.equal(isCallerFilteredVariable(record, 'emp', 'Add_Employee', 'record'), true);
+  assert.equal(isCallerFilteredVariable(id, 'emp', 'Add_Employee', 'record'), false);
+  assert.equal(isCallerFilteredVariable(record, 'emp', 'Add_Employee'), false);
+  assert.equal(isCallerFilteredVariable(id, 'emp', 'Add_Employee'), true);
+  assert.equal(isCallerFilteredVariable('emp = Add_Employee[ID != 0];', 'emp', 'Add_Employee', 'record'), false);
+  assert.equal(isCallerFilteredVariable(`${record}\nemp = Other[ID > 0];`, 'emp', 'Add_Employee', 'record'), false);
+  assert.equal(isCallerFilteredVariable('emp = Other[Official_Email == zoho.loginuserid];', 'emp', 'Add_Employee', 'record'), false);
+});
+
 test('a snippet that prints HTML built by an app function names that function in its step', () => {
   const app = deriveIr(
     parse(

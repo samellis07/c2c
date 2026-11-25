@@ -32,7 +32,7 @@ import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, 
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
-import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, isCallerFilteredVariable, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
+import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, recordSummaryIdShape, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 
 export interface HtmlpageFile {
   path: string;
@@ -2219,10 +2219,7 @@ export function rewriteRecordSummaryFrames(template: string, app?: App, source?:
       if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return whole;
     }
     const idExpr = match[2].trim();
-    const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
-    const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
-    const variable = /^[A-Za-z_]\w*$/.test(idExpr) && isCallerFilteredVariable(source ?? template, idExpr, form);
-    if (!read && !param && !variable) return whole;
+    if (!recordSummaryIdShape(idExpr, form, source ?? template)) return whole;
     const routed = report ? `#/report/${report.name}/row/<%=${idExpr}%>` : `#/record/${form}/<%=${idExpr}%>`;
     const nextAttrs = attrs.slice(0, src.index) + `src=${src[1]}${routed}${src[1]}` + attrs.slice(src.index + src[0].length);
     const anchorAttrs = nextAttrs.replace(/\bsrc\s*=/i, 'href=');
