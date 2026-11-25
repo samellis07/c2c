@@ -1561,3 +1561,75 @@ test('a branch group needs the statement-only body: the marker id comes from the
   assert.deepEqual(styleBranchMarkers('<style><%=x%>.b{color:red}</style>'), []);
   assert.deepEqual(styleBranchMarkers('<style>.a { <% if (x) { %> color: red; <% } %> }</style>'), []);
 });
+
+// The one kept frame: a YouTube player by its 11-character id. Both
+// sanitizers run the same table; everything else about an iframe is removed.
+const FRAME_KEPT = '<iframe src="https://www.youtube-nocookie.com/embed/CPjUpwUpOK8" sandbox="allow-scripts allow-same-origin allow-presentation" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" allowfullscreen=""></iframe>';
+
+test('a YouTube player frame keeps its address, size and title with a fixed sandbox, in both sanitizers', async () => {
+  const run = await runtime();
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  const input = '<iframe width="640" height="360" src="https://www.youtube.com/embed/CPjUpwUpOK8" title="Training" frameborder="0" allow="camera" srcdoc="<p>x</p>" onload="x()" sandbox="allow-top-navigation" style="position:fixed" allowfullscreen>fallback</iframe>';
+  const want = '<iframe src="https://www.youtube-nocookie.com/embed/CPjUpwUpOK8" width="640" height="360" title="Training" sandbox="allow-scripts allow-same-origin allow-presentation" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" allowfullscreen=""></iframe>';
+  assert.equal(buildSanitize(input), want);
+  assert.equal(run.sanitizeSnippet(input, doc), want);
+  const dropped: string[] = [];
+  buildSanitize(input, undefined, dropped);
+  assert.deepEqual(dropped, [], 'a kept frame is not a counted removal');
+  assert.equal(buildSanitize('<iframe src="https://youtube.com/embed/CPjUpwUpOK8"></iframe>'), FRAME_KEPT);
+});
+
+test('every other iframe is still removed, in both sanitizers, and stays a counted removal', async () => {
+  const run = await runtime();
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  const hostile = [
+    'https://evil.example/embed/CPjUpwUpOK8',
+    'https://www.youtube.com.evil.example/embed/CPjUpwUpOK8',
+    'https://evil.example/https://www.youtube.com/embed/CPjUpwUpOK8',
+    'https://www.youtube.com@evil.example/embed/CPjUpwUpOK8',
+    'https://user:pw@www.youtube.com/embed/CPjUpwUpOK8',
+    'https://www.youtube.com:444/embed/CPjUpwUpOK8',
+    'http://www.youtube.com/embed/CPjUpwUpOK8',
+    '//www.youtube.com/embed/CPjUpwUpOK8',
+    'HTTPS://WWW.YOUTUBE.COM/embed/CPjUpwUpOK8',
+    'https://www.youtube.com/embed/CPjUpwUpOK8?autoplay=1',
+    'https://www.youtube.com/embed/CPjUpwUpOK8#x',
+    'https://www.youtube.com/embed/CPjUpwUpOK8/',
+    'https://www.youtube.com/embed/CPjUpwUpOK8%0a',
+    'https://www.youtube.com/embed/../watch',
+    'https://www.youtube.com/embed/short',
+    'https://www.youtube.com/embed/CPjUpwUpOK8extra',
+    'https://www.youtube.com/watch?v=CPjUpwUpOK8',
+    'https://www.youtube.com/embed/videoseries?list=PL1',
+    'javascript:alert(1)',
+    'data:text/html,<script>x()</script>',
+    ' https://www.youtube.com/embed/CPjUpwUpOK8',
+    'https://www.youtube.com/embed/CPjUpwUpOK8\n',
+    '',
+  ];
+  for (const src of hostile) {
+    const html = `<p>a</p><iframe src="${src.replace(/"/g, '&quot;')}"></iframe>`;
+    const dropped: string[] = [];
+    assert.equal(buildSanitize(html, undefined, dropped), '<p>a</p>', src);
+    assert.deepEqual(dropped, ['iframe'], src);
+    assert.equal(run.sanitizeSnippet(html, doc), '<p>a</p>', src);
+  }
+  for (const html of ['<iframe></iframe>', '<iframe srcdoc="<p>x</p>"></iframe>', '<object data="https://www.youtube.com/embed/CPjUpwUpOK8"></object>', '<embed src="https://www.youtube.com/embed/CPjUpwUpOK8">', '<frame src="https://www.youtube.com/embed/CPjUpwUpOK8">']) {
+    assert.equal(buildSanitize(html), '', html);
+    assert.equal(run.sanitizeSnippet(html, doc), '', html);
+  }
+});
+
+test('the shell CSP frames only itself and the video host', async () => {
+  const { SHELL_CONTENT_SECURITY_POLICY } = await import('../src/csp.js');
+  assert.match(SHELL_CONTENT_SECURITY_POLICY, /frame-src 'self' https:\/\/www\.youtube-nocookie\.com;/);
+  assert.doesNotMatch(SHELL_CONTENT_SECURITY_POLICY, /\*|youtube\.com|script-src[^;]*youtube/);
+});
+
+test('a page snippet with a YouTube player frame carries it and counts no removed iframe', () => {
+  const zml = `<zml><dsp id='html_snippet'><![CDATA[<p>Watch</p><iframe width="640" height="360" src="https://www.youtube.com/embed/CPjUpwUpOK8" frameborder="0" allowfullscreen></iframe>]]></dsp></zml>`;
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`));
+  const model = buildModel(app);
+  assert.deepEqual(model.todos.filter((todo) => todo.area === 'zml'), []);
+  assert.match(JSON.stringify(model.pages[0]), /youtube-nocookie\.com\/embed\/CPjUpwUpOK8/);
+});
