@@ -19,6 +19,7 @@
  * rendered there. A style expression is limited to the CSS value grammar.
  */
 
+import { htmlCommentRanges, inRanges } from './html-comments.js';
 import type { App } from '../../core/src/ir.js';
 import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
@@ -1117,7 +1118,10 @@ function embeddedComponents(
   // the tag as it was, and the embed stays a TODO.
   const choiceTag = /<div\b((?:[^<>%]|<%=[^%<>]*%>)*)>([^<>%]*)<\/div[ \t\r\n]*>/gi;
   const choiceLink = /\b(?:form|view|report)linkname[ \t\r\n]*=[ \t\r\n]*(["'])<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>\1/i;
-  const chosen = template.replace(choiceTag, (whole: string, inner: string, body: string) => {
+  // A tag the HTML parser reads inside a comment is inert: it is no embed, so it neither generates a view nor counts.
+  const commented = htmlCommentRanges(template);
+  const chosen = template.replace(choiceTag, (whole: string, inner: string, body: string, offset: number) => {
+    if (inRanges(commented, offset)) return whole;
     const link = choiceLink.exec(inner);
     if (!link || !ZC_COMPONENT_ELNAME.test(inner) || /<%/.test(inner.replace(link[0], ''))) return whole;
     const values = literalChoices(template, link[2]);
@@ -1139,7 +1143,9 @@ function embeddedComponents(
   // A tag whose attributes hold `<%= %>` islands is matched whole; its islands
   // become tokens while the attributes are read and only a bare-read value in
   // `params` is ever written back.
-  const rewritten = chosen.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag) => {
+  const commentedNow = chosen === template ? commented : htmlCommentRanges(chosen);
+  const rewritten = chosen.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag, offset: number) => {
+    if (inRanges(commentedNow, offset)) return tag;
     if (!tag.includes('<%')) return embed(tag, []) ?? tag;
     const slots: string[] = [];
     // Match the whole island body, then trim spaces and tabs in a linear pass
