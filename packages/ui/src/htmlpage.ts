@@ -3063,6 +3063,9 @@ export function convertZmlSnippetToHtml(
   return out;
 }
 
+/** The client copy of a server read answers a failed read with this info action; the endpoint never runs the copy. */
+const CLIENT_READ_GUARD = /^\s*actions\.push\(\{ op: "info", message: \((\w+) && \1\.message\) \|\| "Server read failed; client action blocked\." \}\);$/gm;
+
 /** Todo constructs raised only by the translator's client projection. */
 const CLIENT_PROJECTION_TODOS: ReadonlySet<string> = new Set(['client-condition-uses-server', 'client-loop-uses-server']);
 
@@ -4180,7 +4183,7 @@ export function compileHtmlpage(
   // The translator may also emit a client projection of the same code (slot
   // conditions, list pushes). Only a real client action — a UI effect the
   // endpoint cannot perform — is out of scope.
-  if (/actions\.push\(/.test(tr.client)) return fail('island needs a client step');
+  if (/actions\.push\(/.test(tr.client.replace(CLIENT_READ_GUARD, ''))) return fail('island needs a client step');
   const server = tr.server;
   if (/shim\.todo\(/.test(server)) return fail('untranslated construct');
   // Server code of every `thisapp.<fn>()` callee the read-only check proved.

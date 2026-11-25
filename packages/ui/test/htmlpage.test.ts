@@ -4738,6 +4738,32 @@ test('a dashboard prints a markup function that reads the last day, and asks for
   assert.match(html, /data-zml="popup-form:Orders"/);
 });
 
+test('a ranged read in an arm the page input decides pages the rows on the server and needs no client step', async () => {
+  const pack = {
+    name: 'Util.pack',
+    signature: 'map Util.pack(string who, int page)',
+    deluge: 'found = Map();\nfound.put("plotIds", "5,6");\nfound.put("proplength", 2);\nreturn found;',
+  };
+  const snippet = `htmlpage hp1()\ncontent\n<%{\nindex = 1;\nif(input.page != "" && input.page != null)\n{\nindex = input.page.toLong();\n}\nproplength = 0;\nplotIds = List();\nif(input.who == "-other-")\n{\ninput.who = "-Select-";\n}\nif(input.who == "Agent")\n{\nfound = thisapp.Util.pack(input.who,index);\nif(found.get("plotIds") != "")\n{\nplotIds = found.get("plotIds").toList();\n}\nelse\n{\nplotIds = List();\n}\nproplength = found.get("proplength").toLong();\n}\nelse\n{\nfor each r in Orders[ID != 0] sort by Added_Time desc range from (index - 1) * 10 + 1 to index * 10 + 1\n{\nplotIds.add(r.ID);\nproplength = proplength + 1;\n}\n}\n%>\n<p><%=proplength%></p><p><%=plotIds.size()%></p>\n<%\n}%>`;
+  const app = appWithFns([pack], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const rows = { Orders: [1, 2, 3].map((Amount) => ({ Status: 'open', Amount })) };
+  const other = await renderPage(app, snippet, { who: 'Owner' }, rows);
+  assert.match(other.html, /<p>3<\/p><p>3<\/p>/, 'the else arm reads the three rows on the server');
+  const agent = await renderPage(app, snippet, { who: 'Agent' }, rows);
+  assert.match(agent.html, /<p>2<\/p><p>1<\/p>/, 'the other arm takes the app function result');
+  const third = await renderPage(app, snippet, { who: 'Owner', page: '2' }, { Orders: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((Amount) => ({ Status: 'open', Amount })) });
+  assert.match(third.html, /<p>3<\/p><p>3<\/p>/, 'page 2 of a range of ten holds rows 11 to 13');
+});
+
+test('a ranged read below a page input the script rewrote compiles, whatever the client copy would do', () => {
+  const pack = { name: 'Util.pack', signature: 'map Util.pack(string who, int page)', deluge: 'found = Map();\nfound.put("plotIds", "5");\nfound.put("proplength", 1);\nreturn found;' };
+  const snippet = `htmlpage hp1()\ncontent\n<%{\nif(input.city == "")\n{\ninput.city = "null";\n}\nelse\n{\nindex = input.page.toLong();\n}\nproplength = 0;\nif(input.who == "-other-")\n{\ninput.who = "-Select-";\n}\nif(input.who == "Agent")\n{\nfound = thisapp.Util.pack(input.who,index);\nif(found.get("plotIds") != "")\n{\nplotIds = found.get("plotIds").toList();\n}\nelse\n{\nplotIds = List();\n}\nproplength = found.get("proplength").toLong();\n}\nelse\n{\nfor each r in Orders[ID != 0] sort by Added_Time desc range from (index - 1) * 10 + 1 to index * 10 + 1\n{\nplotIds.add(r.ID);\nproplength = proplength + 1;\n}\n}\n%>\n<p><%=proplength%></p>\n<%\n}%>`;
+  const compiled = compileHtmlpage(appWithFns([pack], `${ORDERS}\n${pageWithSnippet(snippet)}`), 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+});
+
 test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
   const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "<li>" + thisapp.Util.wrap(input.q) + "</li>";\n%>\n<ul><%= row %></ul>`;
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
