@@ -32,7 +32,7 @@ import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, 
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
-import { markupFlow } from './markup-flow.js';
+import { allStmts, markupFlow, thisappPath } from './markup-flow.js';
 import { fileFieldsFor } from '../../deluge/src/field-store.js';
 import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
 import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, recordSummaryIdShape, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
@@ -1309,6 +1309,8 @@ function endpointModule(opts: {
   ]
     .map((line) => ` * ${line}`)
     .join('\n')}\n */\n`;
+  // The render takes an environment when it reads files or runs setup writes.
+  const env = opts.images || opts.hasWrites;
   const statics = opts.statics.map((s, i) => `const c2c_static_${i} = ${JSON.stringify(s)};`).join('\n');
   const indented = opts.server
     .split('\n')
@@ -1422,7 +1424,17 @@ function c2cCss(v) {
 }
 
 ${c2cUrlFunctionSource()}
-${opts.markup ? `\n${c2cMarkupFunctionSource()}\n` : ''}${opts.images ? `\n${c2cImageFunctionSource()}\n` : ''}
+${opts.hasWrites ? `
+// A caller that may not run the setup writes still gets the page: its write calls do nothing.
+function c2cWithoutWrites(shim, notes) {
+  const skip = async () => {
+    const note = "a setup write was skipped because the caller may not run it";
+    if (notes.indexOf(note) < 0) notes.push(note);
+    return null;
+  };
+  return { ...shim, datastore: { ...shim.datastore, insert: skip, update: skip, setField: skip } };
+}
+` : ''}${opts.markup ? `\n${c2cMarkupFunctionSource()}\n` : ''}${opts.images ? `\n${c2cImageFunctionSource()}\n` : ''}
 ${renderAuditSource({ dataImages: opts.markup })}
 
 function c2cLink(url) {
@@ -1440,11 +1452,11 @@ function c2cLink(url) {
   return '<a href="' + c2cEsc(href) + '">' + c2cEsc(label) + "</a>";
 }
 
-async function render(ctx${opts.images ? ', c2c_env' : ''}) {
-  const shim = ctx.shim;
+async function render(ctx${env ? ', c2c_env' : ''}) {
+  const shim = ${opts.hasWrites ? 'c2c_env.mayWrite ? ctx.shim : c2cWithoutWrites(ctx.shim, c2c_env.notes)' : 'ctx.shim'};
 ${indented}
   const c2c_parts = [];
-  const c2c_notes = ${opts.images ? 'c2c_env.notes' : '[]'};
+  const c2c_notes = ${env ? 'c2c_env.notes' : '[]'};
   // A URL attribute value may span several parts (static pieces and islands).
   // The scheme check runs on the whole joined value, so the pieces accumulate
   // until the next non-URL part; a dropped island inside the value does not
@@ -1566,18 +1578,11 @@ ${opts.hasWrites ? `  const headers = req && req.headers && typeof req.headers =
     send(res, 401, { dryRun: true, error: "authenticated caller required" });
     return;
   }
-${opts.hasWrites ? `  if (!adminProfiles.includes(principal.profile)) {
-    send(res, 403, { dryRun: true, error: "administrator profile required" });
-    return;
-  }
-` : ''}${opts.requireOwner ? `  // The snippet's existence check is scoped to zoho.adminuserid, the
-  // application owner: only the owner principal may run the write path. The
-  // owner id is deploy configuration (C2C_ADMIN_USER_ID), never a client value.
+${opts.hasWrites ? `  // The page renders for any caller the read policy admits; only an administrator profile
+  // (and, under a zoho.adminuserid existence check, the application owner) may run its
+  // setup writes. The owner id is deploy configuration (C2C_ADMIN_USER_ID), never a client value.
   const ownerId = String(process.env.C2C_ADMIN_USER_ID || "");
-  if (!ownerId || String(principal.userId || "") !== ownerId) {
-    send(res, 403, { dryRun: true, error: "application owner required" });
-    return;
-  }
+  const mayWrite = adminProfiles.includes(principal.profile)${opts.requireOwner ? ' && !!ownerId && String(principal.userId || "") === ownerId' : ''};
 ` : ''}  for (const form of htmlpage.forms) {
     if (isHidden(form)) {
       send(res, 403, { dryRun: true, error: "hidden form" });
@@ -1595,10 +1600,10 @@ ${opts.hasWrites ? `  if (!adminProfiles.includes(principal.profile)) {
       dryRun: !live,
       appTimeZone,
       access,
-${opts.hasWrites ? '      adminUserId: principal.userId || "",\n' : ''}${opts.appCalls ? '      functions,\n' : ''}      ...(datastore ? { datastore } : {}),
+${opts.hasWrites ? '      adminUserId: mayWrite ? principal.userId || "" : ownerId,\n' : ''}${opts.appCalls ? '      functions,\n' : ''}      ...(datastore ? { datastore } : {}),
     });
     const ctx = runtime.context({ record: input, old: {}, principal, appTimeZone });
-    const rendered = await render(ctx${opts.images ? ', { files: live ? await liveFileStore(req) : null, notes: [], bytes: 0 }' : ''});
+    const rendered = await render(ctx${env ? `, { ${[opts.images ? 'files: live ? await liveFileStore(req) : null, bytes: 0' : '', opts.hasWrites ? 'mayWrite' : '', 'notes: []'].filter(Boolean).join(', ')} }` : ''});
     let violation = "";
     try {
       violation = c2cAuditViolation(rendered.html);
@@ -1824,7 +1829,7 @@ export function mutatesFetchedRead(server: string): boolean {
 }
 
 /** The literal dotted path of a translated `shim.thisapp.call(ctx, [...], ...)`, else null. */
-function appCallPath(rest: string): string[] | null {
+export function appCallPath(rest: string): string[] | null {
   const m = /^ctx, (\[(?:"(?:[^"\\]|\\.)*"(?:, ?)?)+\])/.exec(rest);
   if (!m) return null;
   try {
@@ -1897,6 +1902,29 @@ function withImageReads(app: App, server: string): { server: string; reads: numb
     return `await c2cImage(c2c_env, ${whole}, ${JSON.stringify(form)}, ${JSON.stringify(field)})`;
   });
   return { server: wrapped, reads };
+}
+
+/**
+ * A render statement `thisapp.<fn>();` whose callee is a `void` function with
+ * no parameters that does nothing but `insert into`. The call is that insert
+ * written where it is called, so it meets the same guard rules as an inline
+ * one (htmlpage-shape-c.ts) instead of reaching the function registry. Any
+ * other call is left as written.
+ */
+function inlineInsertCalls(app: App, script: string, body: Stmt[]): string {
+  let out = script;
+  const edits: { start: number; end: number; text: string }[] = [];
+  for (const s of allStmts(body)) {
+    if (s.kind !== 'expr' || s.expr.kind !== 'call' || s.expr.args.length > 0) continue;
+    const path = thisappPath(s.expr.callee);
+    const fn = path ? appFunction(app, path) : undefined;
+    if (!fn || !/^\s*void\b/.test(fn.signature ?? '') || fnSignatureParams(fn.signature).length > 0) continue;
+    const texts = fn.deluge.map((d) => d.text.trim()).filter(Boolean);
+    const inserts = texts.length > 0 && texts.every((text) => parse(text).body.every((stmt) => stmt.kind === 'expr' && stmt.expr.kind === 'insert'));
+    if (inserts) edits.push({ start: s.span.start, end: s.span.end, text: `${texts.join('\n').replace(/;\s*$/, '')};` });
+  }
+  for (const edit of edits.reverse()) out = `${out.slice(0, edit.start)}${edit.text}${out.slice(edit.end)}`;
+  return out;
 }
 
 /** The app function a `thisapp.<fn>()` path names: the exact name, then the case-insensitive one the generated registry also resolves. */
@@ -3206,6 +3234,11 @@ export function compileHtmlpage(
   let ast;
   try {
     ast = parse(script);
+    const inlined = inlineInsertCalls(app, script, ast.body);
+    if (inlined !== script) {
+      script = inlined;
+      ast = parse(script);
+    }
   } catch {
     return fail('Deluge islands do not parse');
   }
@@ -3263,10 +3296,11 @@ export function compileHtmlpage(
   // the rows of a query, aggregates, and pure helpers. Any other shim call,
   // a functions.* call, an assignment through a fetched value, or an await
   // that is not one of those reads stays the same counted snippet.
+  const appCall = (callee: string[]) => readOnlyAppFunction(app, callee, new Set(), calleeServers, flow.functions.has(callee.join('.').toLowerCase()));
   if (isShapeC) {
-    if (!shapeCServerOk(server)) return fail('island is not an allowed write render');
+    if (!shapeCServerOk(server, appCall)) return fail('island is not an allowed write render');
   } else {
-    if (!islandReadOnly(server, (callee) => readOnlyAppFunction(app, callee, new Set(), calleeServers, flow.functions.has(callee.join('.').toLowerCase())))) return fail('island is not a read-only render');
+    if (!islandReadOnly(server, appCall)) return fail('island is not a read-only render');
   }
 
   // The read-only check ran on the plain translation; the endpoint wraps its image reads.
