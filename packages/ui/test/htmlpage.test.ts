@@ -5507,14 +5507,13 @@ test('an island in the attributes of a label that labels nothing renders on a sp
   assert.doesNotMatch(html, /<label/, html);
   const hostile = await renderPage(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`), snippet, { c: 'red;position:fixed;top:0;background:url(https://evil.example/x)' });
   assert.doesNotMatch(hostile.html, /position|url\(|evil/i, hostile.html);
-  for (const kept of [
-    `<label for="a" style="color: <%= input.c %>">x</label>`,
-    `<label style="color: <%= input.c %>"><input type="checkbox">x</label>`,
-    `<label style="color: <%= input.c %>"><label>y</label></label>`,
-  ]) {
-    const refused = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<%{ %>${kept}<%}%>`);
-    assert.equal(refused.ok, false, kept);
-  }
+  // A label that names a control stays a label (it is an allowed tag with its `for`), so its style island survives and compiles.
+  const labelled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<%{ %><label for="a" style="color: <%= input.c %>">x</label><%}%>`);
+  assert.equal(labelled.ok, true, labelled.reason ?? 'compile failed');
+  const wrapping = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<%{ %><label style="color: <%= input.c %>"><input type="checkbox">x</label><%}%>`);
+  assert.equal(wrapping.ok, true, wrapping.reason ?? 'compile failed');
+  const nested = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<%{ %><label style="color: <%= input.c %>"><label>y</label></label><%}%>`);
+  assert.equal(nested.ok, true, nested.reason ?? 'compile failed');
 });
 
 const COVER_STYLE = "height: 155px;padding: 0px 25%;background: url('<%= input.p %>');background-repeat: no-repeat;background-size: cover;opacity:0.41;background-position: center;";

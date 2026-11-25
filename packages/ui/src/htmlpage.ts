@@ -3494,7 +3494,7 @@ function escapeHtml(text: string): string {
 }
 
 /** An open `<label>` tag whose attributes may hold `<%= %>` islands. */
-const LABEL_OPEN = /<label\b(?:<%=?[^%<>]*%>|[^<>])*>/gi;
+const LABEL_OPEN = /<label\b[^<>]*(?:<%[^%<>]*%>[^<>]*)*>/gi;
 /** What makes a label more than a span: a control it labels (inside it, or by `for`). */
 const LABEL_CONTROL = /<(?:input|select|textarea|button|meter|output|progress)\b/i;
 
@@ -3529,7 +3529,7 @@ function rewriteIslandLabels(template: string): string {
 }
 
 /** An open `<div>` tag whose attributes may hold `<%= %>` islands. */
-const DIV_OPEN = /<div\b(?:<%=?[^%<>]*%>|[^<>])*>/gi;
+const DIV_OPEN = /<div\b[^<>]*(?:<%[^%<>]*%>[^<>]*)*>/gi;
 /** The `background-*` declarations a cover image carries; any other one keeps the div as written. */
 const IMAGE_BACKGROUND_PARTS = new Set(['background-repeat', 'background-size', 'background-position']);
 
