@@ -647,7 +647,7 @@ function resolveNavigation(result: unknown, routes?: NavRoutes): NavInstruction 
         record = v;
         continue;
       }
-      if (!fields.includes(k.toLowerCase())) return null;
+      if (!fields.includes(k.toLowerCase())) continue;
       addQuery(k, v);
     }
     return finish(record ? `#/form/${encodeURIComponent(key)}/edit/${encodeURIComponent(record)}` : `#/form/${encodeURIComponent(key)}`);

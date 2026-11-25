@@ -170,6 +170,17 @@ test('a target that names a form, page parameter or filter this app does not hav
   for (const note of ['a', 'b', 'c']) assert.equal(run.resolve(await run.call({ Note: note, ID: '1' })), null, note);
 });
 
+test('a form opened with a value for a field it does not have still opens, without that value', async (t) => {
+  const run = await loadFunction(t, demo(['t.Status = "Done";', 'openUrl("#Form:Audit?Task_Reff=" + t.ID + "&Status=Open&zc_Header=false", "popup window");'].join('\n')));
+  assert.deepEqual(run.todos.filter((c) => NAV.test(c)), []);
+  assert.deepEqual(run.resolve(await run.call({ ID: '9' })), { kind: 'navigate', url: '#/form/Audit?Status=Open', target: 'new' });
+});
+
+test('an openUrl written only in a comment is no navigation and raises no manual item', () => {
+  const g = generate(demo(['t.Status = "Done";', '// openUrl("#Form:Audit", "popup window");'].join('\n')));
+  assert.deepEqual(g.todos.filter((t) => NAV.test(t.construct)), []);
+});
+
 test('a function that calls a navigating function returns the callee navigation', async (t) => {
   const outer: FunctionDef = { name: 'Nav.go', kind: 'creator', signature: 'void Nav.go(Task t)', properties: [], deluge: [{ text: 't.Note = "x";\nthisapp.Nav.inner(t);\nt.Status = "after";', span: Z }], span: Z };
   const inner: FunctionDef = { name: 'Nav.inner', kind: 'creator', signature: 'void Nav.inner(Task t)', properties: [], deluge: [{ text: 't.Note = "y";\nopenUrl("#Report:All_Tasks", "same window");', span: Z }], span: Z };
