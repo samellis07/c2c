@@ -3019,8 +3019,23 @@ export function applyActions(actions, root) {
     } else if (op === 'openUrl') {
       const url = Array.isArray(action.args) ? action.args[0] : action.url;
       const target = Array.isArray(action.args) ? action.args[1] : undefined;
-      const note = openUrlNav(root, url, target);
-      if (note) notes.push(note);
+      // Creator's `#Script:` targets are page commands, never addresses.
+      const script = typeof url === 'string' ? /^\s*#Script:(.+)$/i.exec(url) : null;
+      if (script) {
+        const key = script[1].trim().toLowerCase();
+        const kind = Object.prototype.hasOwnProperty.call(SCRIPT_NAV_KINDS, key) ? SCRIPT_NAV_KINDS[key] : undefined;
+        if (kind) {
+          notes.push(url);
+          applyActionNav(root, { kind });
+        } else {
+          const banner = root && root.querySelector ? root.querySelector('[data-banner]') : null;
+          if (banner) banner.textContent = 'The link was not opened: the address is not allowed.';
+          notes.push('openUrl refused');
+        }
+      } else {
+        const note = openUrlNav(root, url, target);
+        if (note) notes.push(note);
+      }
     } else if (op === 'fidelity') {
       // An action the migrated app cannot run gets a visible note, never a
       // silent skip.
@@ -3160,6 +3175,8 @@ function fillFormValues(formEl, form, record) {
 function navigableUrl(view, url) {
   if (!safeUrl(url)) return false;
   if (/[\u0000-\u0020\\]/.test(url) || url.startsWith('//')) return false;
+  // `#Script:` names a page command, never an address (applyActionNav maps the known ones).
+  if (/^#script:/i.test(url)) return false;
   if (/^https?:/i.test(url) && !/^https?:\/\/[^/?#\\]+(?:[/?#]|$)/i.test(url)) return false;
   const base = view && view.location && typeof view.location.href === 'string' ? view.location.href : 'https://localhost/';
   let parsed;
@@ -3214,21 +3231,66 @@ function openUrlNav(root, url, target) {
   return url;
 }
 
-/** Apply generated openUrl results in order; Creator #Script targets are UI commands. */
-export function applyOpenUrlNav(root, nav, effects = {}) {
-  if (!Array.isArray(nav)) return;
-  for (const item of nav) {
-    if (!item || typeof item.url !== 'string') continue;
-    if (item.url.startsWith('#Script:')) {
-      switch (item.url.slice('#Script:'.length).toLowerCase()) {
-        case 'page.refresh':
-        case 'page.reload': effects.refresh?.(); break;
-        case 'dialog.close': effects.closeDialog?.(); break;
-        case 'page.close': effects.closePage?.(); break;
-        case 'page.parent.refresh': effects.refreshParent?.(); break;
-        default: break;
+/** What each `#Script:` openUrl target Creator documents does, as a navigation instruction kind (the server maps the same names in shims nav.resolve). */
+const SCRIPT_NAV_KINDS = {
+  'page.refresh': 'reload',
+  'page.reload': 'reload',
+  'dialog.close': 'closeDialog',
+  'page.close': 'closePage',
+  'page.parent.refresh': 'refreshParent',
+};
+
+/**
+ * Performs the one navigation instruction a custom action's reply may carry
+ * (docs/report-action-navigation.md): `navigate` goes through openUrlNav's
+ * address gate, `reload` loads this page again, and the three page commands
+ * Creator's `#Script:` targets stand for act on the page itself. `source` is
+ * the element the user clicked, so `closeDialog` closes the dialog that holds
+ * it. An unknown kind does nothing.
+ */
+export function applyActionNav(root, nav, source) {
+  if (!nav || typeof nav !== 'object') return;
+  const view = viewOf(root);
+  const reload = (win) => {
+    try {
+      if (win && win.location && typeof win.location.reload === 'function') win.location.reload();
+    } catch {
+      /* a closed or cross-origin opener cannot be reloaded */
+    }
+  };
+  switch (nav.kind) {
+    case 'navigate':
+      openUrlNav(root, nav.url, nav.target === 'new' ? 'new window' : 'same window');
+      break;
+    case 'reload':
+      reload(view);
+      break;
+    case 'closeDialog': {
+      const doc = view.document || (root && root.ownerDocument);
+      const own = source && source.closest ? source.closest('.modal[data-modal-form]') : null;
+      const open = own || (doc && doc.querySelectorAll ? [...doc.querySelectorAll('.modal[data-modal-form]')].pop() : null);
+      if (open && typeof open.remove === 'function') open.remove();
+      break;
+    }
+    case 'closePage':
+      try {
+        if (view.opener && !view.opener.closed && typeof view.close === 'function') view.close();
+        else if (view.history && view.history.length > 1 && typeof view.history.back === 'function') view.history.back();
+      } catch {
+        /* a test document has no navigation */
       }
-    } else openUrlNav(root, item.url, item.window);
+      break;
+    case 'refreshParent':
+      try {
+        if (view.opener && !view.opener.closed) reload(view.opener);
+        else if (view.parent && view.parent !== view) reload(view.parent);
+        else reload(view);
+      } catch {
+        reload(view);
+      }
+      break;
+    default:
+      break;
   }
 }
 
@@ -8288,12 +8350,7 @@ export function boot(appModel, doc) {
                 if (res && res.ok) {
                   showToast(documentRef, 'success', fnBtn.getAttribute('data-fn-msg') || 'Done');
                   const body = await readJson(res);
-                  applyOpenUrlNav(view, body && body.nav, {
-                    refresh: () => documentRef.location?.reload?.(),
-                    closeDialog: () => fnBtn.closest('[role="dialog"],.modal,.modal-backdrop')?.remove(),
-                    closePage: () => { try { view.close?.(); } catch {} },
-                    refreshParent: () => documentRef.location?.reload?.(),
-                  });
+                  applyActionNav(fnBtn, body && body.nav, fnBtn);
                   if (fnBtn.getAttribute('data-fn-refresh') === 'true' && documentRef.location && typeof documentRef.location.reload === 'function') documentRef.location.reload();
                   return;
                 }
@@ -8348,6 +8405,8 @@ export function boot(appModel, doc) {
             .then(async (res) => {
               if (res && res.ok) {
                 showToast(documentRef, 'success', 'Action sent. Preview: nothing was run yet.');
+                const body = await readJson(res);
+                applyActionNav(customAction, body && body.nav, customAction);
                 return;
               }
               const body = res ? await readJson(res) : null;

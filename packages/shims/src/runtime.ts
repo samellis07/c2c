@@ -600,7 +600,8 @@ const SCRIPT_NAV: Record<string, NavInstruction> = {
 /** Creator's `#Script:<name>` openUrl targets the page can perform; any other `#Script:*` is no navigation. */
 export function scriptNavInstruction(url: string): NavInstruction | undefined {
   const m = /^#Script:(.+)$/i.exec(url.trim());
-  const found = m ? SCRIPT_NAV[m[1]!.trim().toLowerCase()] : undefined;
+  const key = m ? m[1]!.trim().toLowerCase() : '';
+  const found = Object.prototype.hasOwnProperty.call(SCRIPT_NAV, key) ? SCRIPT_NAV[key] : undefined;
   return found ? { ...found } : undefined;
 }
 

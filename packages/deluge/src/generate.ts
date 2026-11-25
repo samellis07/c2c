@@ -2955,6 +2955,32 @@ export function navCaptureEligible(app: App, fn: FunctionDef, seen: Set<string> 
   return ok && navigates;
 }
 
+/**
+ * True when every `openUrl` in `fn` names a page command (`#Script:dialog.close`
+ * and its siblings) as a literal and the body navigates nowhere else. Such a
+ * function has no server work to run first, yet it is still a navigation: it
+ * returns its instruction like any other, instead of being a counted gap.
+ */
+export function navScriptOnly(fn: FunctionDef): boolean {
+  if (fn.deluge.length !== 1) return false;
+  let body: Stmt[];
+  try {
+    body = parse(fn.deluge[0]!.text).body;
+  } catch {
+    return false;
+  }
+  let found = false;
+  let only = true;
+  walk(body, (n) => {
+    if (n.kind !== 'openUrl') return;
+    found = true;
+    const first = (n as Extract<Stmt, { kind: 'openUrl' }>).args[0];
+    const target = first ? unparenExpr(first) : undefined;
+    if (target?.kind !== 'string' || scriptNavInstruction(target.value) === undefined) only = false;
+  });
+  return found && only;
+}
+
 /** The route names a workflow's `openUrl` may resolve against, as the literal the generated dispatch endpoint passes to `shim.nav.resolve`. */
 export function navRoutesSource(app: App): string {
   const forms: Record<string, string[]> = {};
@@ -3380,7 +3406,7 @@ function emitFunction(
   // instead of being dropped, when every target in it could be navigable.
   const navCapture =
     liftedText === undefined &&
-    translated.some(({ tr }) => tr.server.trim()) &&
+    (translated.some(({ tr }) => tr.server.trim()) || navScriptOnly(fn)) &&
     navCaptureEligible(app, fn);
   if (navCapture) translated = translateParts(true);
   const parts = translated.map(({ d, tr }) => {

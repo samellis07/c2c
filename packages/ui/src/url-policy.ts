@@ -159,7 +159,7 @@ function httpsHost(url: string): string | undefined {
 export function navigationAllowed(url: string, allowedHosts: ReadonlySet<string>): boolean {
   const raw = String(url ?? '');
   const flat = flatUrl(raw);
-  if (DENIED_HREF_SCHEMES.some((scheme) => flat.startsWith(scheme)) || flat.startsWith('file:') || flat.startsWith('//')) return false;
+  if (DENIED_HREF_SCHEMES.some((scheme) => flat.startsWith(scheme)) || flat.startsWith('file:') || flat.startsWith('//') || flat.startsWith('#script:')) return false;
   if (isSameAppNavTarget(raw)) return !/[\u0000- \\]/.test(raw);
   const host = httpsHost(raw);
   if (!host || !allowedHosts.has(host)) return false;
@@ -203,7 +203,7 @@ export function navigationPolicyFunctionSource(): string {
   return `function c2cNavOk(url, allowedHosts) {
   var raw = String(url || "");
   var flat = raw.replace(/${URL_FLAT_CLASS}+/g, "").toLowerCase();
-  if (${denied} || flat.startsWith("file:") || flat.startsWith("//")) return false;
+  if (${denied} || flat.startsWith("file:") || flat.startsWith("//") || flat.startsWith("#script:")) return false;
   if (raw.startsWith("#") || (raw.startsWith("/") && !raw.startsWith("//"))) return !/[\\u0000-\\u0020\\\\]/.test(raw);
   var m = /^https:\\/\\/([^/?#\\\\]+)/i.exec(raw);
   if (!m) return false;

@@ -33,16 +33,14 @@ export type ActionNavInstruction =
       url: string;
       target?: 'same' | 'new';
     }
-  /** Creator's `openUrl("#Script:page.refresh")`: the current page loads again. */
-  | { kind: 'reload' };
-
-export interface OpenUrlInstruction { url: string; window: string }
-export interface OpenUrlEffects {
-  refresh?: () => void;
-  closeDialog?: () => void;
-  closePage?: () => void;
-  refreshParent?: () => void;
-}
+  /** Creator's `openUrl("#Script:page.refresh")` (or `page.reload`): the current page loads again. */
+  | { kind: 'reload' }
+  /** `#Script:dialog.close`: the popup this form was opened in closes. */
+  | { kind: 'closeDialog' }
+  /** `#Script:page.close`: this page closes, or goes back when it was not opened by a script. */
+  | { kind: 'closePage' }
+  /** `#Script:page.parent.refresh`: the page that opened this one (or this page, with no opener) loads again. */
+  | { kind: 'refreshParent' };
 
 /** This app's own hash route or a single-leading-slash relative path — never `//host/...`, a protocol-relative open redirect wearing a relative path's clothes. */
 function isSameAppTarget(url: string): boolean {
@@ -64,13 +62,40 @@ export function navOk(url: unknown, allowedHosts: readonly string[]): boolean {
   const raw = String(url ?? '');
   if (!raw || /[\u0000-\u0020\\]/.test(raw)) return false;
   const flat = raw.replace(/[\u0000- ]+/g, '').toLowerCase();
-  if (flat.startsWith('javascript:') || flat.startsWith('data:') || flat.startsWith('vbscript:') || flat.startsWith('blob:') || flat.startsWith('file:') || flat.startsWith('//')) return false;
+  if (flat.startsWith('javascript:') || flat.startsWith('data:') || flat.startsWith('vbscript:') || flat.startsWith('blob:') || flat.startsWith('file:') || flat.startsWith('//') || flat.startsWith('#script:')) return false;
   if (isSameAppTarget(raw)) return !/[\u0000- \\]/.test(raw);
   const host = httpsHost(raw);
   if (!host || !allowedHosts.includes(host)) return false;
   const authority = /^https:\/\/([^/?#\\]+)/i.exec(raw)?.[1] ?? '';
   // Credentials in the authority still reach the browser: refuse them even when the host is allow-listed.
   return !authority.includes('@');
+}
+
+/** The window that opened this one, while it is still open. */
+function openerOf(view: AppWindow): Window | undefined {
+  const opener = view.opener as Window | null | undefined;
+  return opener && !opener.closed ? opener : undefined;
+}
+
+/**
+ * The three page commands Creator's `#Script:` targets stand for. A generated
+ * app opens a Creator popup form as its own route (in a new tab when opened
+ * with `popup window`), so the popup is that tab: `dialog.close` closes it
+ * and does nothing in the main window, where no dialog is open.
+ */
+function performPageCommand(kind: 'closeDialog' | 'closePage' | 'refreshParent', view: AppWindow): void {
+  try {
+    if (kind === 'closeDialog') {
+      if (openerOf(view)) view.close();
+    } else if (kind === 'closePage') {
+      if (openerOf(view)) view.close();
+      else if (view.history.length > 1) view.history.back();
+    } else {
+      (openerOf(view) ?? view).location.reload();
+    }
+  } catch {
+    // A parent that moved to another origin cannot be reloaded from here.
+  }
 }
 
 /**
@@ -87,6 +112,10 @@ export function performActionNav(nav: ActionNavInstruction | undefined, allowedH
     view.location.reload();
     return;
   }
+  if (nav?.kind === 'closeDialog' || nav?.kind === 'closePage' || nav?.kind === 'refreshParent') {
+    performPageCommand(nav.kind, view);
+    return;
+  }
   if (!nav || nav.kind !== 'navigate' || !navOk(nav.url, allowedHosts)) return;
   if (nav.target === 'new') {
     view.open(nav.url, '_blank', 'noopener,noreferrer');
@@ -94,24 +123,4 @@ export function performActionNav(nav: ActionNavInstruction | undefined, allowedH
   }
   if (nav.url.startsWith('#')) navigateHash(view, nav.url);
   else view.location.href = nav.url;
-}
-
-/** Applies Creator openUrl results in execution order. Pseudo-URLs are UI commands, never browser URLs. */
-export function applyOpenUrlNav(nav: readonly OpenUrlInstruction[] | undefined, allowedHosts: readonly string[], view: AppWindow, effects: OpenUrlEffects = {}): void {
-  if (!Array.isArray(nav)) return;
-  for (const item of nav) {
-    if (!item || typeof item.url !== 'string') continue;
-    if (item.url.startsWith('#Script:')) {
-      switch (item.url.slice('#Script:'.length).toLowerCase()) {
-        case 'page.refresh':
-        case 'page.reload': effects.refresh?.(); break;
-        case 'dialog.close': effects.closeDialog?.(); break;
-        case 'page.close': effects.closePage?.(); break;
-        case 'page.parent.refresh': effects.refreshParent?.(); break;
-        default: break;
-      }
-      continue;
-    }
-    performActionNav({ kind: 'navigate', url: item.url, target: /^(new|popup) window$/i.test(item.window) ? 'new' : 'same' }, allowedHosts, view);
-  }
 }
