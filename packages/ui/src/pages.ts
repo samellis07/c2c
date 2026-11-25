@@ -7,6 +7,7 @@
  * strip leaves slash-separated handlers (`<svg/onload=...>`) in place.
  */
 
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { App, Form } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
@@ -677,7 +678,7 @@ function ruleHead(text: string): string {
 }
 
 /** Scan static CSS without regex parsing/backtracking. Unsupported constructs fail closed. */
-export function carryStaticStyle(css: string, scope: string, inMedia = false, keyframes?: Set<string>): ScopedStyle {
+export function carryStaticStyle(css: string, scope: string, inMedia = false, keyframes?: Set<string>, frameScope = scope): ScopedStyle {
   const rules: string[] = [];
   const dropped: string[] = [];
   const where: string[] = [];
@@ -705,7 +706,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
   if (comment === 'block') drop('unterminated comment');
   css = uncommented;
   const names = keyframes ?? keyframeNames(css);
-  const prefix = keyframePrefix(scope);
+  const prefix = keyframePrefix(frameScope);
   let i = 0;
   // Between rules a browser ignores CDO/CDC (`<!--`, `-->`) like whitespace;
   // sheets that wrap their CSS in HTML comments still carry. Inside a head
@@ -820,7 +821,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
         }
       }
       if (!mediaConditionSafe(condition) || inMedia) { drop(inMedia ? 'nested @media' : '@media condition'); continue; }
-      const nested = carryStaticStyle(body, scope, true, names);
+      const nested = carryStaticStyle(body, scope, true, names, frameScope);
       dropped.push(...nested.dropped);
       where.push(...(nested.where ?? []).map((w) => ruleHead(`${head} ${w}`)));
       if (nested.css) rules.push(`@media ${condition}{${nested.css}}`);
@@ -835,7 +836,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
       // (no backslash), so it refuses CSS escape sequences that decode to
       // url(/expression(/a brace at render time, not just their literal text.
       if (!mediaConditionSafe(condition) || inMedia) { drop(inMedia ? 'nested @supports' : '@supports condition'); continue; }
-      const nested = carryStaticStyle(body, scope, true, names);
+      const nested = carryStaticStyle(body, scope, true, names, frameScope);
       dropped.push(...nested.dropped);
       where.push(...(nested.where ?? []).map((w) => ruleHead(`${head} ${w}`)));
       if (nested.css) rules.push(`@supports ${condition}{${nested.css}}`);
@@ -1467,17 +1468,80 @@ export function droppedStyleRules(raw: string): number {
 
 const DYNAMIC_CSS = 'CSS built by a Deluge tag';
 
+/**
+ * Title of the empty span a rendered snippet prints where a branch group of its `<style>` body ran; see {@link styleBodyBranches}.
+ * `title` is the one attribute every snippet sanitizer, build and runtime, keeps on any element.
+ */
+export const STYLE_BRANCH_MARK_PREFIX = 'c2c-css-';
+
+/** Marker id of one branch group: the group's text with whitespace collapsed, so the model and the render agree without sharing an order. */
+export function styleBranchId(text: string): string {
+  return createHash('sha256').update(text.replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 12);
+}
+
+/** True when `css` opens and closes every brace and parenthesis it uses, outside comments and strings, and never closes one it did not open. */
+function balancedCss(css: string): boolean {
+  let braces = 0, parens = 0, quote = '', comment = false;
+  for (let n = 0; n < css.length; n++) {
+    const ch = css[n]!;
+    if (comment) { if (ch === '*' && css[n + 1] === '/') { comment = false; n++; } continue; }
+    if (quote) { if (ch === '\\') n++; else if (ch === quote) quote = ''; continue; }
+    if (ch === '/' && css[n + 1] === '*') { comment = true; n++; continue; }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '{') braces++;
+    else if (ch === '}') { if (--braces < 0) return false; }
+    else if (ch === '(') parens++;
+    else if (ch === ')') { if (--parens < 0) return false; }
+  }
+  return !quote && !comment && braces === 0 && parens === 0;
+}
+
+/**
+ * A `<style>` body whose Deluge tags are all statements (`<% if (...) { %>`
+ * ... `<% } %>`) and sit between whole rules: the text before the first tag is
+ * ordinary static CSS and each group after a tag is one branch, carried only
+ * where the render took it. Any `<%= %>` tag, or a tag inside a rule or an
+ * at-rule body, is CSS built at request time, so the body is not a plan and
+ * stays counted tag by tag.
+ */
+function styleBodyBranches(body: string): { main: string; branches: { id: string; css: string }[] } | undefined {
+  const parts: string[] = [];
+  let at = 0;
+  for (let open = body.indexOf('<%'); open >= 0; open = body.indexOf('<%', at)) {
+    const close = body.indexOf('%>', open + 2);
+    if (close < 0 || body.startsWith('<%=', open)) return undefined;
+    parts.push(body.slice(at, open));
+    at = close + 2;
+  }
+  if (!parts.length) return undefined;
+  parts.push(body.slice(at));
+  if (!parts.every(balancedCss)) return undefined;
+  return { main: parts[0]!, branches: parts.slice(1).filter((css) => css.replace(/\/\*[\s\S]*?\*\//g, '').trim()).map((css) => ({ id: styleBranchId(css), css })) };
+}
+
+/** Marker ids of the branch groups in the `<style>` bodies of `raw`, in order. A snippet compiled from `raw` prints one marker where each group would have. */
+export function styleBranchMarkers(raw: string): string[] {
+  return styleSheets(raw).flatMap((sheet) => styleBodyBranches(decodeXmlEntities(sheet))?.branches.map((branch) => branch.id) ?? []);
+}
+
 export function carriedStyleRules(raw: string, scope: string): ScopedStyle {
   if (!/<\s*style/i.test(String(raw ?? ''))) return { css: '', droppedRules: 0, dropped: [] };
   const win = domWindow();
   const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
   const sheets: string[] = [];
+  const branches: { id: string; css: string }[] = [];
   const templateCss: string[] = [];
   const templateWhere: string[] = [];
   const walk = (node: DomNode) => {
     if (node.nodeType !== 1) return;
     if ((node.tagName || '').toLowerCase() === 'style') {
       const decoded = decodeXmlEntities(node.textContent ?? '');
+      const plan = styleBodyBranches(decoded);
+      if (plan) {
+        sheets.push(plan.main);
+        branches.push(...plan.branches);
+        return;
+      }
       sheets.push(maskTemplateIslands(decoded, TEMPLATE_MARK));
       // CSS a Deluge tag builds at request time has no static rule to carry: count each tag as lost.
       for (let at = decoded.indexOf('<%'); at >= 0; at = decoded.indexOf('<%', at + 2)) {
@@ -1491,14 +1555,16 @@ export function carriedStyleRules(raw: string, scope: string): ScopedStyle {
   };
   walk(parsed.documentElement);
   // Keyframes declared in any of the page's <style> elements are renamed in all of them.
-  const names = keyframeNames(sheets.join('\n'));
+  const names = keyframeNames([...sheets, ...branches.map((branch) => branch.css)].join('\n'));
   const carried: string[] = []; const dropped: string[] = [...templateCss]; const where: string[] = [...templateWhere];
-  for (const sheet of sheets) {
-    const result = carryStaticStyle(sheet, scope, false, names);
+  const take = (result: ScopedStyle) => {
     if (result.css) carried.push(result.css);
     dropped.push(...result.dropped);
     where.push(...(result.where ?? result.dropped.map(() => '')));
-  }
+  };
+  for (const sheet of sheets) take(carryStaticStyle(sheet, scope, false, names));
+  // `:where` keeps a branch rule as specific as the static rule it sits beside.
+  for (const branch of branches) take(carryStaticStyle(branch.css, `${scope}:where(:has([title="${STYLE_BRANCH_MARK_PREFIX}${branch.id}"]))`, false, names, scope));
   return { css: carried.join('\n'), droppedRules: dropped.length, dropped, ...(where.length ? { where } : {}) };
 }
 

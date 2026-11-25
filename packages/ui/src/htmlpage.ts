@@ -28,7 +28,7 @@ import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
-import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
+import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, styleBranchId, styleBranchMarkers } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
@@ -3142,6 +3142,7 @@ export function compileHtmlpage(
   }
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
     return fail('marker collision');
+  if (head.template.includes(STYLE_BRANCH_MARK_PREFIX)) return fail('marker collision');
 
   // Context for every island, from the static markup that precedes it.
   {
@@ -3228,6 +3229,7 @@ export function compileHtmlpage(
   // are emitted as "V" (escaped island value) and "W" (literal static) parts
   // so the generated render joins them and applies the scheme rule to the
   // whole assembled value, not to each island alone.
+  const branchIds = new Set(styleBranchMarkers(head.template));
   const scriptParts: string[] = ['c2c_out = List();'];
   for (const param of head.params) scriptParts.push(`${param} = input.${param};`);
   const URL_VALUE_OPEN = new RegExp(`([A-Za-z_:][\\w:.-]*)[${TAG_WS}]*=[${TAG_WS}]*("|')`, 'g');
@@ -3276,6 +3278,12 @@ export function compileHtmlpage(
       // The statements run (their reads and conditions are checked like any
       // island's) but print nothing: the element they sit in is removed.
       scriptParts.push(isl.wasStmts ? `${isl.text.trim().replace(/;$/, '')};` : isl.text);
+      // The rule group that follows prints where the branch runs, as a marker
+      // the page's carried CSS selects on (see styleBranchMarkers).
+      const after = chunks[isl.i + 1];
+      const group = after?.kind === 'static' ? after.text.split(/<\/style/i)[0]! : '';
+      const id = styleBranchId(group);
+      if (branchIds.has(id)) scriptParts.push(`c2c_out.add({"k":"H","v":${JSON.stringify(`<span title="${STYLE_BRANCH_MARK_PREFIX}${id}"></span>`)}});`);
     } else if (isl.context === 'comment' || isl.context === 'sheet' || isl.context === 'cssbody') {
       // An island inside an HTML comment produces no output (drop it, with a note).
       scriptParts.push('c2c_out.add({"k":"D","v":0});');
