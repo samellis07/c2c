@@ -37,7 +37,7 @@ function demo(text: string, signature = 'void Nav.go(Task t)'): App {
   };
 }
 
-async function loadFunction(t: { after(fn: () => void): void }, app: App): Promise<{ call: (task: Record<string, unknown>) => Promise<unknown>; resolve: (value: unknown) => unknown; todos: string[]; source: string }> {
+async function loadFunction(t: { after(fn: () => void): void }, app: App): Promise<{ call: (task: Record<string, unknown>) => Promise<unknown>; dispatch: (values: Record<string, unknown>) => Promise<{ nav: unknown; values: Record<string, unknown> }>; resolve: (value: unknown) => unknown; todos: string[]; source: string }> {
   const g = generate(app);
   const file = g.files.find((f) => f.path === 'functions/custom/nav-go.mjs');
   assert.ok(file, 'the function generated a module');
@@ -59,6 +59,13 @@ async function loadFunction(t: { after(fn: () => void): void }, app: App): Promi
     const routes = JSON.parse(navRoutesSource(app));
     return {
       call: (task) => mod.Nav_go!(ctx, task),
+      // The way a report custom action runs a for-each-record function.
+      dispatch: async (values) => {
+        const shim = (ctx as unknown as { shim: { record: { bind(c: unknown, v: unknown, f: string): { values: Record<string, unknown> } }; thisapp: { call(c: unknown, p: string[], a: unknown[]): Promise<unknown> }; nav: { resolve(v: unknown, r: unknown): unknown } } }).shim;
+        const row = shim.record.bind(ctx, values, 'Task');
+        const nav = shim.nav.resolve(await shim.thisapp.call(ctx, ['Nav', 'go'], [row]), routes);
+        return { nav, values: row.values };
+      },
       resolve: (value) => (ctx as unknown as { shim: { nav: { resolve(v: unknown, r: unknown): unknown } } }).shim.nav.resolve(value, routes),
       todos: g.todos.map((t) => t.construct),
       source: file.source,
@@ -193,4 +200,23 @@ test('a function that calls a navigating function returns the callee navigation'
 test('a function that returns a value of its own keeps a counted manual item for its navigation', () => {
   const g = generate(demo(['t.Note = "x";', 'openUrl("#Report:All_Tasks", "same window");', 'return t.Note;'].join('\n'), 'string Nav.go(Task t)'));
   assert.ok(g.todos.some((t) => /^openurl-dropped/.test(t.construct)));
+});
+
+test('a for-each-record function dispatched from a report action reads and writes the clicked record through input', async (t) => {
+  const fn: FunctionDef = {
+    name: 'Nav.go',
+    kind: 'creator',
+    form: 'Task',
+    signature: 'void Nav.go(Task t)',
+    properties: [{ key: 'execution type', value: 'for each record', span: Z }],
+    deluge: [{ text: 'if (input.Status == "Open")\n{\n  input.Status = "Done";\n  openUrl("#Form:Audit?Status=" + input.Status + "&Task_Ref=" + input.ID, "same window");\n}', span: Z }],
+    span: Z,
+  };
+  const run = await loadFunction(t, { ...demo(''), functions: [fn] });
+  assert.deepEqual(run.todos.filter((c) => NAV.test(c)), []);
+  const open = await run.dispatch({ ID: '5', Status: 'Open' });
+  assert.deepEqual(open.nav, { kind: 'navigate', url: '#/form/Audit?Status=Done&Task_Ref=5', target: 'same' });
+  assert.equal(open.values.Status, 'Done');
+  const closed = await run.dispatch({ ID: '6', Status: 'Closed' });
+  assert.equal(closed.nav, null, 'the guard reads the record, so the other branch runs');
 });

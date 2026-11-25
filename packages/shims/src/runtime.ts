@@ -486,6 +486,12 @@ export interface ShimContext {
    */
   rowId?: string;
   /**
+   * True inside a `for each record` function called through `thisapp.call`:
+   * `input.<field>` then reads and writes the clicked record (`ctx.row`), as in
+   * Creator, where `input` is that record.
+   */
+  rowInput?: boolean;
+  /**
    * True while the generated delete stub runs a form's modules for a record
    * delete. A merged form module runs its `on delete`-scoped scripts only then.
    */
@@ -3125,6 +3131,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       get(ctx, ...path) {
         const value = getPath(ctx.record, path);
+        if (value === undefined && ctx.rowInput && ctx.row && path.length) {
+          const field = shim.record.get(ctx.row, path[0]!);
+          return path.length === 1 ? field : getPath(field, path.slice(1));
+        }
         // input.ID of an edit is the request ROWID (body.ROWID) when the posted
         // record carries no id of its own.
         if (value === undefined && path.length === 1 && path[0] === 'ID') return ctx.rowId;
@@ -3132,6 +3142,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       set(ctx, path, value) {
         note({ op: 'input.set', path, value });
+        if (ctx.rowInput && ctx.row && path.length === 1) return shim.record.set(ctx.row, path, value);
         return setPath(ctx.record, path, value);
       },
       insert(ctx, path, value) {
@@ -4137,6 +4148,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         delete child.row;
         delete child.subformRow;
         delete child.rowId;
+        delete child.rowInput;
         delete child.writeOp;
         delete child.persisted;
         delete child.formNonce;
@@ -4146,6 +4158,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             source && typeof source === 'object' && '__row' in source
               ? (source as RowMeta)
               : shim.record.bind(ctx, (source as Record<string, unknown> | undefined) ?? {}, entry.rowForm);
+          child.rowInput = true;
         }
         thisappDepth.set(child, depth + 1);
         return entry.call(child, ...callArgs);
