@@ -338,10 +338,114 @@ test('a marker hides only the controls it names, and an unknown name hides nothi
   assert.equal(proto.main.querySelector('section[data-report]'), null, 'a marker that does not parse is not drawn');
 });
 
-test('a lookup field is refused as an embed key: the value is display text, the column holds a row id', () => {
-  for (const tag of [FORM_TAG('Parent=<%=row.Name%>'), REPORT_TAG('Parent=<%=row.Name%>'), REPORT_TAG('Parent=open')]) {
+test('a form embed never takes a lookup field as a key: prefilling a picklist from display text picks no provable option', () => {
+  for (const tag of [FORM_TAG('Parent=<%=row.Name%>'), FORM_TAG('Parent=open')]) {
     const { model } = buildUi(appWith(embed(tag)));
     assert.equal(snippetOf(model)?.components, undefined, tag);
     assert.equal(snippetTodos(model).length, 1, tag);
+  }
+});
+
+test('a report embed filters a lookup field by its display text through the lookup path', () => {
+  const { model } = buildUi(appWith(embed(REPORT_TAG('zc_Header=false&amp;Parent=<%=row.Name%>&amp;Status=open'))));
+  assert.deepEqual(snippetTodos(model), []);
+  const el = snippetOf(model);
+  assert.deepEqual(el?.components, [{ kind: 'report', name: 'All_Rows', params: ['Parent.Name', 'Status'] }]);
+  assert.match(el?.html ?? '', /data-zml="component-report:All_Rows:untitled\?Parent\.Name=[^"]*Status=open"/);
+  const literal = snippetOf(buildUi(appWith(embed(REPORT_TAG('Parent=open')))).model);
+  assert.deepEqual(literal?.components, [{ kind: 'report', name: 'All_Rows', params: ['Parent.Name'] }]);
+});
+
+test('a lookup key written as a path, repeated, or beside its own path stays counted', () => {
+  for (const tag of [REPORT_TAG('Parent.Name=<%=row.Name%>'), REPORT_TAG('Parent=<%=row.Name%>&amp;parent=<%=row.Status%>')]) {
+    const { model } = buildUi(appWith(embed(tag)));
+    assert.equal(snippetOf(model)?.components, undefined, tag);
+    assert.equal(snippetTodos(model).length, 1, tag);
+  }
+});
+
+test('a report marker filters a lookup by the display text on the lookup path', async () => {
+  const snippet = embed(REPORT_TAG('zc_Header=false&amp;Parent=<%=row.Name%>'));
+  const { main, bodies } = await painted(snippet, `<div data-zml="component-report:All_Rows:untitled?Parent.Name=Ann+Lee"></div>`);
+  assert.ok(main.querySelector('section[data-report="All_Rows"]'), main.innerHTML);
+  const query = bodies.find((body) => body.op === 'query');
+  assert.ok(query, JSON.stringify(bodies));
+  assert.deepEqual(query.filters, [{ field: 'Parent.Name', op: '==', value: 'Ann Lee' }]);
+});
+
+test('a marker naming a path the snippet did not declare is never filled', async () => {
+  const snippet = embed(REPORT_TAG('Parent=<%=row.Name%>'));
+  for (const query of ['Parent.Status=x', 'Parent.Name.Status=x', 'Parent.=x', '.Name=x', 'Parent.Name=x&Parent.Name=y', 'Parent.__proto__=x', 'Name=x']) {
+    const { main } = await painted(snippet, `<div data-zml="component-report:All_Rows?${query}"></div>`);
+    assert.equal(main.querySelector('section[data-report="All_Rows"]'), null, query);
+  }
+});
+
+/** A report over a form whose lookup shows `format` of the Accounts form instead of its link field. */
+function lookupApp(format: string, snippet: string): App {
+  const zml = `<zml><layout><row><column width='100%'><dsp id='Outer1'><![CDATA[${snippet}]]></dsp></column></row></layout></zml>`;
+  return deriveIr(parse(`application "Demo"
+{
+	section Front
+	{
+form Accounts
+{
+  Account_Name
+  (
+    type = text
+  )
+  First
+  (
+    type = text
+  )
+  Last
+  (
+    type = text
+  )
+}
+form Calls
+{
+  Subject
+  (
+    type = text
+  )
+  Account
+  (
+    type = picklist
+    values = Accounts.ID
+    displayformat = ${format}
+  )
+}
+report All_Calls
+{
+  show all rows from Calls
+  (
+    Subject
+    Account
+  )
+}
+		page Outer
+		{
+			Content=${JSON.stringify(zml)}
+		}
+	}
+}
+`));
+}
+
+const CALLS_TAG = `<div elName='zc-component' viewLinkName='All_Calls' params='Account=<%=row.Account_Name%>'>Loading...</div>`;
+const callsEmbed = `htmlpage Outer1(who)\ncontent\n<%{\n\trow = Accounts[Account_Name == input.who];\n%>\n${CALLS_TAG}\n<% }%>`;
+
+test('a lookup shown through a one-field displayformat filters on that target field', () => {
+  const { model } = buildUi(lookupApp('[Account_Name]', callsEmbed));
+  assert.deepEqual(snippetTodos(model), []);
+  assert.deepEqual(snippetOf(model)?.components, [{ kind: 'report', name: 'All_Calls', params: ['Account.Account_Name'] }]);
+});
+
+test('a lookup whose text is not exactly one stored target field stays counted', () => {
+  for (const format of ['[First + " " + Last]', '["Acct " + Account_Name]', '[Missing]', '[Account_Name.first]']) {
+    const { model } = buildUi(lookupApp(format, callsEmbed));
+    assert.equal(snippetOf(model)?.components, undefined, format);
+    assert.equal(snippetTodos(model).length, 1, format);
   }
 });

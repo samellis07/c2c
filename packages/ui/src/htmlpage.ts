@@ -35,6 +35,7 @@ import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.
 import { allStmts, markupFlow, thisappPath } from './markup-flow.js';
 import { fileFieldsFor } from '../../deluge/src/field-store.js';
 import { hasShapeCWrites, hasUnguardedRecordWrite, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
+import { displayTerms } from './decorations/lookups.js';
 import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, recordSummaryIdShape, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 
 export interface HtmlpageFile {
@@ -816,16 +817,40 @@ interface ComponentParam {
 }
 
 /** The field keys a parameterised embed may name: top-level fields of the form (or the report's form). */
-function embedFieldNames(app: App, kind: string, name: string): string[] {
-  const form = kind === 'form' ? app.forms.find((item) => item.name === name) : app.forms.find((item) => item.name === app.reports.find((report) => report.name === name)?.form);
-  // A lookup column stores the target row's id, while a page value is display text: a filter or prefill by name would never match.
-  return (form?.fields ?? []).filter((field) => field.subfields.length === 0 && !field.lookup && !/^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')).map((field) => field.name);
+interface EmbedLookup {
+  name: string;
+  /** `Lookup.Target`: set only when one stored target field holds the display text. */
+  path?: string;
 }
 
-/** Lookup columns of the embedded form: a key naming one is never applied or left out (the value is display text, the column holds a row id). */
-function embedLookupNames(app: App, kind: string, name: string): ReadonlySet<string> {
-  const form = kind === 'form' ? app.forms.find((item) => item.name === name) : app.forms.find((item) => item.name === app.reports.find((report) => report.name === name)?.form);
-  return new Set((form?.fields ?? []).filter((field) => field.lookup).map((field) => field.name.toLowerCase()));
+function embedForm(app: App, kind: string, name: string) {
+  return kind === 'form' ? app.forms.find((item) => item.name === name) : app.forms.find((item) => item.name === app.reports.find((report) => report.name === name)?.form);
+}
+
+function embedFieldNames(app: App, kind: string, name: string): string[] {
+  // A lookup column stores the target row's id, while a page value is display text: a filter or prefill by name would never match.
+  return (embedForm(app, kind, name)?.fields ?? []).filter((field) => field.subfields.length === 0 && !field.lookup && !/^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')).map((field) => field.name);
+}
+
+/**
+ * The lookup fields of an embedded form or report's form, by name, with the
+ * target field that holds the display text. A report filters such a field by
+ * that text on the lookup path (`Lookup.Target`), which the report endpoint
+ * resolves under the caller's read grants on both forms. A lookup whose text
+ * is not exactly one stored target field (a composite, a literal around the
+ * field, several fields) has no single value to compare and carries no path.
+ */
+function embedLookupFields(app: App, kind: string, name: string): EmbedLookup[] {
+  const out: EmbedLookup[] = [];
+  for (const field of embedForm(app, kind, name)?.fields ?? []) {
+    const lookup = field.lookup;
+    if (!lookup) continue;
+    const terms = lookup.displayFormat ? displayTerms(lookup.displayFormat) : [];
+    const shown = terms.length === 0 ? lookup.field : terms.length === 1 && 'ref' in terms[0] ? terms[0].ref : undefined;
+    const target = shown && field.subfields.length === 0 ? app.forms.find((item) => item.name === lookup.form)?.fields.find((item) => item.name === shown) : undefined;
+    out.push({ name: field.name, ...(target && target.subfields.length === 0 && !target.lookup ? { path: `${field.name}.${target.name}` } : {}) });
+  }
+  return out;
 }
 
 /**
@@ -843,7 +868,7 @@ function componentParams(
   fields: readonly string[] = [],
   slots: readonly string[] = [],
   own: ReadonlySet<string> = new Set(),
-  lookups: ReadonlySet<string> = new Set(),
+  lookups: readonly EmbedLookup[] = [],
 ): { untitled: boolean; hidden: string[]; params: ComponentParam[] } | null {
   // A reference without its `;` still reads as `&` where an `&` follows, as the browser reads an attribute value.
   const text = raw.replace(/&amp;|&amp(?=&)/gi, '&').trim();
@@ -873,11 +898,14 @@ function componentParams(
       continue;
     }
     if (!/^[A-Za-z_]\w*$/.test(rawKey) || PARAM_RESERVED.has(key) || /^zc_/i.test(rawKey)) return null;
-    if (lookups.has(key)) return null;
     const matches = fields.filter((field) => field.toLowerCase() === key);
+    const looked = lookups.filter((lookup) => lookup.name.toLowerCase() === key);
+    // A form prefill of a lookup would have to pick the option whose label is the text, and a label can name several rows.
+    if (looked.length && (kind === 'form' || !looked[0].path)) return null;
     // A report filter on a key that is no field would show more records than Creator does; a form prefill of one fills nothing.
-    if (matches.length > 1 || (matches.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
+    if (matches.length + looked.length > 1 || (matches.length + looked.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
     seenKeys.add(key);
+    const outKey = matches[0] ?? looked[0]?.path;
     const slot = SLOT_TOKEN.exec(rawValue);
     if (slot) {
       const read = (slots[Number(slot[1])] ?? '').trim();
@@ -887,9 +915,9 @@ function componentParams(
       // A page input must be a parameter this snippet declares.
       if (segments[0] === 'input' && (segments.length < 2 || !own.has(segments[1]))) return null;
       // A key that names no field of the form fills nothing, but its value was checked all the same.
-      if (matches.length) params.push({ key: matches[0], value: { read } });
+      if (outKey) params.push({ key: outKey, value: { read } });
     } else if (LITERAL_PARAM.test(rawValue) && !rawValue.includes('\u0001')) {
-      if (matches.length) params.push({ key: matches[0], value: { literal: rawValue } });
+      if (outKey) params.push({ key: outKey, value: { literal: rawValue } });
     } else {
       return null;
     }
@@ -949,7 +977,7 @@ function embeddedComponents(
     const rawParams = attrs.get('params');
     // A token outside `params` is an island in another attribute: not an embed.
     if (slots.length && attrKeys.some((key) => key !== 'params' && (attrs.get(key) ?? '').includes('\u0001'))) return null;
-    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupNames(app, kind, name)) : null;
+    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupFields(app, kind, name)) : null;
     if (known && !hostile && params) {
       const keys = params.params.map((item) => item.key);
       const component: EmbeddedComponent = { kind: kind as 'form' | 'report', name, ...(keys.length ? { params: keys } : {}) };
