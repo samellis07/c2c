@@ -317,6 +317,38 @@ export const ALLOWED_ATTRS: Record<string, Set<string>> = {
   '*': new Set(['class', 'title', 'data-style-dropped', 'data-zml']),
 };
 
+/**
+ * Classes a shell stylesheet lifts out of flow (fixed, absolute or z-indexed):
+ * page or data markup may not borrow one to paint over the app. The browser
+ * runtime and the React template keep identical copies; a test derives the
+ * list from both stylesheets.
+ */
+export const SHELL_OVERLAY_CLASSES = new Set([
+  'c2c-modal-backdrop', 'c2c-sr-only', 'modal', 'modal-close', 'navitems', 'skip', 'skip-link', 'visually-hidden',
+]);
+
+/** Longest class attribute and token the sanitizers scan, and the most tokens they keep. */
+const CLASS_TEXT_MAX = 4096;
+const CLASS_TOKENS_MAX = 32;
+const CLASS_TOKEN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
+
+/**
+ * A class attribute reduced to its plain identifier tokens, minus the shell's
+ * overlay classes (compared without case: a quirks-mode page matches class
+ * names case-insensitively). A carried `<style>` rule is scoped to the page
+ * and selects by class, so the class has to survive the sanitizer; nothing
+ * else in a token may.
+ */
+function cleanClass(value: string): string {
+  const text = String(value ?? '');
+  if (text.length > CLASS_TEXT_MAX) return '';
+  const kept: string[] = [];
+  for (const token of text.split(/\s+/)) {
+    if (kept.length < CLASS_TOKENS_MAX && CLASS_TOKEN.test(token) && !SHELL_OVERLAY_CLASSES.has(token.toLowerCase())) kept.push(token);
+  }
+  return kept.join(' ');
+}
+
 interface DomAttr {
   name: string;
   value: string;
@@ -1235,6 +1267,11 @@ function cleanNode(node: DomNode, doc: DomDocument, dropped?: string[]): DomNode
         out.setAttribute('data-style-dropped', style.dropped.join(' '));
         dropped?.push(...style.dropped);
       }
+      continue;
+    }
+    if (name === 'class') {
+      const kept = cleanClass(attr.value);
+      if (kept) out.setAttribute('class', kept);
       continue;
     }
     out.setAttribute(name, attr.value);

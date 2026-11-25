@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
-import { dangerousStyle, safeUrl, sanitizeSnippet } from '../template/lib/c2c-ui/pages/sanitize.js';
+import { SHELL_OVERLAY_CLASSES as BUILD_OVERLAY_CLASSES, sanitizeSnippet as buildSanitize } from '../../ui/src/pages.js';
+import { BASE_CSS } from '../../ui/src/styles.js';
+import { SHELL_OVERLAY_CLASSES, dangerousStyle, safeUrl, sanitizeSnippet } from '../template/lib/c2c-ui/pages/sanitize.js';
 
 test('template sanitizer URL policy keeps navigation URLs and rejects dangerous variants', () => {
   // Non-ASCII hostnames are accepted: browsers normalize them to IDN/punycode,
@@ -39,4 +44,40 @@ test('template sanitizer keeps an exact inline raster image src on an img and no
   ];
   for (const src of refused) assert.equal(sanitizeSnippet(`<img src="${src.replace(/"/g, '&quot;')}">`, doc), '<img>', src);
   assert.equal(sanitizeSnippet(`<a href="${png}">x</a>`, doc), '<a>x</a>');
+});
+
+test('template sanitizer keeps a class token by the same rule as the generator and the browser runtime', async () => {
+  const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
+    SHELL_OVERLAY_CLASSES: Set<string>;
+    sanitizeSnippet(raw: string, doc: unknown): string;
+  };
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  const htmls = [
+    '<div class="card btn-primary active">x</div>',
+    '<div class="a modal b">x</div>',
+    '<div class="x&quot; onclick=&quot;alert(1)">x</div>',
+    '<div class="a<script>">x</div>',
+    '<div class="url(//x.test/a) ok caf\u00e9 1abc">x</div>',
+    '<div class="   ">x</div>',
+    `<div class="${'a'.repeat(65)} ${Array.from({ length: 200 }, (_, n) => `c${n}`).join(' ')}">x</div>`,
+  ];
+  for (const html of htmls) {
+    const fromTemplate = sanitizeSnippet(html, doc as unknown as Document);
+    assert.equal(fromTemplate, buildSanitize(html), html);
+    assert.equal(fromTemplate, runtime.sanitizeSnippet(html, doc), html);
+  }
+  assert.equal(sanitizeSnippet('<div class="a modal skip-link b">x</div>', doc as unknown as Document), '<div class="a b">x</div>');
+  // One list in three places, and it names every class either shell stylesheet lifts out of flow.
+  assert.deepEqual([...SHELL_OVERLAY_CLASSES].sort(), [...BUILD_OVERLAY_CLASSES].sort());
+  assert.deepEqual([...SHELL_OVERLAY_CLASSES].sort(), [...runtime.SHELL_OVERLAY_CLASSES].sort());
+  const shellCss = readFileSync(join(process.cwd(), 'packages/ui-react/template/lib/c2c-ui/styles/shell.css'), 'utf8');
+  const lifted = new Set<string>();
+  for (const css of [BASE_CSS, shellCss]) {
+    for (const rule of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/position\s*:\s*(?:fixed|absolute|sticky)|z-index/i.test(rule[2]!)) continue;
+      for (const cls of rule[1]!.matchAll(/\.([A-Za-z_][\w-]*)/g)) lifted.add(cls[1]!);
+    }
+  }
+  assert.ok(lifted.size > 0);
+  for (const cls of lifted) assert.ok(SHELL_OVERLAY_CLASSES.has(cls), `${cls} is lifted out of flow by a shell stylesheet but not reserved`);
 });

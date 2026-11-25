@@ -1457,3 +1457,63 @@ test('the dropped-CSS manual step names each dropped rule by its selector or Del
   // Without rule locations the step keeps its plain wording.
   assert.doesNotMatch(droppedStyleRulesTodo('Home', 1, ['@import']).step, /Dropped:/);
 });
+
+// A carried `<style>` rule is scoped as `[data-page="P"] .card`, so the class
+// it names has to survive every sanitizer the markup passes through. The
+// generator's, the browser runtime's and the React template's copies keep a
+// class token by one rule: a plain identifier that is not one of the shell's
+// own overlay classes, which would let page or data markup paint over the app.
+
+const CLASS_VECTORS: Array<[string, string, string | null]> = [
+  ['plain classes', 'card wide', 'card wide'],
+  ['digits, dashes and underscores', 'row-fluid span12 _x', 'row-fluid span12 _x'],
+  ['bootstrap-style names', 'btn btn-primary active', 'btn btn-primary active'],
+  ['an overlay class is dropped, its neighbours stay', 'a modal b', 'a b'],
+  ['an overlay class in another case (quirks mode matches case-insensitively)', 'Modal SKIP-link ok', 'ok'],
+  ['every overlay class', 'modal modal-close navitems skip visually-hidden skip-link c2c-modal-backdrop c2c-sr-only', null],
+  ['an event handler pasted into class', 'x" onclick="alert(1)', null],
+  ['an event handler as its own token', 'ok onclick=alert(1)', 'ok'],
+  ['markup in a token', 'a<script>alert(1)</script>', null],
+  ['a url() token', 'url(//x.test/a) b', 'b'],
+  ['a leading digit', '1abc ok', 'ok'],
+  ['a non-ASCII token', 'café ok', 'ok'],
+  ['an escape (the escaped token goes, a plain neighbour stays)', 'a\\62 c', 'c'],
+  ['a token over 64 characters', `${'a'.repeat(65)} ok`, 'ok'],
+  ['blank', '   ', null],
+  ['tabs and newlines between tokens', 'a\tb\nc', 'a b c'],
+];
+
+function classOf(html: string): string | null {
+  const div = new JSDOM(`<body>${html}</body>`).window.document.querySelector('div');
+  assert.ok(div, html);
+  return div.getAttribute('class');
+}
+
+test('a class attribute is kept token by token, identically in the generator and the browser runtime', async () => {
+  const run = await runtime();
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  for (const [label, value, kept] of CLASS_VECTORS) {
+    const html = `<div class="${value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">x</div>`;
+    const runtimeHtml = run.sanitizeSnippet(html, doc);
+    const buildHtml = buildSanitize(html);
+    assert.equal(runtimeHtml, buildHtml, `${label}: both sanitizers agree`);
+    assert.equal(classOf(buildHtml), kept, label);
+  }
+  // A pile of tokens is capped rather than copied through.
+  const many = Array.from({ length: 200 }, (_, n) => `c${n}`).join(' ');
+  const capped = classOf(buildSanitize(`<div class="${many}">x</div>`));
+  assert.ok(capped && capped.split(' ').length <= 32, 'token count is capped');
+  assert.equal(classOf(run.sanitizeSnippet(`<div class="${many}">x</div>`, doc)), capped);
+});
+
+test('a carried class rule matches the element the sanitized snippet keeps', async () => {
+  const run = await runtime();
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  const carried = carryStaticStyle('.card{color:red}.btn-primary.active{color:blue}', '[data-page="Home"]').css;
+  assert.equal(carried, '[data-page="Home"] .card{color:red}\n[data-page="Home"] .btn-primary.active{color:blue}');
+  for (const html of [run.sanitizeSnippet('<p class="card btn-primary active">x</p>', doc), buildSanitize('<p class="card btn-primary active">x</p>')]) {
+    const page = new JSDOM(`<body><div data-page="Home">${html}</div></body>`).window.document;
+    assert.ok(page.querySelector('[data-page="Home"] .card'), html);
+    assert.ok(page.querySelector('[data-page="Home"] .btn-primary.active'), html);
+  }
+});
