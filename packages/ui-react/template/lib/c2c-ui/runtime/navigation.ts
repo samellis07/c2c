@@ -33,6 +33,14 @@ export interface ActionNavInstruction {
   target?: 'same' | 'new';
 }
 
+export interface OpenUrlInstruction { url: string; window: string }
+export interface OpenUrlEffects {
+  refresh?: () => void;
+  closeDialog?: () => void;
+  closePage?: () => void;
+  refreshParent?: () => void;
+}
+
 /** This app's own hash route or a single-leading-slash relative path — never `//host/...`, a protocol-relative open redirect wearing a relative path's clothes. */
 function isSameAppTarget(url: string): boolean {
   if (url.startsWith('#')) return true;
@@ -78,4 +86,24 @@ export function performActionNav(nav: ActionNavInstruction | undefined, allowedH
   }
   if (nav.url.startsWith('#')) navigateHash(view, nav.url);
   else view.location.href = nav.url;
+}
+
+/** Applies Creator openUrl results in execution order. Pseudo-URLs are UI commands, never browser URLs. */
+export function applyOpenUrlNav(nav: readonly OpenUrlInstruction[] | undefined, allowedHosts: readonly string[], view: AppWindow, effects: OpenUrlEffects = {}): void {
+  if (!Array.isArray(nav)) return;
+  for (const item of nav) {
+    if (!item || typeof item.url !== 'string') continue;
+    if (item.url.startsWith('#Script:')) {
+      switch (item.url.slice('#Script:'.length).toLowerCase()) {
+        case 'page.refresh':
+        case 'page.reload': effects.refresh?.(); break;
+        case 'dialog.close': effects.closeDialog?.(); break;
+        case 'page.close': effects.closePage?.(); break;
+        case 'page.parent.refresh': effects.refreshParent?.(); break;
+        default: break;
+      }
+      continue;
+    }
+    performActionNav({ kind: 'navigate', url: item.url, target: /^(new|popup) window$/i.test(item.window) ? 'new' : 'same' }, allowedHosts, view);
+  }
 }

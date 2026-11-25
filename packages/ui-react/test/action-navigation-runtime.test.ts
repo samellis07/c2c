@@ -26,6 +26,7 @@ async function loadNavigation(t: { after(fn: () => void): void }) {
   return (await import(pathToFileURL(join(out, 'lib/c2c-ui/runtime/navigation.js')).href)) as {
     navOk: (url: unknown, allowedHosts: readonly string[]) => boolean;
     performActionNav: (nav: unknown, allowedHosts: readonly string[], view: unknown) => void;
+    applyOpenUrlNav: (nav: unknown, allowedHosts: readonly string[], view: unknown, effects?: Record<string, () => void>) => void;
   };
 }
 
@@ -99,4 +100,20 @@ test('performActionNav navigates an allowlisted https host in the current tab vi
   const view = { location: { hash: '', href: 'https://app.example/' }, open: () => assert.fail('should not open a new tab') };
   performActionNav({ kind: 'navigate', url: 'https://allowed.example/doc' }, ALLOWED, view);
   assert.equal(view.location.href, 'https://allowed.example/doc');
+});
+
+test('applyOpenUrlNav applies ordered pseudo commands and rejects hostile URLs', { skip: SKIP }, async (t) => {
+  const { applyOpenUrlNav } = await loadNavigation(t);
+  const events: string[] = [];
+  const opened: unknown[] = [];
+  const view = { location: { hash: '', href: 'https://app.example/' }, open: (...args: unknown[]) => opened.push(args) };
+  applyOpenUrlNav([
+    { url: '#Script:page.refresh', window: 'same window' },
+    { url: '#Script:dialog.close', window: 'same window' },
+    { url: 'https://allowed.example/doc', window: 'new window' },
+    { url: 'javascript:alert(1)', window: 'same window' },
+    { url: '#Script:unknown', window: 'same window' },
+  ], ALLOWED, view, { refresh: () => events.push('refresh'), closeDialog: () => events.push('close') });
+  assert.deepEqual(events, ['refresh', 'close']);
+  assert.deepEqual(opened, [['https://allowed.example/doc', '_blank', 'noopener,noreferrer']]);
 });
