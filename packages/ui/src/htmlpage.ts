@@ -518,9 +518,12 @@ const INCLUDE_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
  * a value is a bounded literal or one `<%=input.p%>` island forwarding a
  * parameter the embedding page declares. `zc_*` display flags are dropped.
  * Percent escapes, entities, nested islands, other expressions and unknown
- * names all refuse, so the iframe stays a counted snippet.
+ * names all refuse, so the iframe stays a counted snippet. A caller that
+ * passes `omit` (a hand-written page link) leaves an undeclared name out of
+ * the link instead: Creator hands a page only the parameters it declares, so
+ * the page could not read that value there either.
  */
-function includeParams(query: string, target: readonly string[], own: ReadonlySet<string>): string[] | null {
+function includeParams(query: string, target: readonly string[], own: ReadonlySet<string>, undeclared: 'refuse' | 'omit' = 'refuse'): string[] | null {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const part of query.split('&')) {
@@ -538,12 +541,18 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
       if (!LITERAL_PARAM.test(raw)) return null;
       continue;
     }
-    if (matches.length !== 1) return null;
-    const name = matches[0];
+    if (matches.length > 1 || (matches.length === 0 && undeclared === 'refuse')) return null;
+    const name = matches[0] ?? key;
     if (INCLUDE_RESERVED.has(key.toLowerCase())) return null;
     if (seen.has(name.toLowerCase())) return null;
     seen.add(name.toLowerCase());
     const forward = FORWARD_ISLAND.exec(raw);
+    if (matches.length === 0) {
+      // A key the target page does not declare, which `omit` leaves out of the link: its value must
+      // still be a bounded literal or a parameter of this page, so nothing odd is dropped unseen.
+      if (forward ? !own.has(forward[1]) || INCLUDE_RESERVED.has(forward[1].toLowerCase()) : !LITERAL_PARAM.test(raw)) return null;
+      continue;
+    }
     if (forward) {
       if (INCLUDE_RESERVED.has(forward[1].toLowerCase())) return null;
       if (!own.has(forward[1])) return null;
@@ -567,10 +576,11 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
  * carried into the generated link's query as a bounded literal, unchanged, or
  * as `encodeUrl(input.<p>)` forwarding one of this page's own parameters,
  * percent-encoded so a hostile value can never widen the query past the one
- * key it is bound to. Anything `includeParams` cannot prove — an unknown
- * page, an undeclared or repeated parameter name, an expression other than a
- * bare forwarded `input.p`, path traversal, a non-`#Page:` target — leaves
- * the href untouched and the snippet stays the counted TODO.
+ * key it is bound to. A name the target page does not declare is left out of
+ * the link, and a page the app does not have keeps its route. Anything
+ * `includeParams` cannot prove — a repeated parameter name, an expression other
+ * than a bare forwarded `input.p`, path traversal, a non-`#Page:` target —
+ * leaves the href untouched and the snippet stays the counted TODO.
  */
 const PAGE_HREF = /^(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>#Page:([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
 
@@ -582,9 +592,11 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
     const m = PAGE_HREF.exec(hrefMatch[2].trim());
     if (!m) return whole;
     const name = m[1]!;
-    const target = app.pages.find((item) => item.name === name);
-    if (!target) return whole;
-    const params = includeParams(m[2] ?? '', target.params ?? [], ownParams);
+    // A page this app does not have declares nothing; the link keeps its route and Creator shows the same missing page.
+    const matches = app.pages.filter((item) => item.name === name || (name !== item.name && linkNameKey(item.name) === linkNameKey(name)));
+    const target = matches.find((item) => item.name === name) ?? (matches.length === 1 ? matches[0] : undefined);
+    if (matches.length > 1 && !target) return whole;
+    const params = includeParams(m[2] ?? '', target?.params ?? [], ownParams, 'omit');
     if (params === null) return whole;
     const query = params
       .map((p) => {
@@ -594,7 +606,7 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
         return value.startsWith('@') ? `${key}=<%=encodeUrl(input.${value.slice(1)})%>` : `${key}=${value}`;
       })
       .join('&amp;');
-    const href = `#/page/${encodeURIComponent(name)}${query ? `?${query}` : ''}`;
+    const href = `#/page/${encodeURIComponent(target?.name ?? name)}${query ? `?${query}` : ''}`;
     const nextAttrs = attrs.slice(0, hrefMatch.index) + `href=${hrefMatch[1]}${href}${hrefMatch[1]}` + attrs.slice(hrefMatch.index + hrefMatch[0].length);
     return `<a${nextAttrs}>${inner}</a>`;
   });
@@ -812,7 +824,8 @@ function embedFieldNames(app: App, kind: string, name: string): string[] {
  * that is not a display flag must name a field of the embedded form (or the
  * report's form), once, with a bounded literal or one bare read as its value:
  * the value reaches the embed only as an encoded query value the runtime
- * applies as the form prefill or the report filter.
+ * applies as the form prefill or the report filter. A form prefill key that
+ * names no field fills nothing, so it is left out once its value is checked.
  */
 function componentParams(
   raw: string,
@@ -822,12 +835,14 @@ function componentParams(
   slots: readonly string[] = [],
   own: ReadonlySet<string> = new Set(),
 ): { untitled: boolean; hidden: string[]; params: ComponentParam[] } | null {
-  const text = raw.replace(/&amp;/gi, '&').trim();
+  // A reference without its `;` still reads as `&` where an `&` follows, as the browser reads an attribute value.
+  const text = raw.replace(/&amp;|&amp(?=&)/gi, '&').trim();
   if (!text) return { untitled: false, hidden: [], params: [] };
   let untitled = false;
   const hidden = new Set<string>();
   const seenFlags = new Set<string>();
   const params: ComponentParam[] = [];
+  const seenKeys = new Set<string>();
   for (const part of text.split('&')) {
     if (!part) continue;
     const eq = part.indexOf('=');
@@ -849,7 +864,9 @@ function componentParams(
     }
     if (!/^[A-Za-z_]\w*$/.test(rawKey) || PARAM_RESERVED.has(key) || /^zc_/i.test(rawKey)) return null;
     const matches = fields.filter((field) => field.toLowerCase() === key);
-    if (matches.length !== 1 || params.some((item) => item.key.toLowerCase() === key)) return null;
+    // A report filter on a key that is no field would show more records than Creator does; a form prefill of one fills nothing.
+    if (matches.length > 1 || (matches.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
+    seenKeys.add(key);
     const slot = SLOT_TOKEN.exec(rawValue);
     if (slot) {
       const read = (slots[Number(slot[1])] ?? '').trim();
@@ -858,9 +875,10 @@ function componentParams(
       if (segments.some((segment) => PARAM_RESERVED.has(segment.toLowerCase()))) return null;
       // A page input must be a parameter this snippet declares.
       if (segments[0] === 'input' && (segments.length < 2 || !own.has(segments[1]))) return null;
-      params.push({ key: matches[0], value: { read } });
+      // A key that names no field of the form fills nothing, but its value was checked all the same.
+      if (matches.length) params.push({ key: matches[0], value: { read } });
     } else if (LITERAL_PARAM.test(rawValue) && !rawValue.includes('\u0001')) {
-      params.push({ key: matches[0], value: { literal: rawValue } });
+      if (matches.length) params.push({ key: matches[0], value: { literal: rawValue } });
     } else {
       return null;
     }
