@@ -5400,16 +5400,29 @@ test(
     const eventManagement = parseProject(join(gallery, 'event-management')).ir;
     const out = collectOutputs(eventManagement);
     assert.deepEqual(auditApp(eventManagement, out), []);
+<<<<<<< HEAD
     // The four snippets compile; what the sanitizer still drops stays a counted
     // UI todo, never a silent drop: the remote background images of book_event
     // and Event_Search_Result, and Admin_Dashboard's Bootstrap script.
     for (const name of ['book_event.dsp', 'Admin_Dashboard.dsp', 'Event_Search_Result.dsp']) {
+=======
+    // book_event, Event_Search_Result, and Map_View each keep a server-side
+    // snippet no safe translation covers; each stays a counted UI todo, never
+    // a silent drop.
+    for (const name of ['book_event.dsp', 'Event_Search_Result.dsp', 'Map_View.dsp']) {
+>>>>>>> e17c7ff4d (Event Management Admin_Dashboard is carried whole once its hook-free Bootstrap script is not counted; the gallery test says so)
       assert.ok(
         out.model.todos.some((t) => t.area === 'zml' && t.name === name),
         `Event Management page ${name} should carry a counted UI todo for what the sanitizer drops`,
       );
     }
+<<<<<<< HEAD
     assert.ok(!out.model.todos.some((t) => t.area === 'zml' && t.name === 'Map_View.dsp'), 'Map_View compiles to a map link');
+=======
+    // Admin_Dashboard's snippet is carried whole. Its one removed element is the
+    // Bootstrap 3 script, and nothing in the app holds a hook it could act on.
+    assert.deepEqual(out.model.todos.filter((t) => t.name === 'Admin_Dashboard.dsp'), []);
+>>>>>>> e17c7ff4d (Event Management Admin_Dashboard is carried whole once its hook-free Bootstrap script is not counted; the gallery test says so)
   },
 );
 
