@@ -5566,5 +5566,11 @@ test('a text remove of a written literal over a string shim text is a read-only 
   assert.equal(islandReadOnly('var q = shim.list.removeText(p, "x");'), false, 'a name nothing declares');
   assert.equal(islandReadOnly('var q = shim.list.removeText(shim.string.trim(shim.date.text(d)), "x");'), false, 'a date text wrapped in a string shim');
   assert.equal(islandReadOnly('var p = shim.string.toUpperCase(shim.date.text(d));\nvar q = shim.list.removeText(p, "x");'), false, 'a named date text wrapped in a string shim');
+  const heldDate = 'var t = shim.date.text(d);\n';
+  assert.equal(islandReadOnly(`${heldDate}var q = shim.list.removeText(shim.string.trim(t), "x");`), false, 'a held date text wrapped in a string shim');
+  assert.equal(islandReadOnly(`${heldDate}var p = shim.string.trim(t);\nvar q = shim.list.removeText(p, "x");`), false, 'a held date text, wrapper named');
+  assert.equal(islandReadOnly(`${heldDate}var p = shim.string.trim(t);\nvar r = shim.string.toUpperCase(p);\nvar q = shim.list.removeText(r, "x");`), false, 'a chain of named string shims over a date text');
+  assert.equal(islandReadOnly('var q = shim.list.removeText(shim.string.trim(shim.record.get(r, "when")), "x");'), false, 'a field read wrapped in a string shim');
+  assert.equal(islandReadOnly('var p = shim.string.trim(input);\nvar r = shim.string.toUpperCase(p);\nvar q = shim.list.removeText(r, "x");'), true, 'a chain of string shims over the input');
   assert.equal(islandReadOnly('var q = shim.list.removeText("a-b", "-");'), false, 'a written text');
 });
