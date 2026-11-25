@@ -3183,7 +3183,7 @@ function rewriteBlankFrames(template: string): string {
   return replaceIframeElements(template, (whole, attrs, inner) => {
     if (inner.trim() !== '' || attrs.includes('<%')) return whole;
     const parsed = parseZmlAttributes(attrs);
-    const names = Object.keys(parsed);
+    const names = Object.keys(parsed).sort();
     if (!names.every((name) => BLANK_FRAME_ATTRS.has(name)) || parsed.src === undefined || parsed.src.trim() !== '') return whole;
     if (!NO_BORDER.test(parsed.style ?? '')) return whole;
     const kept = ['class', 'style'].filter((name) => parsed[name] !== undefined);
