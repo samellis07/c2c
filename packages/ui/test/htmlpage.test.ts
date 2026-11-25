@@ -3997,6 +3997,32 @@ for each r in rows
   }
 });
 
+test('a for-each directly over a caller-bound criteria read stays authorized', async () => {
+  const snippet = `htmlpage hp1()
+content
+<%
+total = 0;
+for each r in Orders[Status == input.status]
+{
+  total = total + r.Amount;
+}
+%>
+<p>Total <%= total %></p>`;
+  const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? '');
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  assert.equal(model.todos.filter((todo) => todo.reason === 'Server-side Deluge snippet requires manual translation').length, 0);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({ Orders: [{ Status: 'open', Amount: '10.10' }, { Status: 'closed', Amount: '20.20' }] });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { status: 'open' } } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.match(String(out.body.html), /Total 10\.1/);
+  } finally {
+    live.restore();
+  }
+});
+
 test('try/catch around a read-only render block compiles instead of keeping the counted TODO', () => {
   const snippet = `htmlpage hp1()
 content
