@@ -7,7 +7,7 @@
 const ALLOWED_TAGS = new Set([
   'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
   'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
-  'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
+  'input', 'label', 'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
   'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
 ]);
 
@@ -18,6 +18,8 @@ const DROPPED_TAGS = new Set([
 
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'title']),
+  input: new Set(['id', 'type']),
+  label: new Set(['for']),
   img: new Set(['src', 'alt', 'title', 'width', 'height']),
   font: new Set(['color', 'face', 'size']),
   td: new Set(['colspan', 'rowspan', 'title']),
@@ -133,6 +135,7 @@ function cleanNode(node: Node, doc: Document): Node | null {
   if (node.nodeType !== 1) return null;
   const element = node as Element;
   const tag = element.tagName.toLowerCase();
+  if (tag === 'input' && (element.getAttribute('type') ?? '').toLowerCase() !== 'checkbox') return null;
   if (tag === 'iframe') return videoFrame(element, doc);
   if (DROPPED_TAGS.has(tag)) return null;
   const fragment = doc.createDocumentFragment();

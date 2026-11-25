@@ -33,7 +33,7 @@ export function escapeHtml(value) {
 }
 
 export const ALLOWED_TAGS = new Set([
-  'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
+  'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt', 'input', 'label',
   'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
   'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
   'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
@@ -46,6 +46,8 @@ export const DROPPED_TAGS = new Set([
 
 const ALLOWED_ATTRS = {
   a: new Set(['href', 'title']),
+  input: new Set(['id', 'type']),
+  label: new Set(['for']),
   // A generated ExecuteFunction button carries its call route, encoded
   // arguments, and success message; the delegated click wires the POST.
   button: new Set(['type', 'data-fn-call', 'data-fn-args', 'data-fn-argc', 'data-fn-msg', 'data-fn-refresh']),
@@ -391,6 +393,7 @@ function cleanNode(node, doc, dropped) {
   if (node.nodeType === 3) return doc.createTextNode(node.textContent || '');
   if (node.nodeType !== 1) return null;
   const tag = String(node.tagName || '').toLowerCase();
+  if (tag === 'input' && (node.getAttribute('type') || '').toLowerCase() !== 'checkbox') return null;
   if (tag === 'iframe') return videoFrame(node, doc);
   if (DROPPED_TAGS.has(tag)) return null;
   const fragment = doc.createDocumentFragment();
