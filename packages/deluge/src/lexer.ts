@@ -73,7 +73,8 @@ export function lex(src: string): Token[] {
         const d = src[i]!;
         if (d === '\\' && i + 1 < n) {
           const e = src[i + 1]!;
-          value += e === 'n' ? '\n' : e === 't' ? '\t' : e === 'r' ? '\r' : e;
+          // Any other escape keeps its backslash, so a regex written `\d` or `\.` reaches the pattern as written.
+          value += e === 'n' ? '\n' : e === 't' ? '\t' : e === 'r' ? '\r' : e === '\\' || e === '"' || e === "'" ? e : `\\${e}`;
           i += 2;
           continue;
         }

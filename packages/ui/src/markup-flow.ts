@@ -18,8 +18,8 @@ export interface MarkupFlow {
   prints: Span[];
 }
 
-/** A string value that holds a tag, a closing tag or a comment. */
-const MARKUP_TEXT = /<[A-Za-z/!]/;
+/** A string value that holds a tag, a closing tag or a comment. A regex lookbehind (`(?<!`, `(?<name>`) opens no tag. */
+const MARKUP_TEXT = /(?<!\(\?)<[A-Za-z/!]/;
 
 /** `thisapp.<A>.<B>` call target, else null. */
 export function thisappPath(callee: Expr): string[] | null {
@@ -124,7 +124,21 @@ export function markupFlow(
       }
     }
   }
-  const direct = new Set<unknown>(assigns.map((s) => s.value));
+  // A call whose value reaches the name whole (the right side, an operand of `+`, a branch of an inline `if`, or inside
+  // parentheses) is printed through the name's markup print. A method on it (`.length()`) may not return markup, so it is stray.
+  const direct = new Set<unknown>();
+  const carried = (e: Expr): void => {
+    direct.add(e);
+    if (e.kind === 'paren') carried(e.expr);
+    else if (e.kind === 'binary' && e.op === '+') {
+      carried(e.left);
+      carried(e.right);
+    } else if (e.kind === 'ifExpr') {
+      carried(e.then);
+      if (e.else) carried(e.else);
+    }
+  };
+  for (const s of assigns) carried(s.value);
   const used = new Set<string>();
   const stray = new Set<string>();
   for (const call of calls(body)) {

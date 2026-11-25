@@ -22,7 +22,7 @@
 import type { App } from '../../core/src/ir.js';
 import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
-import type { Expr, Stmt } from '../../deluge/src/ast.js';
+import type { Expr, Script, Stmt } from '../../deluge/src/ast.js';
 import { administratorProfiles, navRoutesSource, buttonCallFunctions, clientCallFunctions, fnSignatureParams, functionCallModule, functionRowBinding, functionScriptOptions, rawFnParams, slug as functionSlug, translateInApp, type ButtonFunctionCall, type ClientCallCatalog } from '../../deluge/src/generate.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
@@ -948,6 +948,42 @@ function componentParams(
 }
 
 /**
+ * The string literals a name is assigned across a template's statement islands, in sorted order, or null when
+ * any other binding could reach it (a non-literal or compound assignment, a loop variable of that name, a script
+ * that does not parse) or it is never assigned.
+ */
+function literalChoices(template: string, name: string): string[] | null {
+  const chunks = splitChunks(template);
+  if (!chunks) return null;
+  let script: Script;
+  try {
+    script = parse(chunks.filter((c) => c.kind === 'stmts').map((c) => c.text).join('\n'));
+  } catch {
+    return null;
+  }
+  const values = new Set<string>();
+  let clean = true;
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    const rec = node as Record<string, unknown>;
+    const target = rec.target as { kind?: string; name?: string } | undefined;
+    if (rec.kind === 'assign' && target?.kind === 'name' && target.name?.toLowerCase() === name.toLowerCase()) {
+      const value = rec.value as { kind?: string; value?: string };
+      if (rec.op === '=' && value.kind === 'string' && typeof value.value === 'string') values.add(value.value);
+      else clean = false;
+    }
+    if (rec.kind === 'forEach' && typeof rec.name === 'string' && rec.name.toLowerCase() === name.toLowerCase()) clean = false;
+    for (const key of Object.keys(rec).sort()) if (key !== 'span') visit(rec[key]);
+  };
+  visit(script.body);
+  return clean && values.size > 0 ? [...values].sort() : null;
+}
+
+/**
  * Creator zc-component divs can name a generated form/report [UNVERIFIED]. Only a literal
  * link name whose params are all applicable display flags is provable; other embeds stay TODOs.
  */
@@ -1019,10 +1055,34 @@ function embeddedComponents(
     todos.push({ target });
     return tag;
   };
+  // An embed whose link name is one name the script only ever sets to literals is written once per literal under an
+  // `if` on that name, so each branch is a plain embed of a known component. Any branch the embed cannot prove keeps
+  // the tag as it was, and the embed stays a TODO.
+  const choiceTag = /<div\b((?:[^<>%]|<%=[^%<>]*%>)*)>([^<>%]*)<\/div[ \t\r\n]*>/gi;
+  const choiceLink = /\b(?:form|view|report)linkname[ \t\r\n]*=[ \t\r\n]*(["'])<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>\1/i;
+  const chosen = template.replace(choiceTag, (whole: string, inner: string, body: string) => {
+    const link = choiceLink.exec(inner);
+    if (!link || !ZC_COMPONENT_ELNAME.test(inner) || /<%/.test(inner.replace(link[0], ''))) return whole;
+    const values = literalChoices(template, link[2]);
+    if (!values) return whole;
+    const before = { components: components.length, markers: markers.length, todos: todos.length };
+    const branches = values.map((value) => {
+      const open = `<div${inner.replace(link[0], link[0].replace(/<%=[^%]*%>/, value))}>`;
+      return { value, open: embed(open, []), literal: open };
+    });
+    if (todos.length !== before.todos || branches.some((branch) => branch.open === null || branch.open === branch.literal)) {
+      components.length = before.components;
+      markers.length = before.markers;
+      todos.length = before.todos;
+      return whole;
+    }
+    const arms = branches.map((branch) => `if (${link[2]} == ${JSON.stringify(branch.value)}) { %>${branch.open}${body}</div><% }`);
+    return `<% ${arms.join(' else ')} %>`;
+  });
   // A tag whose attributes hold `<%= %>` islands is matched whole; its islands
   // become tokens while the attributes are read and only a bare-read value in
   // `params` is ever written back.
-  const rewritten = template.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag) => {
+  const rewritten = chosen.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag) => {
     if (!tag.includes('<%')) return embed(tag, []) ?? tag;
     const slots: string[] = [];
     // Match the whole island body, then trim spaces and tabs in a linear pass
