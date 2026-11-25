@@ -3214,6 +3214,24 @@ function openUrlNav(root, url, target) {
   return url;
 }
 
+/** Apply generated openUrl results in order; Creator #Script targets are UI commands. */
+export function applyOpenUrlNav(root, nav, effects = {}) {
+  if (!Array.isArray(nav)) return;
+  for (const item of nav) {
+    if (!item || typeof item.url !== 'string') continue;
+    if (item.url.startsWith('#Script:')) {
+      switch (item.url.slice('#Script:'.length).toLowerCase()) {
+        case 'page.refresh':
+        case 'page.reload': effects.refresh?.(); break;
+        case 'dialog.close': effects.closeDialog?.(); break;
+        case 'page.close': effects.closePage?.(); break;
+        case 'page.parent.refresh': effects.refreshParent?.(); break;
+        default: break;
+      }
+    } else openUrlNav(root, item.url, item.window);
+  }
+}
+
 /**
  * `clear <field>` / `input.<subform>.clear()`. A subform target drops its
  * body rows; `Subform.Field` clears that field in every row; a select loses
@@ -8262,6 +8280,13 @@ export function boot(appModel, doc) {
               .then(async (res) => {
                 if (res && res.ok) {
                   showToast(documentRef, 'success', fnBtn.getAttribute('data-fn-msg') || 'Done');
+                  const body = await readJson(res);
+                  applyOpenUrlNav(view, body && body.nav, {
+                    refresh: () => documentRef.location?.reload?.(),
+                    closeDialog: () => fnBtn.closest('[role="dialog"],.modal,.modal-backdrop')?.remove(),
+                    closePage: () => { try { view.close?.(); } catch {} },
+                    refreshParent: () => documentRef.location?.reload?.(),
+                  });
                   if (fnBtn.getAttribute('data-fn-refresh') === 'true' && documentRef.location && typeof documentRef.location.reload === 'function') documentRef.location.reload();
                   return;
                 }
