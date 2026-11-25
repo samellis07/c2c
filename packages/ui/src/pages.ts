@@ -295,6 +295,9 @@ const NAMED: Record<string, UiElement['kind']> = {
   htmlsnippet: 'html',
 };
 
+/** Ids the page shell owns: a snippet control may not take one (getElementById would find it first, or a label for it would click a shell button). */
+const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title']);
+
 export const ALLOWED_TAGS = new Set([
   'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt', 'input', 'label',
   'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
@@ -1347,6 +1350,7 @@ function cleanNode(node: DomNode, doc: DomDocument, dropped?: string[]): DomNode
   for (const attr of listOf(node.attributes)) {
     const name = attr.name.toLowerCase();
     if (!allowedAttr(tag, name)) continue;
+    if ((name === 'id' || (tag === 'label' && name === 'for')) && SHELL_IDS.has(String(attr.value).trim().toLowerCase())) continue;
     if ((name === 'href' || name === 'src') && !safeUrl(attr.value)) continue;
     if (name === 'style') {
       const style = cleanStyle(attr.value);

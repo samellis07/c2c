@@ -1789,3 +1789,13 @@ test('a font face source with a stray parenthesis is invalid CSS and carries no 
   const { scopedCss } = pageModel(["<style>@font-face { font-family: 'X'; src: url('fonts/a b.otf') ) , url('http://evil.test/x'); }</style><p>x</p>"]);
   assert.doesNotMatch(scopedCss, /src|evil|url/);
 });
+
+test('a checkbox or label may not take an id the page shell owns', () => {
+  const { html } = pageModel([
+    '<input type="checkbox" id="toasts"><label for="more-tab">x</label><input type="checkbox" id="Tabbar"><input type="checkbox" id="mine"><label for="mine">y</label>',
+  ]);
+  const out = html[0]?.html ?? '';
+  assert.doesNotMatch(out, /id="toasts"|for="more-tab"|id="Tabbar"/i);
+  assert.match(out, /id="mine"/);
+  assert.match(out, /for="mine"/);
+});
