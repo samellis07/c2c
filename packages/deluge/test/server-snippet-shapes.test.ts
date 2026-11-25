@@ -367,7 +367,7 @@ content
   assert.deepEqual(lost.dropped, ['CSS built by a Deluge tag']);
 });
 
-test('shape style-element island guard: a statement island in <style> text stays refused', () => {
+test('shape style-element island: a read-only statement island in <style> text runs and prints nothing', () => {
   const compiled = compileHtmlpage(
     appOf(SALES),
     'Home',
@@ -382,7 +382,24 @@ content
 <div>Hi</div>
 <%}%>`,
   );
-  assert.equal(compiled.ok, false);
+  assert.equal(compiled.ok, true, `refused: ${compiled.reason}`);
+  assert.doesNotMatch(compiled.html ?? '', /<style|<%|x = /);
+  assert.match(compiled.file?.source ?? '', /datastore\.(aggregate|query)/);
+  const writes = compileHtmlpage(
+    appOf(SALES),
+    'Home',
+    'HTML Snippet',
+    `htmlpage HTML_Snippet()
+content
+<%{
+  %>
+<style>
+<% openUrl("#Form:Sales", "same window"); %>
+</style>
+<div>Hi</div>
+<%}%>`,
+  );
+  assert.equal(writes.ok, false);
 });
 
 test('shape script-element island: <%=expr%> in <script> text compiles and the script is counted as dropped', () => {

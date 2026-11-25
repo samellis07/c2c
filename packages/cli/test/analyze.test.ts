@@ -528,8 +528,8 @@ test(
   // f2eff2275 translated the admin-user report criteria and removed the two residuals;
   // the three UI todos are the custom actions whose workflow generated no function,
   // each turned off on screen. The other nine actions run live.
-  assert.equal(course.determinism.todoCount, 3);
-  assert.equal(course.determinism.uiTodoCount, 3);
+  assert.equal(course.determinism.todoCount, 0);
+  assert.equal(course.determinism.uiTodoCount, 0);
   assert.deepEqual(
     course.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
     [],
@@ -544,8 +544,9 @@ test(
   // 34378cc85 compiles read-only htmlpage Deluge islands into server-rendered endpoints,
   // clearing most of the residual CRM snippets; the remaining 11 are 7 UI snippets + 4
   // page static-style drops (1c9611919 still counts those style rules).
-  assert.equal(crm.determinism.todoCount, 11);
-  assert.equal(crm.determinism.uiTodoCount, 11);
+  // Statement islands that only choose style rules and typed empty lists now compile: 6 snippets + 2 style drops remain.
+  assert.equal(crm.determinism.todoCount, 8);
+  assert.equal(crm.determinism.uiTodoCount, 8);
   assert.deepEqual(
     crm.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
     [],
@@ -570,7 +571,7 @@ test(
   // Live `input.Register_Here` after the in-place Course_Code set is a client
   // loop. Field_scripts8 keeps two client-condition-uses-server (facultyList).
   // Residual: 17 UI + 2 client-condition-uses-server.
-  assert.equal(education.determinism.todoCount, 19);
+  assert.equal(education.determinism.todoCount, 11);
   assert.equal(education.deluge.todoLocations.filter((item) => item.scope === 'app').length, 0);
   assert.equal(education.deluge.todoLocations.filter((item) => item.construct === 'client-loop-uses-server').length, 0);
   const fieldScripts8 = education.deluge.todoLocations.filter((item) => item.location.startsWith('workflow Field_scripts8:'));
