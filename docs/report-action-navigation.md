@@ -15,12 +15,31 @@ The dispatch endpoint's JSON reply may carry an optional `nav` field
 alongside its existing `dryRun`/`wrote`/`action` fields:
 
 ```ts
-nav?: {
-  kind: 'navigate';
-  url: string;
-  target?: 'same' | 'new'; // default 'same'
-}
+nav?:
+  | { kind: 'navigate'; url: string; target?: 'same' | 'new' } // target default 'same'
+  | { kind: 'reload' }
+  | { kind: 'closeDialog' }
+  | { kind: 'closePage' }
+  | { kind: 'refreshParent' };
 ```
+
+This is the only navigation format a generated app speaks. The server returns
+at most one instruction per action run, and the last `openUrl` that ran wins
+(the same rule Creator applies, since it navigates once, after the workflow
+ends). The four page commands are Creator's `#Script:` openUrl targets:
+
+| `openUrl` target | Instruction | What the page does |
+| --- | --- | --- |
+| `#Script:page.refresh`, `#Script:page.reload` | `reload` | Loads the current page again. |
+| `#Script:dialog.close` | `closeDialog` | Vanilla page: removes the popup dialog holding the clicked button (or the one opened last). React page: a popup form is its own route, opened in a new tab, so it closes that tab when this page was opened by another one, and is a deliberate no-op in the main window, where no dialog is open. |
+| `#Script:page.close` | `closePage` | Closes the page when another page opened it; otherwise goes back one entry in history; with nowhere to go it stays. |
+| `#Script:page.parent.refresh` | `refreshParent` | Reloads the page that opened this one, or this page when it has no opener. |
+
+Any other `#Script:*` target is not a command the page knows. It is never
+carried: it stays a counted manual item with its location, and a client
+`openUrl` of one is refused with a visible note (never written to the address
+bar). A `navigate` instruction whose `url` starts with `#Script:` is refused by
+the page's address gate.
 
 `url` is the fully resolved navigation target — a same-app hash route
 (`#/report/Orders`), a relative path, or an `https:` URL — with every dynamic
@@ -37,7 +56,7 @@ workflow whose *entire* body is a navigation (see
 
 Anything else — an `openUrl` whose scheme or host is itself built from a
 Deluge value (a field, a variable, a function argument), a literal
-`https://` target, a `#Script:` pseudo route, or a target this scan cannot
+`https://` target, an unknown `#Script:` pseudo route, or a target this scan cannot
 resolve — is **never** turned into a `nav` reply. It stays a counted manual
 item with a location-specific `manualStep` (`Custom action "X" on report "Y"
 runs its workflow, but a navigation (openUrl) inside it is not carried
@@ -98,7 +117,7 @@ gets a handle back to the page that opened it.
 A navigation whose target is not a same-app route — most commonly a literal
 or dynamically built `https:` URL (a host itself coming from a field, a
 variable, or string concatenation), or a `#Script:` pseudo-route
-(`page.refresh`, which is not a real navigation target) — is not carried. The custom action still
+the page has no command for — is not carried. The custom action still
 dispatches and runs its workflow; only the navigation is dropped, and it is
 always counted with a `manualStep` naming the action, the report, and (where
 known) why the target could not be resolved.
