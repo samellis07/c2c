@@ -806,6 +806,8 @@ const COMPONENT_FLAGS: Record<string, { kinds: readonly string[]; values: readon
   // accepting it preserves an otherwise renderable generated embed.
   zc_secheader: { kinds: ['form', 'report'], values: ['true', 'false'] },
   zc_focus: { kinds: ['form'], values: ['false'] },
+  // The generated embed is always drawn inline, which is what Creator's phone layout flag asks for.
+  zc_mobileview: { kinds: ['form', 'report'], values: ['inline'] },
   zc_succmsg: { kinds: ['form'], values: ['data added successfully!'] },
   zc_submitval: { kinds: ['form'], values: ['submit'] },
   zc_resetval: { kinds: ['form'], values: ['reset'] },
@@ -827,6 +829,9 @@ const COMPONENT_FLAGS: Record<string, { kinds: readonly string[]; values: readon
   zc_summary: { kinds: ['report'], values: ['true', 'false'] },
   zc_saverec: { kinds: ['report'], values: ['true', 'false'] },
 };
+
+/** The text of an embed's `zc_SuccMsg`: short plain text, never markup, a URL query or a script. */
+const SUCCESS_TEXT = /^[A-Za-z0-9 .,!?'-]{1,100}$/;
 
 /** An island of an embed tag, held as a token until its tag attributes are parsed. */
 const SLOT_TOKEN = /^\u0001(\d+)\u0001$/;
@@ -951,13 +956,15 @@ function componentParams(
   slots: readonly string[] = [],
   own: ReadonlySet<string> = new Set(),
   lookups: readonly EmbedLookup[] = [],
-): { untitled: boolean; hidden: string[]; params: ComponentParam[] } | null {
+): { untitled: boolean; hidden: string[]; params: ComponentParam[]; border?: string; message?: string } | null {
   // A reference without its `;` still reads as `&` where an `&` follows, as the browser reads an attribute value.
   const text = raw.replace(/&amp;|&amp(?=&)/gi, '&').trim();
   if (!text) return { untitled: false, hidden: [], params: [] };
   let untitled = false;
   const hidden = new Set<string>();
   const seenFlags = new Set<string>();
+  let border: string | undefined;
+  let message: string | undefined;
   const params: ComponentParam[] = [];
   const seenKeys = new Set<string>();
   // One island of a value: a bare read of a record field or a declared page input, checked the same way wherever it stands.
@@ -988,6 +995,21 @@ function componentParams(
     // Creator repeats the embed's own link name inside `params`; naming the
     // same view again changes nothing, naming another one is not provable.
     if (ZC_LINK.test(key) && value === name.toLowerCase()) continue;
+    // A form's border colour and success text are free-form flags: each passes one bounded literal the runtime applies.
+    if (key === 'zc_bdrclr' || (key === 'zc_succmsg' && value !== COMPONENT_FLAGS.zc_succmsg.values[0])) {
+      if (kind !== 'form' || seenFlags.has(key)) return null;
+      seenFlags.add(key);
+      if (key === 'zc_bdrclr') {
+        const hex = /^#([0-9a-f]{3,8})$/.exec(value);
+        if (hex) border = `x${hex[1]}`;
+        else if (/^[a-z]{3,20}$/.test(value)) border = value;
+        else return null;
+      } else {
+        if (!SUCCESS_TEXT.test(rawValue)) return null;
+        message = rawValue;
+      }
+      continue;
+    }
     const flag = Object.prototype.hasOwnProperty.call(COMPONENT_FLAGS, key) ? COMPONENT_FLAGS[key] : undefined;
     if (flag) {
       if (!flag.kinds.includes(kind) || !flag.values.includes(value) || seenFlags.has(key)) return null;
@@ -1032,7 +1054,7 @@ function componentParams(
       return null;
     }
   }
-  return { untitled, hidden: [...hidden].sort(), params };
+  return { untitled, hidden: [...hidden].sort(), params, ...(border ? { border } : {}), ...(message ? { message } : {}) };
 }
 
 /** A param value as marker text: literals as written, each read encoded when the page renders. */
@@ -1180,7 +1202,7 @@ function embeddedComponents(
       const component: EmbeddedComponent = { kind: kind as 'form' | 'report', name, ...(keys.length ? { params: keys } : {}) };
       components.push(component);
       const query = applied.map((item) => `${item.key}=${valueMarker(item.value)}`).join('&');
-      const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}${params.hidden.length ? `:hide-${params.hidden.join('-')}` : ''}${query ? `?${query}` : ''}`;
+      const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}${params.hidden.length ? `:hide-${params.hidden.join('-')}` : ''}${params.border ? `:border-${params.border}` : ''}${params.message ? `:msg-${encodeURIComponent(params.message)}` : ''}${query ? `?${query}` : ''}`;
       markers.push(marker.replace(/<%=[^%]*%>/g, ''));
       if (!slots.length) return tag.replace(/>$/, ` data-zml="${marker}">`);
       // The tag is rebuilt from its parsed attributes: the island-carrying

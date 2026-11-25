@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
-import { buildUi } from '../src/index.js';
+import { buildUi, clientRuntimeSource } from '../src/index.js';
 import { compileHtmlpage } from '../src/htmlpage.js';
 import type { UiElement, UiModel } from '../src/index.js';
 import { pageSpecs } from '../../ui-react/src/charts.js';
@@ -418,6 +418,47 @@ content
   assert.ok(main.querySelector('section[data-report="All_Rows"] > h1'), 'zc_Header=true keeps the report title');
 });
 
+test('a form embed carries its own border colour and success text to the runtime', async () => {
+  const snippet = `htmlpage Outer1()\ncontent\n<%{ %><div elName='zc-component' formLinkName='Intake' params='zc_BdrClr=white&amp;zc_SuccMsg=Data Added Sucessfully!&amp;zc_mobileView=inline&amp;zc_Header=false'></div><div elName='zc-component' formLinkName='Intake' params='zc_BdrClr=#1A2b3c'></div><% }%>`;
+  const { model } = buildUi(componentApp(snippet));
+  assert.deepEqual(snippetTodos(model), []);
+  const el = snippetOf(model, 'Outer');
+  assert.deepEqual(el?.components, [{ kind: 'form', name: 'Intake' }, { kind: 'form', name: 'Intake' }]);
+  assert.match(el?.html ?? '', /data-zml="component-form:Intake:untitled:border-white:msg-Data%20Added%20Sucessfully!"/);
+  assert.match(el?.html ?? '', /data-zml="component-form:Intake:border-x1a2b3c"/);
+  const dom = new JSDOM('<!doctype html><body><nav id="nav"></nav><main id="main"></main></body>', { url: 'http://localhost/slate/index.html#/' });
+  const win = dom.window as unknown as Window & typeof globalThis;
+  win.fetch = (async () => ({ ok: true, status: 200, json: async () => ({ dryRun: false, wrote: true }) })) as unknown as typeof fetch;
+  const globals = globalThis as { model?: unknown; document?: unknown; CSS?: unknown; navigator?: unknown };
+  globals.CSS ??= { escape: (value: string) => value };
+  globals.model = model;
+  globals.document = win.document;
+  try {
+    const source = clientRuntimeSource();
+    const runtime = (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)) as Runtime & { boot(model: unknown, doc: unknown): Promise<void> };
+    const settle = async () => {
+      for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    await runtime.boot(model, win.document);
+    await settle();
+    const main = win.document.getElementById('main')!;
+    main.innerHTML = runtime.renderPage(model.pages.find((page) => page.name === 'Outer'), win.document, model);
+    runtime.hydrateComponentEmbeds(main, model, { navigator: { onLine: true }, fetch: win.fetch });
+    const slots = Array.from(win.document.querySelectorAll<HTMLElement>('[data-zml^="component-form:Intake"]'));
+    assert.equal(slots.length, 2);
+    assert.equal((slots[0].firstElementChild as HTMLElement).style.borderColor, 'white');
+    assert.equal((slots[1].firstElementChild as HTMLElement).style.borderColor, 'rgb(26, 43, 60)');
+    for (const [slot, text] of [[slots[0], 'Data Added Sucessfully!'], [slots[1], 'Data Added Successfully!']] as const) {
+      slot.querySelector('form')!.dispatchEvent(new win.Event('submit', { cancelable: true, bubbles: true }));
+      await settle();
+      assert.equal(slot.querySelector('[data-banner]')?.textContent, text);
+    }
+  } finally {
+    delete globals.model;
+    delete globals.document;
+  }
+});
+
 test('zc-component secondary-header display params keep generated reports inline', () => {
   const snippet = `htmlpage Outer1()\ncontent\n<%{ %><div elName='zc-component' viewLinkName='All_Rows' params='zc_Header=false&amp;zc_SecHeader=false'></div><% }%>`;
   const { model } = buildUi(componentApp(snippet));
@@ -432,7 +473,13 @@ test('zc-component params that cannot be applied stay counted TODOs', () => {
     `<div elName='zc-component' viewLinkName='All_Rows' params='Name=Ann Lee'></div>`,
     `<div elName='zc-component' viewLinkName='All_Rows' params='zc_Header=no'></div>`,
     `<div elName='zc-component' viewLinkName='All_Rows' params='zc_Header'></div>`,
-    `<div elName='zc-component' formLinkName='Intake' params='zc_SuccMsg=Saved'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_SuccMsg=<b>Saved</b>'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_SuccMsg=Saved&amp;zc_SuccMsg=Again'></div>`,
+    `<div elName='zc-component' viewLinkName='All_Rows' params='zc_SuccMsg=Saved'></div>`,
+    `<div elName='zc-component' viewLinkName='All_Rows' params='zc_BdrClr=white'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_BdrClr=red;x:url(//e)'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_BdrClr=white&amp;zc_BdrClr=red'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_mobileView=popup'></div>`,
     `<div elName='zc-component' formLinkName='Intake' params='zc_Focus=true'></div>`,
     `<div elName='zc-component' formLinkName='Intake' params='zc_Header=false&amp;Name=<%=input.Name%>'></div>`,
     `<div elName='zc-component' formLinkName='Intake' params='__proto__=x'></div>`,
