@@ -215,6 +215,8 @@ export interface UiElement {
   style?: Record<string, string>;
   /** `openUrl(..., "popup window")` actions a snippet would have run server-side. */
   popups?: UiPopup[];
+  /** Popups the snippet's own render opens (a marker where its script ran the call), each named outright. */
+  popupMarks?: { target: 'form' | 'report'; name: string }[];
   /** Pages of this app the snippet embedded by `page-embed` iframe, drawn inline at their markers. */
   includes?: string[];
   /** Generated forms/reports embedded by a zc-component marker. */
@@ -2251,6 +2253,13 @@ export function elementFromZml(
         const notes = [...(compiled.componentTodos ?? []), ...unavailable].map(componentNote);
         children = [...notes, ...children];
       }
+      // A popup the render itself opens (under a condition only it decides) is no lifted popup: each mark drops one lifted twin.
+      const rendered = compiled?.ok ? (compiled.popupMarks ?? []) : [];
+      const liftedPopups = [...popups];
+      for (const mark of rendered) {
+        const twin = liftedPopups.findIndex((popup) => popup.target === mark.target && popup.name === mark.name);
+        if (twin >= 0) liftedPopups.splice(twin, 1);
+      }
       if (compiled?.ok && compiled.staticOnly) {
         return {
           tag,
@@ -2262,7 +2271,7 @@ export function elementFromZml(
           ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}),
           ...(compiled.includes?.length ? { includes: compiled.includes } : {}),
           ...(compiled.components?.length ? { components: compiled.components.filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name)) } : {}),
-          ...(popups.length ? { popups } : {}),
+          ...(liftedPopups.length ? { popups: liftedPopups } : {}),
           children: [...actionItems, ...children],
         };
       }
@@ -2279,7 +2288,8 @@ export function elementFromZml(
           src: compiled.src,
           ...(compiled.includes?.length ? { includes: compiled.includes } : {}),
           ...(compiled.components?.length ? { components: compiled.components.filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name)) } : {}),
-          ...(popups.length ? { popups } : {}),
+          ...(liftedPopups.length ? { popups: liftedPopups } : {}),
+          ...(rendered.length ? { popupMarks: rendered } : {}),
           children: [...actionItems, ...children],
         };
       }
