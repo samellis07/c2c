@@ -3244,8 +3244,8 @@ function rewriteMapFrames(template: string): string {
   return replaceIframeElements(template, (whole, attrs, inner) => {
     if (inner.trim() !== '') return whole;
     const parsed = parseZmlAttributes(attrs);
-    if (!Object.keys(parsed).every((name) => MAP_FRAME_ATTRS.has(name))) return whole;
-    if (Object.entries(parsed).some(([name, value]) => name !== 'src' && value.includes('<%'))) return whole;
+    if (!Object.keys(parsed).sort().every((name) => MAP_FRAME_ATTRS.has(name))) return whole;
+    if (Object.entries(parsed).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).some(([name, value]) => name !== 'src' && value.includes('<%'))) return whole;
     const match = MAP_FRAME_SRC.exec((parsed.src ?? '').trim());
     if (!match) return whole;
     const name = `c2c_map${count++}`;
@@ -3896,10 +3896,10 @@ function rewriteFormEmbedFrames(template: string, app: App): string {
   return replaceIframeElements(template, (whole, attrs, inner) => {
     if (inner.trim() !== '') return whole;
     const parsed = parseZmlAttributes(attrs);
-    if (!Object.keys(parsed).every((name) => FORM_FRAME_ATTRS.has(name))) return whole;
+    if (!Object.keys(parsed).sort().every((name) => FORM_FRAME_ATTRS.has(name))) return whole;
     const match = FORM_EMBED_SRC.exec((parsed.src ?? '').trim());
     if (!match || !app.forms.some((form) => form.name === match[1])) return whole;
-    if (Object.entries(parsed).some(([name, value]) => name !== 'src' && /[<>"'&]/.test(value))) return whole;
+    if (Object.entries(parsed).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).some(([name, value]) => name !== 'src' && /[<>"'&]/.test(value))) return whole;
     if (parsed.frameborder !== '0' && !NO_BORDER.test(parsed.style ?? '')) return whole;
     if (parsed.scrolling !== undefined && parsed.scrolling.toLowerCase() !== 'auto') return whole;
     const sizes: string[] = [];
