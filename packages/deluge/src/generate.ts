@@ -26,6 +26,7 @@ import { integrityColumns, type IntegrityColumn } from '../../data/src/integrity
 import { flowHistoryTable, generateSchema, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
 import { LIMITS, jobPoolName } from '../../shims/src/index.js';
+import { scriptNavInstruction } from '../../shims/src/runtime.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { parseAllowedDays } from '../../shims/src/write-rules.js';
 import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerKey, isStageFieldProperty, phaseFieldKind, transitionOwnerProperties, type BlueprintFieldSpec } from './blueprint-rules.js';
@@ -2889,13 +2890,13 @@ export function actionNavigationDropReason(app: App, fn: FunctionDef): string | 
  * target built from values only known when the workflow runs (a local, a
  * field, a function argument). The page re-checks every instruction against
  * its URL policy before acting, so an unsafe value is refused there. A target
- * that is definitely not navigable (an unknown form, a `#Script:` call that is
- * not a page refresh, a literal `javascript:` URL) is not carried.
+ * that is definitely not navigable (an unknown form, a `#Script:` call the page
+ * has no command for, a literal `javascript:` URL) is not carried.
  */
 function navTargetCapturable(app: App, fn: FunctionDef, stmt: Stmt, locals: ReadonlyMap<string, Expr>): boolean {
   if (stmt.kind !== 'openUrl' || !stmt.args.length || stmt.args.length > 3) return false;
   const first = unparenExpr(stmt.args[0]!);
-  if (first.kind === 'string' && /^\s*#Script:/i.test(first.value)) return /^\s*#Script:page\.refresh\s*$/i.test(first.value);
+  if (first.kind === 'string' && /^\s*#Script:/i.test(first.value)) return scriptNavInstruction(first.value) !== undefined;
   // A local the target is built from is read as the value it was given, so a
   // target that is definitely not navigable is told apart from one only known
   // at run time.
