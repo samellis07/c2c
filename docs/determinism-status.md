@@ -30,7 +30,7 @@ TODO item per untranslated construct occurrence.
 | apps with no residual todos | 41/67 |
 | apps with no residual todos and no silent drops (deterministic) | 41/67 (61.2%) |
 | silent drops (total) | 0 |
-| residual TODO items | 69 |
+| residual TODO items | 61 |
 | distinct TODO kinds | 29 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
@@ -38,22 +38,22 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 25 |
+| `Server-side Deluge snippet requires manual translation` | 18 |
 | `Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.` | 6 |
 | `openurl-unsupported-target` | 3 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 3 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 3 |
 | `openurl-dropped-unrecognized-branch-shape` | 2 |
 | `openurl-dropped-with-server-logic` | 2 |
-| `The <iframe> element is removed from this page snippet by the sanitizer` | 2 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 2 |
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
 | `Custom action (app identifier) is not migrated; its button is turned off.` | 1 |
-| `Embedded zc-component form (app identifier) has no generated view` | 1 |
 | `Field (app identifier) sets `annotation = true`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.` | 1 |
 | `Field (app identifier) sets `duration = 150`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Field (app identifier) sets `show onload = true`; the generated image field opens its camera only when the user taps the control, never automatically when the form loads.` | 1 |
+| `Inline style declarations not carried over (unsafe or unsupported CSS): background` | 1 |
+| `Inline style declarations not carried over (unsafe or unsupported CSS): background-image, background-image, background-image, background-image` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background-image, background, background, background` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background, background, background` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): text-align, text-align` | 1 |
@@ -75,6 +75,7 @@ clears the app. The count is apps, not items.
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
+| `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background-image declaration)` | 1 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 1 |
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 | `ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
@@ -91,7 +92,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "Server-side Deluge snippet requires manual translation",
-      "count": 25
+      "count": 18
     },
     {
       "construct": "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
@@ -118,10 +119,6 @@ clears the app. The count is apps, not items.
       "count": 2
     },
     {
-      "construct": "The <iframe> element is removed from this page snippet by the sanitizer",
-      "count": 2
-    },
-    {
       "construct": "The <script> element is removed from this page snippet by the sanitizer",
       "count": 2
     },
@@ -131,10 +128,6 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Custom action (app identifier) is not migrated; its button is turned off.",
-      "count": 1
-    },
-    {
-      "construct": "Embedded zc-component form (app identifier) has no generated view",
       "count": 1
     },
     {
@@ -151,6 +144,14 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Field (app identifier) sets `show onload = true`; the generated image field opens its camera only when the user taps the control, never automatically when the form loads.",
+      "count": 1
+    },
+    {
+      "construct": "Inline style declarations not carried over (unsafe or unsupported CSS): background",
+      "count": 1
+    },
+    {
+      "construct": "Inline style declarations not carried over (unsafe or unsupported CSS): background-image, background-image, background-image, background-image",
       "count": 1
     },
     {
@@ -218,10 +219,9 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
-        "Embedded zc-component form (app identifier) has no generated view",
         "openurl-dropped-unrecognized-branch-shape"
       ],
-      "items": 4
+      "items": 3
     },
     {
       "constructs": [
@@ -260,6 +260,15 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
+        "Inline style declarations not carried over (unsafe or unsupported CSS): background",
+        "Inline style declarations not carried over (unsafe or unsupported CSS): background-image, background-image, background-image, background-image",
+        "openurl-unsupported-target",
+        "The <script> element is removed from this page snippet by the sanitizer"
+      ],
+      "items": 4
+    },
+    {
+      "constructs": [
         "Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background-image, background, background, background",
         "Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background, background, background"
       ],
@@ -291,14 +300,6 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation"
       ],
       "items": 2
-    },
-    {
-      "constructs": [
-        "openurl-unsupported-target",
-        "Server-side Deluge snippet requires manual translation",
-        "The <script> element is removed from this page snippet by the sanitizer"
-      ],
-      "items": 5
     },
     {
       "constructs": [
@@ -336,15 +337,7 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)",
-        "The <iframe> element is removed from this page snippet by the sanitizer"
-      ],
-      "items": 6
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background-image declaration)"
+        "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)"
       ],
       "items": 4
     },
@@ -360,11 +353,17 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over: the page sanitizer drops 7 static style rules or declarations (CSS built by a Deluge tag x7)"
       ],
-      "items": 3
+      "items": 2
     },
     {
       "constructs": [
         "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
+        "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background-image declaration)"
       ],
       "items": 1
     },
@@ -389,7 +388,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 69,
+  "todoTotal": 61,
   "totalApps": 67
 }
 ```
