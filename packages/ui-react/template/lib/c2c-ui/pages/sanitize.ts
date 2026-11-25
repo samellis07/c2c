@@ -100,11 +100,39 @@ function allowedAttr(tag: string, name: string): boolean {
   return !!ALLOWED_ATTRS[tag]?.has(name) || ALLOWED_ATTRS['*']!.has(name);
 }
 
+/**
+ * The one frame a snippet may keep: a YouTube player, `https://www.youtube.com/embed/<11-character id>` and
+ * nothing else. The build sanitizer (packages/ui/src/pages.ts) carries the same rule.
+ */
+function videoEmbedSrc(value: string): string | undefined {
+  const match = /^https:\/\/(?:www\.)?youtube(?:-nocookie)?\.com\/embed\/([A-Za-z0-9_-]{11})$/.exec(value);
+  return match ? `https://www.youtube-nocookie.com/embed/${match[1]}` : undefined;
+}
+
+function videoFrame(element: Element, doc: Document): Node | null {
+  const src = videoEmbedSrc(element.getAttribute('src') ?? '');
+  if (!src) return null;
+  const out = doc.createElement('iframe');
+  out.setAttribute('src', src);
+  for (const name of ['width', 'height']) {
+    const value = element.getAttribute(name) ?? '';
+    if (/^[0-9]{1,4}$/.test(value)) out.setAttribute(name, value);
+  }
+  const title = element.getAttribute('title');
+  if (title) out.setAttribute('title', title);
+  out.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+  out.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+  out.setAttribute('loading', 'lazy');
+  out.setAttribute('allowfullscreen', '');
+  return out;
+}
+
 function cleanNode(node: Node, doc: Document): Node | null {
   if (node.nodeType === 3) return doc.createTextNode(node.textContent ?? '');
   if (node.nodeType !== 1) return null;
   const element = node as Element;
   const tag = element.tagName.toLowerCase();
+  if (tag === 'iframe') return videoFrame(element, doc);
   if (DROPPED_TAGS.has(tag)) return null;
   const fragment = doc.createDocumentFragment();
   for (const child of Array.from(element.childNodes)) {

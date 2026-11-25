@@ -7,11 +7,12 @@
  * Advanced I/O function host fact (plugin/references/facts/functions.md): one
  * Catalyst-assigned label, optional `.development`, then `catalystserverless.<dc>`.
  * A wildcard, a foreign host, or a relative `/server/...` base adds nothing.
+ * frame-src is `'self'` plus the one video host the snippet sanitizers keep a player frame for.
  */
 
 /** Byte-stable policy when no function origin is known. Trailing semicolon included. */
 export const SHELL_CONTENT_SECURITY_POLICY =
-  "default-src 'self'; script-src 'self' https://static.zohocdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';";
+  "default-src 'self'; script-src 'self' https://static.zohocdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'self';";
 
 /**
  * Public suffixes of `catalystserverless` hosts. `com.au` is one suffix,
