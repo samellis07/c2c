@@ -15,7 +15,7 @@
  */
 
 /** Element tags a markup value keeps. */
-const MARKUP_TAGS = ['a', 'b', 'br', 'div', 'em', 'i', 'img', 'p', 'small', 'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'u'] as const;
+const MARKUP_TAGS = ['a', 'b', 'br', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'i', 'img', 'li', 'ol', 'p', 'small', 'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'u', 'ul'] as const;
 
 /** Style properties a markup value keeps; every value passes the endpoint's CSS value grammar. */
 const MARKUP_STYLE_PROPS = [

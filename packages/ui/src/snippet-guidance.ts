@@ -72,8 +72,8 @@ const STEPS: Record<SnippetReason, string> = {
   untranslated: 'The compiler stopped at a Deluge construct with no verified translation',
 };
 
-/** A Deluge string literal that holds markup. */
-export const MARKUP_LITERAL = /"[^"\n]*<[A-Za-z/!%]/;
+/** A Deluge string literal that holds markup. A regex lookbehind (`(?<!`, `(?<name>`) opens no tag. */
+export const MARKUP_LITERAL = /"[^"\n]*(?<!\(\?)<[A-Za-z/!%]/;
 
 /**
  * App functions the snippet calls directly (`thisapp.<name>(...)`) whose body

@@ -4251,6 +4251,57 @@ test('a parameterised component embed of a caller with no record renders an empt
   }
 });
 
+const TWO_REPORTS = `${ORDERS}
+report All_Orders
+{
+  show all rows from Orders
+  (
+    Name
+  )
+}
+report My_Orders
+{
+  show all rows from Orders
+  (
+    Name
+  )
+}`;
+
+function choiceApp(script: string) {
+  const snippet = `htmlpage hp1()\ncontent\n<%{\n${script}\n%>\n<div elName='zc-component' viewLinkName='<%=link%>' params='zc_Header=true'>Loading View...</div>\n<%\n}%>`;
+  return generateUi(appOf(`${TWO_REPORTS}\n${pageWithSnippet(snippet)}`));
+}
+
+test('a component embed named by a name the script only sets to report literals renders the embed of the branch taken', async () => {
+  const { files, model } = choiceApp('if(input.who == "me")\n{\nlink = "My_Orders";\n}\nelse\n{\nlink = "All_Orders";\n}');
+  const compiled = uiSnippetFiles(model);
+  assert.equal(compiled.length, 1, JSON.stringify(model.todos));
+  const mod = await loadTree(files, compiled[0]!.path);
+  const live = await liveStore({ Orders: [] });
+  try {
+    for (const [who, shown, hidden] of [['me', 'My_Orders', 'All_Orders'], ['other', 'All_Orders', 'My_Orders']]) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { who } } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      assert.match(String(out.body.html), new RegExp(`data-zml="component-report:${shown}\\?zc_Header=true|data-zml="component-report:${shown}"`), String(out.body.html));
+      assert.doesNotMatch(String(out.body.html), new RegExp(`component-report:${hidden}`));
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a component embed named by a name that can hold anything but a known report literal stays a TODO', () => {
+  for (const script of [
+    'link = input.which;',
+    'link = "All_Orders";\nlink = link + "x";',
+    'link = "Nope";',
+    'link = "All_Orders";\nfor each link in {"My_Orders"}\n{\n}',
+  ]) {
+    const { model } = choiceApp(script);
+    assert.equal(uiSnippetFiles(model).length, 0, script);
+  }
+});
+
 test('an expression island under a tag the sanitizer unwraps renders its escaped value in place', async () => {
   const hostile = '<script>globalThis.__hit=1</script><img src=x onerror=1>&"\'';
   for (const tag of ['center', 'time', 'section', 'label', 'nav', 'article']) {
@@ -4482,6 +4533,32 @@ test('a markup function called anywhere but as the whole right side of an assign
     const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
     assert.equal(compileHtmlpage(app, 'Home', 'hp1', snippet).ok, false, snippet);
   }
+});
+
+test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "<li>" + thisapp.Util.wrap(input.q) + "</li>";\n%>\n<ul><%= row %></ul>`;
+  const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(app, snippet, { q: 'x<script>alert(1)</script>' });
+  assert.match(html, /<ul><li><div class="w">x&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/div><\/li><\/ul>/);
+  assert.doesNotMatch(html, /<script/);
+});
+
+test('a method called on a markup function value in a concatenation stays a snippet', () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "a" + thisapp.Util.wrap("y").length();\n%>\n<p><%= row %></p>`;
+  const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  assert.equal(compileHtmlpage(app, 'Home', 'hp1', snippet).ok, false);
+});
+
+test('a function whose regex holds a lookbehind is not a markup function and prints as escaped text', async () => {
+  const group = { name: 'Util.group', signature: 'string Util.group(string s)', deluge: 'return s.replaceAll("(?<!\\.\\d)(?<=\\d)(?=(?:\\d\\d\\d)+\\b)", ",");' };
+  const snippet = `htmlpage hp1()\ncontent\n<p><%= thisapp.Util.group("1234567") %></p>`;
+  const app = appWithFns([group], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(app, snippet);
+  assert.match(html, /<p>1,234,567<\/p>/);
 });
 
 test('hostile text inside a markup value never reaches the page as script, a handler, a frame or a bad URL', async () => {
