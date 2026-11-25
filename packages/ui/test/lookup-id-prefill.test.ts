@@ -77,11 +77,19 @@ test('the same name stays counted when it could hold anything but the page input
     `\tprojID = input.pid.toLong() + 1;`,
     `\tprojID = input.pid;`,
     `\tprojID = input.pid.toLong();\n\tfor each projID in Projects\n\t{\n\t}`,
+    `\twhile (input.pid == "1")\n\t{\n\t\tprojID = input.pid.toLong();\n\t}`,
+    `\tfor each r in Projects\n\t{\n\t\tprojID = input.pid.toLong();\n\t}`,
+    `\tif (input.pid == "1")\n\t{\n\t\twhile (true)\n\t\t{\n\t\t\tprojID = input.pid.toLong();\n\t\t}\n\t}`,
   ];
   for (const statements of cases) {
     const { model } = buildUi(appWith(page(`${statements}\n\tproject = Projects[ID == projID];`, ACTIONS('Project=<%=projID%>'))));
     assert.ok(refused(model).length > 0, statements);
   }
+});
+
+test('a name set once to the page input inside a guarding if still carries; inside any loop it does not', () => {
+  const guarded = `\tif (input.pid != null)\n\t{\n\t\tprojID = input.pid.toLong();\n\t\tproject = Projects[ID == projID];\n\t\t%>\n${ACTIONS('Project=<%=projID%>')}\n<%\n\t}`;
+  assert.deepEqual(refused(buildUi(appWith(page(guarded, ''))).model), []);
 });
 
 test('an elName with no link and a stray quote embeds nothing and no longer counts, one that names a link still counts', () => {
