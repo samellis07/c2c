@@ -1926,13 +1926,16 @@ export function renderPage(page, doc, appModel) {
 }
 
 const PAGE_INCLUDE_PREFIX = 'page-include:';
-const INCLUDE_PARAM = /^[A-Za-z_]\w*=(?:@[A-Za-z_]\w*|[A-Za-z0-9_.-]{0,64})$/;
+const INCLUDE_PARAM = /^[A-Za-z_]\w*=(?:@[A-Za-z_]\w*|\*|[A-Za-z0-9_.-]{0,64})$/;
+/** A form-encoded value the server render put in a marker for a `key=*` parameter. */
+const INCLUDE_SUPPLIED = /^(?:[A-Za-z0-9_.*+-]|%[0-9A-Fa-f]{2}){0,1024}$/;
 const INCLUDE_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
- * `Page` or `Page?key=@param,key=literal`: the include spec the compiler
+ * `Page` or `Page?key=@param,key=literal,key=*`: the include spec the compiler
  * proved (declared target parameters, bounded literals, forwarded page
- * parameters). Anything else is null and the marker is never filled.
+ * parameters, values the render supplies). Anything else is null and the
+ * marker is never filled.
  */
 export function parseIncludeSpec(spec) {
   const text = String(spec || '');
@@ -1952,10 +1955,46 @@ export function parseIncludeSpec(spec) {
       if (value.startsWith('@')) {
         if (INCLUDE_RESERVED.has(value.slice(1))) return null;
         params.push({ key, from: value.slice(1) });
-      } else params.push({ key, value });
+      } else if (value === '*') params.push({ key, supplied: true });
+      else params.push({ key, value });
     }
   }
   return { name, params };
+}
+
+/**
+ * The declared spec a rendered marker spec instantiates, with its parameters
+ * resolved. A marker repeats the declaration exactly, except that each `key=*`
+ * parameter carries one form-encoded value the server render computed (the
+ * only part of a marker a page's data can reach); that value must decode.
+ * Null when no declared spec fits.
+ */
+function declaredInclude(spec, declared) {
+  const text = String(spec || '');
+  const q = text.indexOf('?');
+  for (const item of declared) {
+    const parsed = parseIncludeSpec(item);
+    if (!parsed || (q < 0 ? text !== parsed.name : text.slice(0, q) !== parsed.name || !parsed.params.length)) continue;
+    const parts = q < 0 ? [] : text.slice(q + 1).split(',');
+    if (parts.length !== parsed.params.length) continue;
+    const params = [];
+    for (let at = 0; at < parts.length; at++) {
+      const param = parsed.params[at];
+      if (!param.supplied) {
+        if (parts[at] !== item.slice(item.indexOf('?') + 1).split(',')[at]) break;
+        params.push(param);
+        continue;
+      }
+      if (!parts[at].startsWith(`${param.key}=`) || !INCLUDE_SUPPLIED.test(parts[at].slice(param.key.length + 1))) break;
+      try {
+        params.push({ key: param.key, value: decodeURIComponent(parts[at].slice(param.key.length + 1).replace(/\+/g, ' ')) });
+      } catch {
+        break;
+      }
+    }
+    if (params.length === parts.length) return { name: parsed.name, params };
+  }
+  return null;
 }
 
 /** Page input scoped to an included page, set where the include is drawn. */
@@ -2000,8 +2039,8 @@ export function hydratePageIncludes(root, appModel, viewRef) {
     const declared = host ? (host.getAttribute('data-page-includes') || '').split(' ') : [];
     // The whole spec, parameters included, must be one the compiled snippet
     // declared: markup (or a server-rendered value) cannot add a parameter.
-    const parsed = parseIncludeSpec(spec);
-    if (!parsed || !declared.includes(spec)) continue;
+    const parsed = declaredInclude(spec, declared);
+    if (!parsed) continue;
     const name = parsed.name;
     slot.setAttribute('data-include-done', 'true');
     const page = (appModel.pages || []).find((item) => item.name === name);

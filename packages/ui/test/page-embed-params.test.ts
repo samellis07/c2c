@@ -55,8 +55,7 @@ test('attack: parameter injection stays counted', () => {
     '<%=zoho.appuri%>view-embed/Inner?dayVal=a&dayVal=b',
     // A forwarded parameter the embedding page does not declare.
     '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=input.other%>',
-    // Expressions, system variables and statements are not forwarded.
-    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=zoho.loginuser%>',
+    // Expressions and statements are not forwarded; only a bare read is.
     '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=input.usermailid + "x"%>',
     '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=Orders[ID != 0].ID%>',
     '<%=zoho.appuri%>view-embed/Inner?dayVal=<%input.usermailid%>',
@@ -189,4 +188,94 @@ test('a marker whose parameters differ from the declared spec is never filled', 
   const main = win(dom).document.getElementById('main') as unknown as { innerHTML: string };
   runtime.hydratePageIncludes(main, model, {});
   assert.doesNotMatch(main.innerHTML, /page-include"|class="page-include/);
+});
+
+test('a bare read the render computes becomes a supplied parameter of the include', () => {
+  const out = compileOuter('<%=zoho.appuri%>view-embed/Inner?dayVal=<%=zoho.currentdate%>&&userMailID=<%=input.usermailid%>');
+  assert.equal(out.ok, true, out.reason ?? 'compile failed');
+  assert.deepEqual(out.includes, ['Inner?dayVal=*,userMailID=@usermailid']);
+  assert.match(out.file?.source ?? '', /encodeUrl\(zoho\.currentdate\)/);
+  const local = compileHtmlpage(appOf([inner()]), 'Outer', 'Outer1', `htmlpage Outer1(usermailid)\ncontent\n<%{ day = input.usermailid.toLong(); %><div><iframe src="<%=zoho.appuri%>view-embed/Inner?dayVal=<%= day %>"></iframe></div><% }%>`);
+  assert.equal(local.ok, true, local.reason ?? 'compile failed');
+  assert.deepEqual(local.includes, ['Inner?dayVal=*']);
+});
+
+test('attack: a supplied read that is not one bare read of a declared name stays counted', () => {
+  for (const src of [
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=input.other%>',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=input.other.toLong()%>',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=zoho.currentdate.toString("x")%>',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=zoho.currentdate + "x"%>',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=a.__proto__%>',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=a.constructor.toString()%>',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=zoho.currentdate%>x',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=zoho.currentdate%><%=zoho.currenttime%>',
+    '<%=zoho.appuri%>view-embed/Inner?ownerEmail=<%=zoho.loginuserid%>',
+    '<%=zoho.appuri%>view-embed/Inner?dayVal=<%=zoho.currentdate%>&dayVal=<%=zoho.currentdate%>',
+    '<%=zoho.appuri%>view-embed/Inner?zc_Header=<%=zoho.currentdate%>',
+  ]) {
+    const out = compileOuter(src);
+    assert.ok(!out.ok || !(out.includes ?? []).length, `${src} must not become an include`);
+  }
+});
+
+function hydratedInclude(marker: string, declared: string) {
+  return async () => {
+    const runtime = await loadRuntime();
+    const { model } = buildUi(appOf([inner()]));
+    const dom = new JSDOM(`<!doctype html><body><main id="main"><div class="snippet" data-page-includes="${declared}"><div data-zml="${marker}"></div></div></main></body>`, { url: 'http://localhost/#/page/Outer' });
+    const main = win(dom).document.getElementById('main') as unknown as { innerHTML: string };
+    const bodies: Array<{ url: string; input: Record<string, string> }> = [];
+    const view = {
+      location: win(dom).location,
+      fetch: async (url: string, init: { body: string }) => {
+        bodies.push({ url: String(url), input: JSON.parse(init.body).input });
+        return { status: 404, ok: false };
+      },
+    };
+    runtime.hydratePageIncludes(main, model, view);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return { main, bodies };
+  };
+}
+
+test('a supplied value reaches the included page as one decoded input value', async () => {
+  const declared = 'Inner?dayVal=*,userMailID=lit';
+  const { main, bodies } = await hydratedInclude('page-include:Inner?dayVal=a%2Cb%3Dc%26d+%40x%22%3Cb%3E*,userMailID=lit', declared)();
+  assert.match(main.innerHTML, /class="page-include"/, main.innerHTML);
+  const call = bodies.find((b) => /inner/i.test(b.url));
+  assert.ok(call, JSON.stringify(bodies));
+  assert.deepEqual({ ...call.input }, { dayVal: 'a,b=c&d @x"<b>*', userMailID: 'lit' });
+  const empty = await hydratedInclude('page-include:Inner?dayVal=,userMailID=lit', declared)();
+  assert.deepEqual({ ...(empty.bodies.find((b) => /inner/i.test(b.url))?.input ?? {}) }, { dayVal: '', userMailID: 'lit' });
+});
+
+test('attack: a marker may differ from its declaration only in the value of a supplied parameter', async () => {
+  const declared = 'Inner?dayVal=*,userMailID=lit';
+  for (const marker of [
+    'page-include:Inner?dayVal=x,userMailID=@admin',
+    'page-include:Inner?dayVal=x,userMailID=other',
+    'page-include:Inner?dayVal=x',
+    'page-include:Inner?dayVal=x,userMailID=lit,extra=1',
+    'page-include:Inner?userMailID=lit,dayVal=x',
+    'page-include:Inner?dayVal=x,y=1,userMailID=lit',
+    'page-include:Inner?dayVal=a,b,userMailID=lit',
+    'page-include:Inner?dayVal=%E0%A4%A,userMailID=lit',
+    'page-include:Inner?dayVal=a b,userMailID=lit',
+    'page-include:Inner?dayVal="x",userMailID=lit',
+    `page-include:Inner?dayVal=${'a'.repeat(1025)},userMailID=lit`,
+    'page-include:Inner',
+  ]) {
+    const { main } = await hydratedInclude(marker, declared)();
+    assert.doesNotMatch(main.innerHTML, /class="page-include"/, marker);
+  }
+});
+
+test('runtime spec grammar accepts a supplied parameter and nothing looser', async () => {
+  const runtime = await loadRuntime();
+  assert.deepEqual(runtime.parseIncludeSpec('Inner?dayVal=*,userMailID=@usermailid'), {
+    name: 'Inner',
+    params: [{ key: 'dayVal', supplied: true }, { key: 'userMailID', from: 'usermailid' }],
+  });
+  for (const bad of ['Inner?a=**', 'Inner?a=*x', 'Inner?a=@*']) assert.equal(runtime.parseIncludeSpec(bad), null, bad);
 });

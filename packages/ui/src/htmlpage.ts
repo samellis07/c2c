@@ -508,8 +508,16 @@ const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
 const FORWARD_ISLAND = /^<%=[ \t]*input[ \t]*\.[ \t]*([A-Za-z_]\w*)[ \t]*%>$/;
 /** Literal include parameter values: no delimiter, quote, percent escape, scheme colon or slash. */
 const LITERAL_PARAM = /^[A-Za-z0-9_.-]{0,64}$/;
-/** Grammar of one include parameter in a marker: `key=@param` (forward) or `key=literal`. */
-export const INCLUDE_PARAM = /^[A-Za-z_]\w*=(?:@[A-Za-z_]\w*|[A-Za-z0-9_.-]{0,64})$/;
+/**
+ * A value the server render supplies: exactly one `<%=read%>` island holding a
+ * bare read (`a.b.c`, optional `.toLong()`/`.toString()`), the grammar of an
+ * embed parameter value. The island is encoded into the marker at render time.
+ */
+const SUPPLIED_READ = '[A-Za-z_]\\w*(?:[ \\t]*\\.[ \\t]*[A-Za-z_]\\w*)*(?:[ \\t]*\\.[ \\t]*(?:toLong|toString)[ \\t]*\\([ \\t]*\\))?';
+const SUPPLIED_ISLAND_SOURCE = `<%=[ \\t]*${SUPPLIED_READ}[ \\t]*%>`;
+const SUPPLIED_ISLAND = new RegExp(`^<%=[ \\t]*(${SUPPLIED_READ})[ \\t]*%>$`);
+/** Grammar of one include parameter in a declared spec: `key=@param` (forward), `key=*` (supplied by the render) or `key=literal`. */
+export const INCLUDE_PARAM = /^[A-Za-z_]\w*=(?:@[A-Za-z_]\w*|\*|[A-Za-z0-9_.-]{0,64})$/;
 const INCLUDE_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
@@ -524,7 +532,7 @@ const INCLUDE_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
  * the link instead: Creator hands a page only the parameters it declares, so
  * the page could not read that value there either.
  */
-function includeParams(query: string, target: readonly string[], own: ReadonlySet<string>, undeclared: 'refuse' | 'omit' = 'refuse'): string[] | null {
+function includeParams(query: string, target: readonly string[], own: ReadonlySet<string>, undeclared: 'refuse' | 'omit' = 'refuse', supplied?: string[]): string[] | null {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const part of query.split('&')) {
@@ -554,10 +562,18 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
       if (forward ? !own.has(forward[1]) || INCLUDE_RESERVED.has(forward[1].toLowerCase()) : !LITERAL_PARAM.test(raw)) return null;
       continue;
     }
+    const read = supplied && !forward ? SUPPLIED_ISLAND.exec(raw)?.[1].replace(/[ \t]/g, '') : undefined;
     if (forward) {
       if (INCLUDE_RESERVED.has(forward[1].toLowerCase())) return null;
       if (!own.has(forward[1])) return null;
       out.push(`${name}=@${forward[1]}`);
+    } else if (read && supplied) {
+      const segments = read.split('.');
+      if (segments.some((segment) => INCLUDE_RESERVED.has(segment.toLowerCase()))) return null;
+      // A page input must be a parameter this snippet declares.
+      if (segments[0] === 'input' && (segments.length < 2 || !own.has(segments[1]))) return null;
+      supplied.push(read);
+      out.push(`${name}=*`);
     } else if (LITERAL_PARAM.test(raw)) {
       out.push(`${name}=${raw}`);
     } else {
@@ -633,8 +649,9 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
  * elsewhere in the URL or the tag, frame content, or a position that is not
  * plain text (a comment, a raw-text or dropped element).
  */
-function inlinePageEmbeds(template: string, app: App, page: string, ownParams: ReadonlySet<string> = new Set()): { template: string; includes: string[] } {
+function inlinePageEmbeds(template: string, app: App, page: string, ownParams: ReadonlySet<string> = new Set()): { template: string; includes: string[]; markers: string[] } {
   const includes: string[] = [];
+  const markers: string[] = [];
   const pages = new Map(app.pages.map((item) => [item.name, item]));
   let out = '';
   let at = 0;
@@ -648,7 +665,7 @@ function inlinePageEmbeds(template: string, app: App, page: string, ownParams: R
     const quote = open[1];
     const rest = template.slice(m.index + m[0].length);
     const tail = new RegExp(
-      `^(?:page-embed|view-embed)/([A-Za-z_]\\w*)(?:\\?((?:[^"'<>%${TAG_WS}]|<%=[ \\t]*input[ \\t]*\\.[ \\t]*[A-Za-z_]\\w*[ \\t]*%>)*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
+      `^(?:page-embed|view-embed)/([A-Za-z_]\\w*)(?:\\?((?:[^"'<>%${TAG_WS}]|${SUPPLIED_ISLAND_SOURCE})*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
       'i',
     ).exec(rest);
     if (!tail) continue;
@@ -656,7 +673,8 @@ function inlinePageEmbeds(template: string, app: App, page: string, ownParams: R
     const query = tail[2] ?? '';
     const target = pages.get(name);
     if (!target || name === page) continue;
-    const params = includeParams(query, target.params ?? [], ownParams);
+    const supplied: string[] = [];
+    const params = includeParams(query, target.params ?? [], ownParams, 'refuse', supplied);
     if (!params) continue;
     // The tag must open in a text position of an element the sanitizer keeps.
     const before = out + template.slice(at, at + start);
@@ -664,12 +682,16 @@ function inlinePageEmbeds(template: string, app: App, page: string, ownParams: R
     if (!pieces) continue;
     if (slotContext(pieces.map((c) => (c.kind === 'static' ? c.text : 'x')).join('')) !== 'text') continue;
     const spec = params.length ? `${name}?${params.join(',')}` : name;
-    out = `${before}<div data-zml="${PAGE_INCLUDE_PREFIX}${spec}"></div>`;
+    // The declaration keeps `key=*`; the marker carries the value the render computes, form-encoded.
+    const marker = spec.replace(/=\*(?=,|$)/g, () => `=<%=encodeUrl(${supplied.shift()})%>`);
+    out = `${before}<div data-zml="${PAGE_INCLUDE_PREFIX}${marker}"></div>`;
     at = m.index + m[0].length + tail[0].length;
     APPURI_ISLAND.lastIndex = at;
     if (!includes.includes(spec)) includes.push(spec);
+    // The static shell carries the marker without the values the render supplies.
+    markers.push(marker.replace(/<%=[^%]*%>/g, ''));
   }
-  return { template: out + template.slice(at), includes };
+  return { template: out + template.slice(at), includes, markers };
 }
 
 const ZC_LINK = /^(form|view|report|page)linkname$/i;
@@ -3126,7 +3148,7 @@ export function compileHtmlpage(
     // Every include must survive sanitization where it stood; a marker the
     // allowlist removed would be an embed that silently vanished.
     const html = done.html ?? '';
-    for (const name of includes) if (!html.includes(`data-zml="${PAGE_INCLUDE_PREFIX}${name}"`)) return fail('page embed did not survive markup sanitization');
+    for (const marker of embeds.markers) if (!html.includes(`data-zml="${PAGE_INCLUDE_PREFIX}${marker}"`)) return fail('page embed did not survive markup sanitization');
     for (const marker of embedded.markers) if (!html.includes(`data-zml="${marker.replace(/&/g, '&amp;')}"`)) return fail('component embed did not survive markup sanitization');
     return { manualReasons: [], ...done, ...(includes.length ? { includes } : {}), ...(embedded.components.length ? { components: embedded.components } : {}), ...(embedded.todos.length ? { componentTodos: embedded.todos } : {}) };
   };
