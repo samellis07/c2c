@@ -75,6 +75,26 @@ test('attack: parameter injection stays counted', () => {
   }
 });
 
+test('a missing space between two quoted attributes before src still proves the embed', () => {
+  // The HTML5 tokenizer starts a new attribute right after a quoted value's
+  // closing quote even with no separating whitespace (a parse-error the
+  // browser, and Creator's own renderer, still recovers from); the embed
+  // must be recognized the same way.
+  const glued = `htmlpage Outer1(usermailid)\ncontent\n<div><p>Before</p><iframe style="border:0;"width="100%" src="<%=zoho.appuri%>view-embed/Inner?dayVal=1&&userMailID=<%=input.usermailid%>"></iframe></div>`;
+  const out = compileHtmlpage(appOf([inner()]), 'Outer', 'Outer1', glued);
+  assert.equal(out.ok, true, out.reason ?? 'compile failed');
+  assert.deepEqual(out.includes, ['Inner?dayVal=1,userMailID=@usermailid']);
+});
+
+test('a missing space between an unquoted attribute value and the next attribute stays refused', () => {
+  // Only a closing quote lets the tokenizer start a new attribute with no
+  // whitespace; an unquoted value has no such terminator, so the text after
+  // it is still part of the value and the embed stays unproven.
+  const glued = `htmlpage Outer1(usermailid)\ncontent\n<div><p>Before</p><iframe width=100%src="<%=zoho.appuri%>view-embed/Inner?dayVal=1"></iframe></div>`;
+  const out = compileHtmlpage(appOf([inner()]), 'Outer', 'Outer1', glued);
+  assert.ok(!out.ok || !(out.includes ?? []).length);
+});
+
 test('declared zc parameters are passed, while undeclared display flags are ignored', () => {
   const target = snippetPage('Inner(zc_flag)', 'htmlpage Inner1(zc_flag)\ncontent\n<p>x</p>');
   const out = compileHtmlpage(appOf([target]), 'Outer', 'Outer1', outerSnippet('<%=zoho.appuri%>view-embed/Inner?zc_flag=on&zc_Header=false'));
