@@ -27,10 +27,10 @@ const MARKUP_STYLE_PROPS = [
 ] as const;
 
 /** Longest value the endpoint rebuilds; a longer one renders empty. */
-export const MARKUP_VALUE_MAX = 4 * 1024 * 1024;
+const MARKUP_VALUE_MAX = 4 * 1024 * 1024;
 
 /** The one `src` an `<img>` in a markup value may carry. */
-export const MARKUP_IMAGE_SRC = '^data:image\\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+\\/]+={0,2}$';
+const MARKUP_IMAGE_SRC = '^data:image\\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+\\/]+={0,2}$';
 
 export function c2cMarkupFunctionSource(): string {
   return `var C2C_MK_TAGS = ${JSON.stringify(Object.fromEntries(MARKUP_TAGS.map((tag) => [tag, 1])))};
@@ -190,8 +190,8 @@ function c2cMarkup(value, notes, href) {
 }
 
 /** Largest image the endpoint inlines, and the most image bytes one render inlines. */
-export const IMAGE_INLINE_MAX = 2 * 1024 * 1024;
-export const IMAGE_RENDER_MAX = 4 * 1024 * 1024;
+const IMAGE_INLINE_MAX = 2 * 1024 * 1024;
+const IMAGE_RENDER_MAX = 4 * 1024 * 1024;
 
 /**
  * `c2cImage` in a generated page endpoint: an image field's value as Creator
