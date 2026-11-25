@@ -10,3 +10,49 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - The toolbar setting is not carried; fields marked private or personal data get no generated privacy control; report `permission` blocks have no generated equivalent (`docs/determinism-status.md`).
 - This release's documentation does not record a run of the generated output against a deployed Catalyst project or live Zoho; test the deployment before relying on it.
 - Creator placement relative to On Validate and other items marked `[UNVERIFIED]` in the source documentation remain unverified (`docs/ui.md`).
+
+## Platform limits and their manual steps
+
+Each row below is a construct that `c2c analyze` reports as a manual step because the generated app cannot reproduce it. The construct names match `docs/determinism-status.md`. For each one: what Creator does, what the generated app does instead, why the two differ, and what to do by hand. Where the reason is a browser or platform rule rather than something this tree enforces, the row says so.
+
+### Fields
+
+| Construct | Creator | Generated app | Why it differs | Manual step |
+| --- | --- | --- | --- | --- |
+| Video field `duration = N` | Stops recording at N seconds in its own capture dialog. | Hands recording to the device camera app; there is no recording-length limit. | The generated field does not host a capture dialog, so no timer can stop the device's recorder. | Enforce the limit by hand: a client-side timer, a server-side rejection of longer uploads, or accept any length. |
+| Image field `annotation = true` | Lets the user draw or mark up the photo before it is stored. | Accepts the chosen file unchanged. | No drawing tool is generated for the image field. | Add a markup step before the upload, or accept unmarked photos. |
+| Image field `show onload = true` | Opens the camera when the form opens. | Opens the camera only when the user taps the control. (A scan field with this setting does open its scanner on load.) | The generated image field is a file input started by a user action. A browser's rule that camera and file pickers start from a user gesture is the underlying reason; this tree does not test it. | Trigger the camera for that field when the form loads, by hand in the console, where your target browsers allow it. |
+| Scan field `camera = <lens>` | Chooses the lens. | The primary and secondary lenses are generated. Any other value is a manual step and the scanner opens the primary camera. | The generated browser scanner offers those two lenses only. | Choose the lens you need when the field scans. |
+| File field `browse` with `google_docs` or `zoho_docs` | Offers those document stores in the picker. | Uploads from the local drive only. The field carries a note saying so; it is not a counted TODO. | Catalyst has no equivalent document-store picker. | Download the file and upload it, or build a reviewed integration. |
+
+### Reports
+
+| Construct | Creator | Generated app | Why it differs | Manual step |
+| --- | --- | --- | --- | --- |
+| `customlayouts` settings block on a report | Applies a named custom layout template. | Generates the standard report view and no layout. | Catalyst generates no equivalent for the block. | Apply the layout settings by hand on that report in the console, from the settings the report lists. |
+| Timeline `options` such as week start day | Starts the week on the chosen day. | The timeline ignores any `options` entry the generator does not read, and counts it. | The generator proves each option it carries; this one has no generated home. | Apply the setting by hand on that report. |
+| Built-in record column (for example `Added_Location`, or `Record_Status` where no status column exists) | Lists the column. | The column is left out. | The generated schema has no column for it. | Add a column, or a manual note, that stands in for it. |
+| Map report on a form with no address field | Plots pins. | Shows the same rows as a list. | A map needs stored latitude and longitude; none are invented. | Add an address field, fill in its coordinates, point the report's display field at it, and regenerate. |
+| Custom action: `Custom action ... is not migrated` | Runs the action's workflow from a report button. | The button is turned off. An action whose workflow opens an external URL or calls an integration task carries that detail in its reason. | An action is migrated only when its workflow generates a function or is a navigation to an own-app screen. | Rebuild the action as a generated workflow or a Catalyst function and wire the button to it. |
+| Custom action: `navigation (openUrl) inside it is not carried over` | Runs the workflow, then navigates. | Runs the workflow; the button reports success and does not navigate. | The navigation is dropped when it is a second `openUrl`, a `#Script` pseudo-route, or a target that cannot be resolved. | Wire the navigation in the generated UI by hand. The manual step names the reason. |
+
+### Pages and snippets
+
+| Construct | Creator | Generated app | Why it differs | Manual step |
+| --- | --- | --- | --- | --- |
+| `The <script> element is removed from this page snippet by the sanitizer` | Runs the script. | The element is removed, always in full. | A script body is always executable, so no safe subset exists. | Reimplement the behavior as a client handler or a generated function. |
+| `The <iframe> element is removed from this page snippet by the sanitizer` | Embeds the framed page. | The element is removed. | The sanitizer keeps no `<iframe>` subset, and the generated page's content security policy allows frames only from the app itself and one video host. | Embed the content through a reviewed route of the app, or link to it. |
+| `Static <style> CSS not carried over` and `Inline style declarations not carried over`, for `background` and `background-image` | Loads a background image from any host. | A `url()` that fetches the app's own origin, or a `data:image` URI, is kept. A remote or protocol-relative `url()` is dropped, and the counted entry names the property. | A remote `url()` is a way to fetch from, or leak to, another host, and no syntax check separates a safe use from an attack. The page's policy also allows images only from the app itself and `data:`. | Host the image with the app (or inline it as a `data:` URI) and point the style at it. |
+| `Static <style> CSS not carried over` counted as `CSS built by a Deluge tag` | Builds CSS with Deluge at render time. | A computed number inside a style body is carried as a custom property the page sets; other rules built by a Deluge tag are counted. | The generated page ships fixed CSS, so only the computed-number shape has a generated home. | Rewrite the counted rules as static CSS. |
+| `Embedded zc-component form ... has no generated view` | Embeds a form. | No component is drawn for that embed. | The embedded form has no generated view to include. | Embed a form or report the app does generate, or link to it. |
+| `ZML <pc>` and `ZML <text>` `click parameters ... are not generated` | Passes the parameters when the element is clicked. | Wires a click only for one static equality or a named filter. | A parameter that is not one of those (for example a Deluge expression) has no filter the report endpoint accepts. | Wire the parameters to the generated click handler by hand. |
+| `Server-side Deluge snippet requires manual translation` | Runs Deluge when the snippet renders. | One counted manual step, with reasons from a fixed list (`write`, `render-navigation`, `caller-read`, `dynamic-url`, `sanitizer-loss`, `untranslated`) and the page named. | A snippet that writes, sends mail, or calls out on render is always refused, and other shapes stay manual when they cannot be proved safe. | Translate the snippet by hand using the reasons, then retest the page (`docs/ui.md`, `docs/fill-todos.md`). |
+
+### Deluge functions and mail
+
+| Construct | Creator | Generated app | Why it differs | Manual step |
+| --- | --- | --- | --- | --- |
+| `openurl-unsupported-target` | A function whose body is an `openUrl` goes anywhere. | No function is generated. | The target is not an own-app form, report, or page link (`docs/report-action-navigation.md`). | Reconfigure the function's navigation. |
+| `openurl-dropped-with-server-logic` | Runs server logic, then navigates. | The server logic is kept; the navigation after it is dropped. | A function that does server work cannot return client navigation. | Wire that navigation in the generated UI. |
+| `openurl-dropped-unrecognized-branch-shape` | Navigates from any branch layout. | The server logic is kept; the `openUrl` is dropped. | Only a bare `openUrl`, or an `if` whose branches are each one `openUrl` after plain assigns, is recognized. | Wire that navigation by hand. |
+| `sendmail-attachment:view` | Attaches a report view as a file. | The mail carries a typed descriptor; no file is rendered. | Catalyst Mail cannot render a Creator report view into a file (`docs/fill-todos.md`). | Render the matching rows in a Catalyst function, attach the file, and send a test mail. |
