@@ -4791,6 +4791,44 @@ test('an island between the attributes of a tag that is not one plain if block o
   }
 });
 
+// A map frame is linked out the way the ZML embed element links an exact map provider out: the frame needs scripts the sandbox withholds.
+const mapFrame = (src: string, attrs = " name='zohoview' height='100%' width='100%' frameborder='0' scrolling='Auto'") =>
+  `htmlpage hp1()\ncontent\n<%{\nmapUrl = Orders[ID == input.id.toLong()].Status;\n%>\n<iframe${attrs} src='${src}'></iframe>\n<%\n}%>`;
+
+test('a frame whose address a record holds is the link to that address when it is an exact map provider, and nothing otherwise', async () => {
+  const snippet = mapFrame('<%=mapUrl%>&z=15&output=embed');
+  const app = appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  assert.deepEqual(compiled.droppedTags ?? [], []);
+  const rows = (status: string) => ({ Orders: [{ Status: status, Amount: 1 }] });
+  const ok = await renderPage(app, snippet, { id: '1000' }, rows('https://maps.google.com/maps?q=12.5,77.1'));
+  assert.match(ok.html, /<div class="embed"><a href="https:\/\/maps\.google\.com\/maps\?q=12\.5,77\.1&amp;z=15&amp;output=embed"[^>]*>Open map<\/a><\/div>/);
+  assert.doesNotMatch(ok.html, /iframe/);
+  for (const bad of ['https://maps.google.com.evil.example/maps?q=1,2', 'http://maps.google.com/maps?q=1,2', 'javascript:alert(1)//', 'https://example.org/maps?q=1,2', 'https://www.google.com/mapsevil', '', 'https://maps.google.com/']) {
+    const out = await renderPage(app, snippet, { id: '1000' }, rows(bad));
+    assert.doesNotMatch(out.html, /<a |iframe|href/, bad);
+  }
+});
+
+test('a frame that is not one island followed by a short plain suffix, or that carries more than a frame draws, stays counted', () => {
+  const cases: [string, string?][] = [
+    ['<%=mapUrl.toLowerCase()%>'],
+    ['<%=mapUrl%><%=mapUrl%>'],
+    ['<%=mapUrl%>'],
+    ['<%=mapUrl%>&z=15'],
+    ['https://maps.google.com/maps?q=1,2'],
+    ['<%=mapUrl%>&z=15&output=embed', " onload='x()'"],
+    ['<%=mapUrl%>"x'],
+    ['<%=mapUrl%>&z=<%=input.id%>'],
+  ];
+  for (const [src, attrs] of cases) {
+    const snippet = mapFrame(src, attrs);
+    const out = compileHtmlpage(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`), 'Home', 'hp1', snippet);
+    assert.ok(!out.ok || !/Open map/.test(out.file?.source ?? ''), src);
+  }
+});
+
 test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
   const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "<li>" + thisapp.Util.wrap(input.q) + "</li>";\n%>\n<ul><%= row %></ul>`;
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);

@@ -3192,6 +3192,42 @@ function rewriteBlankFrames(template: string): string {
   });
 }
 
+/** Attributes of a map frame that change nothing the link shows: its size and look belonged to the frame. */
+const MAP_FRAME_ATTRS = new Set(['allowfullscreen', 'class', 'frameborder', 'height', 'name', 'scrolling', 'src', 'style', 'width']);
+/** One bare read, then a short plain suffix that asks for the map embed output (`&z=15&output=embed`). */
+const MAP_FRAME_SRC = /^<%=[ \t]*([A-Za-z_]\w*(?:[ \t]*\.[ \t]*[A-Za-z_]\w*)*)[ \t]*%>((?:&z=\d{1,2})?(?:&output=embed)+)$/;
+/** The exact map providers the ZML embed element links out (client-runtime `embedLinkOutKind`): the host is whole, the path starts after it. */
+const MAP_ADDRESS_PREFIXES = [
+  'https://maps.google.com/maps?',
+  'https://maps.google.com/maps/',
+  'https://www.google.com/maps?',
+  'https://www.google.com/maps/',
+  'https://openstreetmap.org/export/embed.html?',
+  'https://www.openstreetmap.org/export/embed.html?',
+];
+
+/**
+ * A frame whose address a record holds (`<iframe src="<%=mapUrl%>&z=15&output=embed">`) is the link to that address when the
+ * address is an exact map provider, as the ZML embed element links one out: a map widget needs scripts a sandboxed frame withholds,
+ * and a frame of any other address is never kept. Any other address prints nothing. The frame's size and look are not carried
+ * (a link has none). A frame with content, another attribute, an island elsewhere, or a source that is not one bare read and the
+ * map embed suffix is left as written and stays counted: a frame of a record summary or any other address is never turned into nothing.
+ */
+function rewriteMapFrames(template: string): string {
+  let count = 0;
+  return replaceIframeElements(template, (whole, attrs, inner) => {
+    if (inner.trim() !== '') return whole;
+    const parsed = parseZmlAttributes(attrs);
+    if (!Object.keys(parsed).every((name) => MAP_FRAME_ATTRS.has(name))) return whole;
+    if (Object.entries(parsed).some(([name, value]) => name !== 'src' && value.includes('<%'))) return whole;
+    const match = MAP_FRAME_SRC.exec((parsed.src ?? '').trim());
+    if (!match) return whole;
+    const name = `c2c_map${count++}`;
+    const test = MAP_ADDRESS_PREFIXES.map((prefix) => `${name}.startsWith("${prefix}")`).join(' || ');
+    return `<%\n${name} = ${match[1].replace(/[ \t]/g, '')} + "${match[2]}";\nif(${test})\n{\n%><div class="embed"><a href="<%=${name}%>">Open map</a></div><%\n}\n%>`;
+  });
+}
+
 /**
  * Replace each complete `<iframe ...>...</iframe>` element, scanning once from
  * left to right. Attributes are read quote-aware (a quote with no closing
@@ -3879,6 +3915,7 @@ export function compileHtmlpage(
   head.template = rewriteConditionalAttributes(head.template);
   head.template = rewriteRecordSummaryFrames(inlineSummaryUrlVariable(head.template), app, decoded);
   head.template = rewriteBlankFrames(head.template);
+  head.template = rewriteMapFrames(head.template);
   const fnFiles: HtmlpageFile[] = [];
   head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)), {
     app,
