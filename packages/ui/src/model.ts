@@ -289,6 +289,8 @@ export interface UiReport {
   endField?: string;
   /** Calendar display grouping from `options { display type }`. */
   displayType?: string;
+  /** Timeline week boundary from `options { week start day }`. */
+  weekStartDay?: 'monday' | 'sunday';
   /** Kanban lane order from `options { sort order }`: alphabetical by lane key, not first-seen order. */
   sortOrder?: 'ascending' | 'descending';
   /** Kanban card or calendar entry title (`options { display field }` on calendar/timeline). */
@@ -2459,6 +2461,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   let startField: string | undefined;
   let endField: string | undefined;
   let displayType: string | undefined;
+  let weekStartDay: 'monday' | 'sunday' | undefined;
   let sortOrder: 'ascending' | 'descending' | undefined;
   let titleField: string | undefined;
   if (view === 'calendar' || view === 'timeline') {
@@ -2483,6 +2486,10 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
       const dt = options.get('display type')?.toLowerCase();
       if (view === 'calendar' && (dt === 'week' || dt === 'day')) displayType = dt;
       titleField = displayField && formField(form, displayField) ? displayField : columns[0]?.field;
+      if (view === 'timeline') {
+        const ws = options.get('week start day')?.toLowerCase();
+        if (ws === 'monday' || ws === 'sunday') weekStartDay = ws;
+      }
     }
   }
   if (view === 'kanban' && status === 'generated') {
@@ -2687,6 +2694,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
       if (key === 'record count') return (value.toLowerCase() === 'enable') === (showRecordCount === true);
       if (key === 'radius') return mapRadius === reportRadiusOption(value);
       if (key === 'display type') return view === 'calendar' && (value.toLowerCase() === 'week' || value.toLowerCase() === 'day') && displayType === value.toLowerCase();
+      if (key === 'week start day') return view === 'timeline' && (value.toLowerCase() === 'monday' || value.toLowerCase() === 'sunday') && weekStartDay === value.toLowerCase();
       if (key === 'sort order') return view === 'kanban' && (value.toLowerCase() === 'ascending' || value.toLowerCase() === 'descending') && sortOrder === value.toLowerCase();
       return false;
     };
@@ -2743,6 +2751,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     ...(startField ? { startField } : {}),
     ...(endField ? { endField } : {}),
     ...(displayType ? { displayType } : {}),
+    ...(weekStartDay ? { weekStartDay } : {}),
     ...(sortOrder ? { sortOrder } : {}),
     ...(titleField ? { titleField } : {}),
     ...(mapField ? { mapField } : {}),

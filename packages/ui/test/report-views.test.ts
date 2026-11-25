@@ -111,6 +111,17 @@ test('calendar display type week is carried and groups entries by week', async (
   assert.deepEqual(lanes(doc), [{ key: '2026-10-05', head: '05-Oct-2026 (2)', items: ['101 — 07-Oct-2026 10:00:00', '102 — 09-Oct-2026 10:00:00'] }]);
 });
 
+test('timeline week start day controls lane bucketing for monday and sunday', async () => {
+  const model = buildUi(appOf([FORM,
+    report('timeline', 'Mon', 'week start day = monday\ndisplay field = Room\nstart date = Check_In'),
+    report('timeline', 'Sun', 'week start day = sunday\ndisplay field = Room\nstart date = Check_In'),
+  ].join('\n'))).model;
+  const runtime = (await loadViewsRuntime()) as any;
+  const rows = [{ Room: '101', Check_In: '04-Oct-2026 10:00:00' }];
+  assert.deepEqual(runtime.boardLanes(model.reports.find((r: any) => r.name === 'Mon'), rows).map((lane: any) => lane.key), ['2026-09-28']);
+  assert.deepEqual(runtime.boardLanes(model.reports.find((r: any) => r.name === 'Sun'), rows).map((lane: any) => lane.key), ['2026-10-04']);
+});
+
 test('report properties display record count shows the generated row count', () => {
   const r = reportsOf(report('list', 'Counted', 'display rows = 25', '\t\treport properties\n\t\t(\n\t\t\tdisplay record count = true\n\t\t)\n'));
   assert.equal(r.Counted.status, 'generated');
