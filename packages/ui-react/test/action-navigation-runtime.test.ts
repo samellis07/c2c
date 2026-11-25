@@ -158,3 +158,14 @@ test('performActionNav reloads the page for a reload instruction (a page refresh
   performActionNav({ kind: 'reload' }, [], view);
   assert.equal(reloads, 1);
 });
+
+test('performActionNav ignores an instruction that only inherits its kind, url or target', { skip: SKIP }, async (t) => {
+  const { performActionNav } = await loadNavigation(t);
+  const calls: string[] = [];
+  const view = { location: { hash: '', href: 'https://app.example/', reload: () => calls.push('reload') }, open: (...args: unknown[]) => calls.push(`open ${String(args[0])}`) };
+  performActionNav(Object.create({ kind: 'reload' }), ALLOWED, view);
+  performActionNav(Object.create({ kind: 'navigate', url: 'https://allowed.example/x', target: 'new' }), ALLOWED, view);
+  performActionNav({ kind: 'navigate', target: 'new', ...Object.create({ url: 'https://allowed.example/x' }) }, ALLOWED, view);
+  assert.deepEqual(calls, []);
+  assert.equal(view.location.href, 'https://app.example/');
+});

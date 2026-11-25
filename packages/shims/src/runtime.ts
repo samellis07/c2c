@@ -606,7 +606,8 @@ export function scriptNavInstruction(url: string): NavInstruction | undefined {
 }
 
 function isNavResult(value: unknown): value is { kind: string; url?: unknown; target?: unknown } {
-  return !!value && typeof value === 'object' && !Array.isArray(value) && ['navigate', 'reload', 'closeDialog', 'closePage', 'refreshParent'].includes(String((value as { kind?: unknown }).kind));
+  // An own `kind` only: a value that merely inherits one (a prototype-polluted object) is not an instruction.
+  return !!value && typeof value === 'object' && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'kind') && ['navigate', 'reload', 'closeDialog', 'closePage', 'refreshParent'].includes(String((value as { kind?: unknown }).kind));
 }
 
 function navText(value: unknown): string {

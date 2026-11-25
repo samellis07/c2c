@@ -3315,7 +3315,7 @@ const SCRIPT_NAV_KINDS = {
  * it. An unknown kind does nothing.
  */
 export function applyActionNav(root, nav, source) {
-  if (!nav || typeof nav !== 'object') return;
+  if (!nav || typeof nav !== 'object' || !Object.prototype.hasOwnProperty.call(nav, 'kind')) return;
   const view = viewOf(root);
   const reload = (win) => {
     try {
@@ -3326,7 +3326,7 @@ export function applyActionNav(root, nav, source) {
   };
   switch (nav.kind) {
     case 'navigate':
-      openUrlNav(root, nav.url, nav.target === 'new' ? 'new window' : 'same window');
+      openUrlNav(root, Object.prototype.hasOwnProperty.call(nav, 'url') ? nav.url : undefined, Object.prototype.hasOwnProperty.call(nav, 'target') && nav.target === 'new' ? 'new window' : 'same window');
       break;
     case 'reload':
       reload(view);

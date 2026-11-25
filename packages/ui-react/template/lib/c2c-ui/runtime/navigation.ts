@@ -108,6 +108,9 @@ function performPageCommand(kind: 'closeDialog' | 'closePage' | 'refreshParent',
  * never gets a handle back to this page.
  */
 export function performActionNav(nav: ActionNavInstruction | undefined, allowedHosts: readonly string[], view: AppWindow): void {
+  // A parsed network reply: act only on an instruction that carries its own kind, url and target (never an inherited one).
+  if (!nav || typeof nav !== 'object' || !Object.prototype.hasOwnProperty.call(nav, 'kind')) return;
+  if (nav.kind === 'navigate' && (!Object.prototype.hasOwnProperty.call(nav, 'url') || (nav.target !== undefined && !Object.prototype.hasOwnProperty.call(nav, 'target')))) return;
   if (nav?.kind === 'reload') {
     view.location.reload();
     return;
