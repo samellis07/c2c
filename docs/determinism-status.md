@@ -18,7 +18,7 @@ targets. The gap between the two numbers is the apps held back only by silent dr
 A residual TODO item is an untranslated Deluge hole or one generated UI stub
 (a field, report, page, or ZML item). Each UI stub is included in the residual,
 so an app with a stub is not deterministic.
-0 of the 39 deterministic apps still have UI TODO stubs (0 in total).
+0 of the 42 deterministic apps still have UI TODO stubs (0 in total).
 
 The builtin catalogue lists 20 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
@@ -27,10 +27,10 @@ TODO item per untranslated construct occurrence.
 | | |
 |---|---:|
 | corpus apps | 67 |
-| apps with no residual todos | 39/67 |
-| apps with no residual todos and no silent drops (deterministic) | 39/67 (58.2%) |
+| apps with no residual todos | 42/67 |
+| apps with no residual todos and no silent drops (deterministic) | 42/67 (62.7%) |
 | silent drops (total) | 0 |
-| residual TODO items | 72 |
+| residual TODO items | 68 |
 | distinct TODO kinds | 29 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
@@ -38,7 +38,7 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 28 |
+| `Server-side Deluge snippet requires manual translation` | 24 |
 | `Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.` | 6 |
 | `openurl-unsupported-target` | 3 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 3 |
@@ -71,9 +71,9 @@ clears the app. The count is apps, not items.
 
 | construct | apps |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 4 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
+| `Server-side Deluge snippet requires manual translation` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 1 |
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
@@ -83,7 +83,7 @@ clears the app. The count is apps, not items.
 
 ```json
 {
-  "deterministicApps": 39,
+  "deterministicApps": 42,
   "deterministicWithUiTodos": {
     "apps": 0,
     "uiTodos": 0
@@ -91,7 +91,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "Server-side Deluge snippet requires manual translation",
-      "count": 28
+      "count": 24
     },
     {
       "construct": "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
@@ -206,7 +206,7 @@ clears the app. The count is apps, not items.
       "count": 1
     }
   ],
-  "noTodoApps": 39,
+  "noTodoApps": 42,
   "perAppConstructSets": [
     {
       "constructs": [
@@ -325,24 +325,6 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
       "items": 3
     },
     {
@@ -401,7 +383,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 72,
+  "todoTotal": 68,
   "totalApps": 67
 }
 ```
