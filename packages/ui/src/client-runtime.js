@@ -2106,7 +2106,7 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
   const call = (viewRef && viewRef.fetch) || globalThis.fetch;
   for (const slot of root.querySelectorAll('[data-zml^="component-"]')) {
     if (slot.getAttribute('data-component-done') === 'true') continue;
-    const match = /^component-(form|report):([A-Za-z_]\w*)(:untitled)?(?::hide-([a-z-]+))?(?::border-(x[0-9a-f]{3,8}|[a-z]{3,20}))?(?::msg-([A-Za-z0-9%.!~*'()_-]{1,600}))?(?:\?([^]*))?$/.exec(slot.getAttribute('data-zml') || '');
+    const match = /^component-(form|report):([A-Za-z_]\w*)(:untitled)?(?::hide-([a-z-]+))?(?::border-(x[0-9a-f]{3,8}|n[a-z]{3,20}))?(?::msg-([A-Za-z0-9%.!~*'()_-]{1,600}))?(?:\?([^]*))?$/.exec(slot.getAttribute('data-zml') || '');
     if (!match) continue;
     const [, kind, name, untitled, hide, border, msg, query] = match;
     const host = slot.closest('[data-page-components]');
@@ -2137,7 +2137,7 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
       if (kind === 'report' && params.keys.length) embedFilters.set(slot, reportRouteFilters(params.query));
       // A form embed's `zc_BdrClr` colours the form's own border and its `zc_SuccMsg` is the text shown after a save.
       const frame = slot.firstElementChild;
-      if (kind === 'form' && border && frame) frame.style.borderColor = border.charAt(0) === 'x' && /^x[0-9a-f]+$/.test(border) ? `#${border.slice(1)}` : border;
+      if (kind === 'form' && border && frame) frame.style.borderColor = border.charAt(0) === 'x' ? `#${border.slice(1)}` : border.slice(1);
       let message;
       try {
         message = kind === 'form' && msg ? decodeURIComponent(msg) : undefined;
