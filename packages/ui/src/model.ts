@@ -2066,15 +2066,10 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       const tokens = unquote(browseProp.value).split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
       const uncarried = tokens.filter((t) => t !== 'local_drive');
       if (uncarried.length && uncarried.every((t) => BROWSE_REMOTE_SOURCES.has(t))) {
-        const name = `${formName}.${field.name} property browse`;
-        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-          todos.push({
-            area: 'field',
-            name,
-            reason: `Browse option(s) ${uncarried.join(', ')} have no Catalyst equivalent; file uploads are supported from local drive only.`,
-            manualStep: `In Catalyst, remote file browsing (${uncarried.join(', ')}) is not supported out of the box. Configure third-party integrations (e.g. Google Drive, Zoho WorkDrive) or Catalyst Cloud Scale functions to attach remote documents, or rely on local device uploads.`,
-          });
-        }
+        ui.note = [
+          ui.note,
+          `Browse option(s) ${uncarried.join(', ')} have no Catalyst equivalent; file uploads are supported from local drive only.`,
+        ].filter(Boolean).join(' ');
       }
     }
     if (widget === 'file' && depth === 0) {
@@ -2092,10 +2087,12 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
     ui.accept = widget === 'image' || widget === 'signature' ? 'image/*' : widget === 'audio' ? 'audio/*' : widget === 'video' ? 'video/*' : undefined;
-    ui.note =
+    ui.note = [
+      ui.note,
       widget === 'signature'
         ? 'A signature pad uploads the drawn strokes as JSON. The dry-run function does not write to Stratus.'
-        : 'The column stores a Stratus object key. The dry-run upload does not write bytes.';
+        : 'The column stores a Stratus object key. The dry-run upload does not write bytes.',
+    ].filter(Boolean).join(' ');
     if (widget === 'audio') {
       const duration = prop(field, AUDIO_DURATION_PROPERTY_KEY);
       if (duration !== undefined) {

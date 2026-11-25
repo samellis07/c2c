@@ -4229,9 +4229,9 @@ test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo
   const cloudOut = collectOutputs(cloudSources);
   assert.equal(rowStatus(cloudSources, cloudOut, 'Attachment.File_Attachment property browse'), 'counted');
   const todo = cloudOut.model.todos.find((t) => t.name === 'Attachment.File_Attachment property browse');
-  assert.ok(todo, 'UI todo is emitted for uncarried cloud browse options');
-  assert.ok(todo.reason.includes('google_docs, zoho_docs'));
-  assert.ok(todo.manualStep?.includes('Google Drive, Zoho WorkDrive'));
+  assert.equal(todo, undefined, 'remote browse limitation is represented in generated field output');
+  const generatedField = cloudOut.model.forms[0]!.fields.find((field) => field.name === 'File_Attachment')!;
+  assert.match(generatedField.note ?? '', /file uploads are supported from local drive only/i);
 
   // Unknown browse source stays a drop.
   const unknown = dsApp(fileField('local_drive, dropbox'));
@@ -4239,7 +4239,7 @@ test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo
 
   // Mutation test: removing the UI todo makes local_drive, google_docs, zoho_docs a drop again.
   const mutated = cloneOutputs(cloudOut);
-  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Attachment.File_Attachment property browse');
+  delete mutated.model.forms[0]!.fields.find((field) => field.name === 'File_Attachment')!.note;
   assert.equal(rowStatus(cloudSources, mutated, 'Attachment.File_Attachment property browse'), 'dropped');
 });
 
@@ -4625,16 +4625,16 @@ test('a picklist whose values literal groups options under labels draws them as 
   assert.equal(rowStatus(grouped, mutated, 'Orders.Status option groups'), 'dropped');
 });
 
-test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
+test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is generated with a local-drive note', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
   assert.equal(rowStatus(contacts, collectOutputs(contacts), 'New_Contact.Picture property preview duration'), 'emitted');
 
   const taskzdone = parseProject(join(gallery, 'taskzdone')).ir;
   const taskzOut = collectOutputs(taskzdone);
-  assert.equal(rowStatus(taskzdone, taskzOut, 'Add_Attachment.File_Attachment property browse'), 'counted');
-  const todo = taskzOut.model.todos.find((t) => t.name === 'Add_Attachment.File_Attachment property browse');
-  assert.ok(todo, 'TaskzDone Add_Attachment.File_Attachment property browse has a counted UI todo');
+  const taskzField = taskzOut.model.forms.find((form) => form.name === 'Add_Attachment')!.fields.find((field) => field.name === 'File_Attachment')!;
+  assert.match(taskzField.note ?? '', /file uploads are supported from local drive only/i);
+  assert.equal(rowStatus(taskzdone, taskzOut, 'Add_Attachment.File_Attachment property browse'), 'emitted');
 });
 
 test(
