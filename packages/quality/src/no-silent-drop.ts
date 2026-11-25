@@ -740,7 +740,7 @@ function propertyNoteProves(p: Property, field: Field, ui: UiField | undefined):
   const note = ui?.note ?? '';
   if (key === 'browse') {
     const sources = unquote(p.value).split(',').map((token) => token.trim().toLowerCase()).filter((token) => token && token !== 'local_drive');
-    return sources.length > 0 && sources.every((source) => remoteBrowseSources.has(source)) && /remote browse options \([^)]*\) are not carried/i.test(note);
+    return sources.length > 0 && sources.every((source) => remoteBrowseSources.has(source)) && /browse option\(s\) [^;]+ have no catalyst equivalent/i.test(note) && /file uploads are supported from local drive only/i.test(note);
   }
   if (key === 'duration' && field.type?.trim().toLowerCase() === 'video') {
     return /creator duration\s*=\s*[^ ]+\s+is not enforced/i.test(note) && /uploaded video remains supported/i.test(note);
