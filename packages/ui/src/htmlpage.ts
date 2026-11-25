@@ -460,7 +460,14 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'sheet
  */
 export const PAGE_INCLUDE_PREFIX = 'page-include:';
 
-const IFRAME_ATTR = `[${TAG_WS}]+[A-Za-z_:][\\w:.-]*(?:[${TAG_WS}]*=[${TAG_WS}]*(?:"[^"<]*"|'[^'<]*'|[^${TAG_WS}"'=<>\`%]+))?`;
+// Per the HTML5 tokenizer's "after attribute value (quoted)" state, a
+// character right after a quoted value's closing quote starts a new
+// attribute even with no separating whitespace (a parse-error the browser,
+// and Creator's own renderer, still recovers from). The lookbehind on a
+// closing quote covers that recovery; every other position still needs
+// whitespace, so an unquoted value still cannot glue straight into the next
+// attribute name.
+const IFRAME_ATTR = `(?:[${TAG_WS}]+|(?<=["']))[A-Za-z_:][\\w:.-]*(?:[${TAG_WS}]*=[${TAG_WS}]*(?:"[^"<]*"|'[^'<]*'|[^${TAG_WS}"'=<>\`%]+))?`;
 const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?[${TAG_WS}]+src[${TAG_WS}]*=[${TAG_WS}]*(["'])$`, 'i');
 const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
 
