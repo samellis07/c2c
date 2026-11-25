@@ -29,7 +29,7 @@ content
 	%>
 .card { color: red; }
 </style>
-<div class='card'>Home</div>
+<div class='card'><span class='cur'>RUPEE_ESC</span> Home</div>
 <%
 }%>]]></dsp></column></row></layout></zml>`;
   const app = deriveIr(parse(`application "Demo"
@@ -45,7 +45,7 @@ form Orgs
 }
 		page Outer
 		{
-			Content=${JSON.stringify(zml)}
+			Content=${JSON.stringify(zml).replace('RUPEE_ESC', '\\u20B9')}
 		}
 	}
 }
@@ -76,6 +76,7 @@ async function run(user: Record<string, string>, rows: number): Promise<string> 
 for (const [label, user] of [['Administrator', ADMIN], ['Staff', STAFF]] as const) {
   test(`${label}: no organisation yet shows the link to the form, once one exists the page shows none`, async () => {
     const empty = await run(user, 0);
+    assert.match(empty, /<span class="cur">\u20B9<\/span>/);
     assert.match(empty, /Home/);
     assert.match(empty, /href="#\/form\/Orgs"/);
     const filled = await run(user, 1);

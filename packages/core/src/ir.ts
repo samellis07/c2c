@@ -511,8 +511,8 @@ export interface App {
 
 export function unquote(s: string): string {
   if (s.length >= 2 && (s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) {
-    return s.slice(1, -1).replace(/\\(.)/gs, (_m, c: string) =>
-      c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c,
+    return s.slice(1, -1).replace(/\\(u[0-9A-Fa-f]{4}|.)/gs, (_m, c: string) =>
+      c.length === 5 ? String.fromCharCode(parseInt(c.slice(1), 16)) : c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c,
     );
   }
   return s;
