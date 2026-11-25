@@ -761,6 +761,13 @@ interface Scope {
 interface Out {
   server: string;
   client: string;
+  /**
+   * The statement as one server run that also answers its client actions: this
+   * text does the server work of `server` and queues each client action as an
+   * effect under `key` (see {@link serverEffectOut}). Present only when every
+   * client action of the statement is one the browser accepts from a reply.
+   */
+  eff?: (key: string) => string;
 }
 
 const EMPTY: Fx = {
@@ -3413,6 +3420,8 @@ function delugeComment(s: Stmt, src: string): string {
 function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   const server: string[] = [];
   const client: string[] = [];
+  const effs: ((key: string) => string)[] = [];
+  let effOk = true;
   let alertText: string | null = null;
   // A computed alert message, as server code, for the `cancel submit` that
   // directly follows it: the refusal carries the text Creator would show.
@@ -3451,8 +3460,16 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
     }
     if (o.server.trim()) server.push(o.server);
     if (o.client.trim()) client.push(o.client);
+    // A statement with no client action of its own runs on the server alone.
+    if (o.eff) effs.push(o.eff);
+    else if (!o.client.trim() || clientBindsLocalsOnly(o.client)) effs.push(() => o.server);
+    else effOk = false;
   }
-  return { server: server.join('\n'), client: client.join('\n') };
+  return {
+    server: server.join('\n'),
+    client: client.join('\n'),
+    ...(effOk ? { eff: (key: string) => effs.map((e) => e(key)).filter((t) => t.trim()).join('\n') } : {}),
+  };
 }
 
 /**
@@ -3578,12 +3595,15 @@ function statementBody(s: Stmt, scope: Scope, stats: TranslateStats, todos: Todo
       if (scope.noClient) return serverOnlyAction(args, s.span, stats, todos);
       // A server read in the URL (`openUrl base + Form[criteria].ID`) is a prefetch slot, like a client condition.
       const clientArgs = args.map((a) => clientExpr(a, scope));
-      if (serverEffectTask(scope, args, clientArgs)) {
-        return serverEffectOut(scope, `{ op: "openUrl", args: [${args.map((a) => a.code).join(', ')}] }`, args.flatMap((a) => a.constructs), stats, todos, s.span);
-      }
+      const task = `{ op: "openUrl", args: [${args.map((a) => a.code).join(', ')}] }`;
+      if (serverEffectTask(scope, args, clientArgs)) return serverEffectOut(scope, task, args.flatMap((a) => a.constructs), stats, todos, s.span);
       const constructs = [...args.flatMap((a) => a.constructs), ...(clientArgs.some((c) => c.todo) ? ['client-condition-uses-server'] : [])];
       account(stats, todos, { todo: args.some((a) => a.todo) || clientArgs.some((c) => c.todo), shim: true, constructs }, s.span);
-      return { server: '', client: `actions.push({ op: "openUrl", args: [${clientArgs.map((a) => a.code).join(', ')}] });` };
+      return {
+        server: '',
+        client: `actions.push({ op: "openUrl", args: [${clientArgs.map((a) => a.code).join(', ')}] });`,
+        ...(args.some((a) => a.todo) ? {} : { eff: (key) => queueEffect(key, task) }),
+      };
     }
     case 'ui': {
       const targets = s.targets.map((t) => targetLit(t, scope));
@@ -3592,6 +3612,9 @@ function statementBody(s: Stmt, scope: Scope, stats: TranslateStats, todos: Todo
       return {
         server: '',
         client: `actions.push({ op: ${JSON.stringify(s.action)}, targets: [${targets.map((t) => t.code).join(', ')}] });`,
+        ...(s.action === 'clear' || targets.some((t) => t.todo)
+          ? {}
+          : { eff: (key) => queueEffect(key, `{ op: ${JSON.stringify(s.action)}, targets: [${targets.map((t) => t.code).join(', ')}] }`) }),
       };
     }
     case 'deleteFrom':
@@ -3678,9 +3701,16 @@ function clientPush(op: string, value: Fx, span: { start: number; end: number },
     account(stats, todos, { todo: false, shim: true, constructs: value.constructs }, span);
     return { server: `shim.log.info(ctx, ${value.code});`, client: '' };
   }
+  if (op === 'alert' && serverEffectTask(scope, [value], [message])) {
+    return serverEffectOut(scope, `{ op: "alert", message: ${value.code} }`, value.constructs, stats, todos, span);
+  }
   const constructs = message.todo ? [...value.constructs, 'client-condition-uses-server'] : value.constructs;
   account(stats, todos, { todo: value.todo || message.todo, shim: true, constructs }, span);
-  return { server: '', client: `actions.push({ op: ${JSON.stringify(op)}, message: ${message.code} });` };
+  return {
+    server: '',
+    client: `actions.push({ op: ${JSON.stringify(op)}, message: ${message.code} });`,
+    ...(op === 'alert' && !value.todo ? { eff: (key) => queueEffect(key, `{ op: "alert", message: ${value.code} }`) } : {}),
+  };
 }
 
 /**
@@ -4059,22 +4089,27 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
   const hasAlert = (stmt: Stmt): boolean => (stmt.kind === 'block' ? stmt.body.some(hasAlert) : stmt.kind === 'alert');
   const textKept = bodies.every((b, i) => !hasAlert(b) || !/\bcancelSubmit\(ctx, null\)/.test(translated[i]!.server));
   if (!clientDropped && scope.validateEvent && !scope.noClient && refusalArms(s) && textKept) {
-    const isClientTodo = (t: TodoItem): boolean => t.construct === 'client-condition-uses-server' || t.construct === 'client-loop-uses-server';
-    const armTodos = todos.slice(todoMark).filter(isClientTodo);
-    if (clientTests.some((c) => c.todo) || armTodos.length) {
-      const kept = todos.slice(todoMark).filter((t) => !isClientTodo(t));
-      todos.length = todoMark;
-      todos.push(...kept);
-      // An arm statement that counted a todo only for the dropped browser copy
-      // now translates (the server half carries it): re-bucket its ledger row.
-      for (const row of scope.cover.slice(coverMark)) {
-        if (row.bucket !== 'todo' || kept.some((t) => t.start < row.end && t.end > row.start)) continue;
-        row.bucket = 'shimmed';
-        stats.todo--;
-        stats.shimmed++;
-      }
+    if (clientTests.some((c) => c.todo) || todos.slice(todoMark).some(isClientTodo)) {
+      dropClientTodos(scope, stats, todos, todoMark, coverMark);
       clientDropped = true;
     }
+  }
+  // A test the browser cannot evaluate over arms whose every client action the
+  // server run can answer: the server runs the if and queues the arm's actions
+  // as effects under one marker the browser keeps where the if sat.
+  const armOuts = [then, ...elifBodies, ...(els ? [els] : [])];
+  const ifServer = (key: string): string => {
+    let out = `if (${test.code}) {\n${indent(then.eff!(key))}\n}`;
+    for (let i = 0; i < elifTests.length; i++) out += ` else if (${elifTests[i]!.code}) {\n${indent(elifBodies[i]!.eff!(key))}\n}`;
+    if (els) out += ` else {\n${indent(els.eff!(key))}\n}`;
+    return out;
+  };
+  if (!clientDropped && !scope.noClient && scope.serverEffects && scope.replayBarrier === 0 && clientTests.some((c) => c.todo) && armOuts.every((o) => o.eff)) {
+    dropClientTodos(scope, stats, todos, todoMark, coverMark);
+    dropClientNames(scope, assigned, declaredBefore);
+    account(stats, todos, { todo: condTodo, shim: condShim || clientTests.some((c) => c.shim), constructs }, s.span);
+    const key = JSON.stringify(`e${scope.slot++}`);
+    return { server: ifServer(key), client: `actions.push({ op: "serverEffect", key: ${key} });`, eff: ifServer };
   }
   const clientCondTodo = !clientDropped && clientTests.some((c) => c.todo);
   if (clientCondTodo) constructs.push('client-condition-uses-server');
@@ -4095,7 +4130,29 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
     }
     if (els) client += ` else {\n${indent(els.client)}\n}`;
   }
-  return { server, client };
+  return { server, client, ...(armOuts.every((o) => o.eff) ? { eff: ifServer } : {}) };
+}
+
+/** A todo only the browser's copy of a statement raised: the client cannot evaluate a condition or loop source. */
+function isClientTodo(t: TodoItem): boolean {
+  return t.construct === 'client-condition-uses-server' || t.construct === 'client-loop-uses-server';
+}
+
+/**
+ * Forget the todos a dropped browser copy raised since the marks. An arm
+ * statement that counted a todo only for that copy now translates (the server
+ * half carries it): re-bucket its ledger row.
+ */
+function dropClientTodos(scope: Scope, stats: TranslateStats, todos: TodoItem[], todoMark: number, coverMark: number): void {
+  const kept = todos.slice(todoMark).filter((t) => !isClientTodo(t));
+  todos.length = todoMark;
+  todos.push(...kept);
+  for (const row of scope.cover.slice(coverMark)) {
+    if (row.bucket !== 'todo' || kept.some((t) => t.start < row.end && t.end > row.start)) continue;
+    row.bucket = 'shimmed';
+    stats.todo--;
+    stats.shimmed++;
+  }
 }
 
 function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
@@ -4777,11 +4834,12 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     recordStateWrite(path.root === 'input' ? `input.${path.path[0]}` : `rec.${path.root}`, scope, fixed, value);
     // A server value the browser cannot be handed as a slot: the server run answers
     // with what it left in the field, where the write sat in the script.
-    if (!client && value.serverOnly && !value.todo && path.root === 'input' && path.path.length === 1 && scope.serverEffects && scope.replayBarrier === 0 && !scope.noClient && scope.writeGuards.every((g) => g.ok)) {
-      return serverEffectOut(scope, `{ op: "setValue", targets: [${JSON.stringify(path.path[0])}], args: [shim.input.get(ctx, ${JSON.stringify(path.path[0])})] }`, value.constructs, stats, todos, span, fixed);
+    const setValue = path.root === 'input' && path.path.length === 1 && !value.todo ? `{ op: "setValue", targets: [${JSON.stringify(path.path[0])}], args: [shim.input.get(ctx, ${JSON.stringify(path.path[0])})] }` : null;
+    if (!client && value.serverOnly && setValue && scope.serverEffects && scope.replayBarrier === 0 && !scope.noClient && scope.writeGuards.every((g) => g.ok)) {
+      return serverEffectOut(scope, setValue, value.constructs, stats, todos, span, fixed);
     }
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
-    return { server: fixed, client };
+    return { server: fixed, client, ...(setValue ? { eff: (key) => `${fixed}\n${queueEffect(key, setValue)}` } : {}) };
   }
   if (path && scope.query.has(path.root)) {
     if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
@@ -5495,7 +5553,13 @@ function serverEffectTask(scope: Scope, args: readonly Fx[], clientArgs: readonl
 function serverEffectOut(scope: Scope, task: string, constructs: string[], stats: TranslateStats, todos: TodoItem[], span: { start: number; end: number }, before = ''): Out {
   const key = JSON.stringify(`e${scope.slot++}`);
   account(stats, todos, { todo: false, shim: true, constructs }, span);
-  return { server: `${before ? `${before}\n` : ''}shim.client.effect(ctx, ${key}, ${task});`, client: `actions.push({ op: "serverEffect", key: ${key} });` };
+  const queue = (at: string): string => `${before ? `${before}\n` : ''}${queueEffect(at, task)}`;
+  return { server: queue(key), client: `actions.push({ op: "serverEffect", key: ${key} });`, eff: queue };
+}
+
+/** The server half's line that answers one client task under a marker key. */
+function queueEffect(key: string, task: string): string {
+  return `shim.client.effect(ctx, ${key}, ${task});`;
 }
 
 function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
@@ -5523,6 +5587,7 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   return {
     server: '',
     client: `actions.push(${uiTask(clientArgs)});`,
+    ...(args.some((a) => a.todo) ? {} : { eff: (key) => queueEffect(key, uiTask(args)) }),
   };
 }
 

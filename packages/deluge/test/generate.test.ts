@@ -2927,7 +2927,7 @@ test('a server-bound local shadowing a form field is not client-bound', () => {
       }],
       workflows: [workflow({
         name: 'Hours shadow check', form: 'Orders', event: 'on user input',
-        deluge: { text: 'Hours = Orders[ID == 1].count(); if(thisapp.Util.Ok(Hours + 1)) { alert "ok"; }', span: Z },
+        deluge: { text: 'Hours = Orders[ID == 1].count(); if(thisapp.Util.Ok(Hours + 1)) { reload; }', span: Z },
       })],
     }),
   );
@@ -3745,13 +3745,13 @@ test('a client condition on a record element or an unreadable local stays a coun
           name: 'Row check',
           form: 'Reservation',
           event: 'on user input',
-          deluge: { text: 'for each r in Pods[ID != 0] { if(r.Pod_No == "9A" && Reservation[ID != 0].count() > 0) { alert "x"; } }', span: Z },
+          deluge: { text: 'for each r in Pods[ID != 0] { if(r.Pod_No == "9A" && Reservation[ID != 0].count() > 0) { reload; } }', span: Z },
         }),
         workflow({
           name: 'Write check',
           form: 'Reservation',
           event: 'on user input',
-          deluge: { text: 'x = insert into Pods [Pod_No = "1A"];\nif(x == 1) { alert "x"; }', span: Z },
+          deluge: { text: 'x = insert into Pods [Pod_No = "1A"];\nif(x == 1) { reload; }', span: Z },
         }),
       ],
     }),
@@ -3781,7 +3781,7 @@ test('a callee that mutates a parameter list or map is not a read-only client ca
             name: 'Hours check',
             form: 'Orders',
             event: 'on user input',
-            deluge: { text: 'ids = {1, 2};\nm = {"a": 1};\nif(thisapp.Util.Ok(ids, m, input.Hours)) { alert "ok"; }', span: Z },
+            deluge: { text: 'ids = {1, 2};\nm = {"a": 1};\nif(thisapp.Util.Ok(ids, m, input.Hours)) { reload; }', span: Z },
           }),
         ],
       }),
@@ -3875,7 +3875,7 @@ test('case-folded duplicate function names are never read-only client calls', ()
               name: 'Hours check',
               form: 'Orders',
               event: 'on user input',
-              deluge: { text: `if(${call}) { alert "ok"; }`, span: Z },
+              deluge: { text: `if(${call}) { reload; }`, span: Z },
             }),
           ],
         }),
@@ -3920,7 +3920,7 @@ test('repeated declarations of one function name are never read-only client call
             name: 'Hours check',
             form: 'Orders',
             event: 'on user input',
-            deluge: { text: 'if(thisapp.Util.Ok(input.Hours)) { alert "ok"; }', span: Z },
+            deluge: { text: 'if(thisapp.Util.Ok(input.Hours)) { reload; }', span: Z },
           }),
         ],
       }),
@@ -4052,14 +4052,14 @@ test('a local collection mutated with server data keeps the manual condition', a
     { name: 'Util.L', signature: 'bool Util.L(collection items)', body: 'return items.size() > 0;' },
   ].map((f) => ({ name: f.name, kind: 'deluge' as const, signature: f.signature, deluge: [{ text: f.body, span: Z }], properties: [], span: Z }));
   for (const text of [
-    'm = Map();\nm.put("k", Orders[Hours == input.Hours].count());\nif(thisapp.Util.F(m.get("k"))) { alert "x"; }',
+    'm = Map();\nm.put("k", Orders[Hours == input.Hours].count());\nif(thisapp.Util.F(m.get("k"))) { reload; }',
     // Map mutators must not be replayed inside a read-only condition endpoint.
     // This shape uses the map-specific shim path, rather than list.remove's
     // collection path, and must remain a counted condition TODO.
-    'm = Map();\nm.put("k", Orders[Hours == input.Hours].count());\nif(thisapp.Util.F(m.put("x", 1))) { alert "x"; }',
-    'm = Map();\nfor each r in Orders[Hours == input.Hours] { m.put("k", r.Hours); }\nif(thisapp.Util.F(m.get("k"))) { alert "x"; }',
-    'l = List();\nl.add(Orders[Hours == input.Hours].count());\nif(thisapp.Util.L(l)) { alert "x"; }',
-    'l = List();\nfor each r in Orders[Hours == input.Hours] { l.add(r.Hours); }\nif(thisapp.Util.L(l)) { alert "x"; }',
+    'm = Map();\nm.put("k", Orders[Hours == input.Hours].count());\nif(thisapp.Util.F(m.put("x", 1))) { reload; }',
+    'm = Map();\nfor each r in Orders[Hours == input.Hours] { m.put("k", r.Hours); }\nif(thisapp.Util.F(m.get("k"))) { reload; }',
+    'l = List();\nl.add(Orders[Hours == input.Hours].count());\nif(thisapp.Util.L(l)) { reload; }',
+    'l = List();\nfor each r in Orders[Hours == input.Hours] { l.add(r.Hours); }\nif(thisapp.Util.L(l)) { reload; }',
   ]) {
     const g = generate(
       app({
@@ -4145,7 +4145,7 @@ test('a writing or transitively writing thisapp callee keeps the manual conditio
           name: 'Hours check',
           form: 'Orders',
           event: 'on user input',
-          deluge: { text: 'if(thisapp.Util.Wrap(input.Hours)) { alert "ok"; }', span: Z },
+          deluge: { text: 'if(thisapp.Util.Wrap(input.Hours)) { reload; }', span: Z },
         }),
       ],
     }),
@@ -10284,7 +10284,7 @@ test('a client condition calling a case-folded ambiguous app function keeps its 
         form: 'Reservation',
         event: 'on user input',
         deluge: {
-          text: 'total = Pods[ID != 0].count(); if(thisapp.podcount(total) > 3) { alert "full"; }',
+          text: 'total = Pods[ID != 0].count(); if(thisapp.podcount(total) > 3) { reload; }',
           span: Z,
         },
       }),
@@ -10308,7 +10308,7 @@ test('a client condition calling a writing app function on a server-bound value 
         name: 'Capacity check',
         form: 'Reservation',
         event: 'on user input',
-        deluge: { text: 'total = Pods[ID != 0].count(); if(thisapp.bump(total) > 3) { alert "full"; }', span: Z },
+        deluge: { text: 'total = Pods[ID != 0].count(); if(thisapp.bump(total) > 3) { reload; }', span: Z },
       }),
     ],
   }));

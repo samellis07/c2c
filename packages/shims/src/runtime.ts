@@ -435,12 +435,14 @@ export type ContextInput = Partial<
   Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent'>
 > & { form?: string };
 
-/** A client action the server run answers with: a field `:ui` task, an `openUrl`, a field value or the rows to insert into a subform. */
+/** A client action the server run answers with: a field `:ui` task, an `openUrl`, a field value, the rows to insert into a subform, an alert or a field's visibility. */
 export type ClientEffect =
   | { op: 'ui'; method: string; target: string[]; args: unknown[] }
   | { op: 'openUrl'; args: unknown[] }
   | { op: 'setValue'; targets: string[]; args: unknown[] }
-  | { op: 'subform'; method: 'insert'; target: string[]; args: unknown[] };
+  | { op: 'subform'; method: 'insert'; target: string[]; args: unknown[] }
+  | { op: 'alert'; message: unknown }
+  | { op: 'show' | 'hide' | 'enable' | 'disable'; targets: string[] };
 
 export interface ShimContext {
   shim: Shim;
