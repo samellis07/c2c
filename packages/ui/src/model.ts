@@ -11,7 +11,7 @@ import type { App, Field, Form, FunctionDef, Page, Property, PropertyBlock, Repo
 import { hasOthersOption, PRIVACY_PROPERTY_KEYS, privacyFlagsOf, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
-import { actionNavigationDropReason, actionNavigationLifted, blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
+import { actionNavigationDropReason, actionNavigationLifted, blueprintFieldSpecs, navScriptOnly, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
 import { parse as parseDeluge, parseExpression } from '../../deluge/src/parser.js';
 import { conditionalFormatCriteria, reportCriteria } from '../../deluge/src/translate.js';
@@ -837,6 +837,8 @@ function actionDropsOpenUrl(app: App, workflow: string | undefined): boolean {
 }
 
 function isPureClientFunction(app: App, fn: FunctionDef): boolean {
+  // A page command (`#Script:dialog.close`, ...) is no link the page can follow on its own: the generated function returns it as the action's reply.
+  if (navScriptOnly(fn)) return false;
   let body: Stmt[];
   try {
     body = parseDeluge(fn.deluge.map((part) => part.text).join('\n')).body;
@@ -851,7 +853,7 @@ function isPureClientFunction(app: App, fn: FunctionDef): boolean {
     if (!calleeFn) return false;
     try {
       const calleeBody = parseDeluge(calleeFn.deluge.map((p) => p.text).join('\n')).body;
-      return isOpenUrlOnlyBody(calleeBody);
+      return !navScriptOnly(calleeFn) && isOpenUrlOnlyBody(calleeBody);
     } catch {
       return false;
     }

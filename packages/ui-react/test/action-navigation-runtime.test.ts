@@ -26,7 +26,6 @@ async function loadNavigation(t: { after(fn: () => void): void }) {
   return (await import(pathToFileURL(join(out, 'lib/c2c-ui/runtime/navigation.js')).href)) as {
     navOk: (url: unknown, allowedHosts: readonly string[]) => boolean;
     performActionNav: (nav: unknown, allowedHosts: readonly string[], view: unknown) => void;
-    applyOpenUrlNav: (nav: unknown, allowedHosts: readonly string[], view: unknown, effects?: Record<string, () => void>) => void;
   };
 }
 
@@ -42,6 +41,7 @@ const ALLOWED = ['allowed.example', 'allowed.example.com'];
  */
 const VECTORS: Array<[string, string, boolean]> = [
   ['same-app hash route', '#/report/Orders', true],
+  ['a #Script page command is no address', '#Script:dialog.close', false],
   ['relative path', '/report/Orders', true],
   ['allowlisted https host', 'https://allowed.example/doc', true],
   ['literal javascript: scheme', 'javascript:alert(1)', false],
@@ -105,20 +105,37 @@ test('performActionNav navigates an allowlisted https host in the current tab vi
   assert.equal(view.location.href, 'https://allowed.example/doc');
 });
 
-test('applyOpenUrlNav applies ordered pseudo commands and rejects hostile URLs', { skip: SKIP }, async (t) => {
-  const { applyOpenUrlNav } = await loadNavigation(t);
-  const events: string[] = [];
-  const opened: unknown[] = [];
-  const view = { location: { hash: '', href: 'https://app.example/' }, open: (...args: unknown[]) => opened.push(args) };
-  applyOpenUrlNav([
-    { url: '#Script:page.refresh', window: 'same window' },
-    { url: '#Script:dialog.close', window: 'same window' },
-    { url: 'https://allowed.example/doc', window: 'new window' },
-    { url: 'javascript:alert(1)', window: 'same window' },
-    { url: '#Script:unknown', window: 'same window' },
-  ], ALLOWED, view, { refresh: () => events.push('refresh'), closeDialog: () => events.push('close') });
-  assert.deepEqual(events, ['refresh', 'close']);
-  assert.deepEqual(opened, [['https://allowed.example/doc', '_blank', 'noopener,noreferrer']]);
+test('the page commands act on the page itself and never navigate', { skip: SKIP }, async (t) => {
+  const { performActionNav } = await loadNavigation(t);
+  const page = (opener: boolean, history = 1) => {
+    const events: string[] = [];
+    const view = {
+      location: { hash: '', href: 'https://app.example/', reload: () => events.push('reload'), assign: () => events.push('assign') },
+      open: () => events.push('open'),
+      close: () => events.push('close'),
+      history: { length: history, back: () => events.push('back') },
+      opener: opener ? { closed: false, location: { reload: () => events.push('opener reload') } } : null,
+    };
+    return { events, view };
+  };
+  const run = (kind: string, opener: boolean, history?: number) => {
+    const { events, view } = page(opener, history);
+    performActionNav({ kind } as never, [], view);
+    assert.equal(view.location.hash, '');
+    assert.equal(view.location.href, 'https://app.example/');
+    return events;
+  };
+  // A popup this app opened for a form: dialog.close and page.close close it; the parent refreshes the opener.
+  assert.deepEqual(run('closeDialog', true), ['close']);
+  assert.deepEqual(run('closePage', true), ['close']);
+  assert.deepEqual(run('refreshParent', true), ['opener reload']);
+  // In the main window no dialog is open, so dialog.close is a deliberate no-op; page.close goes back; the parent is the page itself.
+  assert.deepEqual(run('closeDialog', false, 3), []);
+  assert.deepEqual(run('closePage', false, 3), ['back']);
+  assert.deepEqual(run('closePage', false, 1), []);
+  assert.deepEqual(run('refreshParent', false), ['reload']);
+  // An unknown kind does nothing.
+  assert.deepEqual(run('explode', true, 3), []);
 });
 
 test('performActionNav refuses a hostile target a workflow built at run time: script URL, protocol-relative host, userinfo trick', { skip: SKIP }, async (t) => {

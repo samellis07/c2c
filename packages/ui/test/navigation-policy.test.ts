@@ -15,6 +15,7 @@ const ALLOWED = new Set(['allowed.example', 'docs.allowed.example']);
 const NAV_VECTORS: Array<[string, string, boolean]> = [
   // ALLOW: same-app hash routes and relative paths.
   ['same-app hash route', '#/report/Orders', true],
+  ['a #Script page command is no address', '#Script:dialog.close', false],
   ['same-app hash route with query', '#/form/Orders/edit/123?Field=1', true],
   ['bare hash fragment', '#frag', true],
   ['relative path', '/report/Orders', true],
