@@ -23,7 +23,7 @@ import type { App } from '../../core/src/ir.js';
 import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
 import type { Expr, Script, Stmt } from '../../deluge/src/ast.js';
-import { administratorProfiles, navRoutesSource, buttonCallFunctions, clientCallFunctions, fnSignatureParams, functionCallModule, functionRowBinding, functionScriptOptions, rawFnParams, slug as functionSlug, translateInApp, type ButtonFunctionCall, type ClientCallCatalog } from '../../deluge/src/generate.js';
+import { administratorProfiles, multiLookupsOf, navRoutesSource, buttonCallFunctions, clientCallFunctions, fnSignatureParams, functionCallModule, functionRowBinding, functionScriptOptions, rawFnParams, slug as functionSlug, translateInApp, type ButtonFunctionCall, type ClientCallCatalog } from '../../deluge/src/generate.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
@@ -66,6 +66,8 @@ export interface HtmlpageCompiled {
   components?: { kind: 'form' | 'report'; name: string }[];
   /** Component embeds without a generated inline target; each remains a counted TODO. */
   componentTodos?: { target: string; step?: string }[];
+  /** Popups the render itself opens, under a condition only it can decide (the lifter carries the rest). */
+  popupMarks?: { target: 'form' | 'report'; name: string }[];
 }
 
 /** Decode the XML entities the ZML attribute escapes the template with. */
@@ -1190,6 +1192,70 @@ function splitChunks(template: string): Chunk[] | null {
   }
 }
 
+/** A call statement of a function in a group: `thisapp.Group.name();`, alone in its statement. */
+const SETUP_CALL = /(^|[;{}\n])([ \t]*)thisapp[ \t]*\.[ \t]*([A-Za-z_]\w*)[ \t]*\.[ \t]*([A-Za-z_]\w*)[ \t]*\([ \t]*\)[ \t]*;/g;
+
+/**
+ * The names a function body binds: assignment targets and loop variables, in
+ * sorted order.
+ */
+function boundNames(node: unknown, out: Set<string> = new Set()): string[] {
+  if (!node || typeof node !== 'object') return [];
+  if (Array.isArray(node)) {
+    for (const item of node) boundNames(item, out);
+  } else {
+    const rec = node as Record<string, unknown>;
+    const target = rec.target as { kind?: string; name?: string } | undefined;
+    if (rec.kind === 'assign' && target?.kind === 'name' && typeof target.name === 'string') out.add(target.name.toLowerCase());
+    if (rec.kind === 'forEach') {
+      for (const key of ['name', 'index']) if (typeof rec[key] === 'string') out.add((rec[key] as string).toLowerCase());
+    }
+    for (const key of Object.keys(rec).sort()) if (key !== 'span') boundNames(rec[key], out);
+  }
+  return [...out].sort();
+}
+
+/**
+ * A `thisapp.Group.name();` statement that calls a void function with no
+ * parameters stands for that function's body: Creator runs the body in place,
+ * so the statements are written where the call stood and the snippet's own
+ * checks (the setup-write guards among them) judge them there. The body must
+ * read nothing of the page (`input`), call no further function and return
+ * nothing, and none of the names it binds may occur anywhere in the snippet,
+ * so it can neither read nor overwrite a value of the page.
+ */
+function inlineSetupCalls(template: string, app: App): string {
+  if (!/\bthisapp\b/i.test(template)) return template;
+  const chunks = splitChunks(template);
+  if (!chunks) return template;
+  const body = (path: string[]): string | null => {
+    const fn = appFunction(app, path);
+    if (!fn || functionRowBinding(fn) || fn.deluge.length !== 1 || !/^\s*void\s+[A-Za-z_][\w.]*\s*\(\s*\)\s*$/i.test(fn.signature ?? '')) return null;
+    const text = fn.deluge[0]!.text;
+    if (/\b(?:thisapp|input|return)\b/i.test(text)) return null;
+    let names: string[];
+    try {
+      names = boundNames(parse(text).body);
+    } catch {
+      return null;
+    }
+    return names.some((name) => !/^\w+$/.test(name) || new RegExp(`\\b${name}\\b`, 'i').test(template)) ? null : text.trim();
+  };
+  let changed = false;
+  const out = chunks.map((chunk) => {
+    if (chunk.kind !== 'stmts') return chunk;
+    const text = chunk.text.replace(SETUP_CALL, (whole: string, lead: string, indent: string, group: string, name: string) => {
+      const inlined = body([group, name]);
+      if (inlined === null) return whole;
+      changed = true;
+      return `${lead}${indent}${inlined}`;
+    });
+    return { ...chunk, text };
+  });
+  if (!changed) return template;
+  return out.map((chunk) => (chunk.kind === 'static' ? chunk.text : chunk.kind === 'expr' ? `<%=${chunk.text}%>` : `<%${chunk.text}%>`)).join('');
+}
+
 const ALLOWED_STMTS = new Set(['block', 'if', 'assign', 'expr', 'forEach', 'break', 'continue', 'try', 'info']);
 const ALLOWED_EXPRS = new Set([
   'number',
@@ -1385,9 +1451,11 @@ function exprOk(e: Expr): boolean {
 }
 
 /**
- * `openUrl(...)` statements inside an island. Popup-window targets stay lifted
- * by the snippet popup lifter and are removed from the script; every other
- * openUrl becomes a rendered link part at its position in the output.
+ * `openUrl(...)` statements inside an island. A popup-window target naming a
+ * form or report becomes a popup mark in the output ({@link settlePopups}
+ * decides which ones the snippet popup lifter already carries); any other
+ * popup is removed from the script; every other openUrl becomes a rendered
+ * link part at its position in the output.
  */
 function rewriteOpenUrls(src: string): string | null {
   let tokens;
@@ -1427,7 +1495,9 @@ function rewriteOpenUrls(src: string): string | null {
       tokens[end + 1] && tokens[end + 1].kind === 'punct' && tokens[end + 1].text === ';' ? tokens[end + 1].end : tokens[end].end;
     const target = (args[1] ?? '').replace(/^['"]|['"]$/g, '');
     if (/popup/i.test(target)) {
-      edits.push({ start: t.start, end: stmtEnd, text: '' });
+      // A form or report named outright rides the render as a popup mark; whether the page keeps it is settled once the whole script is known.
+      const named = /^(["'])#(Form|Report):([A-Za-z_]\w*)(?:[?&][^"']*)?\1$/i.exec(args[0] ?? '');
+      edits.push({ start: t.start, end: stmtEnd, text: named ? `c2c_out.add({"k":"P","v":"${named[2]!.toLowerCase()}:${named[3]}"});` : '' });
       continue;
     }
     if (!args[0]) return null;
@@ -1441,6 +1511,76 @@ function rewriteOpenUrls(src: string): string | null {
     at = e.end;
   }
   return out + src.slice(at);
+}
+
+/** The popup a `c2c_out.add({"k":"P","v":"form:Name"})` statement marks, or null for any other statement. */
+function popupMark(stmt: Stmt): { target: 'form' | 'report'; name: string } | null {
+  if (stmt.kind !== 'expr' || stmt.expr.kind !== 'call' || stmt.expr.args.length !== 1) return null;
+  const callee = stmt.expr.callee;
+  const arg = stmt.expr.args[0]!;
+  if (callee.kind !== 'member' || callee.property !== 'add' || callee.object.kind !== 'name' || callee.object.name !== 'c2c_out' || arg.kind !== 'map') return null;
+  const entry = (key: string) => {
+    const found = arg.entries.find((item) => item.key.kind === 'string' && item.key.value === key);
+    return found && found.value.kind === 'string' ? found.value.value : null;
+  };
+  const value = /^(form|report):([A-Za-z_]\w*)$/.exec(entry('v') ?? '');
+  return entry('k') === 'P' && value ? { target: value[1] as 'form' | 'report', name: value[2]! } : null;
+}
+
+/**
+ * The popup marks of a script, each with the statements around it. The lifter
+ * carries the two shapes it can state: a mark nothing encloses (always) and a
+ * mark alone under `if (rows.count() == 0)` (empty). Every other mark sits
+ * under a condition only this render can decide, so it stays in the script and
+ * prints a marker where it runs. Returns the script without the marks the
+ * lifter carries, and the marks that stay.
+ */
+function settlePopups(script: string, ast: Script): { script: string; marks: { target: 'form' | 'report'; name: string }[] } {
+  const lifted: Stmt[] = [];
+  const marks: { target: 'form' | 'report'; name: string }[] = [];
+  const countsZero = (test: Expr): boolean => {
+    while (test.kind === 'paren') test = test.expr;
+    if (test.kind !== 'binary' || test.op !== '==' || test.right.kind !== 'number' || Number(test.right.text) !== 0) return false;
+    const left = test.left;
+    return left.kind === 'call' && left.args.length === 0 && left.callee.kind === 'member' && left.callee.property.toLowerCase() === 'count' && left.callee.object.kind === 'name';
+  };
+  const visit = (stmt: Stmt, around: Stmt[], plain: boolean): void => {
+    const mark = popupMark(stmt);
+    if (mark) {
+      const lone = around.filter((item) => item.kind !== 'block');
+      if (plain && (lone.length === 0 || (lone.length === 1 && lone[0]!.kind === 'if' && countsZero(lone[0]!.test)))) lifted.push(stmt);
+      else marks.push(mark);
+      return;
+    }
+    const inner = [...around, stmt];
+    switch (stmt.kind) {
+      case 'block':
+        for (const child of stmt.body) visit(child, inner, plain);
+        break;
+      case 'if':
+        visit(stmt.then, inner, plain);
+        for (const elif of stmt.elifs) visit(elif.body, inner, false);
+        if (stmt.else) visit(stmt.else, inner, false);
+        break;
+      case 'forEach':
+      case 'while':
+        visit(stmt.body, inner, false);
+        break;
+      case 'try':
+        visit(stmt.body, inner, false);
+        if (stmt.catchBody) visit(stmt.catchBody, inner, false);
+        break;
+      default:
+        break;
+    }
+  };
+  for (const stmt of ast.body) visit(stmt, [], true);
+  let out = script;
+  for (const stmt of [...lifted].sort((a, b) => b.span.start - a.span.start)) {
+    const end = out[stmt.span.end] === ';' ? stmt.span.end + 1 : stmt.span.end;
+    out = out.slice(0, stmt.span.start) + out.slice(end);
+  }
+  return { script: out, marks };
 }
 
 /**
@@ -1542,6 +1682,14 @@ function endpointModule(opts: {
   routes?: string;
   /** form -> composite field -> its parts, for the forms the render reads: a stored row carries one column per part. */
   composites?: Record<string, Record<string, string[]>>;
+  /** The render prints a popup marker where a popup mark runs. */
+  popups?: boolean;
+  /** form -> lookup field -> linked form, for the lookups whose linked-record fields a query compares. */
+  lookupForms?: Record<string, Record<string, string>>;
+  /** form -> lookup field -> the fields of the linked record the render reads through it. */
+  lookupReads?: Record<string, Record<string, string[]>>;
+  /** The junction tables of the multi lookups among them. */
+  multiLookups?: ReturnType<typeof multiLookupsOf>;
 }): string {
   const banner = `/**\n${[
     `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to ${opts.hasWrites ? 'an endpoint with setup writes' : 'a read-only endpoint'}.`,
@@ -1594,7 +1742,7 @@ function c2cStr(v) {
     if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return v.toString();
     if (typeof v.label === "string") return v.label;
     if (v.constructor && v.constructor.name === "Decimal") return v.toString();
-${opts.composites ? '    // A composite (a name, an address) prints its non-empty parts joined by spaces.\n    if (Object.prototype.hasOwnProperty.call(v, "toString")) return v.toString();\n' : ''}    try {
+${opts.composites || opts.lookupReads ? '    // A composite (a name, an address) prints its non-empty parts joined by spaces; a linked record prints as its id.\n    if (Object.prototype.hasOwnProperty.call(v, "toString")) return v.toString();\n' : ''}    try {
       return JSON.stringify(v, jsonReplacer);
     } catch (err) {
       return "";
@@ -1739,7 +1887,7 @@ ${indented}
     if (item.k === "H") c2c_parts.push(item.v == null ? "" : String(item.v));
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
-    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)${opts.routes ? ', shim' : ''}));${opts.markup ? '\n    else if (item.k === "M") c2c_parts.push(c2cMarkup(c2cStr(item.v), c2c_notes, (text) => c2cHref(shim, text)));' : ''}
+${opts.popups ? '    else if (item.k === "P") c2c_parts.push(\'<div data-zml="popup-\' + c2cEsc(c2cStr(item.v)) + \'"></div>\');\n' : ''}    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)${opts.routes ? ', shim' : ''}));${opts.markup ? '\n    else if (item.k === "M") c2c_parts.push(c2cMarkup(c2cStr(item.v), c2c_notes, (text) => c2cHref(shim, text)));' : ''}
     else if (item.k === "Q") {
       const piece = c2cStr(item.v);
       const num = c2cCssNumber(piece);
@@ -1860,7 +2008,7 @@ ${opts.hasWrites ? `  // The page renders for any caller the read policy admits;
       dryRun: !live,
       appTimeZone,
       access,
-${opts.hasWrites ? '      adminUserId: mayWrite ? principal.userId || "" : ownerId,\n' : ''}${opts.appCalls ? '      functions,\n' : ''}${opts.composites ? `      composites: ${JSON.stringify(opts.composites)},\n` : ''}      ...(datastore ? { datastore } : {}),
+${opts.hasWrites ? '      adminUserId: mayWrite ? principal.userId || "" : ownerId,\n' : ''}${opts.appCalls ? '      functions,\n' : ''}${opts.composites ? `      composites: ${JSON.stringify(opts.composites)},\n` : ''}${opts.lookupForms ? `      lookupForms: ${JSON.stringify(opts.lookupForms)},\n` : ''}${opts.lookupReads ? `      lookupReads: ${JSON.stringify(opts.lookupReads)},\n` : ''}${opts.multiLookups && Object.keys(opts.multiLookups).length ? `      multiLookups: ${JSON.stringify(opts.multiLookups)},\n` : ''}      ...(datastore ? { datastore } : {}),
     });
     const ctx = runtime.context({ record: input, old: {}, principal, appTimeZone });
     const rendered = await render(ctx${env ? `, { ${[opts.images ? 'files: live ? await liveFileStore(req) : null, bytes: 0' : '', opts.hasWrites ? 'mayWrite' : '', 'notes: []'].filter(Boolean).join(', ')} }` : ''});
@@ -3258,6 +3406,7 @@ export function compileHtmlpage(
     reports: new Set(app.reports.map((r) => r.name)),
   });
   head.template = rewriteEmbedIframes(head.template, app);
+  head.template = inlineSetupCalls(head.template, app);
   if (hasExecuteFunctionButton(head.template)) {
     head.template = rewriteExecuteFunctionButtons(head.template, app, new Set(head.params), fnFiles, opts.schema);
     if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);
@@ -3287,7 +3436,7 @@ export function compileHtmlpage(
   const embeds = inlinePageEmbeds(head.template, app, page, ownPageParams);
   head.template = embeds.template;
   const includes = embeds.includes;
-  if (head.template.toLowerCase().includes('component-form:') || head.template.toLowerCase().includes('component-report:')) return fail('marker collision');
+  if (/component-(?:form|report):|popup-(?:form|report):/i.test(head.template)) return fail('marker collision');
   const embedded = embeddedComponents(head.template, app, ownPageParams);
   head.template = embedded.template;
   const withIncludes = (done: HtmlpageCompiled): HtmlpageCompiled => {
@@ -3573,6 +3722,16 @@ export function compileHtmlpage(
   } catch {
     return fail('Deluge islands do not parse');
   }
+  const settled = settlePopups(script, ast);
+  const popupMarks = settled.marks;
+  if (settled.script !== script) {
+    script = settled.script;
+    try {
+      ast = parse(script);
+    } catch {
+      return fail('Deluge islands do not parse');
+    }
+  }
   const isShapeC = hasShapeCWrites(ast);
   // A guarded write belongs where its output shows; one hidden in a removed `<style>` body is refused.
   if (isShapeC && islands.some((isl) => isl.kind !== 'expr' && isl.context === 'cssbody')) return fail('island in an unsafe position');
@@ -3636,9 +3795,13 @@ export function compileHtmlpage(
 
   // The read-only check ran on the plain translation; the endpoint wraps its image reads.
   const images = withImageReads(app, server);
-  const forms = [server, ...calleeServers].flatMap((code) =>
+  const queried = [server, ...calleeServers].flatMap((code) =>
     [...code.matchAll(/shim\.datastore\.(?:query|aggregate|insert|update)\(ctx, "([^"]+)"/g), ...code.matchAll(/compileCriteria\(ctx\.shim, "([^"]+)"/g)].map((m) => m[1]),
   );
+  const serverText = [server, ...calleeServers].join('\n');
+  const paths = lookupPathsOf(app, serverText, [...new Set(queried)].sort());
+  const reads = lookupReadsOf(app, serverText, [...new Set(queried)].sort());
+  const forms = [...queried, ...linkedForms(paths), ...linkedForms(reads.forms)];
   const id = opts.id ?? 's0';
   const path = `/htmlpages/${encodeURIComponent(page)}/${encodeURIComponent(id)}`;
   const file: HtmlpageFile = {
@@ -3658,10 +3821,14 @@ export function compileHtmlpage(
       markup: printed || images.reads > 0,
       images: images.reads > 0,
       ...(printed || images.reads > 0 || /#Page:/i.test(server) ? { routes: navRoutesSource(app) } : {}),
+      ...(popupMarks.length ? { popups: true } : {}),
       ...compositesOf(app, [...new Set(forms)].sort()),
+      ...(Object.keys(paths).length || Object.keys(reads.forms).length
+        ? { lookupForms: mergeLookupForms(paths, reads.forms), ...(Object.keys(reads.fields).length ? { lookupReads: reads.fields } : {}), multiLookups: multiLookupsOfPaths(app, mergeLookupForms(paths, reads.forms), opts.schema) }
+        : {}),
     }),
   };
-  return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file, ...(fnFiles.length ? { files: fnFiles } : {}) });
+  return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file, ...(fnFiles.length ? { files: fnFiles } : {}), ...(popupMarks.length ? { popupMarks } : {}) });
 }
 
 /** The composite fields (a name, an address) of the forms a render reads, by form, or nothing when they hold none. */
@@ -3674,6 +3841,66 @@ function compositesOf(app: App, forms: readonly string[]): { composites?: Record
     }
   }
   return Object.keys(out).length ? { composites: out } : {};
+}
+
+/**
+ * form -> lookup field -> linked form, for the lookups of the queried forms
+ * whose linked-record field the render's criteria compares (`"Head.Field"`).
+ */
+function lookupPathsOf(app: App, server: string, forms: readonly string[]): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const name of forms) {
+    for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
+      if (field.lookup && server.includes(`field: "${field.name}.`)) (out[name] ??= {})[field.name] = field.lookup.form;
+    }
+  }
+  return out;
+}
+
+/**
+ * form -> lookup field -> linked form, and form -> lookup field -> fields, for
+ * the lookups of the queried forms whose linked record the render reads a
+ * field of (`shim.record.get(row, "Head", "Field")` or a `"Head.Field"` read).
+ */
+function lookupReadsOf(app: App, server: string, forms: readonly string[]): { forms: Record<string, Record<string, string>>; fields: Record<string, Record<string, string[]>> } {
+  const linked: Record<string, Record<string, string>> = {};
+  const fields: Record<string, Record<string, string[]>> = {};
+  for (const name of forms) {
+    for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
+      if (!field.lookup || !/^[A-Za-z_]\w*$/.test(field.name)) continue;
+      const read = new Set<string>();
+      for (const m of server.matchAll(new RegExp(`shim\\.record\\.get\\([A-Za-z_$][\\w$]*, "${field.name}", "([A-Za-z_]\\w*)"`, 'g'))) read.add(m[1]!);
+      for (const m of server.matchAll(new RegExp(`shim\\.datastore\\.(?:field|column)\\(ctx, [A-Za-z_$][\\w$]*, "${field.name}\\.([A-Za-z_]\\w*)"`, 'g'))) read.add(m[1]!);
+      if (!read.size) continue;
+      (linked[name] ??= {})[field.name] = field.lookup.form;
+      (fields[name] ??= {})[field.name] = [...read].sort();
+    }
+  }
+  return { forms: linked, fields };
+}
+
+/** The linked forms of a form -> lookup -> linked-form map, in form then lookup order. */
+function linkedForms(map: Record<string, Record<string, string>>): string[] {
+  return Object.keys(map).sort().flatMap((form) => Object.keys(map[form]!).sort().map((head) => map[form]![head]!));
+}
+
+/** Two form -> lookup -> linked-form maps as one. */
+function mergeLookupForms(...maps: Record<string, Record<string, string>>[]): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const map of maps) for (const form of Object.keys(map).sort()) out[form] = { ...out[form], ...map[form] };
+  return out;
+}
+
+/** The multi lookups among the named lookup paths, as the junction tables that hold them. */
+function multiLookupsOfPaths(app: App, paths: Record<string, Record<string, string>>, schema?: SchemaPlan): ReturnType<typeof multiLookupsOf> {
+  const all = multiLookupsOf(app, schema);
+  const out: ReturnType<typeof multiLookupsOf> = {};
+  for (const form of Object.keys(paths).sort()) {
+    for (const head of Object.keys(paths[form]!).sort()) {
+      if (Object.hasOwn(all, form) && Object.hasOwn(all[form]!, head)) (out[form] ??= {})[head] = all[form]![head]!;
+    }
+  }
+  return out;
 }
 
 function islandOrdinal(chunks: Chunk[], target: Chunk): number {

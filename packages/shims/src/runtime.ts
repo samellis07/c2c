@@ -254,6 +254,21 @@ export interface RuntimeOptions {
    */
   composites?: Record<string, Readonly<Record<string, readonly string[]>>>;
   /**
+   * form -> lookup field -> the form it links to. A live read whose criteria
+   * compares a field of the linked record (`Submitted_By.Email == x`) reads
+   * the linked rows the caller may read, then matches the lookup on their ids
+   * (a multi lookup, kept in a junction table, through the `multiLookups` spec).
+   */
+  lookupForms?: Record<string, Record<string, string>>;
+  /**
+   * form -> lookup field -> the fields of the linked record a render reads
+   * through it (`row.Project.Title`). A live read of that form carries the
+   * lookup as the linked record's `{ id, ...fields }`, the fields the caller
+   * may read; a linked form the caller may not read leaves the id as it was.
+   * Needs `lookupForms` for the same lookup.
+   */
+  lookupReads?: Record<string, Record<string, readonly string[]>>;
+  /**
    * form -> the generated write schema (the field tree with composite and
    * subform children). The submit handler authorizes the request against it;
    * the update path re-authorizes the write payload, and a composite field
@@ -2302,6 +2317,131 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
   }
 
   /**
+   * A write entry named by a part of a composite (`Name.first_name`) as that
+   * part's own column (`Name_first_name`), for the forms whose composites this
+   * runtime knows. Any other key is left as it is.
+   */
+  function flatComposites(form: string, values: Record<string, unknown>): Record<string, unknown> {
+    const known = options.composites && Object.hasOwn(options.composites, form) ? options.composites[form]! : undefined;
+    if (!known) return values;
+    let out = values;
+    for (const key of Object.keys(values)) {
+      const dot = key.indexOf('.');
+      if (dot <= 0 || !Object.hasOwn(known, key.slice(0, dot)) || !known[key.slice(0, dot)]!.includes(key.slice(dot + 1))) continue;
+      if (out === values) out = { ...values };
+      delete out[key];
+      out[`${key.slice(0, dot)}_${key.slice(dot + 1)}`] = values[key];
+    }
+    return out;
+  }
+
+  /** The linked rows one lookup path may match: most ids a path reads before the read is refused. */
+  const LOOKUP_PATH_IDS = 1000;
+
+  /**
+   * A `Lookup.Field` leaf of a criteria as a comparison on the lookup itself.
+   * The linked rows are read under the caller's grant on their form, each page
+   * of them through the same exact read, and the leaf keeps the records whose
+   * lookup holds one of their ids (a multi lookup: whose junction rows do).
+   * A path this runtime was not told about stays as written.
+   */
+  async function resolveLookupPaths(ctx: ShimContext, form: string, criteria: Criteria): Promise<Criteria> {
+    if (criteria.op === 'and' || criteria.op === 'or') {
+      const args: Criteria[] = [];
+      for (const arg of criteria.args) args.push(await resolveLookupPaths(ctx, form, arg));
+      return { op: criteria.op, args };
+    }
+    if (criteria.op === 'not') return { op: 'not', arg: await resolveLookupPaths(ctx, form, criteria.arg) };
+    if (!('field' in criteria) || !criteria.field.includes('.')) return criteria;
+    const dot = criteria.field.indexOf('.');
+    const head = criteria.field.slice(0, dot);
+    const parent = options.lookupForms && Object.hasOwn(options.lookupForms, form) && Object.hasOwn(options.lookupForms[form]!, head) ? options.lookupForms[form]![head]! : '';
+    const leaf = criteria.field.slice(dot + 1);
+    if (!parent || (criteria.op !== '==' && criteria.op !== '!=')) return criteria;
+    // A part of a composite is one stored column (`Name.first_name` is `Name_first_name`).
+    const column = leaf.includes('.') && options.composites && Object.hasOwn(options.composites, parent) ? leaf.replace('.', '_') : leaf;
+    const linked = scopeRead(ctx, parent, { op: '==', field: column, value: criteria.value }, fieldHead(leaf));
+    const ids: string[] = [];
+    for (const row of await liveRows(parent, linked.criteria, whereOf(parent, linked.criteria), undefined)) {
+      const id = String(rowIdentity(row) ?? '');
+      if (id && !ids.includes(id)) ids.push(id);
+      if (ids.length > LOOKUP_PATH_IDS) throw new Error(`${form}.${head}: more than ${LOOKUP_PATH_IDS} ${parent} records match ${leaf}; narrow the condition`);
+    }
+    const spec = options.multiLookups && Object.hasOwn(options.multiLookups, form) && Object.hasOwn(options.multiLookups[form]!, head) ? options.multiLookups[form]![head]! : undefined;
+    let match: Criteria = { op: 'in', field: spec ? 'ROWID' : head, value: ids };
+    if (spec) {
+      const owners: string[] = [];
+      for (const part of chunk(ids, LIMITS.zcqlRowsPerQuery)) {
+        const where = whereOf(spec.table, { op: 'in', field: spec.valueColumn, value: part });
+        for (const row of await fetchRows(spec.table, where, undefined, 'ORDER BY ROWID', queryPage)) {
+          const owner = String(row[spec.parentColumn] ?? '');
+          if (owner && !owners.includes(owner)) owners.push(owner);
+        }
+      }
+      match = { op: 'in', field: 'ROWID', value: owners };
+    } else if (!ids.length) {
+      // An empty IN list on the lookup column would match the records with no link.
+      match = { op: 'in', field: 'ROWID', value: [] };
+    }
+    return criteria.op === '==' ? match : { op: 'not', arg: match };
+  }
+
+  /**
+   * Live rows with each lookup of `lookupReads` carried as the linked record
+   * (`{ id, ...fields }`, printing as its id). The linked rows are read once
+   * for every id of the page, under the caller's grant on their form.
+   */
+  async function hydrateLookups(ctx: ShimContext, form: string, rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+    const reads = options.lookupReads && Object.hasOwn(options.lookupReads, form) ? options.lookupReads[form]! : undefined;
+    const links = options.lookupForms && Object.hasOwn(options.lookupForms, form) ? options.lookupForms[form]! : undefined;
+    if (!reads || !links) return rows;
+    let out = rows;
+    for (const head of Object.keys(reads).sort()) {
+      const parent = Object.hasOwn(links, head) ? links[head]! : '';
+      const ids: string[] = [];
+      for (const row of rows) {
+        const cell = row[head];
+        if ((typeof cell === 'string' || typeof cell === 'number') && String(cell) !== '' && !ids.includes(String(cell))) ids.push(String(cell));
+      }
+      if (!parent || !ids.length) continue;
+      let linked: { criteria: Criteria; fields?: readonly string[] };
+      try {
+        linked = scopeRead(ctx, parent, { op: 'in', field: 'ROWID', value: ids });
+      } catch (err) {
+        if (err instanceof RecordAccessError) continue;
+        throw err;
+      }
+      const byId = new Map<string, Record<string, unknown>>();
+      for (const row of await liveRows(parent, linked.criteria, whereOf(parent, linked.criteria), undefined)) {
+        const shown = projectFields(row, linked.fields);
+        const record: Record<string, unknown> = { id: String(rowIdentity(row) ?? '') };
+        for (const field of reads[head]!) record[field] = shown[field] ?? null;
+        Object.defineProperty(record, 'toString', { value: () => String(record.id), enumerable: false });
+        byId.set(record.id as string, record);
+      }
+      out = out.map((row) => {
+        const cell = row[head];
+        const found = typeof cell === 'string' || typeof cell === 'number' ? byId.get(String(cell)) : undefined;
+        return found ? { ...row, [head]: found } : row;
+      });
+    }
+    return out;
+  }
+
+  /** True when a criteria compares a field of a linked record. */
+  function hasLookupPath(criteria: Criteria): boolean {
+    if (criteria.op === 'and' || criteria.op === 'or') return criteria.args.some(hasLookupPath);
+    if (criteria.op === 'not') return hasLookupPath(criteria.arg);
+    return 'field' in criteria && criteria.field.includes('.');
+  }
+
+  /** The criteria of a query, with the linked-record comparisons of a live read resolved. */
+  async function readCriteria(ctx: ShimContext, query: Query): Promise<Criteria> {
+    if (dryRun || !options.lookupForms || !options.datastore?.query || !hasLookupPath(query.criteria)) return query.criteria;
+    return resolveLookupPaths(ctx, query.form, query.criteria);
+  }
+
+  /**
    * The fetch behind `datastore.rows` and the flow-history read: seed, dry-run
    * refusal, then the live adapter. `scoped` is the already-authorized (or
    * policy-bypassing) criteria and field list.
@@ -2332,7 +2472,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       refuseLive('fetch');
       return [];
     }
-    const got = await readLive(query, scoped.criteria, where, query.range, query.sort);
+    const got = await hydrateLookups(ctx, query.form, await readLive(query, scoped.criteria, where, query.range, query.sort));
     const hydrated = await Promise.all(got.map((raw) => readMultiLookups(query.form, raw, fields)));
     return hydrated.map((raw) => {
       const row = shim.record.bind(ctx, scopedRow(raw, fields), query.form);
@@ -3400,7 +3540,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       async rows(ctx, query) {
         // A name no statement bound (assigned only in an arm that did not run) fetched nothing.
         if (query == null) return [];
-        const scoped = scopeRead(ctx, query.form, query.criteria);
+        const scoped = scopeRead(ctx, query.form, await readCriteria(ctx, query));
         return readQueryRows(ctx, query, scoped);
       },
       async historyRows(ctx, form, criteria, opts) {
@@ -3429,7 +3569,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         if (query == null) return aggregateSeed([], fn, field, undefined);
         // `count()` and `distinct ID` read no field: no field grant is needed.
         // `count(field)` does read the field (it counts the values it holds).
-        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' || field == null || field === '' ? undefined : field);
+        const scoped = scopeRead(ctx, query.form, await readCriteria(ctx, query), field === 'ID' || field == null || field === '' ? undefined : field);
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'aggregate', form: query.form, fn, field: field ?? null, where, dryRun, authorized: !!options.access });
         const seeded = await readSeed(seed, dryRun, query.form, scoped.criteria, query.sort, query.range, decimalsOf(query.form));
@@ -3453,7 +3593,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       async column(ctx, query, field) {
         if (query == null) return [];
-        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : fieldHead(field));
+        const scoped = scopeRead(ctx, query.form, await readCriteria(ctx, query), field === 'ID' ? undefined : fieldHead(field));
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'column', form: query.form, field, where, limit: LIMITS.zcqlRowsPerQuery, dryRun, authorized: !!options.access });
         const seeded = await readSeed(seed, dryRun, query.form, scoped.criteria, query.sort, query.range, decimalsOf(query.form));
@@ -3462,12 +3602,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           refuseLive('column');
           return [];
         }
-        const got = await readLive(query, scoped.criteria, where, query.range, query.sort);
+        const got = await hydrateLookups(ctx, query.form, await readLive(query, scoped.criteria, where, query.range, query.sort));
         return got.map((row) => (field === 'ID' ? logicalId(row) : readCell(projectFields(row, scoped.fields), field)));
       },
       async field(ctx, query, field) {
         if (query == null) return null;
-        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : fieldHead(field));
+        const scoped = scopeRead(ctx, query.form, await readCriteria(ctx, query), field === 'ID' ? undefined : fieldHead(field));
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'field', form: query.form, field, where, dryRun, authorized: !!options.access });
         const seeded = await readSeed(seed, dryRun, query.form, scoped.criteria, query.sort, query.range, decimalsOf(query.form));
@@ -3484,13 +3624,14 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         // A staged read still applies the criteria to every stage, then keeps the first row.
         const decimals = decimalsOf(query.form);
         const kept = keptRows(query, where);
-        const got = kept && !kept.written.has(field)
+        const read = kept && !kept.written.has(field)
           ? kept.rows
           : query.zcql?.length
           ? await readLive(query, scoped.criteria, where, query.range ?? { from: 0, to: 0 }, query.sort)
           : query.range || needsExactRead(scoped.criteria, query.sort, decimals)
             ? await liveRows(query.form, scoped.criteria, where, query.range ?? { from: 0, to: 0 }, query.sort)
             : await queryPage(query.form, where, 1, 0, orderByClause(query.sort));
+        const got = await hydrateLookups(ctx, query.form, read);
         // Deluge `Form[criteria].Field` is null when no record matches.
         const value = got[0] ? (field === 'ID' ? logicalId(got[0]) : readCell(projectFields(got[0], scoped.fields), field)) : null;
         rememberCounterRead(query, query.form, field, value, false, got[0] ? String(rowIdentity(got[0]) ?? '') : undefined);
@@ -3530,7 +3671,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return out;
       },
       async plainRows(ctx, query) {
-        const scoped = scopeRead(ctx, query.form, query.criteria);
+        const scoped = scopeRead(ctx, query.form, await readCriteria(ctx, query));
         const rows = await readQueryRows(ctx, query, scoped);
         return rows.map((row) => {
           const { ROWID: _rowid, ...values } = row.values;
@@ -3660,7 +3801,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         warnLongStrings(form, stamped);
         // authorizeWrite keeps composite nesting (Name: { first_name }); the
         // store has one flat column per part, so expand before the check.
-        const expanded = expandCompositeWrites(form, stringifyValues(stamped), rulesOf(form));
+        const expanded = flatComposites(form, expandCompositeWrites(form, stringifyValues(stamped), rulesOf(form)));
         const stored = checkedWrite(form, shadowsForWrite(form, expanded), true);
         const batches = chunk([stored], LIMITS.insertRowsPerCall);
         note({ op: 'insert', form, rows: stored, batches: batches.length, batchSize: LIMITS.insertRowsPerCall, dryRun, performed: false });
@@ -3700,7 +3841,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             throw err;
           }
         }
-        const expandedUpdate = expandCompositeWrites(form, stringifyValues(applySystemColumns(storedValues, 'update', ctx)), rulesOf(form));
+        const expandedUpdate = flatComposites(form, expandCompositeWrites(form, stringifyValues(applySystemColumns(storedValues, 'update', ctx)), rulesOf(form)));
         const stored = checkedWrite(form, shadowsForWrite(form, expandedUpdate), false);
         // The read that finds ROWIDs is the same scoped read as rows/column/count/field.
         // Without the profile record filter, a criteria update writes rows the principal cannot see.

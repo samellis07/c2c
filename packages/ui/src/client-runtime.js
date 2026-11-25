@@ -1839,11 +1839,13 @@ function renderElement(el, doc, parentReport, appModel) {
       )
       .join('');
     const inner = el.src ? `<div data-snippet-src="${escapeHtml(el.src)}">${clean}</div>` : clean;
+    const marks = (el.popupMarks || []).filter((mark) => mark && (mark.target === 'form' || mark.target === 'report') && /^[A-Za-z_]\w*$/.test(mark.name));
+    const popupDecl = marks.length ? ` data-page-popups="${escapeHtml(marks.map((mark) => `${mark.target}:${mark.name}`).join(' '))}"` : '';
     const includes = (el.includes || []).filter((item) => typeof item === 'string' && parseIncludeSpec(item) !== null);
     const declared = includes.length ? ` data-page-includes="${escapeHtml(includes.join(' '))}"` : '';
     const components = (el.components || []).filter((item) => item && (item.kind === 'form' || item.kind === 'report') && /^[A-Za-z_]\w*$/.test(item.name));
     const componentDecl = components.length ? ` data-page-components="${escapeHtml(components.map(componentSpec).join(' '))}"` : '';
-    return `${inner.trim() || markers ? `<div class="snippet"${declared}${componentDecl}>${inner}${markers}</div>` : ''}${kids}`;
+    return `${inner.trim() || markers ? `<div class="snippet"${declared}${componentDecl}${popupDecl}>${inner}${markers}</div>` : ''}${kids}`;
   }
   if (el.kind === 'embed') {
     const spec = el.embed || {};
@@ -2481,6 +2483,31 @@ export function hydratePopups(root, appModel, viewRef) {
   }
 }
 
+/**
+ * Popups a compiled snippet's own render decided to open: a marker the server
+ * render printed where its script ran the call (`data-zml="popup-form:Name"`).
+ * A marker is honored only when its snippet element declared the same popup,
+ * and only inside a render that arrived (never the static shell).
+ */
+export function hydrateRenderedPopups(root, appModel, viewRef) {
+  if (!root || !root.querySelectorAll || typeof popupOpener !== 'function') return;
+  const docRef = root.ownerDocument || null;
+  const routeAt = docRef && docRef.location ? docRef.location.hash : null;
+  for (const marker of root.querySelectorAll('[data-zml^="popup-"]')) {
+    if (marker.getAttribute('data-popup-done') === 'true') continue;
+    const match = /^popup-(form|report):([A-Za-z_]\w*)$/.exec(marker.getAttribute('data-zml') || '');
+    const host = marker.closest('[data-page-popups]');
+    const declared = host ? (host.getAttribute('data-page-popups') || '').split(' ') : [];
+    if (!match || !declared.includes(`${match[1]}:${match[2]}`)) continue;
+    const src = marker.closest('[data-snippet-src]');
+    if (src && src.getAttribute('data-snippet-rendered') !== 'true') continue;
+    marker.setAttribute('data-popup-done', 'true');
+    // The popup belongs to the route that asked for it.
+    if (routeAt != null && docRef.location && docRef.location.hash !== routeAt) continue;
+    popupOpener({ target: match[1], name: match[2] }, root, viewRef);
+  }
+}
+
 /** Page input for server-rendered snippets: the URL's query parameters. */
 export function snippetPageInput(docRef) {
   // Caller-controlled parameter names are collected in a Map (never written as
@@ -2540,6 +2567,7 @@ export function hydrateSnippets(root, appModel, viewRef) {
           host.setAttribute('data-snippet-rendered', 'true');
           hydratePageIncludes(host, appModel, viewRef);
           hydrateComponentEmbeds(host, appModel, viewRef);
+          hydrateRenderedPopups(host, appModel, viewRef);
         }
       })
       .catch(() => {});
