@@ -155,10 +155,11 @@ function spec(fields: FieldSpec[]): FormSpec {
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Mounts every field through <Field> into a jsdom form and waits out the lazy widgets. */
-async function render(fields: FieldSpec[], record: Record<string, unknown> = {}): Promise<{ doc: Document; win: any }> {
+async function render(fields: FieldSpec[], record: Record<string, unknown> = {}, prepare?: (win: any) => void): Promise<{ doc: Document; win: any }> {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1/', pretendToBeVisual: true });
   const win = dom.window as any;
   installGlobals(win);
+  prepare?.(win);
   const kit = await bundle();
   const h = kit.react.createElement;
   const container = win.document.createElement('div');
@@ -496,4 +497,103 @@ test('validateRows flags a subform carrying more rows than maxRows allows', () =
   const rows = [0, 1, 2].map((index) => ({ index, values: { Note: 'x' } }));
   assert.match(validateRows(lines, rows).Lines ?? '', /at most 2 rows/);
   assert.deepEqual(validateRows(lines, rows.slice(0, 2)), {});
+});
+
+/** Browser stubs for the scan field: a camera that records its tracks and a detector that returns `codes`. */
+function scanStubs(options: { codes?: string[]; denied?: boolean; noApi?: boolean } = {}) {
+  const tracks: { stopped: number }[] = [];
+  const requests: any[] = [];
+  const prepare = (win: any) => {
+    if (options.noApi) return;
+    Object.defineProperty(win.navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async (constraints: unknown) => {
+          requests.push(constraints);
+          if (options.denied) throw new Error('NotAllowedError');
+          const track = { stopped: 0 };
+          tracks.push(track);
+          return { getTracks: () => [{ stop: () => (track.stopped += 1) }] };
+        },
+      },
+    });
+    win.BarcodeDetector = class {
+      static async getSupportedFormats() {
+        return ['qr_code', 'code_128'];
+      }
+      async detect() {
+        return (options.codes ?? []).map((rawValue) => ({ rawValue }));
+      }
+    };
+    win.createImageBitmap = async () => ({ close() {} });
+  };
+  return { prepare, tracks, requests };
+}
+
+const scanField = (extra: Partial<FieldSpec['scanner'] & object> = {}, more: Partial<FieldSpec> = {}) =>
+  field('Code', 'text', { scanner: { camera: 'primary', formats: ['qr_code'], gallery: false, onload: false, ...extra }, ...more });
+
+async function until(check: () => boolean, what: string) {
+  for (let i = 0; i < 100 && !check(); i += 1) await delay(20);
+  assert.ok(check(), `timed out waiting for ${what}`);
+}
+
+test('a scan field decodes into the input, fires change, and stops the camera', async () => {
+  const stubs = scanStubs({ codes: ['ISBN-1'] });
+  const { dom } = await bundle();
+  const { doc, win } = await render([scanField()], {}, stubs.prepare);
+  const input = doc.querySelector('input[name="Code"]') as HTMLInputElement;
+  const changes: string[] = [];
+  input.addEventListener('input', () => changes.push('input'));
+  input.addEventListener('change', () => changes.push('change'));
+  const scan = [...doc.querySelectorAll('button')].find((b) => b.textContent === 'Scan') as HTMLButtonElement;
+  assert.ok(scan, 'a Scan button sits beside the field');
+  dom.flushSync(() => scan.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+  await until(() => input.value === 'ISBN-1', 'decoded value');
+  assert.deepEqual(changes, ['input', 'change']);
+  assert.deepEqual(stubs.requests[0], { video: { facingMode: 'environment' }, audio: false });
+  await until(() => stubs.tracks[0]!.stopped === 1, 'camera stop');
+});
+
+test('a scan field with onload opens the camera, and unmounting stops it', async () => {
+  const stubs = scanStubs();
+  const { doc, win } = await render([scanField({ onload: true, camera: 'secondary' })], {}, stubs.prepare);
+  await until(() => stubs.tracks.length === 1, 'camera opened as the form opened');
+  assert.equal(stubs.requests[0].video.facingMode, 'user');
+  const { dom } = await bundle();
+  const close = [...doc.querySelectorAll('button')].find((b) => b.textContent === 'Close scanner') as HTMLButtonElement;
+  dom.flushSync(() => close.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+  assert.equal(stubs.tracks[0]!.stopped, 1);
+});
+
+test('a refused camera or a missing API shows a message and keeps the text input', async () => {
+  const { dom } = await bundle();
+  for (const options of [{ denied: true }, { noApi: true }]) {
+    const stubs = scanStubs(options);
+    const { doc, win } = await render([scanField()], {}, stubs.prepare);
+    const scan = [...doc.querySelectorAll('button')].find((b) => b.textContent === 'Scan') as HTMLButtonElement;
+    dom.flushSync(() => scan.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+    await until(() => (doc.querySelector('.c2c-scan-status')?.textContent ?? '') !== '', 'message');
+    assert.match(doc.querySelector('.c2c-scan-status')!.textContent!, /refused|not available/);
+    assert.equal((doc.querySelector('input[name="Code"]') as HTMLInputElement).disabled, false);
+  }
+});
+
+test('the gallery picker decodes a saved image, and hostile text stays a value', async () => {
+  const hostile = '<img src=x onerror=alert(1)>';
+  const stubs = scanStubs({ codes: [hostile] });
+  const { doc, win } = await render([scanField({ gallery: true })], {}, stubs.prepare);
+  const picker = doc.querySelector('input.c2c-scan-gallery') as HTMLInputElement;
+  assert.equal(picker.getAttribute('accept'), 'image/*');
+  Object.defineProperty(picker, 'files', { configurable: true, value: [new win.File(['x'], 'p.png', { type: 'image/png' })] });
+  picker.dispatchEvent(new win.Event('change', { bubbles: true }));
+  const input = doc.querySelector('input[name="Code"]') as HTMLInputElement;
+  await until(() => input.value === hostile, 'gallery decode');
+  assert.equal(doc.querySelector('img'), null);
+  assert.equal(stubs.requests.length, 0, 'the camera is not opened for a gallery decode');
+});
+
+test('no scan controls unless the field declares a scanner', async () => {
+  const { doc } = await render([field('Plain', 'text')]);
+  assert.equal(doc.querySelector('.c2c-scan'), null);
 });

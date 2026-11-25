@@ -913,7 +913,15 @@ function fieldControl(field, id, describedBy) {
                     : 'text';
   const inputMode = field.widget === 'number' || field.widget === 'decimal' || field.widget === 'percent' ? ' inputmode="decimal"' : '';
   const placeholder = field.widget === 'date' ? ` placeholder="${escapeHtml(datePlaceholder())}"` : '';
-  return `<input${idAttr} name="${name}" type="${type}"${inputMode}${placeholder}${required}${readOnly}${max}${pattern}${initial}${described}${field.scan ? ' data-scan="true"' : ''}${field.scan && field.switchCamera ? ' data-switch-camera="true"' : ''}>`;
+  return `<input${idAttr} name="${name}" type="${type}"${inputMode}${placeholder}${required}${readOnly}${max}${pattern}${initial}${described}${field.scan ? ' data-scan="true"' : ''}${field.scan && field.switchCamera ? ' data-switch-camera="true"' : ''}${scanAttrs(field)}>`;
+}
+
+/** The data attributes the browser scanner reads from a scan field (model.ts ui.scanner). */
+function scanAttrs(field) {
+  const scanner = field.scan ? field.scanner : undefined;
+  if (!scanner) return '';
+  const formats = Array.isArray(scanner.formats) ? scanner.formats.filter((f) => /^[a-z0-9_]+$/.test(f)) : [];
+  return ` data-scan-camera="${scanner.camera === 'secondary' ? 'secondary' : 'primary'}"${formats.length ? ` data-scan-formats="${formats.join(',')}"` : ''}${scanner.gallery ? ' data-scan-gallery="true"' : ''}${scanner.onload ? ' data-scan-onload="true"' : ''}`;
 }
 
 /**
@@ -6841,6 +6849,258 @@ function showCapturePreview(input) {
   }
 }
 
+const SCAN_INTERVAL_MS = 250;
+const SCAN_VALUE_MAX = 4096;
+
+/**
+ * Creator's scan field: a button opens the device camera, a BarcodeDetector
+ * decodes the live frames (or a picked gallery image), and the text goes into
+ * the field exactly as typing would, so on-user-input handlers run. The
+ * camera API needs a secure (HTTPS) origin; without the API, a detector, or
+ * permission the field stays the plain text input and says so. Nothing is
+ * uploaded: frames are decoded in the page, and the decoded string is only
+ * ever assigned as the input's value (never markup).
+ */
+function startScanner(input) {
+  const doc = input.ownerDocument;
+  const win = doc.defaultView;
+  const camera = input.getAttribute('data-scan-camera') === 'secondary' ? 'secondary' : 'primary';
+  const declared = (input.getAttribute('data-scan-formats') || '').split(',').filter(Boolean);
+  const wantsGallery = input.getAttribute('data-scan-gallery') === 'true';
+  const wantsSwitch = input.getAttribute('data-switch-camera') === 'true';
+  let facing = camera === 'secondary' ? 'user' : 'environment';
+  let stream = null;
+  let timer = 0;
+  let session = 0;
+  let detector = null;
+
+  const box = doc.createElement('div');
+  box.className = 'scan-controls';
+  const status = doc.createElement('p');
+  status.className = 'scan-status';
+  status.setAttribute('role', 'status');
+  const video = doc.createElement('video');
+  video.className = 'scan-video';
+  video.setAttribute('playsinline', '');
+  video.muted = true;
+  video.hidden = true;
+  const scanBtn = doc.createElement('button');
+  scanBtn.type = 'button';
+  scanBtn.className = 'scan-open';
+  scanBtn.textContent = 'Scan';
+  const closeBtn = doc.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'scan-close';
+  closeBtn.textContent = 'Close scanner';
+  closeBtn.hidden = true;
+  box.append(scanBtn, closeBtn);
+  let switchBtn = null;
+  if (wantsSwitch) {
+    switchBtn = doc.createElement('button');
+    switchBtn.type = 'button';
+    switchBtn.className = 'scan-switch';
+    switchBtn.textContent = 'Switch camera';
+    switchBtn.hidden = true;
+    box.append(switchBtn);
+  }
+  let galleryInput = null;
+  if (wantsGallery) {
+    galleryInput = doc.createElement('input');
+    galleryInput.type = 'file';
+    galleryInput.accept = 'image/*';
+    galleryInput.className = 'scan-gallery';
+    galleryInput.setAttribute('aria-label', 'Scan from a saved photo');
+    box.append(galleryInput);
+  }
+  box.append(video, status);
+  input.insertAdjacentElement('afterend', box);
+
+  const say = (text) => {
+    status.textContent = text;
+  };
+  const unsupported = 'Scanning is not available here (it needs a camera, a supported browser and HTTPS). Type the value instead.';
+
+  function stop() {
+    session += 1;
+    if (timer) win.clearTimeout(timer);
+    timer = 0;
+    if (stream) {
+      for (const track of stream.getTracks()) track.stop();
+      stream = null;
+    }
+    video.srcObject = null;
+    video.hidden = true;
+    closeBtn.hidden = true;
+    if (switchBtn) switchBtn.hidden = true;
+    scanBtn.hidden = false;
+  }
+
+  function apply(raw) {
+    // Untrusted text: it becomes the value, nothing else.
+    input.value = String(raw).slice(0, SCAN_VALUE_MAX);
+    input.dispatchEvent(new win.Event('input', { bubbles: true }));
+    input.dispatchEvent(new win.Event('change', { bubbles: true }));
+  }
+
+  async function makeDetector() {
+    if (detector) return detector;
+    const Detector = win.BarcodeDetector;
+    if (typeof Detector !== 'function') return null;
+    let formats = declared;
+    if (typeof Detector.getSupportedFormats === 'function') {
+      try {
+        const supported = await Detector.getSupportedFormats();
+        if (formats.length) formats = formats.filter((f) => supported.includes(f));
+        else formats = supported;
+        if (!formats.length) return null;
+      } catch {
+        // fall through with the declared formats
+      }
+    }
+    try {
+      detector = formats.length ? new Detector({ formats }) : new Detector();
+    } catch {
+      return null;
+    }
+    return detector;
+  }
+
+  async function start() {
+    if (stream) return;
+    const mine = ++session;
+    const nav = win.navigator;
+    if (!nav || !nav.mediaDevices || typeof nav.mediaDevices.getUserMedia !== 'function' || typeof win.BarcodeDetector !== 'function') {
+      say(unsupported);
+      return;
+    }
+    const det = await makeDetector();
+    if (mine !== session) return;
+    if (!det) {
+      say(unsupported);
+      return;
+    }
+    let media;
+    try {
+      media = await nav.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: false });
+    } catch {
+      if (mine === session) say('Camera access was refused or no camera was found. Type the value instead.');
+      return;
+    }
+    if (mine !== session) {
+      for (const track of media.getTracks()) track.stop();
+      return;
+    }
+    stream = media;
+    video.srcObject = media;
+    video.hidden = false;
+    closeBtn.hidden = false;
+    if (switchBtn) switchBtn.hidden = false;
+    scanBtn.hidden = true;
+    say('Point the camera at the code.');
+    try {
+      const played = video.play();
+      if (played && typeof played.catch === 'function') played.catch(() => {});
+    } catch {
+      // jsdom and some browsers refuse; frames are read either way
+    }
+    const tick = async () => {
+      timer = 0;
+      if (mine !== session || !stream) return;
+      if (!input.isConnected) {
+        stop();
+        return;
+      }
+      try {
+        const found = await det.detect(video);
+        if (mine !== session) return;
+        const hit = Array.isArray(found) ? found.find((item) => item && typeof item.rawValue === 'string' && item.rawValue !== '') : undefined;
+        if (hit) {
+          apply(hit.rawValue);
+          stop();
+          say('Scanned.');
+          return;
+        }
+      } catch {
+        // a frame that cannot be read is retried on the next tick
+      }
+      if (mine === session && stream) timer = win.setTimeout(tick, SCAN_INTERVAL_MS);
+    };
+    timer = win.setTimeout(tick, SCAN_INTERVAL_MS);
+  }
+
+  async function fromImage(file) {
+    const det = await makeDetector();
+    if (!det) {
+      say(unsupported);
+      return;
+    }
+    let bitmap = null;
+    try {
+      bitmap = await win.createImageBitmap(file);
+      const found = await det.detect(bitmap);
+      const hit = Array.isArray(found) ? found.find((item) => item && typeof item.rawValue === 'string' && item.rawValue !== '') : undefined;
+      if (hit) {
+        apply(hit.rawValue);
+        say('Scanned.');
+      } else {
+        say('No code was found in that image.');
+      }
+    } catch {
+      say('That image could not be read. Type the value instead.');
+    } finally {
+      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+    }
+  }
+
+  scanBtn.addEventListener('click', () => {
+    start();
+  });
+  closeBtn.addEventListener('click', () => {
+    stop();
+    say('');
+  });
+  if (switchBtn) {
+    switchBtn.addEventListener('click', () => {
+      facing = facing === 'environment' ? 'user' : 'environment';
+      stop();
+      start();
+    });
+  }
+  if (galleryInput) {
+    galleryInput.addEventListener('change', () => {
+      const file = galleryInput.files && galleryInput.files[0];
+      if (file) fromImage(file);
+      galleryInput.value = '';
+    });
+  }
+  box.addEventListener('focusout', (event) => {
+    const next = event.relatedTarget;
+    if (stream && next && !box.contains(next) && next !== input) stop();
+  });
+  box.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && stream) stop();
+  });
+  const leave = () => stop();
+  win.addEventListener('pagehide', leave);
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.visibilityState === 'hidden') stop();
+  });
+  const form = input.form;
+  if (form) form.addEventListener('reset', leave);
+  if (input.getAttribute('data-scan-onload') === 'true') start();
+  return { start, stop };
+}
+
+/** Give every `[data-scan-camera]` field its scanner controls, once each. */
+export function attachScanners(formEl) {
+  if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
+  for (const input of formEl.querySelectorAll('input[data-scan][data-scan-camera]')) {
+    if (input.getAttribute('data-scan-bound') === 'true') continue;
+    input.setAttribute('data-scan-bound', 'true');
+    startScanner(input);
+  }
+}
+
 /** Wire every `[data-preview-duration]` pick control in the form to its auto-dismiss preview, once each. */
 export function attachCapturePreviews(formEl) {
   if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
@@ -8871,6 +9131,7 @@ export function boot(appModel, doc) {
     fillLookups(form, formEl, viewRef).catch(() => {});
     attachLookupAddNew(model, formEl, viewRef);
     attachCapturePreviews(formEl);
+    attachScanners(formEl);
     const mode = open && open.mode === 'edit' ? 'edit' : 'add';
     const rowId = mode === 'edit' && open && open.rowId ? String(open.rowId) : '';
     // Creator's edit screen submits with an Update button.

@@ -21,6 +21,15 @@ export interface LookupSpec {
   addNew?: { label?: string };
 }
 
+/** The browser scanner a scan field offers (see form/scanner.ts). */
+export interface ScannerSpec {
+  camera: 'primary' | 'secondary';
+  /** BarcodeDetector format names; empty means every format the browser supports. */
+  formats: string[];
+  gallery: boolean;
+  onload: boolean;
+}
+
 export interface FieldSpec {
   name: string;
   label: string;
@@ -48,6 +57,10 @@ export interface FieldSpec {
   uploadEndpoint?: string;
   /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
   uploadSources?: string[];
+  /** Scan fields: the camera/gallery scanner beside the text input. */
+  scanner?: ScannerSpec;
+  /** Scan fields: offer a button that switches between the front and back camera. */
+  switchCamera?: boolean;
   /** Address fields expose a button that stores browser geolocation in latitude/longitude parts. */
   captureCoordinates?: boolean;
   /** Address fields expose a map control that previews and adjusts the latitude/longitude parts. */

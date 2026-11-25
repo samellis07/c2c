@@ -77,6 +77,14 @@ export type Widget =
   | 'zia'
   | 'unsupported';
 
+export interface ScannerSpec {
+  camera: 'primary' | 'secondary';
+  /** BarcodeDetector format names; empty means every format the browser supports. */
+  formats: string[];
+  gallery: boolean;
+  onload: boolean;
+}
+
 export interface UiField {
   name: string;
   label: string;
@@ -113,6 +121,12 @@ export interface UiField {
   scan: boolean;
   /** Scan control exposes the device camera switch when Creator enables it. */
   switchCamera?: boolean;
+  /**
+   * Browser scanner the generated scan field offers (camera lens, barcode
+   * formats the field declares, gallery picker, open-on-load). Absent on a
+   * field whose settings the browser scanner cannot honour as declared.
+   */
+  scanner?: ScannerSpec;
   /** Address fields with Creator capture_coordinates expose a device-location control. */
   captureCoordinates?: boolean;
   /** Address fields with Creator adjust_using_map expose a map to adjust the stored latitude/longitude pin. */
@@ -1770,9 +1784,12 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
   }
+  if (ui.scan && widget !== 'image') ui.scanner = scannerSpec(field);
   if (ui.scan || widget === 'image') {
     const showOnload = prop(field, SHOW_ONLOAD_PROPERTY_KEY);
-    if (showOnload?.trim().toLowerCase() === 'true') {
+    // A scan field's onload is generated: the runtime opens the scanner when
+    // the form opens (ui.scanner.onload). An image field still has none.
+    if (showOnload?.trim().toLowerCase() === 'true' && !ui.scanner) {
       const name = `${formName}.${field.name} property ${SHOW_ONLOAD_PROPERTY_KEY}`;
       if (!todos.some((t) => t.area === 'field' && t.name === name)) {
         todos.push({
@@ -1826,34 +1843,20 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       }
     }
   }
-  // Image file inputs prove `camera = primary`, `switch camera = true`, and
-  // `show gallery = true` by what the device picker already does
-  // (default-equivalence.ts). A scan field is a text or number input marked
-  // data-scan: it does not open a camera, so the same values are a manual step.
+  // A scan field gets the browser scanner (ui.scanner): `camera = primary|secondary`,
+  // `show gallery` and `show onload` are generated. Any other lens stays a manual step.
   if (ui.scan && widget !== 'image') {
     const named = (key: string) => field.properties.find((p) => p.key.trim().toLowerCase().replace(/\s+/g, ' ') === key);
     const camera = named('camera');
-    if (camera !== undefined && unquote(camera.value).trim() !== '') {
+    if (camera !== undefined && unquote(camera.value).trim() !== '' && !['primary', 'secondary'].includes(unquote(camera.value).trim().toLowerCase())) {
       const value = unquote(camera.value).trim();
       const name = `${formName}.${field.name} property ${camera.key}`;
       if (!todos.some((t) => t.area === 'field' && t.name === name)) {
         todos.push({
           area: 'field',
           name,
-          reason: `Field ${field.name} sets \`camera = ${value}\`; the generated scan field is a text input marked for scanning and does not choose a camera lens.`,
-          manualStep: `Choose the ${value} camera when ${field.name} scans, by hand — the generated field does not open a camera or select a lens.`,
-        });
-      }
-    }
-    const showGallery = named('show gallery');
-    if (showGallery !== undefined && unquote(showGallery.value).trim().toLowerCase() === 'true') {
-      const name = `${formName}.${field.name} property ${showGallery.key}`;
-      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-        todos.push({
-          area: 'field',
-          name,
-          reason: `Field ${field.name} sets \`show gallery = true\`; the generated scan field cannot read a code from a photo in the gallery.`,
-          manualStep: `Let ${field.name} scan a code from a saved photo, by hand — the generated field has no gallery picker.`,
+          reason: `Field ${field.name} sets \`camera = ${value}\`; the generated browser scanner offers only the primary and secondary lenses, not \`${value}\`.`,
+          manualStep: `Choose the ${value} camera when ${field.name} scans, by hand — the generated scanner opens the primary camera.`,
         });
       }
     }
@@ -2274,6 +2277,25 @@ function resolveRow(field: Field): FieldTypeRow | undefined {
 function isUsers(field: Field, token: string): boolean {
   if (token === 'users' || token === 'user') return true;
   return normalizeType(prop(field, 'module')) === 'users';
+}
+
+const BARCODE_FORMATS = ['code_128', 'code_39', 'code_93', 'codabar', 'ean_13', 'ean_8', 'itf', 'upc_a', 'upc_e'];
+
+/** The browser scanner a scan field declares: lens, code formats, gallery picker, open-on-load. */
+function scannerSpec(field: Field): ScannerSpec {
+  const named = (key: string) => {
+    const found = field.properties.find((p) => p.key.trim().toLowerCase().replace(/\s+/g, ' ') === key);
+    return found === undefined ? undefined : unquote(found.value).trim().toLowerCase();
+  };
+  const formats: string[] = [];
+  if (named('qrcode') === 'true') formats.push('qr_code');
+  if (named('barcode') === 'true') formats.push(...BARCODE_FORMATS);
+  return {
+    camera: named('camera') === 'secondary' ? 'secondary' : 'primary',
+    formats,
+    gallery: named('show gallery') === 'true',
+    onload: named('show onload') === 'true',
+  };
 }
 
 function wantsScan(field: Field): boolean {
