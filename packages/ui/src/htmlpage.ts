@@ -31,6 +31,9 @@ import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.j
 import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
+import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
+import { markupFlow } from './markup-flow.js';
+import { fileFieldsFor } from '../../deluge/src/field-store.js';
 import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
 import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, recordSummaryIdShape, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 
@@ -1237,7 +1240,7 @@ function rewriteOpenUrls(src: string): string | null {
  * attribute's whole assembled value, and no script scheme flattened into an
  * inline style. A violation refuses the render instead of returning the HTML.
  */
-export function renderAuditSource(): string {
+export function renderAuditSource(options: { dataImages?: boolean } = {}): string {
   const attrs: Record<string, string[]> = {};
   for (const [tag, set] of Object.entries(ALLOWED_ATTRS).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
     attrs[tag] = [...set].sort();
@@ -1257,7 +1260,7 @@ function c2cAttrAuditOk(tag, name, value) {
   const specific = C2C_AUDIT_ATTRS[tag];
   if (tag === "button" && /^data-fn-arg-\\d+$/.test(attr)) return true;
   if (!(specific && specific.indexOf(attr) >= 0) && C2C_AUDIT_ATTRS["*"].indexOf(attr) < 0) return false;
-  if (C2C_AUDIT_URLS.test(attr) && !c2cUrlOk(value)) return false;
+${options.dataImages ? '  if (tag === "img" && attr === "src" && C2C_MK_IMAGE_SRC.test(value)) return true;\n' : ''}  if (C2C_AUDIT_URLS.test(attr) && !c2cUrlOk(value)) return false;
   return true;
 }
 function c2cAuditViolation(html) {
@@ -1287,6 +1290,10 @@ function endpointModule(opts: {
   requireOwner?: boolean;
   /** The render calls `thisapp.<fn>()` functions proved read-only (readOnlyAppFunction). */
   appCalls?: boolean;
+  /** The render prints a value that holds markup (`c2cMarkup`). */
+  markup?: boolean;
+  /** The render reads an image field as its `<img>` element (`c2cImage`). */
+  images?: boolean;
 }): string {
   const banner = `/**\n${[
     `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to ${opts.hasWrites ? 'an endpoint with setup writes' : 'a read-only endpoint'}.`,
@@ -1310,7 +1317,7 @@ function endpointModule(opts: {
   return `${banner}import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRuntime, jsonReplacer, principalFromRequest, renderedDocumentViolation, renderedHtmlElements } from "creator-to-catalyst/shims";
+import { createRuntime, jsonReplacer, principalFromRequest, renderedDocumentViolation, renderedHtmlElements${opts.images ? ', signDownload' : ''} } from "creator-to-catalyst/shims";
 ${opts.appCalls ? 'import { functions } from "../thisapp.mjs";\n' : ''}
 const policyPath = join(dirname(fileURLToPath(import.meta.url)), "../access-policy.json");
 export const access = JSON.parse(readFileSync(policyPath, "utf8"));
@@ -1415,8 +1422,8 @@ function c2cCss(v) {
 }
 
 ${c2cUrlFunctionSource()}
-
-${renderAuditSource()}
+${opts.markup ? `\n${c2cMarkupFunctionSource()}\n` : ''}${opts.images ? `\n${c2cImageFunctionSource()}\n` : ''}
+${renderAuditSource({ dataImages: opts.markup })}
 
 function c2cLink(url) {
   const text = String(url || "").trim();
@@ -1433,11 +1440,11 @@ function c2cLink(url) {
   return '<a href="' + c2cEsc(href) + '">' + c2cEsc(label) + "</a>";
 }
 
-async function render(ctx) {
+async function render(ctx${opts.images ? ', c2c_env' : ''}) {
   const shim = ctx.shim;
 ${indented}
   const c2c_parts = [];
-  const c2c_notes = [];
+  const c2c_notes = ${opts.images ? 'c2c_env.notes' : '[]'};
   // A URL attribute value may span several parts (static pieces and islands).
   // The scheme check runs on the whole joined value, so the pieces accumulate
   // until the next non-URL part; a dropped island inside the value does not
@@ -1466,7 +1473,7 @@ ${indented}
     if (item.k === "H") c2c_parts.push(item.v == null ? "" : String(item.v));
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
-    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)));
+    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)));${opts.markup ? '\n    else if (item.k === "M") c2c_parts.push(c2cMarkup(c2cStr(item.v), c2c_notes));' : ''}
     else if (item.k === "Q") {
       const piece = c2cStr(item.v);
       const num = c2cCssNumber(piece);
@@ -1591,7 +1598,7 @@ ${opts.hasWrites ? `  if (!adminProfiles.includes(principal.profile)) {
 ${opts.hasWrites ? '      adminUserId: principal.userId || "",\n' : ''}${opts.appCalls ? '      functions,\n' : ''}      ...(datastore ? { datastore } : {}),
     });
     const ctx = runtime.context({ record: input, old: {}, principal, appTimeZone });
-    const rendered = await render(ctx);
+    const rendered = await render(ctx${opts.images ? ', { files: live ? await liveFileStore(req) : null, notes: [], bytes: 0 }' : ''});
     let violation = "";
     try {
       violation = c2cAuditViolation(rendered.html);
@@ -1865,6 +1872,44 @@ function calleeStmtOk(s: Stmt): boolean {
 }
 
 
+/** Stratus-key columns of a form that Creator types as image: the fields whose value a page reads as an `<img>` element. */
+function imageColumns(app: App, form: string): Set<string> {
+  const images = new Set(app.forms.find((item) => item.name === form)?.fields.filter((field) => (field.type ?? '').trim().toLowerCase() === 'image').map((field) => field.name));
+  return new Set(fileFieldsFor(app, form).filter((column) => images.has(column)));
+}
+
+/**
+ * Translated render code with every `Form[criteria].Image` read of a fetched
+ * record wrapped in `c2cImage`, which turns the stored key into the `<img>`
+ * element Creator's value is. A name assigned from more than one form is not
+ * rewritten, and `reads` counts the wrapped reads.
+ */
+function withImageReads(app: App, server: string): { server: string; reads: number } {
+  const formOf = new Map<string, string | null>();
+  for (const m of server.matchAll(/\bvar ([A-Za-z_$][\w$]*) = shim\.datastore\.query\(ctx, "([A-Za-z_]\w*)"/g)) {
+    formOf.set(m[1]!, formOf.has(m[1]!) && formOf.get(m[1]!) !== m[2] ? null : m[2]!);
+  }
+  let reads = 0;
+  const wrapped = server.replace(/await shim\.datastore\.field\(ctx, ([A-Za-z_$][\w$]*), "([A-Za-z_]\w*)"\)/g, (whole, name: string, field: string) => {
+    const form = formOf.get(name);
+    if (!form || !imageColumns(app, form).has(field)) return whole;
+    reads++;
+    return `await c2cImage(c2c_env, ${whole}, ${JSON.stringify(form)}, ${JSON.stringify(field)})`;
+  });
+  return { server: wrapped, reads };
+}
+
+/** The app function a `thisapp.<fn>()` path names: the exact name, then the case-insensitive one the generated registry also resolves. */
+function appFunction(app: App, path: string[]): App['functions'][number] | undefined {
+  const name = path.join('.');
+  return app.functions.find((item) => item.name === name) ?? app.functions.find((item) => item.name.toLowerCase() === name.toLowerCase());
+}
+
+/** True when the function's body holds a string literal with a tag, so what it returns is markup. */
+function buildsMarkup(fn: App['functions'][number]): boolean {
+  return fn.deluge.some((d) => MARKUP_LITERAL.test(d.text));
+}
+
 /**
  * A `thisapp.<fn>()` call a rendered page may make: the callee resolves the
  * way the generated registry does (exact name, then case-insensitive), is not
@@ -1872,16 +1917,19 @@ function calleeStmtOk(s: Stmt): boolean {
  * an island — no write or external action, only the handled statement
  * classes plus `return`, no manual translation, and read-only shim calls,
  * where a nested `thisapp` call is proved the same way. A recursive call is
- * refused. A body that builds markup is refused too: the page prints a call's
- * value as escaped text, so returned HTML would show as tags. Each proved
+ * refused. A body that builds markup is refused too, unless `markupOk`: the
+ * page prints a call's value as escaped text, so returned HTML would show as
+ * tags. Each proved
  * callee's server code is pushed to `servers`, so its forms join the
  * endpoint's hidden-form check.
+ *
+ * `markupOk` admits a callee that builds markup: the caller assigns its value
+ * to a name and the page prints that name through `c2cMarkup` (markup-flow.ts).
  */
-function readOnlyAppFunction(app: App, path: string[], seen: ReadonlySet<string>, servers: string[]): boolean {
-  const name = path.join('.');
-  const fn = app.functions.find((item) => item.name === name) ?? app.functions.find((item) => item.name.toLowerCase() === name.toLowerCase());
+function readOnlyAppFunction(app: App, path: string[], seen: ReadonlySet<string>, servers: string[], markupOk = false): boolean {
+  const fn = appFunction(app, path);
   if (!fn || seen.has(fn.name) || functionRowBinding(fn)) return false;
-  if (!fn.deluge.some((d) => d.text.trim()) || fn.deluge.some((d) => MARKUP_LITERAL.test(d.text))) return false;
+  if (!fn.deluge.some((d) => d.text.trim()) || (!markupOk && buildsMarkup(fn))) return false;
   const inner = new Set(seen).add(fn.name);
   let slot = 0;
   // A body that translates to no server code generates no registry entry.
@@ -3153,7 +3201,7 @@ export function compileHtmlpage(
       scriptParts.push(rewritten);
     }
   }
-  const script = scriptParts.join('\n');
+  let script = scriptParts.join('\n');
 
   let ast;
   try {
@@ -3178,6 +3226,18 @@ export function compileHtmlpage(
   } else {
     if (!ast.body.every((stmt) => stmtOk(stmt))) return fail('island outside the handled classes');
   }
+
+  // A value that holds markup is printed through `c2cMarkup`, not as escaped text.
+  const flow = markupFlow(
+    ast.body,
+    (path) => {
+      const fn = appFunction(app, path);
+      return !!fn && buildsMarkup(fn);
+    },
+    (form, field) => imageColumns(app, form).has(field),
+  );
+  const printed = flow.prints.length > 0;
+  if (printed) script = flow.prints.reduceRight((text, span) => `${text.slice(0, span.start)}"M"${text.slice(span.end)}`, script);
 
   let tr;
   try {
@@ -3206,9 +3266,11 @@ export function compileHtmlpage(
   if (isShapeC) {
     if (!shapeCServerOk(server)) return fail('island is not an allowed write render');
   } else {
-    if (!islandReadOnly(server, (callee) => readOnlyAppFunction(app, callee, new Set(), calleeServers))) return fail('island is not a read-only render');
+    if (!islandReadOnly(server, (callee) => readOnlyAppFunction(app, callee, new Set(), calleeServers, flow.functions.has(callee.join('.').toLowerCase())))) return fail('island is not a read-only render');
   }
 
+  // The read-only check ran on the plain translation; the endpoint wraps its image reads.
+  const images = withImageReads(app, server);
   const forms = [server, ...calleeServers].flatMap((code) =>
     [...code.matchAll(/shim\.datastore\.(?:query|aggregate|insert|update)\(ctx, "([^"]+)"/g), ...code.matchAll(/compileCriteria\(ctx\.shim, "([^"]+)"/g)].map((m) => m[1]),
   );
@@ -3223,11 +3285,13 @@ export function compileHtmlpage(
       path,
       forms: [...new Set(forms)].sort(),
       adminProfiles: administratorProfiles(app),
-      server,
+      server: images.server,
       statics: cleanStatics,
       hasWrites: isShapeC,
       requireOwner: shapeCGuard?.requireOwner,
       appCalls: calleeServers.length > 0,
+      markup: printed || images.reads > 0,
+      images: images.reads > 0,
     }),
   };
   return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file, ...(fnFiles.length ? { files: fnFiles } : {}) });

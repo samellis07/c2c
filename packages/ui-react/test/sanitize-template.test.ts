@@ -18,3 +18,25 @@ test('template sanitizer CSS policy keeps plain properties and rejects executabl
   for (const value of ['color:red', 'margin: 0', 'background-color: white', 'font-size: 1rem']) assert.equal(dangerousStyle(value), false, value);
   for (const value of ['\\75 rl(x)', 'u\\72 l(x)', '\\000075rl(x)', '/*x*/color:red', 'image-set(url(x) 1x)', 'image("x")', 'cross-fade("x", "y", 50%)', '-webkit-cross-fade(red, blue)', '@import url(x)', 'expression(alert(1))', '-moz-binding:url(x)', 'attr(x)']) assert.equal(dangerousStyle(value), true, value);
 });
+
+test('template sanitizer keeps an exact inline raster image src on an img and nothing else with a data URL', () => {
+  const dom = new JSDOM('');
+  const doc = dom.window.document as unknown as Document;
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  assert.equal(sanitizeSnippet(`<img src="${png}">`, doc), `<img src="${png}">`);
+  for (const kind of ['jpeg', 'gif', 'webp']) assert.match(sanitizeSnippet(`<img src="data:image/${kind};base64,AAAA">`, doc), /src=/, kind);
+  const refused = [
+    'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+    'data:image/png;base64,AAAA" onerror="alert(1)',
+    'data:image/png;base64, AAAA',
+    'data:image/png;base64,AA\nAA',
+    'DATA:image/png;base64,AAAA',
+    ' data:image/png;base64,AAAA',
+    'data:image/png,AAAA',
+    'data:image/png;base64,',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    'data:image/png;base64,AAAA#x<script>',
+  ];
+  for (const src of refused) assert.equal(sanitizeSnippet(`<img src="${src.replace(/"/g, '&quot;')}">`, doc), '<img>', src);
+  assert.equal(sanitizeSnippet(`<a href="${png}">x</a>`, doc), '<a>x</a>');
+});
