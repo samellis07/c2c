@@ -117,3 +117,24 @@ test('applyOpenUrlNav applies ordered pseudo commands and rejects hostile URLs',
   assert.deepEqual(events, ['refresh', 'close']);
   assert.deepEqual(opened, [['https://allowed.example/doc', '_blank', 'noopener,noreferrer']]);
 });
+
+test('performActionNav refuses a hostile target a workflow built at run time: script URL, protocol-relative host, userinfo trick', { skip: SKIP }, async (t) => {
+  const { performActionNav } = await loadNavigation(t);
+  const hostile = ['javascript:alert(document.cookie)', ' JaVa\tScRiPt:alert(1)', '//evil.example/x', 'https://allowed.example.com@evil.example.com/x', 'https://user:pw@evil.example/x', 'data:text/html,x'];
+  for (const url of hostile) {
+    for (const target of ['same', 'new'] as const) {
+      const view = { location: { hash: '', href: 'https://app.example/', reload: () => assert.fail('no reload') }, open: () => assert.fail(`opened ${url}`) };
+      performActionNav({ kind: 'navigate', url, target }, ALLOWED, view);
+      assert.equal(view.location.hash, '', `${url} (${target}) changed the route`);
+      assert.equal(view.location.href, 'https://app.example/', `${url} (${target}) navigated`);
+    }
+  }
+});
+
+test('performActionNav reloads the page for a reload instruction (a page refresh in the workflow)', { skip: SKIP }, async (t) => {
+  const { performActionNav } = await loadNavigation(t);
+  let reloads = 0;
+  const view = { location: { hash: '', href: 'https://app.example/', reload: () => (reloads += 1) }, open: () => assert.fail('no new tab') };
+  performActionNav({ kind: 'reload' }, [], view);
+  assert.equal(reloads, 1);
+});

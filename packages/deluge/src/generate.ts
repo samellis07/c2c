@@ -2894,7 +2894,10 @@ function navTargetCapturable(app: App, fn: FunctionDef, stmt: Stmt, locals: Read
   const resolved: Stmt = locals.size ? { ...stmt, args: stmt.args.map((a) => substituteLocalReads(a, locals)) } : stmt;
   const result = classifyOpenUrlStmt(app, fn, resolved, new Map());
   if (result.kind === 'supported') return true;
-  return /^(?:complex dynamic expression in openUrl|unknown identifier )/.test(result.reason ?? '');
+  // A form opened with a value for a field it does not have still opens: the
+  // form ignores a parameter that matches none of its fields, so the carried
+  // navigation drops that parameter instead of refusing the whole target.
+  return /^(?:complex dynamic expression in openUrl|unknown identifier |target form .+ has no field )/.test(result.reason ?? '');
 }
 
 /**
@@ -3292,6 +3295,16 @@ function classifyOpenUrlStmt(
   return { kind: 'supported', target: text };
 }
 
+/** True when the function body calls `openUrl` as a statement; a call written only inside a comment is no navigation to carry. */
+function hasOpenUrlCall(fn: FunctionDef): boolean {
+  const text = fn.deluge.map((d) => d.text).join('\n');
+  try {
+    return containsOpenUrlStmt(parse(text).body);
+  } catch {
+    return /\bopenurl\s*\(/i.test(text);
+  }
+}
+
 function emitFunction(
   app: App,
   fn: FunctionDef,
@@ -3394,7 +3407,7 @@ function emitFunction(
       }
       return;
     }
-  } else if (liftedText === undefined && !navCapture && server.trim() && /\bopenurl\s*\(/i.test(fn.deluge.map((d) => d.text).join('\n'))) {
+  } else if (liftedText === undefined && !navCapture && server.trim() && hasOpenUrlCall(fn)) {
     // The function also produced real server code (e.g. a guard read before
     // the navigation), so classifyClientOpenUrl's whole-function shape still
     // matches but the earlier branch above never runs. Keep the server code
