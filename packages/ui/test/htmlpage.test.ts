@@ -4764,6 +4764,33 @@ test('a ranged read below a page input the script rewrote compiles, whatever the
   assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
 });
 
+test('an if block of attributes inside a tag draws the tag with or without them, whichever the row decides', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%{\nfor each r in Orders[ID != 0] sort by Amount\n{\n%>\n<div class="card"\n<%\nif(r.Status == "closed")\n{\n%>\nstyle="opacity:0.5;" title="done"\n<%\n}\n%>\n><%=r.Amount%></div>\n<span\n<%\nif(r.Amount > 1)\n{\n%> class="big"<%\n}\n%>>x</span>\n<%\n}\n}%>`;
+  const app = appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(app, snippet);
+  assert.match(html, /<div class="card">1<\/div>\s*<span>x<\/span>/, 'an open order of 1 has neither attribute');
+  assert.match(html, /<div class="card">2<\/div>\s*<span class="big">x<\/span>/);
+  assert.match(html, /<div class="card" style="opacity:0\.5;" title="done">3<\/div>\s*<span class="big">x<\/span>/);
+});
+
+test('an island between the attributes of a tag that is not one plain if block of attribute text stays counted', () => {
+  for (const tag of [
+    '<div class="a"\n<% x = 1; %>\nid="b">',
+    '<div class="a"\n<%=input.q%>\n>',
+    '<div class="a"\n<%\nif(input.q == "1")\n{\n%>\nid="b"\n<%\n}\nelse\n{\n%>\nid="c"\n<%\n}\n%>\n>',
+    '<div class="a"\n<%\nif(input.q == "1")\n{\n%>\nid="<%=input.q%>"\n<%\n}\n%>\n>',
+    '<div class="a"\n<%\nif(input.q == "1")\n{\n%>\nid="b"><b\n<%\n}\n%>\n>',
+    '<div class="a"\n<%\nif(input.q == "1")\n{\n%>\nonclick="x()"\n<%\n}\n%>\n>',
+    '<p class="a"\n<%\nif(input.q == "1")\n{\n%>\nid="b"\n<%\n}\n%>\n>',
+  ]) {
+    const out = compileHtmlpage(appOf(`${ORDERS}\n${pageWithSnippet('x')}`), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<%{\n%>\n${tag}t</div>\n<%\n}%>`);
+    assert.ok(!out.ok || !/onclick/.test(out.file?.source ?? ''), tag);
+    assert.ok(!out.ok || !/id=.?"?b/.test((out.file?.source ?? '').replace(/\\"/g, '"')) || tag.includes('<%=input.q%>'), tag);
+  }
+});
+
 test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
   const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "<li>" + thisapp.Util.wrap(input.q) + "</li>";\n%>\n<ul><%= row %></ul>`;
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
