@@ -179,3 +179,32 @@ test('a function that builds and updates a fresh local while updating its list p
   assert.deepEqual([...replaySet('list f(list L)', 'T = List();\nT.add(1);\nL.addAll(T);\nreturn L;')], ['f:0']);
   assert.deepEqual([...replaySet('map f(map M)', 'N = Map();\nN.put("a", 1);\nM.putAll(N);\nreturn M;')], ['f:0']);
 });
+
+const APPEND_SUBJECT = `count = 0;
+for each index value in givenList
+{
+  if(givenList.get(value) == input.givenSubject)
+  {
+    count = count + 1;
+  }
+}
+if(count == 1)
+{
+  tempList = givenList.subList(0,givenList.indexOf(givenSubject));
+  tempList.add(givenSubject + "-1");
+  givenList = tempList;
+}
+else
+{
+  givenList.add(givenSubject);
+}
+return givenList;`;
+
+test('a function that rebinds its list parameter to a fresh copy it built still replays', () => {
+  assert.deepEqual([...replaySet('list appendSubject(list givenList, string givenSubject)', APPEND_SUBJECT)], ['appendSubject:0']);
+});
+
+test('a function that rebinds its list parameter to a fetched list stays out of the replay set', () => {
+  const body = APPEND_SUBJECT.replace('tempList = givenList.subList(0,givenList.indexOf(givenSubject));', 'tempList = Item[ID != 0].Name.getAll();\n  other = givenList;\n  other.add("x");');
+  assert.deepEqual([...replaySet('list appendSubject(list givenList, string givenSubject)', body)], []);
+});

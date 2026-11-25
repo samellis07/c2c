@@ -2689,6 +2689,20 @@ export function mutatesOnlyFreshLocals(code: string, mutableParams: readonly str
   // `[`/`{` literal there is refused (see the comment below), so only
   // FRESH_COPY_CALL counts.
   const freshParamRebind = (esc: string): number => count(`(?:^|[^\\w$.])${esc}\\s*=\\s*${FRESH_COPY_CALL}`);
+  // `param = tmp` where `tmp` is a local declared once, bound once to a fresh
+  // list or column, and never rebound: the parameter now names a list the body
+  // built, so later writes through it cannot reach a stored row. The caller
+  // reads the result from the return value, as it does for a copy call.
+  const paramRebindToFreshLocal = (esc: string): boolean => {
+    const m = new RegExp(`(?:^|[^\\w$.])${esc}\\s*=(?!=)\\s*([A-Za-z_$][\\w$]*)\\s*;`).exec(plain);
+    if (!m || m[1] === undefined) return false;
+    const tmp = escapeRegExp(m[1]);
+    return (
+      count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${tmp}\\b`) === 1 &&
+      freshBind(tmp) === 1 &&
+      count(`(?:^|[^\\w$.])${tmp}\\s*=(?!=)`) === 1
+    );
+  };
   for (const m of code.matchAll(SHIM_CALL)) {
     const isSet = m[1] === 'set' && m[2] === undefined;
     if (!isSet && !(m[1] === 'list' && m[2] !== undefined && !LIST_SHIM_READERS.has(m[2]))) continue;
@@ -2709,7 +2723,8 @@ export function mutatesOnlyFreshLocals(code: string, mutableParams: readonly str
       // parameter's post-first-rebind value — binds it to a fresh copy call,
       // never a literal: the parameter already held a value the body did not
       // create, so a literal there would silently drop it instead of copying it.
-      if (count(bind) > 1 || (count(bind) === 1 && freshParamRebind(esc) !== 1)) return false;
+      if (count(bind) > 1) return false;
+      if (count(bind) === 1 && freshParamRebind(esc) !== 1 && !paramRebindToFreshLocal(esc)) return false;
       continue;
     }
     const decls = count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\b`);
