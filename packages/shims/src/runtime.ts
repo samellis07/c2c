@@ -413,10 +413,12 @@ export type ContextInput = Partial<
   Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent'>
 > & { form?: string };
 
-/** A client action the server run answers with: a field `:ui` task or an `openUrl`. */
+/** A client action the server run answers with: a field `:ui` task, an `openUrl`, a field value or the rows to insert into a subform. */
 export type ClientEffect =
   | { op: 'ui'; method: string; target: string[]; args: unknown[] }
-  | { op: 'openUrl'; args: unknown[] };
+  | { op: 'openUrl'; args: unknown[] }
+  | { op: 'setValue'; targets: string[]; args: unknown[] }
+  | { op: 'subform'; method: 'insert'; target: string[]; args: unknown[] };
 
 export interface ShimContext {
   shim: Shim;
@@ -1197,15 +1199,15 @@ export interface Shim {
      */
     run?(ctx: ShimContext): Promise<unknown>;
     /**
-     * Server half: queue one client effect (a field `:ui` task or an `openUrl`
-     * whose value only this run knows) under the marker `key` the browser left in its action
+     * Server half: queue one client effect (a field `:ui` task, an `openUrl`, a
+     * field value or subform rows only this run knows) under the marker `key` the browser left in its action
      * list. The reply to the browser's run carries them as `effects`.
      */
     effect(ctx: ShimContext, key: string, effect: ClientEffect): void;
     /**
      * Browser only: the action list with every `serverEffect` marker replaced by
      * the effects the run's reply holds under its key. A marker the run did not
-     * answer is dropped; an effect that is neither a field `:ui` task nor an `openUrl` is ignored.
+     * answer is dropped; an effect of any other kind is ignored.
      */
     settle?(actions: unknown[], reply: unknown): unknown[];
   };
