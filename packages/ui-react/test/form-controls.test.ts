@@ -561,7 +561,9 @@ test('a scan field with onload opens the camera, and unmounting stops it', async
   await until(() => stubs.tracks.length === 1, 'camera opened as the form opened');
   assert.equal(stubs.requests[0].video.facingMode, 'user');
   const { dom } = await bundle();
-  const close = [...doc.querySelectorAll('button')].find((b) => b.textContent === 'Close scanner') as HTMLButtonElement;
+  const closeButton = () => [...doc.querySelectorAll('button')].find((b) => b.textContent === 'Close scanner') as HTMLButtonElement | undefined;
+  await until(() => closeButton() !== undefined, 'the Close scanner button');
+  const close = closeButton()!;
   dom.flushSync(() => close.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
   assert.equal(stubs.tracks[0]!.stopped, 1);
 });
