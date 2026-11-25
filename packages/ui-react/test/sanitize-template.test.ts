@@ -46,6 +46,21 @@ test('template sanitizer keeps an exact inline raster image src on an img and no
   assert.equal(sanitizeSnippet(`<a href="${png}">x</a>`, doc), '<a>x</a>');
 });
 
+test('snippet sanitizers keep checkbox labels while dropping hostile input attributes', async () => {
+  const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as { sanitizeSnippet(raw: string, doc: unknown): string };
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  const safe = '<input id="checkbox_1" type="checkbox"><label for="checkbox_1">Expand</label>';
+  assert.equal(sanitizeSnippet(safe, doc as unknown as Document), safe);
+  assert.equal(buildSanitize(safe), safe);
+  assert.equal(runtime.sanitizeSnippet(safe, doc), safe);
+  const hostile = '<input id="x" type="checkbox" name="secret" value="1" checked onclick="alert(1)"><label for="x" onmouseover="alert(1)">x</label>';
+  const expected = '<input id="x" type="checkbox"><label for="x">x</label>';
+  assert.equal(sanitizeSnippet(hostile, doc as unknown as Document), expected);
+  assert.equal(buildSanitize(hostile), expected);
+  assert.equal(runtime.sanitizeSnippet(hostile, doc), expected);
+  assert.equal(sanitizeSnippet('<input type="text" id="x">', doc as unknown as Document), '');
+});
+
 test('template sanitizer keeps a class token by the same rule as the generator and the browser runtime', async () => {
   const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
     SHELL_OVERLAY_CLASSES: Set<string>;
