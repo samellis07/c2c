@@ -205,7 +205,7 @@ const DOCUMENT_SHELL_TAGS = new Set(['html', 'body']);
  */
 const UNWRAPPED_TEXT_TAGS = new Set([
   'center', 'time', 'section', 'article', 'header', 'footer', 'nav', 'main', 'aside', 'label', 'address',
-  'details', 'summary', 'cite', 'dfn', 'bdi', 'bdo', 'data', 'big', 'tt', 'strike', 'nobr', 'output',
+  'details', 'summary', 'cite', 'dfn', 'bdi', 'bdo', 'data', 'big', 'tt', 'strike', 'nobr', 'output', 'p1',
 ]);
 
 /** Elements whose open tag ends before any content (HTML void elements). */
@@ -1003,6 +1003,7 @@ function componentParams(
   slots: readonly string[] = [],
   own: ReadonlySet<string> = new Set(),
   lookups: readonly EmbedLookup[] = [],
+  idNames: ReadonlySet<string> = new Set(),
 ): { untitled: boolean; hidden: string[]; params: ComponentParam[]; border?: string; message?: string } | null {
   // A reference without its `;` still reads as `&` where an `&` follows, as the browser reads an attribute value.
   const text = raw.replace(/&amp;|&amp(?=&)/gi, '&').trim();
@@ -1072,7 +1073,8 @@ function componentParams(
     // A form prefill of a lookup would have to pick the option whose label is the text, and a label can name several rows.
     // The caller's own page input is no such text: Creator hands the URL value to the lookup as it came, a row id, and
     // the prefill sets the select to the option with that value, so the input passes through unchanged.
-    const idPass = kind === 'form' && looked.length === 1 && slot !== null && /^input\.[A-Za-z_]\w*$/.test((slots[Number(slot[1])] ?? '').trim());
+    // A name set once to `input.<own param>.toLong()` is that same row id after the conversion.
+    const idPass = kind === 'form' && looked.length === 1 && slot !== null && ((read) => /^input\.[A-Za-z_]\w*$/.test(read) || idNames.has(read))((slots[Number(slot[1])] ?? '').trim());
     if (looked.length && !idPass && (kind === 'form' || (!looked[0].path && !looked[0].display))) return null;
     // A report filter on a key that is no field would show more records than Creator does; a form prefill of one fills nothing.
     if (matches.length + looked.length > 1 || (matches.length + looked.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
@@ -1191,6 +1193,26 @@ function tokenizeIslands(tag: string): { tokenized: string; slots: string[] } {
 }
 
 /**
+ * Names the render code sets exactly once, to `input.<p>.toLong()` for a parameter `p` the page itself declares. Such a
+ * name is the page input's row id, so a lookup prefill may carry it as it carries `input.p`.
+ */
+const INPUT_ID_ASSIGN = /(?<![\w.])([A-Za-z_]\w*)[ \t]*=[ \t]*input\.([A-Za-z_]\w*)\.toLong\(\)[ \t]*;/g;
+
+function pageInputIdNames(template: string, own: ReadonlySet<string>): Set<string> {
+  const names = new Set<string>();
+  if (!own.size) return names;
+  const code = islandCode(template);
+  for (const match of code.matchAll(INPUT_ID_ASSIGN)) {
+    const [, name, param] = match as unknown as [string, string, string];
+    if (!own.has(param)) continue;
+    const writes = [...code.matchAll(new RegExp(`(?<![\\w.])${name}[ \\t]*(?:=(?!=)|[-+*/]=|\\+\\+|--)`, 'g'))].length;
+    const looped = new RegExp(`\\bfor[ \\t\\r\\n]+each[ \\t\\r\\n]+${name}(?![\\w])`, 'i').test(code);
+    if (writes === 1 && !looped) names.add(name);
+  }
+  return names;
+}
+
+/**
  * Creator zc-component divs can name a generated form/report [UNVERIFIED]. Only a literal
  * link name whose params are all applicable display flags is provable; other embeds stay TODOs.
  */
@@ -1202,13 +1224,15 @@ function embeddedComponents(
   const components: EmbeddedComponent[] = [];
   const markers: string[] = [];
   const todos: { target: string; step?: string }[] = [];
+  const idNames = pageInputIdNames(template, own);
   const embed = (tag: string, slots: readonly string[]): string | null => {
     if (!/\belname\s*=/i.test(tag)) return tag;
     const attrs = componentAttributes(tag);
     if (!attrs) {
       // A zc-component tag that does not parse still counts: it never renders,
       // but the customer has an embed to migrate by hand.
-      if (ZC_COMPONENT_ELNAME.test(tag)) todos.push({ target: 'component' });
+      // A tag that names no form, report, view or page carries nothing to embed.
+      if (ZC_COMPONENT_ELNAME.test(tag) && /(?:form|view|report|page)linkname/i.test(tag)) todos.push({ target: 'component' });
       return tag;
     }
     const componentAttr = attrs.get('elname');
@@ -1242,7 +1266,7 @@ function embeddedComponents(
     const rawParams = attrs.get('params');
     // A token outside `params` is an island in another attribute: not an embed.
     if (slots.length && attrKeys.some((key) => key !== 'params' && (attrs.get(key) ?? '').includes('\u0001'))) return null;
-    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupFields(app, kind, name)) : null;
+    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupFields(app, kind, name), idNames) : null;
     if (known && !hostile && params) {
       const applied = shownFieldKeys(app, kind, name, params.params);
       const keys = applied.map((item) => item.key);
