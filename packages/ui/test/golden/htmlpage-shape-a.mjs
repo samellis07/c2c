@@ -60,6 +60,26 @@ function c2cEsc(v) {
   return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// An island inside a quoted id (or a label's for) renders one bounded token:
+// letters, digits and '-' stay, '_' doubles, every other character becomes
+// '_' + its hex code point + '_', so two different values never share an id
+// and no quote, space, '#' or URL text survives. A long value becomes 'h' + a
+// 32-bit hash + its length. One linear pass.
+function c2cIdToken(v) {
+  const text = String(v);
+  let out = "";
+  for (const ch of text) {
+    if (/[A-Za-z0-9-]/.test(ch)) out += ch;
+    else if (ch === "_") out += "__";
+    else out += "_" + ch.codePointAt(0).toString(16) + "_";
+    if (out.length > 24) break;
+  }
+  if (out.length <= 24) return out;
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
+  return "h" + hash.toString(16) + "-" + text.length.toString(16);
+}
+
 // An island inside a quoted style attribute renders only a strict CSS value:
 // numbers with a unit, #hex, rgb()/rgba()/hsl()/hsla() with numeric arguments,
 // and a keyword allowlist, joined by whitespace, commas or '/'. Semicolons,
@@ -118,7 +138,8 @@ function c2cUrlOk(url) {
 }
 
 const C2C_AUDIT_TAGS = new Set(["a","abbr","b","blockquote","br","button","caption","code","col","colgroup","dd","del","div","dl","dt","em","figcaption","figure","font","h1","h2","h3","h4","h5","h6","hr","i","img","input","ins","kbd","label","li","mark","ol","p","pre","q","s","samp","small","span","strong","sub","sup","table","tbody","td","tfoot","th","thead","tr","u","ul","var","wbr"]);
-const C2C_AUDIT_ATTRS = {"*":["class","data-style-dropped","data-zml","title"],"a":["href","title","rel"],"button":["data-fn-argc","data-fn-args","data-fn-call","data-fn-msg","data-fn-refresh","type"],"font":["color","face","size"],"img":["alt","height","src","title","width"],"input":["id","type"],"label":["for"],"ol":["start","title"],"td":["colspan","rowspan","title"],"th":["colspan","rowspan","title"]};
+const C2C_AUDIT_ATTRS = {"*":["class","data-style-dropped","data-zml","id","title"],"a":["href","title","rel"],"button":["data-fn-argc","data-fn-args","data-fn-call","data-fn-msg","data-fn-refresh","type"],"font":["color","face","size"],"img":["alt","height","src","title","width"],"input":["checked","type"],"label":["for"],"ol":["start","title"],"td":["colspan","rowspan","title"],"th":["colspan","rowspan","title"]};
+const C2C_AUDIT_SHELL_IDS = ["main","tabbar","more-sheet","more-tab","toasts","app-title"];
 const C2C_AUDIT_URLS = /^(href|src|srcset|action|formaction|xlink:href|poster|cite|background|longdesc|profile|usemap|data|ping|manifest|codebase|archive|lowsrc|dynsrc|srcdoc)$/i;
 function c2cAttrAuditOk(tag, name, value) {
   const attr = String(name).toLowerCase();
@@ -127,6 +148,7 @@ function c2cAttrAuditOk(tag, name, value) {
     const flat = String(value == null ? "" : value).replace(/[\u0000-\u0020]+/g, "").toLowerCase();
     return flat.indexOf("javascript:") < 0 && flat.indexOf("vbscript:") < 0;
   }
+  if ((attr === "id" || (tag === "label" && attr === "for")) && !(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(String(value)) && C2C_AUDIT_SHELL_IDS.indexOf(String(value).toLowerCase()) < 0)) return false;
   const specific = C2C_AUDIT_ATTRS[tag];
   if (tag === "button" && /^data-fn-arg-\d+$/.test(attr)) return true;
   if (!(specific && specific.indexOf(attr) >= 0) && C2C_AUDIT_ATTRS["*"].indexOf(attr) < 0) return false;
@@ -228,6 +250,7 @@ async function render(ctx) {
     if (item.k === "H") c2c_parts.push(item.v == null ? "" : String(item.v));
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
+    else if (item.k === "I" || item.k === "J") c2c_parts.push((item.k === "J" ? "c2c-" : "") + c2cIdToken(c2cStr(item.v)));
     else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)));
     else if (item.k === "Q") {
       const piece = c2cStr(item.v);

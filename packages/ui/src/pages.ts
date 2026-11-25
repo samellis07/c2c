@@ -296,7 +296,18 @@ const NAMED: Record<string, UiElement['kind']> = {
 };
 
 /** Ids the page shell owns: a snippet control may not take one (getElementById would find it first, or a label for it would click a shell button). */
-const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title']);
+export const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title']);
+
+/**
+ * An id (or a label's `for`) a snippet may keep: one bounded token, a letter then letters, digits, `_` or `-`, at most 64 long, and
+ * never a shell id. The generated render builds a computed id from an encoded token, so the same rule closes quote, space, `#` or URL text
+ * in a value. The generator and the browser runtime keep identical copies.
+ */
+const ID_TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+function idTokenOk(value: unknown): boolean {
+  const text = String(value ?? '');
+  return ID_TOKEN.test(text) && !SHELL_IDS.has(text.toLowerCase());
+}
 
 export const ALLOWED_TAGS = new Set([
   'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt', 'input', 'label',
@@ -313,7 +324,7 @@ export const DROPPED_TAGS = new Set([
 
 export const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'title']),
-  input: new Set(['id', 'type']),
+  input: new Set(['type', 'checked']),
   label: new Set(['for']),
   // A generated ExecuteFunction button carries its call route, encoded
   // arguments, and success message; the runtime wires the click.
@@ -323,7 +334,7 @@ export const ALLOWED_ATTRS: Record<string, Set<string>> = {
   td: new Set(['colspan', 'rowspan', 'title']),
   th: new Set(['colspan', 'rowspan', 'title']),
   ol: new Set(['start', 'title']),
-  '*': new Set(['class', 'title', 'data-style-dropped', 'data-zml']),
+  '*': new Set(['class', 'title', 'id', 'data-style-dropped', 'data-zml']),
 };
 
 /**
@@ -1358,7 +1369,12 @@ function cleanNode(node: DomNode, doc: DomDocument, dropped?: string[]): DomNode
   for (const attr of listOf(node.attributes)) {
     const name = attr.name.toLowerCase();
     if (!allowedAttr(tag, name)) continue;
-    if ((name === 'id' || (tag === 'label' && name === 'for')) && SHELL_IDS.has(String(attr.value).trim().toLowerCase())) continue;
+    if ((name === 'id' || (tag === 'label' && name === 'for')) && !idTokenOk(attr.value)) continue;
+    if (name === 'checked') {
+      // A boolean: the initial state of a checkbox, whatever text the author gave it.
+      out.setAttribute('checked', '');
+      continue;
+    }
     if ((name === 'href' || name === 'src') && !safeUrl(attr.value)) continue;
     if (name === 'style') {
       const style = cleanStyle(attr.value);

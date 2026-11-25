@@ -29,7 +29,7 @@ import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
-import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, appHasNoScriptHook, droppedStyles, inlineConstantStyleCalls, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, STYLE_VALUE_VAR_PREFIX, styleBranchId, styleBranchMarkers, styleValues, styleValueUnit } from './pages.js';
+import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, SHELL_IDS, allowedAttr, appHasNoScriptHook, droppedStyles, inlineConstantStyleCalls, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, STYLE_VALUE_VAR_PREFIX, styleBranchId, styleBranchMarkers, styleValues, styleValueUnit } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
@@ -92,7 +92,7 @@ interface Chunk {
   /** An island's source as written, from `<%` to its closer. */
   raw?: string;
   /** Where the island sits in the markup. */
-  context?: 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'cssbody' | 'comment' | 'reject';
+  context?: 'text' | 'attr' | 'id' | 'idlead' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'cssbody' | 'comment' | 'reject';
 }
 
 // A word marker stands for an island in text or an attribute. An island in a
@@ -241,7 +241,7 @@ type SlotMode =
  * island inside an attribute the sanitizer allowlist will remove (a dropped
  * island must stay a counted item, never vanish from a compiled page).
  */
-function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'cssbody' | 'comment' | 'reject' {
+function slotContext(prefix: string): 'text' | 'attr' | 'id' | 'idlead' | 'url' | 'style' | 'style-fn' | 'unwrapped' | 'sheet' | 'cssbody' | 'comment' | 'reject' {
   let mode: SlotMode = 'data';
   let tag = '';
   let name = '';
@@ -462,6 +462,11 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'style
       for (const ch of prefix.slice(valueStart)) depth = ch === '(' ? depth + 1 : ch === ')' ? Math.max(0, depth - 1) : depth;
       return depth > 0 ? 'style-fn' : 'style';
     }
+    // An id, or a label's `for`, carries only as a bounded token: the render
+    // encodes the value to one (see `c2cIdToken`) and the sanitizer keeps the
+    // attribute only when the whole value is a token. An island that opens the
+    // value gets a fixed prefix so it can never spell a shell id.
+    if (/^id$/i.test(quotedName) || /^for$/i.test(quotedName)) return /^[\s]*$/.test(prefix.slice(valueStart)) ? 'idlead' : 'id';
     return URL_ATTRS.test(quotedName) ? 'url' : 'attr';
   }
   if (mode === 'value-unquoted' && unquotedQuote) {
@@ -469,11 +474,11 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'style
     // already polluted: the island is emitted as an escaped plain attribute
     // (the same as any unquoted value), but only when the attribute itself
     // survives the allowlist.
-    if (!keptAttr(name) || /^style$/i.test(name)) return 'reject';
+    if (!keptAttr(name) || /^style$/i.test(name) || /^(?:id|for)$/i.test(name)) return 'reject';
     return 'attr';
   }
   if (mode === 'before-value' || mode === 'value-unquoted') {
-    if (!keptAttr(name) || /^style$/i.test(name) || URL_ATTRS.test(name)) return 'reject';
+    if (!keptAttr(name) || /^style$/i.test(name) || URL_ATTRS.test(name) || /^(?:id|for)$/i.test(name)) return 'reject';
     return 'attr';
   }
   if (mode === 'data') {
@@ -1827,6 +1832,7 @@ export function renderAuditSource(options: { dataImages?: boolean } = {}): strin
   attrs['a'] = [...(attrs['a'] ?? []), 'rel'];
   return `const C2C_AUDIT_TAGS = new Set(${JSON.stringify([...ALLOWED_TAGS].sort())});
 const C2C_AUDIT_ATTRS = ${JSON.stringify(attrs)};
+const C2C_AUDIT_SHELL_IDS = ${JSON.stringify([...SHELL_IDS])};
 const C2C_AUDIT_URLS = ${URL_ATTRS};
 function c2cAttrAuditOk(tag, name, value) {
   const attr = String(name).toLowerCase();
@@ -1835,6 +1841,7 @@ function c2cAttrAuditOk(tag, name, value) {
     const flat = String(value == null ? "" : value).replace(/[\\u0000-\\u0020]+/g, "").toLowerCase();
     return flat.indexOf("javascript:") < 0 && flat.indexOf("vbscript:") < 0;
   }
+  if ((attr === "id" || (tag === "label" && attr === "for")) && !(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(String(value)) && C2C_AUDIT_SHELL_IDS.indexOf(String(value).toLowerCase()) < 0)) return false;
   const specific = C2C_AUDIT_ATTRS[tag];
   if (tag === "button" && /^data-fn-arg-\\d+$/.test(attr)) return true;
   if (!(specific && specific.indexOf(attr) >= 0) && C2C_AUDIT_ATTRS["*"].indexOf(attr) < 0) return false;
@@ -1977,6 +1984,26 @@ function c2cEsc(v) {
   return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// An island inside a quoted id (or a label's for) renders one bounded token:
+// letters, digits and '-' stay, '_' doubles, every other character becomes
+// '_' + its hex code point + '_', so two different values never share an id
+// and no quote, space, '#' or URL text survives. A long value becomes 'h' + a
+// 32-bit hash + its length. One linear pass.
+function c2cIdToken(v) {
+  const text = String(v);
+  let out = "";
+  for (const ch of text) {
+    if (/[A-Za-z0-9-]/.test(ch)) out += ch;
+    else if (ch === "_") out += "__";
+    else out += "_" + ch.codePointAt(0).toString(16) + "_";
+    if (out.length > 24) break;
+  }
+  if (out.length <= 24) return out;
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
+  return "h" + hash.toString(16) + "-" + text.length.toString(16);
+}
+
 // An island inside a quoted style attribute renders only a strict CSS value:
 // numbers with a unit, #hex, rgb()/rgba()/hsl()/hsla() with numeric arguments,
 // and a keyword allowlist, joined by whitespace, commas or '/'. Semicolons,
@@ -2109,6 +2136,7 @@ ${indented}
     if (item.k === "H") c2c_parts.push(item.v == null ? "" : String(item.v));
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
+    else if (item.k === "I" || item.k === "J") c2c_parts.push((item.k === "J" ? "c2c-" : "") + c2cIdToken(c2cStr(item.v)));
 ${opts.popups ? '    else if (item.k === "P") c2c_parts.push(\'<div data-zml="popup-\' + c2cEsc(c2cStr(item.v)) + \'"></div>\');\n' : ''}    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)${opts.routes ? ', shim' : ''}));${opts.markup ? '\n    else if (item.k === "M") c2c_parts.push(c2cMarkup(c2cStr(item.v), c2c_notes, (text) => c2cHref(shim, text)));' : ''}
     else if (item.k === "Q") {
       const piece = c2cStr(item.v);
@@ -3986,18 +4014,55 @@ function dropCutOffEndTag(template: string): string {
  */
 // A tag the HTML parser never closes on its own account: the sanitizer reads both arms' tags as one document, and a second `<p>` or
 // `<li>` there would end the first one in a piece of markup that belongs to the other arm.
-const PLAIN_TAGS = new Set(['article', 'aside', 'b', 'br', 'div', 'em', 'font', 'footer', 'header', 'hr', 'i', 'img', 'main', 'nav', 'ol', 'section', 'small', 'span', 'strong', 'table', 'u', 'ul']);
+const PLAIN_TAGS = new Set(['article', 'aside', 'b', 'br', 'div', 'em', 'font', 'footer', 'header', 'hr', 'i', 'img', 'input', 'main', 'nav', 'ol', 'section', 'small', 'span', 'strong', 'table', 'u', 'ul']);
 const TAG_HEAD = /<([A-Za-z][\w:-]*)[^<>]*$/;
+// `if(<condition>,"class='<token>'","")`: one literal class attribute, nothing otherwise. The class text is plain identifier characters.
+const CLASS_IF_ISLAND = /^\s*if\s*\(([\s\S]*?),\s*"class='([A-Za-z0-9_ -]*)'"\s*,\s*""\s*\)\s*$/;
+function countOf(text: string, ch: string): number {
+  let n = 0;
+  for (let i = 0; i < text.length; i++) if (text[i] === ch) n += 1;
+  return n;
+}
 const IF_OPEN = /^\s*if\s*\([\s\S]*\)\s*\{\s*$/;
 const BLOCK_CLOSE = /^\s*\}\s*$/;
 function rewriteConditionalAttributes(template: string): string {
   const chunks = splitChunks(template);
   if (!chunks) return template;
+  // `<tr <%=if(c,"class='first'","")%> >`: an expression island between attributes that prints one literal class attribute or nothing.
+  // The attribute is moved into a quoted class value (`<tr class="<%=if(c,"first","")%>" >`), the position an island may take.
+  for (let i = 1; i < chunks.length; i++) {
+    const found = chunks[i]!.kind === 'expr' ? CLASS_IF_ISLAND.exec(chunks[i]!.text) : null;
+    const before = chunks[i - 1]!;
+    if (!found || before.kind !== 'static') continue;
+    const open = TAG_HEAD.exec(before.text);
+    if (!open || !/\s$/.test(before.text) || countOf(open[0], '"') % 2 !== 0 || countOf(open[0], "'") % 2 !== 0) continue;
+    const text = `if(${found[1]},"${found[2]}","")`;
+    chunks[i - 1] = { kind: 'static', text: `${before.text}class="` };
+    chunks[i] = { kind: 'expr', text, raw: `<%=${text}%>` };
+    chunks.splice(i + 1, 0, { kind: 'static', text: '"' });
+  }
   const text = (chunk: Chunk | undefined) => chunk?.text ?? '';
+  const source = (chunk: Chunk) => (chunk.kind === 'static' ? chunk.text : (chunk.raw ?? ''));
   const out: string[] = [];
+  // Where each chunk's output starts, so a tag that began in an earlier chunk can be taken back out.
+  const starts: number[] = [];
   for (let i = 0; i < chunks.length; i++) {
+    starts[i] = out.length;
     const [head, open, attrs, close, tail] = chunks.slice(i, i + 5);
-    const tagAt = head?.kind === 'static' && PLAIN_TAGS.has((TAG_HEAD.exec(head.text)?.[1] ?? '').toLowerCase()) ? head.text.search(TAG_HEAD) : -1;
+    // The tag's opening may sit in an earlier chunk when an expression island (`id="row<%=n%>"`) comes between its attributes: those
+    // chunks are static text with no angle bracket and expression islands, and the tag is copied into both arms with them.
+    let k = i;
+    for (;;) {
+      const here = chunks[k];
+      if (here?.kind !== 'static' || TAG_HEAD.test(here.text)) break;
+      if (/[<>]/.test(here.text) || k < 2 || chunks[k - 1]?.kind !== 'expr') {
+        k = -1;
+        break;
+      }
+      k -= 2;
+    }
+    const tagChunk = k >= 0 ? chunks[k] : undefined;
+    const tagAt = tagChunk?.kind === 'static' && PLAIN_TAGS.has((TAG_HEAD.exec(tagChunk.text)?.[1] ?? '').toLowerCase()) ? tagChunk.text.search(TAG_HEAD) : -1;
     const gt = text(tail).indexOf('>');
     const fits =
       tagAt >= 0 &&
@@ -4009,9 +4074,11 @@ function rewriteConditionalAttributes(template: string): string {
       out.push(chunks[i].raw ?? chunks[i].text);
       continue;
     }
-    const tag = text(head).slice(tagAt);
+    let tag = text(tagChunk).slice(tagAt);
+    for (let n = k + 1; n <= i; n++) tag += source(chunks[n]!);
     const end = text(tail).slice(0, gt + 1);
-    out.push(text(head).slice(0, tagAt), `<%${open.text}%>`, tag, attrs.text, end, '<% } else { %>', tag, end, '<% } %>');
+    out.length = starts[k]!;
+    out.push(text(tagChunk).slice(0, tagAt), `<%${open.text}%>`, tag, attrs.text, end, '<% } else { %>', tag, end, '<% } %>');
     // What follows the tag may open the next tag of the same kind, so it is looked at as a head of its own.
     chunks[i + 4] = { kind: 'static', text: text(tail).slice(gt + 1) };
     i += 3;
@@ -4390,7 +4457,7 @@ export function compileHtmlpage(
       scriptParts.push('c2c_out.add({"k":"D","v":0});');
     } else if (isl.kind === 'expr') {
       if (survived.has(i)) {
-        const kind = isl.context === 'url' ? 'V' : isl.context === 'attr' ? 'A' : isl.context === 'style' ? 'C' : isl.context === 'style-fn' ? 'Q' : 'T';
+        const kind = isl.context === 'url' ? 'V' : isl.context === 'attr' ? 'A' : isl.context === 'id' ? 'I' : isl.context === 'idlead' ? 'J' : isl.context === 'style' ? 'C' : isl.context === 'style-fn' ? 'Q' : 'T';
         scriptParts.push(`c2c_out.add({"k":"${kind}","v":(${isl.text.trim()})});`);
       } else if (isl.context === 'style' || isl.context === 'style-fn') {
         scriptParts.push('c2c_out.add({"k":"N","v":"a style island did not survive markup sanitization and rendered empty"});');

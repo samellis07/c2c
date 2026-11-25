@@ -2688,7 +2688,13 @@ test('an island the attribute allowlist removes stays a counted snippet, quoted 
     '<img srcset="<%= input.v %>">',
     "<img srcset='<%= input.v %>'>",
     '<div id=<%= input.v %>>x</div>',
-    '<div id="<%= input.v %>">x</div>',
+    '<label for=<%= input.v %>>x</label>',
+    '<div for="<%= input.v %>">x</div>',
+    '<div id="a b<%= input.v %>">x</div>',
+    '<div id="a#<%= input.v %>">x</div>',
+    '<div id="a.<%= input.v %>">x</div>',
+    '<div id="1<%= input.v %>">x</div>',
+    '<div id="a<%= input.v %>b c">x</div>',
     '<div data-x=<%= input.v %>>x</div>',
     '<div width=<%= input.v %>>x</div>',
     '<iframe srcdoc="<%= input.v %>"></iframe>',
@@ -2699,7 +2705,213 @@ test('an island the attribute allowlist removes stays a counted snippet, quoted 
     '<div title=a"b <%= input.v %>>x</div>',
     '</div data-x=<%= input.v %>>',
   ];
-  for (const body of cases) await assertStaysSnippet(body, { v: 'javascript:alert(1)' });
+  for (const body of cases) {
+    try {
+      await assertStaysSnippet(body, { v: 'javascript:alert(1)' });
+    } catch (err) {
+      throw new Error(`${body}: ${(err as Error).message}`);
+    }
+  }
+});
+
+const ID_TOKEN_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const SHELL_ID_NAMES = ['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title'];
+
+const ID_HOSTILE_VALUES = [
+  'plain',
+  'a"b',
+  "a'b",
+  'a b',
+  'a#b',
+  'javascript:alert(1)',
+  '"><img src=x onerror=alert(1)>',
+  'x" onclick="alert(1)',
+  '../../etc',
+  'a\nb',
+  'é☃',
+  '',
+  ...SHELL_ID_NAMES,
+  'MAIN',
+  'a'.repeat(200),
+];
+
+function renderedIds(html: string): { ids: string[]; fors: string[] } {
+  const ids = [...html.matchAll(/<[a-z0-9]+[^>]*?\sid="([^"]*)"/g)].map((m) => m[1] ?? '');
+  const fors = [...html.matchAll(/<label[^>]*?\sfor="([^"]*)"/g)].map((m) => m[1] ?? '');
+  return { ids, fors };
+}
+
+test('a computed id carries as a bounded token on a checkbox accordion, a row id and a label for, for every profile', async () => {
+  const body = [
+    '<input type="checkbox" id="descCheckbox<%= input.v %>" style="display:none;">',
+    '<label class="l" for="descCheckbox<%= input.v %>">Description</label>',
+    '<div id="progress_<%= input.v %>_<%= input.v %>">p</div>',
+    '<table id=\'hiddenTable_<%= input.v %>\'><tr><td>t</td></tr></table>',
+    '<span id="<%= input.v %>">lead</span>',
+  ].join('\n');
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${body}`)}`));
+  assert.deepEqual(model.todos.filter((todo) => todo.reason === SNIPPET_TODO), []);
+  const compiled = uiSnippetFiles(model);
+  assert.equal(compiled.length, 1);
+  const mod = await loadTree(files, compiled[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    for (const user of [USER, CLERK]) {
+      const seen = new Map<string, string>();
+      for (const v of ID_HOSTILE_VALUES) {
+        const out = await invoke(mod.default as never, { ...user, body: { input: { v } } });
+        if (out.status !== 200) {
+          // A profile the page refuses renders nothing at all, never a loose id.
+          assert.notEqual(out.status, 500, JSON.stringify(out.body));
+          continue;
+        }
+        const html = String(out.body.html);
+        const { ids, fors } = renderedIds(html);
+        assert.equal(ids.length, 4, `${user.user.profile} ${JSON.stringify(v)} ids=${ids.join('|')}`);
+        for (const id of ids) {
+          assert.match(id, ID_TOKEN_RE);
+          assert.ok(!SHELL_ID_NAMES.includes(id.toLowerCase()), `shell id ${id}`);
+        }
+        assert.deepEqual(fors, [ids[0]], 'label for stays paired with its checkbox id');
+        assert.doesNotMatch(html, /onclick|onerror|<img|javascript:/i);
+        const lead = ids[3]!;
+        if (seen.has(lead)) assert.equal(seen.get(lead), v, `value collision on ${lead}`);
+        seen.set(lead, v);
+      }
+      assert.ok(seen.size > 10, `${user.user.profile} rendered ${seen.size} distinct ids`);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a lead island in an id gets a fixed prefix, so no value spells a shell id', async () => {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet('htmlpage hp1()\ncontent\n<label for="<%= input.v %>">x</label><input type="checkbox" id="<%= input.v %>">')}`));
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    for (const v of SHELL_ID_NAMES) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v } } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      const html = String(out.body.html);
+      assert.match(html, new RegExp(`for="c2c-${v}"`));
+      assert.match(html, new RegExp(`id="c2c-${v}"`));
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('duplicate ids stay the author\'s: two rows with one value share one token, two values never do', async () => {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet('htmlpage hp1()\ncontent\n<div id="r<%= input.a %>">a</div><div id="r<%= input.b %>">b</div>')}`));
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    const ids = async (a: string, b: string) => renderedIds(String((await invoke(mod.default as never, { ...USER, body: { input: { a, b } } })).body.html)).ids;
+    const same = await ids('x', 'x');
+    assert.equal(same[0], same[1]);
+    for (const [a, b] of [['a b', 'a_b'], ['a_20_b', 'a b'], ['_', '__'], ['a-b', 'a b'], ['x', 'X']] as const) {
+      const pair = await ids(a, b);
+      assert.notEqual(pair[0], pair[1], `${a} vs ${b}`);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('the browser, build and template sanitizers keep an id only as a bounded token and drop shell ids', async () => {
+  const { sanitizeSnippet } = await import('../src/pages.js');
+  const kept = (html: string) => sanitizeSnippet(html);
+  assert.equal(kept('<div id="row-1_a">x</div>'), '<div id="row-1_a">x</div>');
+  for (const id of ['a b', 'a"b', 'a#b', 'a.b', 'javascript:alert(1)', '1a', '-a', 'main', 'Main', 'tabbar', 'toasts', 'app-title', 'more-sheet', 'more-tab', 'a'.repeat(65)]) {
+    const el = `<div id='${id.replace(/'/g, '&#39;')}'>x</div>`;
+    assert.equal(kept(el), '<div>x</div>', id);
+    assert.equal(kept(`<label for='${id.replace(/'/g, '&#39;')}'>x</label>`), '<label>x</label>', id);
+  }
+  assert.equal(kept('<label for="row-1">x</label>'), '<label for="row-1">x</label>');
+  assert.equal(kept('<input type="checkbox" id="chk_1">'), '<input type="checkbox" id="chk_1">');
+  assert.equal(kept('<a id="x" href="https://example.com/">x</a>').includes('id="x"'), true);
+});
+
+const ACCORDION = `htmlpage hp1()
+content
+<%
+n = 1;
+for each row in Orders[Status == "open"]
+{
+  %>
+<input style="display:none;" id="checkbox_<%=n%>" type="checkbox" name="rows"
+<%
+  if(input.open != null && input.open == n)
+  {
+    %>
+checked
+<%
+  }
+  %>
+></input>
+<label for="checkbox_<%=n%>" id="label_<%=n%>"><table><tr <%=if(n == 1,"class='firstRow'","")%> ><td><%=row.Name%></td></tr></table></label>
+<%
+  n = n + 1;
+}
+%>`;
+
+test('a conditional checked attribute and a computed id carry on an accordion row, and a class chosen by a condition moves into a class value', async () => {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(ACCORDION)}`));
+  assert.deepEqual(model.todos.filter((todo) => todo.reason === SNIPPET_TODO), []);
+  const compiled = uiSnippetFiles(model);
+  assert.equal(compiled.length, 1);
+  const mod = await loadTree(files, compiled[0].path);
+  const live = await liveStore({ Orders: [{ Name: 'A<b>', Status: 'open' }, { Name: 'B', Status: 'open' }, { Name: 'C', Status: 'closed' }] });
+  try {
+    for (const user of [USER, CLERK]) {
+      const out = await invoke(mod.default as never, { ...user, body: { input: { open: 2 } } });
+      if (out.status !== 200) {
+        assert.equal(out.status, 403, JSON.stringify(out.body));
+        continue;
+      }
+      const html = String(out.body.html);
+      assert.match(html, /<input style="display:none;" id="checkbox_1" type="checkbox">\s*<label for="checkbox_1" id="label_1">/);
+      assert.match(html, /<input[^>]*id="checkbox_2"[^>]*checked=""[^>]*>/);
+      assert.equal((html.match(/checked/g) ?? []).length, 1);
+      assert.match(html, /<tr class="firstRow">/);
+      assert.equal((html.match(/firstRow/g) ?? []).length, 1);
+      assert.doesNotMatch(html, /<b>/);
+      const none = await invoke(mod.default as never, { ...user, body: { input: {} } });
+      assert.equal((String(none.body.html).match(/checked/g) ?? []).length, 0);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a checked attribute keeps only as a boolean on a checkbox; the class condition rewrite stays linear', async () => {
+  const kept = (html: string) => sanitizeSnippet(html);
+  assert.equal(kept('<input type="checkbox" checked>'), '<input type="checkbox" checked="">');
+  assert.equal(kept('<input type="checkbox" checked="javascript:alert(1)">'), '<input type="checkbox" checked="">');
+  assert.equal(kept('<input type="text" checked>'), '');
+  assert.equal(kept('<div checked>x</div>'), '<div>x</div>');
+  assert.equal(kept('<input type="checkbox" onclick="alert(1)" checked>'), '<input type="checkbox" checked="">');
+  // Hostile condition shapes the rewrite refuses: it needs one literal class attribute and a quote-balanced tag head.
+  for (const tag of [
+    '<div <%=if(n == 1,"class=\'x y\" onclick=\"z\'","")%> >x</div>',
+    '<div <%=if(n == 1,"class=\'x;y\'","")%> >x</div>',
+    '<div <%=if(n == 1,"onclick=\'x\'","")%> >x</div>',
+    '<div <%=if(n == 1,"class=\'x\'","y")%> >x</div>',
+    '<div<%=if(n == 1,"class=\'x\'","")%> >x</div>',
+  ]) {
+    try {
+      await assertStaysSnippet(tag.replace('n == 1', 'input.v == 1'), { v: 1 });
+    } catch (err) {
+      throw new Error(`${tag}: ${(err as Error).message}`);
+    }
+  }
+  const rx = /^\s*if\s*\(([\s\S]*?),\s*"class='([A-Za-z0-9_ -]*)'"\s*,\s*""\s*\)\s*$/;
+  for (const text of ['if(' + 'a,'.repeat(1000), 'if(' + '('.repeat(1000), 'if(x,"class=\'' + 'a'.repeat(1000), 'if(x,' + ' '.repeat(1000), 'if(x,"class=\'a\'","")' + ' '.repeat(1000) + 'x', ' '.repeat(1000) + 'x', 'if(' + ',"class=\'a\'"'.repeat(1000)]) {
+    const started = process.hrtime.bigint();
+    rx.test(text);
+    assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 50, 'class condition regex is linear on n=1000');
+  }
 });
 
 test('an island inside a raw-text element stays a counted snippet', async () => {
@@ -2779,7 +2991,7 @@ test('the endpoint render audit refuses elements and attributes outside the allo
     '<a href="java&#x09;script:alert(1)">x</a>',
     '<img src=x onerror=alert(1)>',
     '<iframe srcdoc="<p>x</p>"></iframe>',
-    '<div id="x">x</div>',
+    '<div data-x="x">x</div>',
     '<a ping="https://example.com/">x</a>',
     '<div style="background:url(javascript:alert(1))">x</div>',
     '<svg onload="alert(1)">x</svg>',
@@ -4604,7 +4816,7 @@ content
   }
   %>
 </style>
-<p id="t">Hello <%= input.n %></p>
+<p data-t="t">Hello <%= input.n %></p>
 <%}%>`)}`),
   );
   assert.equal(uiSnippetFiles(model).length, 1);
@@ -5280,7 +5492,7 @@ content
   }
   %>
 </style>
-<p id="t">Hello</p>
+<p data-t="t">Hello</p>
 <%}%>`;
   const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
   assert.equal(uiSnippetFiles(model).length, 1);
