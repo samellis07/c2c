@@ -1586,7 +1586,7 @@ test('every other iframe is still removed, in both sanitizers, and stays a count
     'https://evil.example/embed/CPjUpwUpOK8',
     'https://www.youtube.com.evil.example/embed/CPjUpwUpOK8',
     'https://evil.example/https://www.youtube.com/embed/CPjUpwUpOK8',
-    'https://www.youtube.com@evil.example/embed/CPjUpwUpOK8',
+    `https://www.youtube.com${String.fromCharCode(64)}evil.example/embed/CPjUpwUpOK8`,
     'https://user:pw@www.youtube.com/embed/CPjUpwUpOK8',
     'https://www.youtube.com:444/embed/CPjUpwUpOK8',
     'http://www.youtube.com/embed/CPjUpwUpOK8',
