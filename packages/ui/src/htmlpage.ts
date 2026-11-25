@@ -526,6 +526,49 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
 }
 
 /**
+ * A literal `href="<%=zoho.appuri%>#Page:<Page>?..."` link to another page of
+ * the same app, written by hand instead of through an iframe embed. Creator's
+ * own page parameters have no declared type: `input.<name>` is always the raw
+ * query string, read with whatever cast the snippet applies, so there is
+ * nothing here to type-check against — only the same name/value grammar
+ * {@link includeParams} already proves for an embed query. Each value is
+ * carried into the generated link's query as a bounded literal, unchanged, or
+ * as `encodeUrl(input.<p>)` forwarding one of this page's own parameters,
+ * percent-encoded so a hostile value can never widen the query past the one
+ * key it is bound to. Anything `includeParams` cannot prove — an unknown
+ * page, an undeclared or repeated parameter name, an expression other than a
+ * bare forwarded `input.p`, path traversal, a non-`#Page:` target — leaves
+ * the href untouched and the snippet stays the counted TODO.
+ */
+const PAGE_HREF = /^(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>#Page:([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
+
+function rewritePageParamLinks(template: string, app: App, page: string, ownParams: ReadonlySet<string>): string {
+  if (!/#Page:/i.test(template)) return template;
+  return replaceAnchorElements(template, (whole, attrs, inner) => {
+    const hrefMatch = /\bhref\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
+    if (!hrefMatch) return whole;
+    const m = PAGE_HREF.exec(hrefMatch[2].trim());
+    if (!m) return whole;
+    const name = m[1]!;
+    const target = app.pages.find((item) => item.name === name);
+    if (!target) return whole;
+    const params = includeParams(m[2] ?? '', target.params ?? [], ownParams);
+    if (params === null) return whole;
+    const query = params
+      .map((p) => {
+        const eq = p.indexOf('=');
+        const key = p.slice(0, eq);
+        const value = p.slice(eq + 1);
+        return value.startsWith('@') ? `${key}=<%=encodeUrl(input.${value.slice(1)})%>` : `${key}=${value}`;
+      })
+      .join('&amp;');
+    const href = `#/page/${encodeURIComponent(name)}${query ? `?${query}` : ''}`;
+    const nextAttrs = attrs.slice(0, hrefMatch.index) + `href=${hrefMatch[1]}${href}${hrefMatch[1]}` + attrs.slice(hrefMatch.index + hrefMatch[0].length);
+    return `<a${nextAttrs}>${inner}</a>`;
+  });
+}
+
+/**
  * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` (or the older
  * `view-embed/<Page>` spelling) of another page
  * of this app becomes an inline include of that page's generated view. Creator
@@ -2244,8 +2287,21 @@ export function rewriteRecordSummaryFrames(template: string, app?: App, source?:
  * backtracking regular expression was not.
  */
 function replaceIframeElements(template: string, replace: (whole: string, attrs: string, inner: string) => string): string {
-  const open = /<iframe(?![A-Za-z0-9_])/gi;
-  const close = /<\/iframe/gi;
+  return replaceTaggedElements(template, 'iframe', replace);
+}
+
+/**
+ * Replace each complete `<a ...>...</a>` element the same way
+ * {@link replaceIframeElements} does for `<iframe>` — a single quote-aware
+ * scan, never a backtracking attribute-list regular expression.
+ */
+function replaceAnchorElements(template: string, replace: (whole: string, attrs: string, inner: string) => string): string {
+  return replaceTaggedElements(template, 'a', replace);
+}
+
+function replaceTaggedElements(template: string, tagName: string, replace: (whole: string, attrs: string, inner: string) => string): string {
+  const open = new RegExp(`<${tagName}(?![A-Za-z0-9_])`, 'gi');
+  const close = new RegExp(`</${tagName}`, 'gi');
   const lastDouble = template.lastIndexOf('"');
   const lastSingle = template.lastIndexOf("'");
   let out = '';
@@ -2698,6 +2754,25 @@ export function compileHtmlpage(
   // A template that already writes the include marker could name a page the
   // compiler never checked: it stays the counted snippet.
   if (head.template.toLowerCase().includes(PAGE_INCLUDE_PREFIX)) return fail('marker collision');
+  // A forwarded value may name either this `htmlpage` function's own
+  // declared parameter or, as in a real `page Name(date)` snippet, the
+  // enclosing page's own declared parameter — both are names the page itself
+  // already exposes as `input.<name>`, never a value a caller invents.
+  const ownPageParams = new Set([...head.params, ...(app.pages.find((item) => item.name === page)?.params ?? [])]);
+  head.template = rewritePageParamLinks(head.template, app, page, ownPageParams);
+  // A `#Page:` href the rewrite above could not prove safe (unknown page, an
+  // undeclared or repeated parameter, a value other than a bounded literal or
+  // one forwarded `input.p`, the page linking itself) must never reach the
+  // generic island pipeline below: that stage only checks a URL's scheme, not
+  // its target, so an unresolved marker would otherwise compile to a link
+  // that is either dead (literal `#Page:` text, not a real route) or unproven
+  // safe. Refuse the whole snippet instead, same as the other markers above.
+  // A bare, fully static `#Page:` pseudo-URL (no `zoho.appuri` island at all)
+  // is plain literal text the rewrite above never touches — Creator's own
+  // markup carries the same text unchanged, so it is not this construct's
+  // job. Only an appuri-prefixed `#Page:` target the rewrite could not
+  // resolve is refused here.
+  if (/<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>#Page:/i.test(head.template)) return fail('marker collision');
   const embeds = inlinePageEmbeds(head.template, app, page, new Set(head.params));
   head.template = embeds.template;
   const includes = embeds.includes;

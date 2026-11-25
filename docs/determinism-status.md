@@ -416,7 +416,7 @@ clears the app. The count is apps, not items.
         "openurl-unsupported-target",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 8
+      "items": 9
     },
     {
       "constructs": [
@@ -630,7 +630,7 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 2
+      "items": 1
     },
     {
       "constructs": [
