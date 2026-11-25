@@ -1600,6 +1600,14 @@ function exprOk(e: Expr): boolean {
   }
 }
 
+/** `openUrl("#Form:Name", "same window")`: a form or report address written out, with its window type. */
+const OWN_ROUTE_OPENURL = /\bopenUrl[ \t\r\n]*\([ \t\r\n]*(["'])#(?:Form|Report):[A-Za-z_]\w*\1[ \t\r\n]*,[ \t\r\n]*(["'])[A-Za-z ]{1,20}\2[ \t\r\n]*\)/gi;
+
+/** True when every `openUrl` in `text` opens a form or report address written out (and when there is none). */
+function opensOnlyOwnRoutes(text: string): boolean {
+  return !/\bopenUrl\b/i.test(text.replace(OWN_ROUTE_OPENURL, ''));
+}
+
 /**
  * `openUrl(...)` statements inside an island. A popup-window target naming a
  * form or report becomes a popup mark in the output ({@link settlePopups}
@@ -4089,9 +4097,13 @@ export function compileHtmlpage(
   // A statement island in a `<style>` body only computes: the sanitizer
   // removes the element, so nothing it does reaches the output, and the page's
   // dropped-CSS step still counts every tag in the stylesheet. One that opens a
-  // URL prints the link a statement island's openUrl prints anywhere else.
+  // URL would be a redirect the removed element hides, so it stays refused
+  // unless every address it opens is one of this app's own forms or reports,
+  // written out: the link it prints is then the one a statement island prints
+  // anywhere else.
   for (const isl of islands) {
-    if (isl.kind === 'expr' || isl.context === 'text' || isl.context === 'comment' || isl.context === 'cssbody') continue;
+    if (isl.kind === 'expr' || isl.context === 'text' || isl.context === 'comment') continue;
+    if (isl.context === 'cssbody' && opensOnlyOwnRoutes(isl.text)) continue;
     return fail('island in an unsafe position');
   }
 
