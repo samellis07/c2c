@@ -18,7 +18,7 @@ targets. The gap between the two numbers is the apps held back only by silent dr
 A residual TODO item is an untranslated Deluge hole or one generated UI stub
 (a field, report, page, or ZML item). Each UI stub is included in the residual,
 so an app with a stub is not deterministic.
-0 of the 34 deterministic apps still have UI TODO stubs (0 in total).
+0 of the 38 deterministic apps still have UI TODO stubs (0 in total).
 
 The builtin catalogue lists 20 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
@@ -27,24 +27,23 @@ TODO item per untranslated construct occurrence.
 | | |
 |---|---:|
 | corpus apps | 67 |
-| apps with no residual todos | 34/67 |
-| apps with no residual todos and no silent drops (deterministic) | 34/67 (50.7%) |
+| apps with no residual todos | 38/67 |
+| apps with no residual todos and no silent drops (deterministic) | 38/67 (56.7%) |
 | silent drops (total) | 0 |
-| residual TODO items | 101 |
-| distinct TODO kinds | 32 |
+| residual TODO items | 95 |
+| distinct TODO kinds | 31 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
 
 | construct | count |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 48 |
+| `Server-side Deluge snippet requires manual translation` | 44 |
 | `client-condition-uses-server` | 6 |
 | `Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.` | 6 |
 | `openurl-unsupported-target` | 3 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 3 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 3 |
-| `Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.` | 2 |
 | `openurl-dropped-unrecognized-branch-shape` | 2 |
 | `openurl-dropped-with-server-logic` | 2 |
 | `The <iframe> element is removed from this page snippet by the sanitizer` | 2 |
@@ -58,6 +57,7 @@ TODO item per untranslated construct occurrence.
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Field (app identifier) sets `show onload = true`; the generated image field opens its camera only when the user taps the control, never automatically when the form loads.` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): (app identifier)` | 1 |
+| `Inline style declarations not carried over (unsafe or unsupported CSS): text-align, text-align` | 1 |
 
 ## Top 0 silent-drop kinds
 
@@ -71,8 +71,7 @@ clears the app. The count is apps, not items.
 
 | construct | apps |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 5 |
-| `Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.` | 2 |
+| `Server-side Deluge snippet requires manual translation` | 3 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
@@ -81,7 +80,7 @@ clears the app. The count is apps, not items.
 
 ```json
 {
-  "deterministicApps": 34,
+  "deterministicApps": 38,
   "deterministicWithUiTodos": {
     "apps": 0,
     "uiTodos": 0
@@ -89,7 +88,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "Server-side Deluge snippet requires manual translation",
-      "count": 48
+      "count": 44
     },
     {
       "construct": "client-condition-uses-server",
@@ -110,10 +109,6 @@ clears the app. The count is apps, not items.
     {
       "construct": "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)",
       "count": 3
-    },
-    {
-      "construct": "Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.",
-      "count": 2
     },
     {
       "construct": "openurl-dropped-unrecognized-branch-shape",
@@ -216,20 +211,8 @@ clears the app. The count is apps, not items.
       "count": 1
     }
   ],
-  "noTodoApps": 34,
+  "noTodoApps": 38,
   "perAppConstructSets": [
-    {
-      "constructs": [
-        "Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only."
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only."
-      ],
-      "items": 1
-    },
     {
       "constructs": [
         "client-condition-uses-server",
@@ -399,18 +382,6 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
       "items": 3
     },
     {
@@ -450,7 +421,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 101,
+  "todoTotal": 95,
   "totalApps": 67
 }
 ```
