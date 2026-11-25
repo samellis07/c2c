@@ -1212,6 +1212,27 @@ const ALLOWED_EXPRS = new Set([
 /** AST nodes that write a record, send a message, or call out of the app. */
 const EFFECT_NODES = new Set(['insert', 'deleteFrom', 'update', 'invokeurl', 'sendmail', 'pushnotification', 'mailAttachments']);
 
+/** The statements of a function body, or none when it does not parse. */
+function parseOrNothing(text: string): Stmt[] {
+  try {
+    return parse(text).body;
+  } catch {
+    return [];
+  }
+}
+
+/** True when any statement in the tree is an `if`. */
+function hasIfNode(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some(hasIfNode);
+  const rec = node as Record<string, unknown>;
+  if (rec.kind === 'if') return true;
+  for (const key of Object.keys(rec).sort()) {
+    if (key !== 'span' && hasIfNode(rec[key])) return true;
+  }
+  return false;
+}
+
 /** True when any node in the tree is a write or an external action. */
 function hasEffectNode(node: unknown): boolean {
   if (!node || typeof node !== 'object') return false;
@@ -2194,8 +2215,11 @@ function buildsMarkup(fn: App['functions'][number]): boolean {
  * bound to a record, and its whole body passes the same read-only checks as
  * an island — no write or external action, only the handled statement
  * classes plus `return`, no manual translation, and read-only shim calls,
- * where a nested `thisapp` call is proved the same way. A recursive call is
- * refused. A body that builds markup is refused too, unless `markupOk`: the
+ * where a nested `thisapp` call is proved the same way. A call back into a
+ * function whose proof is still running adds no effect of its own: its body is
+ * the one being checked, and the registry's depth bound stops the recursion at
+ * run time. A function with no `if` has no way to stop calling itself and
+ * stays refused. A body that builds markup is refused too, unless `markupOk`: the
  * page prints a call's value as escaped text, so returned HTML would show as
  * tags. Each proved
  * callee's server code is pushed to `servers`, so its forms join the
@@ -2206,7 +2230,8 @@ function buildsMarkup(fn: App['functions'][number]): boolean {
  */
 function readOnlyAppFunction(app: App, path: string[], seen: ReadonlySet<string>, servers: string[], markupOk = false): boolean {
   const fn = appFunction(app, path);
-  if (!fn || seen.has(fn.name) || functionRowBinding(fn)) return false;
+  if (!fn || functionRowBinding(fn)) return false;
+  if (seen.has(fn.name)) return fn.deluge.some((d) => hasIfNode(parseOrNothing(d.text)));
   if (!fn.deluge.some((d) => d.text.trim()) || (!markupOk && buildsMarkup(fn))) return false;
   const inner = new Set(seen).add(fn.name);
   let slot = 0;
