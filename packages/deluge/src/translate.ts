@@ -3666,7 +3666,7 @@ function clientBindsLocalsOnly(code: string): boolean {
   const declared = new Set<string>();
   const pure = (e: string) => {
     const rest = e.replace(/\bshim\.([A-Za-z]+)(?:\.([A-Za-z]+))?\s*\(/g, (call, ns: string, fn?: string) =>
-      (fn === undefined ? ns !== 'each' && ELEMENT_SHIM_ALLOW_SINGLE.has(ns) : ELEMENT_SHIM_ALLOW.get(ns) === true && !LIST_MUTATORS.has(fn.toLowerCase())) ? '(' : call,
+      (fn === undefined ? ns !== 'each' && ELEMENT_SHIM_ALLOW_SINGLE.has(ns) : (ELEMENT_SHIM_ALLOW.get(ns) === true && !LIST_MUTATORS.has(fn.toLowerCase())) || (ns === 'record' && fn === 'get')) ? '(' : call,
     );
     return !/[\w$\])]\s*\(|\b(?:await|shim|input|row|actions|function|new|delete|yield)\b|`|\+\+|--|[^=!<>]=(?!=)/.test(rest);
   };
