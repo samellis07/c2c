@@ -413,6 +413,11 @@ export type ContextInput = Partial<
   Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent'>
 > & { form?: string };
 
+/** A client action the server run answers with: a field `:ui` task or an `openUrl`. */
+export type ClientEffect =
+  | { op: 'ui'; method: string; target: string[]; args: unknown[] }
+  | { op: 'openUrl'; args: unknown[] };
+
 export interface ShimContext {
   shim: Shim;
   appTimeZone?: string;
@@ -433,6 +438,8 @@ export interface ShimContext {
    * reads see the same parameter values.
    */
   args?: unknown[];
+  /** Client effects queued by `shim.client.effect`, by marker key, in the order they ran. */
+  clientEffects?: Record<string, ClientEffect[]>;
   /** Caller taken from the platform user, never from the request body. */
   principal?: Principal;
   /**
@@ -1189,6 +1196,18 @@ export interface Shim {
      * server runtime; generated handlers guard the call.
      */
     run?(ctx: ShimContext): Promise<unknown>;
+    /**
+     * Server half: queue one client effect (a field `:ui` task or an `openUrl`
+     * whose value only this run knows) under the marker `key` the browser left in its action
+     * list. The reply to the browser's run carries them as `effects`.
+     */
+    effect(ctx: ShimContext, key: string, effect: ClientEffect): void;
+    /**
+     * Browser only: the action list with every `serverEffect` marker replaced by
+     * the effects the run's reply holds under its key. A marker the run did not
+     * answer is dropped; an effect that is neither a field `:ui` task nor an `openUrl` is ignored.
+     */
+    settle?(actions: unknown[], reply: unknown): unknown[];
   };
 }
 
@@ -4356,6 +4375,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       touch(ctx) {
         ctx.formNonce = nextFormNonce();
         return ctx.formNonce;
+      },
+      effect(ctx, key, effect) {
+        const queued = (ctx.clientEffects ??= {});
+        (queued[key] ??= []).push(effect);
       },
       async prefetch(ctx, path) {
         const first = await prefetchOnce(ctx, path, false);

@@ -105,6 +105,11 @@ function formEventUninvokedStep(form: string, event: string, kind: string): stri
 
 const CLIENT_RUN_GUARD = 'if (!shim.client || typeof shim.client.run !== "function") throw Object.assign(new Error("client.run unavailable; server half not run"), { c2cElementBlocked: true });\nawait shim.client.run(ctx);';
 
+/** The run guard for a client body; one that queued `serverEffect` markers settles them with the run's reply. */
+function clientRunGuard(body: string): string {
+  return body.includes('op: "serverEffect"') ? CLIENT_RUN_GUARD.replace('await shim.client.run(ctx);', 'actions.splice(0, actions.length, ...shim.client.settle(actions, await shim.client.run(ctx)));') : CLIENT_RUN_GUARD;
+}
+
 /** One form workflow that emitFormHandler actually wrote into a module. */
 export interface WorkflowCoverage {
   form: string;
@@ -1492,7 +1497,7 @@ function emitFormHandler(
       part.w,
       put(
         `client/handlers/${slug(form)}/${slug(part.w.event || part.w.name || 'handler')}.mjs`,
-        clientModule(part.body + (part.server && TAIL_EVENT_KINDS.has(kind) && !part.body.includes('shim.client.run(') ? `\n${CLIENT_RUN_GUARD}` : ''), part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent, runPath: part.server && TAIL_EVENT_KINDS.has(kind) ? `/forms/${encodeURIComponent(form)}/${kind}` : undefined, runEvent: part.server && TAIL_EVENT_KINDS.has(kind) && scriptEvents ? runEventTokens.get(part.index) : undefined, button: kind === 'click' ? workflowButtonName(part.w) : undefined }),
+        clientModule(part.body + (part.server && TAIL_EVENT_KINDS.has(kind) && !part.body.includes('shim.client.run(') ? `\n${clientRunGuard(part.body)}` : ''), part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent, runPath: part.server && TAIL_EVENT_KINDS.has(kind) ? `/forms/${encodeURIComponent(form)}/${kind}` : undefined, runEvent: part.server && TAIL_EVENT_KINDS.has(kind) && scriptEvents ? runEventTokens.get(part.index) : undefined, button: kind === 'click' ? workflowButtonName(part.w) : undefined }),
       ),
     );
   }
@@ -4118,6 +4123,7 @@ export function workflowScriptOptions(app: App, w: Workflow): TranslateOptions {
   return {
     replayFunctions: [...replayFunctionNames(app)].sort(),
     alertEvent: alertEventClass(w.event),
+    serverEffects: TAIL_EVENT_KINDS.has(eventKind(w.event)),
     validateEvent: /^on validate\b/.test(w.event.split(' / ').pop()?.trim().toLowerCase() ?? ''),
     prefetchBound: subformEventField(w.event) ? ['row'] : [],
     // Server-condition functions are named for the workflow they came from:
@@ -6599,6 +6605,9 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
       }
 `
     : '';
+  // A body that queued `shim.client.effect` answers the browser's run with them, keyed
+  // by the marker each one replaces in the client's action list.
+  const effectsReply = opts.body.includes('shim.client.effect(') ? ', ...(ctx.clientEffects ? { effects: ctx.clientEffects } : {})' : '';
   const successBody = opts.systemWrite
     ? `    if (live) {
 ${storedFill}${hasPresuccess ? `      // The form's \`on start\` presuccess actions run first, on the same
@@ -6635,9 +6644,9 @@ ${hasPresuccess ? '      // Presuccess effects buffered on a buffer-safe body ru
       // inserts a second row. Its text never reaches the caller.
       warning = postCommitWarning(err, { table: formName });
     }
-    send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null, ...(warning ? { warning } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) } : { dryRun: true, result: result ?? null, ...(warning ? { warning } : {}), transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
+    send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null${effectsReply}, ...(warning ? { warning } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) } : { dryRun: true, result: result ?? null${effectsReply}, ...(warning ? { warning } : {}), transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
     : `    const result = await handle(ctx);
-    send(res, 200, { dryRun: true, result: result ?? null, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`;
+    send(res, 200, { dryRun: true, result: result ?? null${effectsReply}, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`;
   // A client run names body.runEvent; only the merged script it resolves to
   // through the emitted scriptEvents map runs. The index never comes from the
   // body: an unlisted token, another event, or a foreign name is refused.

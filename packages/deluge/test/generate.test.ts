@@ -4212,7 +4212,7 @@ test('a read-only thisapp call in a ui.add argument becomes an event-time client
   assert.deepEqual(blocked.map((a) => a.op), ['info'], 'a failed call fails closed and adds no options');
 });
 
-test('a ui.add argument calling a writing callee or a server-bound local keeps the manual todo', () => {
+test('a ui.add argument calling a writing callee or a server-bound local is evaluated once by the server run', () => {
   const fns = [
     { name: 'Choices', signature: 'list Choices(int n)', body: 'return {"A", "B"};' },
     { name: 'Stamp', signature: 'list Stamp()', body: 'row = insert into Orders [ Choice = "x" ];\nreturn {"A"};' },
@@ -4229,10 +4229,12 @@ test('a ui.add argument calling a writing callee or a server-bound local keeps t
         workflows: [workflow({ name: 'load', form: 'Orders', event: 'on load', deluge: { text, span: Z } })],
       }),
     );
-    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1, text);
+    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 0, text);
     const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
-    assert.match(stripComments(client.source), /shim\.todo\(ctx, "client-condition-uses-server"\)/, text);
-    assert.doesNotMatch(stripComments(client.source), /shim\.client\.call\(/, text);
+    assert.match(stripComments(client.source), /op: "serverEffect"/, text);
+    assert.doesNotMatch(stripComments(client.source), /shim\.client\.call\(|shim\.todo\(/, text);
+    const server = g.files.find((f) => f.path === 'functions/aio/orders/on-load.mjs')!;
+    assert.match(stripComments(server.source), /shim\.client\.effect\(ctx, "e\d+", \{ op: "ui", method: "add", target: \["Choice"\]/, text);
   }
 });
 

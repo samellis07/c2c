@@ -18,10 +18,14 @@ export const CLIENT_SHIM_CALLABLE: ReadonlySet<string> = new Set(['each', 'get',
  * out of range is refused. Only form events the generator puts a client run
  * on (load, input, add row, delete row, click) carry `ctx.runPath`;
  * `ctx.runEvent` rides along only when the route exports a `scriptEvents` map.
+ *
+ * `client.settle(actions, reply)` follows a run whose script queued
+ * `serverEffect` markers: each marker becomes the field `:ui` tasks and `openUrl`s the run's
+ * reply answered under its key, in script order.
  */
 /** Namespaces and the methods the browser implements on each. */
 export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new Map<string, ReadonlySet<string>>([
-  ['client', new Set(['call', 'condition', 'element', 'prefetch', 'rows', 'run', 'touch'])],
+  ['client', new Set(['call', 'condition', 'element', 'prefetch', 'rows', 'run', 'settle', 'touch'])],
   ['compare', new Set(['eq', 'ne'])],
   ['convert', new Set(['toList', 'toLong', 'toMap', 'toNumber'])],
   [

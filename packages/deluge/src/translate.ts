@@ -255,6 +255,15 @@ export interface TranslateOptions {
    */
   navCapture?: boolean;
   /**
+   * The browser posts this script's server half (`shim.client.run`) and applies
+   * the effects it answers with. A field `:ui` task or an `openUrl` whose
+   * arguments only the server run can know (the id an `insert` returned, a call
+   * that writes, an encoded value) is
+   * then evaluated once, by that run, and its effect is placed where the task
+   * sat in the script. Without it such a task keeps the counted todo.
+   */
+  serverEffects?: boolean;
+  /**
    * Deluge names the generated prefetch module binds without a replayed
    * assignment: a custom function's parameters (`var [params] = ctx.args`) and
    * `row` in a subform row event (`shim.subform.currentRow`). A prefetch slot
@@ -721,6 +730,8 @@ interface Scope {
   noClient: boolean;
   /** TranslateOptions.navCapture: openUrl assigns the `c2c_nav` instruction. */
   navCapture: boolean;
+  /** TranslateOptions.serverEffects: the client posts the server half and applies the effects it answers with. */
+  serverEffects: boolean;
   /** Raw source, for comment-tail lookup. */
   src: string;
   /**
@@ -3279,6 +3290,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     lastAlertCode: null,
     noClient: options.serverOnly ?? false,
     navCapture: !!options.navCapture && !!options.serverOnly,
+    serverEffects: !!options.serverEffects && !options.serverOnly,
     src,
     commentTails: commentTails(src),
     schema: options.schema,
@@ -3563,6 +3575,9 @@ function statementBody(s: Stmt, scope: Scope, stats: TranslateStats, todos: Todo
       if (scope.noClient) return serverOnlyAction(args, s.span, stats, todos);
       // A server read in the URL (`openUrl base + Form[criteria].ID`) is a prefetch slot, like a client condition.
       const clientArgs = args.map((a) => clientExpr(a, scope));
+      if (serverEffectTask(scope, args, clientArgs)) {
+        return serverEffectOut(scope, `{ op: "openUrl", args: [${args.map((a) => a.code).join(', ')}] }`, args.flatMap((a) => a.constructs), stats, todos, s.span);
+      }
       const constructs = [...args.flatMap((a) => a.constructs), ...(clientArgs.some((c) => c.todo) ? ['client-condition-uses-server'] : [])];
       account(stats, todos, { todo: args.some((a) => a.todo) || clientArgs.some((c) => c.todo), shim: true, constructs }, s.span);
       return { server: '', client: `actions.push({ op: "openUrl", args: [${clientArgs.map((a) => a.code).join(', ')}] });` };
@@ -5349,6 +5364,23 @@ function uiAddManualStep(call: string, args: Fx[], scope: Scope): string | undef
   return undefined;
 }
 
+/**
+ * The browser posts the server half anyway (`TranslateOptions.serverEffects`):
+ * a client task whose arguments only that run can know is evaluated there,
+ * once, and its effect comes back in the reply. Not inside a loop, a try arm
+ * or a function body, where the task may run zero or many times.
+ */
+function serverEffectTask(scope: Scope, args: readonly Fx[], clientArgs: readonly { todo: boolean }[]): boolean {
+  return scope.serverEffects && scope.replayBarrier === 0 && !args.some((a) => a.todo) && clientArgs.some((c) => c.todo);
+}
+
+/** The server queues the task under a fresh key; the browser keeps a marker where the task sat, so the actions stay in script order. */
+function serverEffectOut(scope: Scope, task: string, constructs: string[], stats: TranslateStats, todos: TodoItem[], span: { start: number; end: number }): Out {
+  const key = JSON.stringify(`e${scope.slot++}`);
+  account(stats, todos, { todo: false, shim: true, constructs }, span);
+  return { server: `shim.client.effect(ctx, ${key}, ${task});`, client: `actions.push({ op: "serverEffect", key: ${key} });` };
+}
+
 function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   const args = e.args.map((a) => expr(a, scope));
   const obj = memberPath(e.object);
@@ -5359,6 +5391,9 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   // A server read in a `:ui` argument (`row.Items:ui.add(fetched_list)`) is a prefetch slot, like a client condition;
   // a read-only `thisapp` call there is an event-time client call.
   const clientArgs = ui ? args.map((a) => clientExpr(a, scope, 'client-condition-uses-server', true)) : [];
+  const uiTask = (values: readonly { code: string }[]): string =>
+    `{ op: "ui", method: ${JSON.stringify(e.path.slice(1).join('.') || method)}, target: ${typeof target === 'string' && target.startsWith('[') ? target : `[${target}]`}, args: [${values.map((a) => a.code).join(', ')}] }`;
+  if (ui && serverEffectTask(scope, args, clientArgs)) return serverEffectOut(scope, uiTask(args), args.flatMap((a) => a.constructs), stats, todos, span);
   const constructs = args.flatMap((a) => a.constructs);
   if (!ui) constructs.push(`colon:${method}`);
   if (clientArgs.some((c) => c.todo)) constructs.push('client-condition-uses-server');
@@ -5370,7 +5405,7 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   }
   return {
     server: '',
-    client: `actions.push({ op: "ui", method: ${JSON.stringify(e.path.slice(1).join('.') || method)}, target: ${typeof target === 'string' && target.startsWith('[') ? target : `[${target}]`}, args: [${clientArgs.map((a) => a.code).join(', ')}] });`,
+    client: `actions.push(${uiTask(clientArgs)});`,
   };
 }
 

@@ -6013,6 +6013,25 @@ export function browserShimSurface(fetchImpl) {
       if (body && typeof body.error === 'string') throw clientBlocked(body);
       return body;
     },
+    /**
+     * Replace each `serverEffect` marker with the effects the run's reply holds
+     * under its key, so the actions keep the script's order. The reply is data
+     * from the server half: only a field `:ui` task naming a known method or an
+     * `openUrl` is kept, so no other action (reload, a write) can arrive this way.
+     */
+    settle(actions, reply) {
+      const answered = reply && reply.effects && typeof reply.effects === 'object' && !Array.isArray(reply.effects) ? reply.effects : {};
+      const out = [];
+      for (const action of actions) {
+        if (!action || action.op !== 'serverEffect') {
+          out.push(action);
+          continue;
+        }
+        const queued = Object.prototype.hasOwnProperty.call(answered, action.key) ? answered[action.key] : null;
+        if (Array.isArray(queued)) out.push(...queued.filter(isServerEffect));
+      }
+      return out;
+    },
   };
   /** POST JSON and read the reply, or null when the request failed. */
   async function postJson(path, payload) {
@@ -6447,6 +6466,25 @@ function withStubFallback(target) {
       return browserShimProxy(null);
     },
   });
+}
+
+/** The `:ui` methods a server effect may name: the ones applyUiOp carries out. */
+const UI_EFFECT_METHODS = new Set(['add', 'append', 'clear', 'select', 'deselect', 'selectAll', 'deselectAll']);
+
+/**
+ * A server effect is a field `:ui` task or an `openUrl` and nothing else. An
+ * `openUrl` is still applied by applyActions, so it meets the same address
+ * policy as one the browser queued itself.
+ */
+function isServerEffect(effect) {
+  if (!effect || !Array.isArray(effect.args)) return false;
+  if (effect.op === 'openUrl') return effect.args.length >= 1 && effect.args.length <= 2 && effect.args.every((arg) => typeof arg === 'string');
+  return (
+    effect.op === 'ui' &&
+    UI_EFFECT_METHODS.has(effect.method) &&
+    Array.isArray(effect.target) &&
+    effect.target.every((part) => typeof part === 'string')
+  );
 }
 
 /**
