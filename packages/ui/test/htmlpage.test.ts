@@ -5295,3 +5295,22 @@ test('a template that already writes the style value property name is a counted 
   const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', 'htmlpage hp1()\ncontent\n<%{ %><p style="--cssvalue-a: 1px"><%= input.v %></p><%}%>');
   assert.equal(compiled.ok, false);
 });
+
+test('an island in the attributes of a label that labels nothing renders on a span, and a label that labels a control stays unwrapped', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%{ %><ul><li><label class="dot" style="background-color: <%= input.c %>;"></label><b>x</b></li></ul><%}%>`;
+  const compiled = compileHtmlpage(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`), 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`), snippet, { c: '#63c2de' });
+  assert.match(html, /<span class="dot" style="background-color:\s*#63c2de;?"><\/span>/, html);
+  assert.doesNotMatch(html, /<label/, html);
+  const hostile = await renderPage(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`), snippet, { c: 'red;position:fixed;top:0;background:url(https://evil.example/x)' });
+  assert.doesNotMatch(hostile.html, /position|url\(|evil/i, hostile.html);
+  for (const kept of [
+    `<label for="a" style="color: <%= input.c %>">x</label>`,
+    `<label style="color: <%= input.c %>"><input type="checkbox">x</label>`,
+    `<label style="color: <%= input.c %>"><label>y</label></label>`,
+  ]) {
+    const refused = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<%{ %>${kept}<%}%>`);
+    assert.equal(refused.ok, false, kept);
+  }
+});
