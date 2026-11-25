@@ -116,8 +116,10 @@ the signed-in caller's Catalyst user id against `C2C_ADMIN_USER_ID`. A confirmed
 deploy reserves the variable in `env_variables` and then sets it from the admin
 user id the deploy reads back through Catalyst Authentication (the
 `--admin-email` invite or an already-listed admin user). It is never taken from
-page input. If the admin id is not verified, the variable stays empty and the
-endpoint fails closed with `403 application owner required`. The spelling is
+page input. Only that caller (with an administrator profile) runs the write; any
+other caller still gets the page, with the write skipped and a render note. If
+the admin id is not verified, the variable stays empty and the endpoint fails
+closed: no caller is the owner, so the write never runs. The spelling is
 `C2C_ADMIN_USER_ID`; `C2C_ADMIN_USERID` is not read. The key and value count in
 Catalyst's aggregate `env_variables` size budget like any other variable.
 
