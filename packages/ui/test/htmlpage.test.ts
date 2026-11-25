@@ -4483,7 +4483,7 @@ test('hostile text inside a markup value never reaches the page as script, a han
   for (const q of hostile) {
     const { html } = await renderPage(app, snippet, { q });
     for (const el of renderedHtmlElements(html)) {
-      assert.ok(['div', 'b', 'i', 'img', 'p', 'br', 'span', 'em', 'strong', 'u', 'small'].includes(el.tag), `${q} -> ${html}`);
+      assert.ok(['a', 'div', 'b', 'i', 'img', 'p', 'br', 'span', 'em', 'strong', 'u', 'small'].includes(el.tag), `${q} -> ${html}`);
       for (const attr of el.attributes) {
         assert.ok(['class', 'style', 'src', 'alt', 'title', 'width', 'height'].includes(attr.name), `${q} -> ${html}`);
         if (el.tag === 'img' && attr.name === 'src') assert.match(attr.value, /^data:image\/png;base64,/, `${q} -> ${html}`);
@@ -4502,7 +4502,10 @@ test('a markup value keeps an inline raster image and its allowed attributes, an
     html.trim(),
     `<div class="a" style="width:100%;color:red;float:left"><img style="width:50%" alt="a&amp;b" src="data:image/png;base64,${png}"></div>`,
   );
-  assert.deepEqual(notes, ['a markup value attribute the page does not keep was removed']);
+  assert.deepEqual(notes, [], 'border is presentation the page never keeps and is no news');
+  const loud = await renderPage(app, snippet, { q: `<img src="data:image/png;base64,${png}" onclick="alert(1)" data-x="1">` });
+  assert.deepEqual(loud.notes, ['a markup value attribute the page does not keep was removed']);
+  assert.doesNotMatch(loud.html, /onclick|data-x/);
 });
 
 test('the client sanitizer keeps an exact inline raster image src on an img and nothing else with a data URL', async () => {
@@ -4706,4 +4709,83 @@ test('a setup call stays a snippet unless its callee only inserts and the check 
     assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], label);
     assert.equal(uiSnippetFiles(model).length, 0, label);
   }
+});
+
+// A link in a markup value or an openUrl at render, written the Creator way, becomes the app's own route
+// through the navigation `shim.nav.resolve` already applies to a workflow's openUrl.
+
+function twoPages(snippet: string): string {
+  const zml = `<zml><layout><row><column width='100%'><dsp id='hp1'><![CDATA[${snippet}]]></dsp></column></row></layout></zml>`;
+  return `\tpages\n\t{\n\t\tpage Detail(day)\n\t\t{\n\t\t\tContent="<zml></zml>"\n\t\t}\n\t\tpage Home\n\t\t{\n\t\t\tContent=${JSON.stringify(zml)}\n\t\t}\n\t}`;
+}
+
+const calFn = {
+  name: 'Util.cal',
+  signature: 'map Util.cal(string day)',
+  deluge: `html = "<table class='t' border=0 cellspacing=0><thead><tr><th colspan='2'>Days</th></tr></thead><tbody><tr><td><a href='https://app.zohocreator.in" + zoho.appuri + "#Page:Detail?day=" + day + "&passdate=true' target='_blank'>open</a></td></tr></tbody></table>";\nreturn {"calendar":html,"day":day};`,
+};
+
+test('an app function that returns markup with Creator page links prints as a table of generated links', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nc = thisapp.Util.cal(input.day);\n%>\n<%= c.get("calendar") %>`;
+  const app = appWithFns([calFn], `${ORDERS}\n${twoPages(snippet)}`);
+  const { html, notes } = await renderPage(app, snippet, { day: '05-Nov-2026' });
+  assert.equal(
+    html.trim(),
+    '<table class="t"><thead><tr><th colspan="2">Days</th></tr></thead><tbody><tr><td><a href="#/page/Detail?day=05-Nov-2026">open</a></td></tr></tbody></table>',
+  );
+  assert.deepEqual(notes, []);
+});
+
+test('attack: a link in a markup value keeps only an own-app route, a web address or a mail address', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nb = thisapp.Util.wrap(input.q);\n%>\n<%= b %>`;
+  const app = appWithFns([wrapFn], `${ORDERS}\n${twoPages(snippet)}`);
+  const kept: Array<[string, string]> = [
+    ['https://app.zohocreator.in#Page:Detail?day=1', '#/page/Detail?day=1'],
+    ['#Page:Detail?day=1&amp;other=2', '#/page/Detail?day=1'],
+    ['https://example.test/a?b=1', 'https://example.test/a?b=1'],
+    ['mailto:a@example.test', 'mailto:a@example.test'],
+  ];
+  for (const [href, want] of kept) {
+    const { html } = await renderPage(app, snippet, { q: `<a href="${href}">x</a>` });
+    assert.match(html, new RegExp(`<a href="${want.replace(/[.?]/g, '\\$&')}">x</a>`), href);
+  }
+  for (const href of [
+    'javascript:alert(1)',
+    ' javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'vbscript:msgbox(1)',
+    '//evil.example/x',
+    'https://app.zohocreator.in#Page:Nope?day=1',
+    'https://app.zohocreator.in#Form:Nope',
+    '#Script:alert(1)',
+    'java%0ascript:alert(1)',
+    '%6Aavascript:alert(1)',
+  ]) {
+    const { html, notes } = await renderPage(app, snippet, { q: `<a href="${href}">x</a>` });
+    assert.equal(html.trim().replace(/<\/?div[^>]*>/g, ''), '<a>x</a>', href);
+    assert.deepEqual(notes, ['a link in a markup value names no page, form, report or web address of this app and has no target'], href);
+  }
+});
+
+test('an openUrl at render that names a Creator page prints a link to the generated page route', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nif (input.day == null) {\n  openUrl("https://app.zohocreator.in" + zoho.appuri + "#Page:Detail?day=" + "2026-01-01" + "&passdate=true", "same window");\n}\n%>\n<p>Home</p>`;
+  const app = appOf(`${ORDERS}\n${twoPages(snippet)}`);
+  const { html } = await renderPage(app, snippet, {});
+  assert.match(html, /<a href="#\/page\/Detail\?day=2026-01-01">Detail<\/a>/);
+  assert.doesNotMatch(html, /zohocreator|passdate/);
+});
+
+test('an info statement in a called function is only a log line and keeps the render read-only', async () => {
+  const noisy = { name: 'Util.noisy', signature: 'int Util.noisy()', deluge: 'info "counting";\nn = Orders[Status == "open"].count();\ninfo n;\nreturn n;' };
+  const snippet = `htmlpage hp1()\ncontent\n<p>Open: <%= thisapp.Util.noisy() %></p>`;
+  const app = appWithFns([noisy], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const { html } = await renderPage(app, snippet);
+  assert.match(html, /Open: 2/);
+  const writes = { name: 'Util.noisy', signature: 'int Util.noisy()', deluge: 'info "counting";\ninsert into Orders [ Status = "open" ];\nreturn 1;' };
+  const refused = appWithFns([writes], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  assert.equal(compileHtmlpage(refused, 'Home', 'hp1', snippet).ok, false, 'an info next to a write is still a write');
+  // The page script itself would show it as a client message, which an endpoint cannot do.
+  const direct = `htmlpage hp1()\ncontent\n<%\ninfo "render";\n%>\n<p>Home</p>`;
+  assert.equal(compileHtmlpage(appOf(`${ORDERS}\n${pageWithSnippet(direct)}`), 'Home', 'hp1', direct).ok, false);
 });

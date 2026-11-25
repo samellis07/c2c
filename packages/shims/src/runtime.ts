@@ -630,7 +630,7 @@ function lookupKey(table: Record<string, readonly string[]> | undefined, name: s
 }
 
 /** Maps a Creator openUrl target to this app's own hash route; anything else is passed through for the page's own URL gate to judge. */
-function resolveNavigation(result: unknown, routes?: NavRoutes): NavInstruction | null {
+function resolveNavigation(result: unknown, routes?: NavRoutes, options: { ignoreUndeclared?: boolean } = {}): NavInstruction | null {
   if (!isNavResult(result)) return null;
   if (result.kind !== 'navigate') return { kind: result.kind } as NavInstruction;
   const target: 'same' | 'new' = result.target === 'new' ? 'new' : 'same';
@@ -685,7 +685,11 @@ function resolveNavigation(result: unknown, routes?: NavRoutes): NavInstruction 
     const params = routes!.pages![key]!;
     for (const [k, v] of pairs) {
       if (/^zc_/i.test(k)) continue;
-      if (!params.includes(k)) return null;
+      if (!params.includes(k)) {
+        // A page reads only the parameters it declares, so a link written into markup may leave the others out.
+        if (options.ignoreUndeclared) continue;
+        return null;
+      }
       addQuery(k, v);
     }
     return finish(`#/page/${encodeURIComponent(key)}`);
@@ -1117,7 +1121,7 @@ export interface Shim {
     /** The instruction a called function returned wins over none; a later one wins over an earlier one. */
     merge(previous: unknown, returned: unknown): unknown;
     /** The instruction as the page may act on it (an own-app route, a reload, a path), or null when it names no route this app has. */
-    resolve(result: unknown, routes?: NavRoutes): NavInstruction | null;
+    resolve(result: unknown, routes?: NavRoutes, options?: { ignoreUndeclared?: boolean }): NavInstruction | null;
   };
   convert: {
     toLong(value: unknown, ctx: ShimContext, ...extra: unknown[]): number | bigint;

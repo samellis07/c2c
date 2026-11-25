@@ -23,7 +23,7 @@ import type { App } from '../../core/src/ir.js';
 import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
-import { administratorProfiles, buttonCallFunctions, clientCallFunctions, fnSignatureParams, functionCallModule, functionRowBinding, functionScriptOptions, rawFnParams, slug as functionSlug, translateInApp, type ButtonFunctionCall, type ClientCallCatalog } from '../../deluge/src/generate.js';
+import { administratorProfiles, navRoutesSource, buttonCallFunctions, clientCallFunctions, fnSignatureParams, functionCallModule, functionRowBinding, functionScriptOptions, rawFnParams, slug as functionSlug, translateInApp, type ButtonFunctionCall, type ClientCallCatalog } from '../../deluge/src/generate.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
@@ -1017,7 +1017,7 @@ function splitChunks(template: string): Chunk[] | null {
   }
 }
 
-const ALLOWED_STMTS = new Set(['block', 'if', 'assign', 'expr', 'forEach', 'break', 'continue', 'try']);
+const ALLOWED_STMTS = new Set(['block', 'if', 'assign', 'expr', 'forEach', 'break', 'continue', 'try', 'info']);
 const ALLOWED_EXPRS = new Set([
   'number',
   'string',
@@ -1137,6 +1137,9 @@ function stmtOk(s: Stmt, inLoop = false): boolean {
       return exprOk(s.target) && exprOk(s.value) && !assignsCriteriaField(s.target);
     case 'expr':
       return exprOk(s.expr);
+    case 'info':
+      // `info x` writes x to the Deluge log; the translation emits nothing, so a render has no effect to check.
+      return exprOk(s.value);
     case 'forEach':
       return exprOk(s.collection) && stmtOk(s.body, true);
     case 'break':
@@ -1294,6 +1297,34 @@ function c2cAuditViolation(html) {
 }`;
 }
 
+/**
+ * `c2cRoute` and `c2cHref` in a generated page endpoint: a link target written
+ * the Creator way (`#Page:Name?x=1`, with or without the app's address in
+ * front) as this app's own route. The route comes from `shim.nav.resolve`, the
+ * navigation an `openUrl` in a workflow already takes, so a page link means one
+ * thing everywhere; a page parameter the target does not declare is left out,
+ * because Creator hands a page only the parameters it declares. A Creator route
+ * that names nothing this app has gets no target (the stale Creator address is
+ * never kept); any other target must be a web or mail address the page's URL
+ * policy admits.
+ */
+function routeSource(routes: string): string {
+  return `const C2C_ROUTES = ${routes};
+
+function c2cRoute(shim, text) {
+  const nav = shim.nav.resolve({ kind: "navigate", url: String(text), target: "same" }, C2C_ROUTES, { ignoreUndeclared: true });
+  return nav && nav.kind === "navigate" && /^#\\/(?:form|report|page)\\//.test(nav.url) ? nav.url : "";
+}
+
+function c2cHref(shim, text) {
+  const raw = String(text == null ? "" : text).replace(/&amp;/g, "&").trim();
+  const route = c2cRoute(shim, raw);
+  if (route) return route;
+  if (/#(?:Form|Report|Page|View|Script):/i.test(raw)) return "";
+  return /^(?:https?:\\/\\/|mailto:)/i.test(raw) && c2cUrlOk(raw) ? raw : "";
+}`;
+}
+
 /** The generated endpoint module. */
 function endpointModule(opts: {
   page: string;
@@ -1312,6 +1343,8 @@ function endpointModule(opts: {
   markup?: boolean;
   /** The render reads an image field as its `<img>` element (`c2cImage`). */
   images?: boolean;
+  /** `navRoutesSource(app)`: the render resolves a link to one of this app's own routes through `shim.nav.resolve`. */
+  routes?: string;
 }): string {
   const banner = `/**\n${[
     `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to ${opts.hasWrites ? 'an endpoint with setup writes' : 'a read-only endpoint'}.`,
@@ -1452,15 +1485,19 @@ function c2cWithoutWrites(shim, notes) {
   };
   return { ...shim, datastore: { ...shim.datastore, insert: skip, update: skip, setField: skip } };
 }
-` : ''}${opts.markup ? `\n${c2cMarkupFunctionSource()}\n` : ''}${opts.images ? `\n${c2cImageFunctionSource()}\n` : ''}
+` : ''}${opts.routes ? `\n${routeSource(opts.routes)}\n` : ''}${opts.markup ? `\n${c2cMarkupFunctionSource()}\n` : ''}${opts.images ? `\n${c2cImageFunctionSource()}\n` : ''}
 ${renderAuditSource({ dataImages: opts.markup })}
 
-function c2cLink(url) {
+function c2cLink(url${opts.routes ? ', shim' : ''}) {
   const text = String(url || "").trim();
   let href = "";
   let label = text;
-  const internal = /^#(Form|Report):(.+)$/.exec(text);
-  if (internal) {
+${opts.routes ? `  const route = c2cRoute(shim, text);
+  const internal = route ? null : /^#(Form|Report):(.+)$/.exec(text);
+  if (route) {
+    href = route;
+    label = decodeURIComponent(route.split("?")[0].split("/")[2]).replace(/_/g, " ");
+  } else ` : '  const internal = /^#(Form|Report):(.+)$/.exec(text);\n  '}if (internal) {
     href = "#/" + internal[1].toLowerCase() + "/" + encodeURIComponent(internal[2]);
     label = internal[2].replace(/_/g, " ");
   } else if (/^https?:\\/\\//i.test(text)) {
@@ -1503,7 +1540,7 @@ ${indented}
     if (item.k === "H") c2c_parts.push(item.v == null ? "" : String(item.v));
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
-    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)));${opts.markup ? '\n    else if (item.k === "M") c2c_parts.push(c2cMarkup(c2cStr(item.v), c2c_notes));' : ''}
+    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)${opts.routes ? ', shim' : ''}));${opts.markup ? '\n    else if (item.k === "M") c2c_parts.push(c2cMarkup(c2cStr(item.v), c2c_notes, (text) => c2cHref(shim, text)));' : ''}
     else if (item.k === "Q") {
       const piece = c2cStr(item.v);
       const num = c2cCssNumber(piece);
@@ -1664,6 +1701,8 @@ ${opts.hasWrites ? '      adminUserId: mayWrite ? principal.userId || "" : owner
 const READ_ONLY_SHIM = new Set([
   // A typed empty list (`List:Int()`) is a local value; it reads and writes nothing.
   'list',
+  // `info x` only notes x in the render transcript.
+  'log.info',
   'get',
   'set',
   'datastore.query',
@@ -3344,6 +3383,7 @@ export function compileHtmlpage(
       appCalls: calleeServers.length > 0,
       markup: printed || images.reads > 0,
       images: images.reads > 0,
+      ...(printed || images.reads > 0 || /#Page:/i.test(server) ? { routes: navRoutesSource(app) } : {}),
     }),
   };
   return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file, ...(fnFiles.length ? { files: fnFiles } : {}) });

@@ -241,3 +241,14 @@ test('a for-each-record function dispatched from a report action reads and write
   const closed = await run.dispatch({ ID: '6', Status: 'Closed' });
   assert.equal(closed.nav, null, 'the guard reads the record, so the other branch runs');
 });
+
+test('a page route leaves out a parameter the page does not declare only when the caller asks, and never widens anything else', () => {
+  const routes = { forms: {}, reports: { All: ['Name'] }, pages: { Board: ['Task_Id'] } };
+  const { shim } = createRuntime({ dryRun: true }).context({ record: {}, old: {}, principal: { profile: 'Administrator', userId: 'u1' } });
+  const nav = (url: string, options?: { ignoreUndeclared?: boolean }) => shim.nav.resolve({ kind: 'navigate', url, target: 'same' }, routes, options);
+  assert.equal(nav('#Page:Board?Task_Id=7&Secret=1'), null, 'a workflow navigation still refuses an undeclared name');
+  assert.deepEqual(nav('#Page:Board?Task_Id=7&Secret=1', { ignoreUndeclared: true }), { kind: 'navigate', url: '#/page/Board?Task_Id=7', target: 'same' });
+  assert.deepEqual(nav('#Page:Board?Secret=1', { ignoreUndeclared: true }), { kind: 'navigate', url: '#/page/Board', target: 'same' });
+  assert.equal(nav('#Page:Missing?Task_Id=7', { ignoreUndeclared: true }), null, 'an unknown page is still no route');
+  assert.equal(nav('#Report:All?Secret=1', { ignoreUndeclared: true }), null, 'a report filter on an unknown field is still refused');
+});
