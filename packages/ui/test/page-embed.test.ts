@@ -424,7 +424,7 @@ test('a form embed carries its own border colour and success text to the runtime
   assert.deepEqual(snippetTodos(model), []);
   const el = snippetOf(model, 'Outer');
   assert.deepEqual(el?.components, [{ kind: 'form', name: 'Intake' }, { kind: 'form', name: 'Intake' }]);
-  assert.match(el?.html ?? '', /data-zml="component-form:Intake:untitled:border-white:msg-Data%20Added%20Sucessfully!"/);
+  assert.match(el?.html ?? '', /data-zml="component-form:Intake:untitled:border-nwhite:msg-Data%20Added%20Sucessfully!"/);
   assert.match(el?.html ?? '', /data-zml="component-form:Intake:border-x1a2b3c"/);
   const dom = new JSDOM('<!doctype html><body><nav id="nav"></nav><main id="main"></main></body>', { url: 'http://localhost/slate/index.html#/' });
   const win = dom.window as unknown as Window & typeof globalThis;

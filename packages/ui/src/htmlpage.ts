@@ -1014,7 +1014,7 @@ function componentParams(
       if (key === 'zc_bdrclr') {
         const hex = /^#([0-9a-f]{3,8})$/.exec(value);
         if (hex) border = `x${hex[1]}`;
-        else if (/^[a-z]{3,20}$/.test(value)) border = value;
+        else if (/^[a-z]{3,20}$/.test(value)) border = `n${value}`;
         else return null;
       } else {
         if (!SUCCESS_TEXT.test(rawValue)) return null;
