@@ -1752,7 +1752,7 @@ function renderElement(el, doc, parentReport, appModel) {
     const includes = (el.includes || []).filter((item) => typeof item === 'string' && parseIncludeSpec(item) !== null);
     const declared = includes.length ? ` data-page-includes="${escapeHtml(includes.join(' '))}"` : '';
     const components = (el.components || []).filter((item) => item && (item.kind === 'form' || item.kind === 'report') && /^[A-Za-z_]\w*$/.test(item.name));
-    const componentDecl = components.length ? ` data-page-components="${escapeHtml(components.map((item) => `${item.kind}:${item.name}`).join(' '))}"` : '';
+    const componentDecl = components.length ? ` data-page-components="${escapeHtml(components.map(componentSpec).join(' '))}"` : '';
     return `${inner.trim() || markers ? `<div class="snippet"${declared}${componentDecl}>${inner}${markers}</div>` : ''}${kids}`;
   }
   if (el.kind === 'embed') {
@@ -1965,12 +1965,21 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
   const call = (viewRef && viewRef.fetch) || globalThis.fetch;
   for (const slot of root.querySelectorAll('[data-zml^="component-"]')) {
     if (slot.getAttribute('data-component-done') === 'true') continue;
-    const match = /^component-(form|report):([A-Za-z_]\w*)(:untitled)?$/.exec(slot.getAttribute('data-zml') || '');
+    const match = /^component-(form|report):([A-Za-z_]\w*)(:untitled)?(?:\?([^]*))?$/.exec(slot.getAttribute('data-zml') || '');
     if (!match) continue;
-    const [, kind, name, untitled] = match;
+    const [, kind, name, untitled, query] = match;
     const host = slot.closest('[data-page-components]');
     const declared = host ? (host.getAttribute('data-page-components') || '').split(' ') : [];
-    if (!declared.includes(`${kind}:${name}`)) continue;
+    // The marker's parameter keys must be exactly the ones the compiled snippet
+    // declared for this component: markup or a rendered value cannot add one.
+    const params = componentQuery(query);
+    if (!params || !declared.includes(componentSpec({ kind, name, params: params.keys }))) continue;
+    // A parameterised marker in the static shell has no value yet: it is drawn
+    // only from the server render that carries the values.
+    if (params.keys.length) {
+      const src = slot.closest('[data-snippet-src]');
+      if (src && src.getAttribute('data-snippet-rendered') !== 'true') continue;
+    }
     const target = kind === 'form'
       ? (appModel.forms || []).find((item) => item.name === name)
       : (appModel.reports || []).find((item) => item.name === name && item.status === 'generated');
@@ -1981,7 +1990,8 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
       // The embed's zc_Header=false hides the view title, nothing else.
       if (untitled) for (const title of slot.querySelectorAll(':scope > section > h1:first-child')) title.remove();
       const mount = componentMounts.get(appModel);
-      if (mount) mount(slot, kind, target, viewRef);
+      if (kind === 'report' && params.keys.length) embedFilters.set(slot, reportRouteFilters(params.query));
+      if (mount) mount(slot, kind, target, viewRef, kind === 'form' && params.keys.length ? params.values : undefined);
     };
     if (!hiddenTarget(appModel, name)) {
       paint();
@@ -2004,6 +2014,54 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
       slot.innerHTML = '<p data-access-status="403">This page is not available.</p>';
     });
   }
+}
+
+/** The declaration a compiled snippet makes for one embedded component: `kind:Name` or `kind:Name?Key1,Key2`. */
+function componentSpec(item) {
+  const keys = Array.isArray(item.params) ? item.params.filter((key) => typeof key === 'string' && /^[A-Za-z_]\w*$/.test(key)) : [];
+  return `${item.kind}:${item.name}${keys.length ? `?${keys.join(',')}` : ''}`;
+}
+
+/**
+ * The parameters of an embed marker's query: `Key=value` pairs whose values
+ * are form-encoded (`+` is a space). Each key is a plain name that appears
+ * once and is never a prototype key; a value that does not decode refuses the
+ * whole marker. `query` is the same pairs re-encoded for the report filter
+ * reader; `values` is the prefill record.
+ */
+function componentQuery(text) {
+  const keys = [];
+  const values = Object.create(null);
+  const pairs = [];
+  if (text === undefined || text === '') return { keys, values, query: '' };
+  for (const part of text.split('&')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) return null;
+    const key = part.slice(0, eq);
+    if (!/^[A-Za-z_]\w*$/.test(key) || key === '__proto__' || key === 'constructor' || key === 'prototype' || keys.includes(key)) return null;
+    let value;
+    try {
+      value = decodeURIComponent(part.slice(eq + 1).replace(/\+/g, ' '));
+    } catch {
+      return null;
+    }
+    keys.push(key);
+    values[key] = value;
+    pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  }
+  return { keys, values, query: pairs.join('&') };
+}
+
+/** Filters a parameterised report embed applies to its own rows, per embed element. */
+const embedFilters = new WeakMap();
+
+/** The embed filters of the component element that holds `node`, or none. */
+function embedFiltersOf(node) {
+  for (let up = node; up; up = up.parentElement) {
+    const found = embedFilters.get(up);
+    if (found) return found;
+  }
+  return [];
 }
 
 const componentMounts = new WeakMap();
@@ -2148,11 +2206,12 @@ function loadChart(report, section, viewRef) {
     return Promise.resolve();
   }
   if (stateEl) stateEl.innerHTML = reportStateHtml('loading');
+  const embedded = embedFiltersOf(section);
   const post = (payload) =>
     apiCall(call, viewRef, report.queryEndpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(embedded.length ? { ...payload, filters: embedded } : payload),
     });
   const axes = chartAxes(report);
   const clickFilter = reportClickFilter(viewRef && viewRef.location ? viewRef.location.hash : '');
@@ -2340,6 +2399,7 @@ export function hydrateSnippets(root, appModel, viewRef) {
       .then((body) => {
         if (body && typeof body.html === 'string') {
           host.innerHTML = sanitizeSnippet(body.html, docRef || undefined);
+          host.setAttribute('data-snippet-rendered', 'true');
           hydratePageIncludes(host, appModel, viewRef);
           hydrateComponentEmbeds(host, appModel, viewRef);
         }
@@ -7974,10 +8034,10 @@ export function boot(appModel, doc) {
       }
     });
   }
-  componentMounts.set(appModel, (slot, kind, target, viewRef) => {
+  componentMounts.set(appModel, (slot, kind, target, viewRef, prefill) => {
     if (kind === 'form') {
       const formEl = slot.querySelector('form');
-      if (formEl) openForm(appModel, target, formEl, viewRef, { name: 'form', id: target.name });
+      if (formEl) openForm(appModel, target, formEl, viewRef, { name: 'form', id: target.name, ...(prefill ? { prefill } : {}) });
       return;
     }
     if (target.view === 'chart') {
@@ -8592,7 +8652,10 @@ export function boot(appModel, doc) {
     // different report's rows never see them.
     const doc = tbody.ownerDocument;
     const route = parseRoute(doc && doc.location ? doc.location.hash : '');
-    const filters = route && route.name === 'report' && route.id === report.name && Array.isArray(route.filters) ? route.filters : [];
+    const routeFilters = route && route.name === 'report' && route.id === report.name && Array.isArray(route.filters) ? route.filters : [];
+    // A parameterised embed filters its own rows, never the page route's.
+    const embedded = tbody.closest ? embedFiltersOf(tbody) : [];
+    const filters = [...routeFilters, ...embedded];
     return apiCall(call, viewRef, report.queryEndpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

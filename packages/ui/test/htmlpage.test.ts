@@ -4196,3 +4196,29 @@ test('getRecords criteria with unvalidated trailing statements stays the integra
     assert.equal(compileHtmlpage(appOf(ORDERS_REPORT), 'Home', 'hp1', snippet).ok, false, criteria);
   }
 });
+
+test('a parameterised component embed renders the record value as one encoded query value', async () => {
+  const hostile = 'Ann & Co="<b>x=1&Status=closed';
+  const snippet = `<%{ o = Orders[Name == input.who]; %><div elName='zc-component' formLinkName='Orders' params='Name=<%=o.Name%>'>Loading</div><% }%>`;
+  const { out } = await renderLive(snippet, [{ Name: hostile, Status: 'open', Amount: 1 }], { who: hostile });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  const html = String(out.body.html);
+  assert.match(html, /data-zml="component-form:Orders\?Name=Ann\+%26\+Co%3D%22%3Cb%3Ex%3D1%26Status%3Dclosed"/, html);
+  assert.doesNotMatch(html, /<b>|Status=closed/);
+});
+
+test('a parameterised component embed of a caller with no record renders an empty value, never another row', async () => {
+  const snippet = `<%{ o = Orders[Name == input.who]; %><div elName='zc-component' viewLinkName='All_Orders' params='Name=<%=o.Name%>'></div><% }%>`;
+  const { files, model } = generateUi(appOf(`${ORDERS}\nreport All_Orders\n{\n  show all rows from Orders\n  (\n    Name\n  )\n}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${snippet}`)}`));
+  const compiled = uiSnippetFiles(model);
+  assert.equal(compiled.length, 1, JSON.stringify(model.todos));
+  const mod = await loadTree(files, compiled[0]!.path);
+  const live = await liveStore({ Orders: [{ Name: 'Ann', Status: 'open', Amount: 1 }] });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { who: 'nobody' } } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.match(String(out.body.html), /data-zml="component-report:All_Orders\?Name="/);
+  } finally {
+    live.restore();
+  }
+});

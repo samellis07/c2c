@@ -666,7 +666,7 @@ function componentAttributes(tag: string): Map<string, string> | null {
   return null;
 }
 
-interface EmbeddedComponent { kind: 'form' | 'report'; name: string }
+interface EmbeddedComponent { kind: 'form' | 'report'; name: string; /** Field keys the marker carries as encoded query values. */ params?: string[] }
 
 /**
  * Named HTML entities a smuggled URL can hide behind. Numeric references ride
@@ -734,36 +734,99 @@ const COMPONENT_FLAGS: Record<string, { kinds: readonly string[]; values: readon
   zc_resetval: { kinds: ['form'], values: ['reset'] },
 };
 
-/** The embed's applicable params, or null when any one cannot be applied. */
-function componentParams(raw: string, kind: string, name: string): { untitled: boolean } | null {
+/** An island of an embed tag, held as a token until its tag attributes are parsed. */
+const SLOT_TOKEN = /^\u0001(\d+)\u0001$/;
+/**
+ * The only islands an embed parameter may carry: one bare read, `a.b.c`, a
+ * page input `input.p` (checked against the page's own parameters), or either
+ * with a closing `.toLong()` / `.toString()`. Calls with arguments, operators,
+ * indexes and quotes keep the snippet counted.
+ */
+const PARAM_READ = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\.(?:toLong|toString)\(\))?$/;
+const PARAM_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** One key of an embed's `params` that fills a field: a bounded literal or a bare read evaluated at render. */
+interface ComponentParam {
+  key: string;
+  value: { literal: string } | { read: string };
+}
+
+/** The field keys a parameterised embed may name: top-level fields of the form (or the report's form). */
+function embedFieldNames(app: App, kind: string, name: string): string[] {
+  const form = kind === 'form' ? app.forms.find((item) => item.name === name) : app.forms.find((item) => item.name === app.reports.find((report) => report.name === name)?.form);
+  return (form?.fields ?? []).filter((field) => field.subfields.length === 0 && !/^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')).map((field) => field.name);
+}
+
+/**
+ * The embed's applicable params, or null when any one cannot be applied. A key
+ * that is not a display flag must name a field of the embedded form (or the
+ * report's form), once, with a bounded literal or one bare read as its value:
+ * the value reaches the embed only as an encoded query value the runtime
+ * applies as the form prefill or the report filter.
+ */
+function componentParams(
+  raw: string,
+  kind: string,
+  name: string,
+  fields: readonly string[] = [],
+  slots: readonly string[] = [],
+  own: ReadonlySet<string> = new Set(),
+): { untitled: boolean; params: ComponentParam[] } | null {
   const text = raw.replace(/&amp;/gi, '&').trim();
-  if (!text) return { untitled: false };
+  if (!text) return { untitled: false, params: [] };
   let untitled = false;
+  const params: ComponentParam[] = [];
   for (const part of text.split('&')) {
     if (!part) continue;
     const eq = part.indexOf('=');
     if (eq < 0) return null;
-    const key = part.slice(0, eq).trim().toLowerCase();
-    const value = part.slice(eq + 1).trim().toLowerCase();
+    const rawKey = part.slice(0, eq).trim();
+    const key = rawKey.toLowerCase();
+    const rawValue = part.slice(eq + 1).trim();
+    const value = rawValue.toLowerCase();
     // Creator repeats the embed's own link name inside `params`; naming the
     // same view again changes nothing, naming another one is not provable.
     if (ZC_LINK.test(key) && value === name.toLowerCase()) continue;
     const flag = Object.prototype.hasOwnProperty.call(COMPONENT_FLAGS, key) ? COMPONENT_FLAGS[key] : undefined;
-    if (!flag || !flag.kinds.includes(kind) || !flag.values.includes(value)) return null;
-    if (key === 'zc_header') untitled = value === 'false';
+    if (flag) {
+      if (!flag.kinds.includes(kind) || !flag.values.includes(value)) return null;
+      if (key === 'zc_header') untitled = value === 'false';
+      continue;
+    }
+    if (!/^[A-Za-z_]\w*$/.test(rawKey) || PARAM_RESERVED.has(key) || /^zc_/i.test(rawKey)) return null;
+    const matches = fields.filter((field) => field.toLowerCase() === key);
+    if (matches.length !== 1 || params.some((item) => item.key.toLowerCase() === key)) return null;
+    const slot = SLOT_TOKEN.exec(rawValue);
+    if (slot) {
+      const read = (slots[Number(slot[1])] ?? '').trim();
+      if (!PARAM_READ.test(read)) return null;
+      const segments = read.split('.');
+      if (segments.some((segment) => PARAM_RESERVED.has(segment.toLowerCase()))) return null;
+      // A page input must be a parameter this snippet declares.
+      if (segments[0] === 'input' && (segments.length < 2 || !own.has(segments[1]))) return null;
+      params.push({ key: matches[0], value: { read } });
+    } else if (LITERAL_PARAM.test(rawValue) && !rawValue.includes('\u0001')) {
+      params.push({ key: matches[0], value: { literal: rawValue } });
+    } else {
+      return null;
+    }
   }
-  return { untitled };
+  return { untitled, params };
 }
 
 /**
  * Creator zc-component divs can name a generated form/report [UNVERIFIED]. Only a literal
  * link name whose params are all applicable display flags is provable; other embeds stay TODOs.
  */
-function embeddedComponents(template: string, app: App): { template: string; components: EmbeddedComponent[]; markers: string[]; todos: { target: string; step?: string }[] } {
+function embeddedComponents(
+  template: string,
+  app: App,
+  own: ReadonlySet<string> = new Set(),
+): { template: string; components: EmbeddedComponent[]; markers: string[]; todos: { target: string; step?: string }[] } {
   const components: EmbeddedComponent[] = [];
   const markers: string[] = [];
   const todos: { target: string; step?: string }[] = [];
-  const rewritten = template.replace(/<div\b[^>]*>/gi, (tag) => {
+  const embed = (tag: string, slots: readonly string[]): string | null => {
     if (!/\belname\s*=/i.test(tag)) return tag;
     const attrs = componentAttributes(tag);
     if (!attrs) {
@@ -801,16 +864,44 @@ function embeddedComponents(template: string, app: App): { template: string; com
     const known = SAFE_COMPONENT_NAME.test(name) && (kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false);
     const hostile = attrKeys.some((key) => /^on/i.test(key)) || [...attrs.values()].sort().some(hostileUrlValue);
     const rawParams = attrs.get('params');
-    const params = rawParams === undefined ? { untitled: false } : componentParams(rawParams, kind, name);
+    // A token outside `params` is an island in another attribute: not an embed.
+    if (slots.length && [...attrs.entries()].some(([key, value]) => key !== 'params' && value.includes('\u0001'))) return null;
+    const params = rawParams === undefined ? { untitled: false, params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own) : null;
     if (known && !hostile && params) {
-      const component = { kind: kind as 'form' | 'report', name };
+      const keys = params.params.map((item) => item.key);
+      const component: EmbeddedComponent = { kind: kind as 'form' | 'report', name, ...(keys.length ? { params: keys } : {}) };
       components.push(component);
-      const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}`;
-      markers.push(marker);
-      return tag.replace(/>$/, ` data-zml="${marker}">`);
+      const query = params.params.map((item) => ('literal' in item.value ? `${item.key}=${item.value.literal}` : `${item.key}=<%=encodeUrl(${item.value.read})%>`)).join('&');
+      const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}${query ? `?${query}` : ''}`;
+      markers.push(marker.replace(/<%=[^%]*%>/g, ''));
+      if (!slots.length) return tag.replace(/>$/, ` data-zml="${marker}">`);
+      // The tag is rebuilt from its parsed attributes: the island-carrying
+      // `params` and the link attributes are replaced by the marker.
+      const kept = [...attrs.entries()]
+        .filter(([key]) => key !== 'params' && key !== 'elname' && !ZC_LINK.test(key))
+        .map(([key, value]) => ` ${key}="${value.replace(/"/g, '&quot;')}"`)
+        .join('');
+      return `<div${kept} data-zml="${marker}">`;
     }
     todos.push({ target });
     return tag;
+  };
+  // A tag whose attributes hold `<%= %>` islands is matched whole; its islands
+  // become tokens while the attributes are read and only a bare-read value in
+  // `params` is ever written back.
+  const rewritten = template.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag) => {
+    if (!tag.includes('<%')) return embed(tag, []) ?? tag;
+    const slots: string[] = [];
+    const tokenized = tag.replace(/<%=[ \t]*([^%<>'"\\\u0001]*?)[ \t]*%>/g, (_m, read: string) => `\u0001${slots.push(read) - 1}\u0001`);
+    // What the tokenizer cannot read keeps the old reading of the tag: cut at
+    // the first `>`, which may still count as an unparsed component.
+    const legacy = () => {
+      embed(tag.slice(0, tag.indexOf('>') + 1), []);
+      return tag;
+    };
+    if (tokenized.includes('<%') || tokenized.includes('%>') || !/\belname\s*=\s*['"]zc-component['"]/i.test(tokenized)) return legacy();
+    const done = embed(tokenized, slots);
+    return done === null ? legacy() : done === tokenized ? tag : done;
   });
   return { template: rewritten, components, markers, todos };
 }
@@ -2777,14 +2868,14 @@ export function compileHtmlpage(
   head.template = embeds.template;
   const includes = embeds.includes;
   if (head.template.toLowerCase().includes('component-form:') || head.template.toLowerCase().includes('component-report:')) return fail('marker collision');
-  const embedded = embeddedComponents(head.template, app);
+  const embedded = embeddedComponents(head.template, app, new Set(head.params));
   head.template = embedded.template;
   const withIncludes = (done: HtmlpageCompiled): HtmlpageCompiled => {
     // Every include must survive sanitization where it stood; a marker the
     // allowlist removed would be an embed that silently vanished.
     const html = done.html ?? '';
     for (const name of includes) if (!html.includes(`data-zml="${PAGE_INCLUDE_PREFIX}${name}"`)) return fail('page embed did not survive markup sanitization');
-    for (const marker of embedded.markers) if (!html.includes(`data-zml="${marker}"`)) return fail('component embed did not survive markup sanitization');
+    for (const marker of embedded.markers) if (!html.includes(`data-zml="${marker.replace(/&/g, '&amp;')}"`)) return fail('component embed did not survive markup sanitization');
     return { manualReasons: [], ...done, ...(includes.length ? { includes } : {}), ...(embedded.components.length ? { components: embedded.components } : {}), ...(embedded.todos.length ? { componentTodos: embedded.todos } : {}) };
   };
   const chunks = splitChunks(head.template);
