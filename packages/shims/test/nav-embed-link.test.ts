@@ -44,3 +44,22 @@ test('a path that only contains the embed words is not an embedded view', () => 
     assert.ok(out === null || out.kind !== 'navigate' || !out.url.startsWith('#/'), url);
   }
 });
+
+test('legacy #From links resolve to a declared report route with safe filtering', () => {
+  assert.deepEqual(resolve('#From:All_Notes?Body=hello'), {
+    kind: 'navigate', url: '#/report/All_Notes?Body=hello', target: 'same',
+  });
+  assert.equal(resolve('#From:All_Notes?Body=hello&ignored=nope'), null);
+  assert.equal(resolve('#From:All_Notes?Body=one&Body=two'), null);
+  assert.equal(resolve('#From:Missing?Body=hello'), null);
+});
+
+test('navigation instructions require an own url property', () => {
+  const inherited = Object.create({ url: '#From:All_Notes' }) as { kind: string; target: string };
+  inherited.kind = 'navigate';
+  inherited.target = 'same';
+  const nav = (createRuntime({ dryRun: true, appTimeZone: 'UTC' }).shim as unknown as {
+    nav: { resolve(result: unknown, routes?: NavRoutes): NavInstruction | null };
+  }).nav;
+  assert.equal(nav.resolve(inherited, routes), null);
+});
