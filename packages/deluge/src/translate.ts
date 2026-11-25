@@ -734,6 +734,8 @@ interface Scope {
   serverEffects: boolean;
   /** Subforms whose `insert` the server run answers as an effect: the browser holds no copy of their rows. */
   subformEffects: Set<string>;
+  /** Loop variable → the subform of `input` its loop walks, while the body is translated. */
+  subformLoops: Map<string, string>;
   /** Raw source, for comment-tail lookup. */
   src: string;
   /**
@@ -768,6 +770,8 @@ interface Out {
    * client action of the statement is one the browser accepts from a reply.
    */
   eff?: (key: string) => string;
+  /** A field write whose value the browser never receives from this statement: no run can answer it as an effect. */
+  unanswered?: true;
 }
 
 const EMPTY: Fx = {
@@ -3301,6 +3305,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     navCapture: !!options.navCapture && !!options.serverOnly,
     serverEffects: !!options.serverEffects && !options.serverOnly,
     subformEffects: new Set(),
+    subformLoops: new Map(),
     src,
     commentTails: commentTails(src),
     schema: options.schema,
@@ -3462,6 +3467,7 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
     if (o.client.trim()) client.push(o.client);
     // A statement with no client action of its own runs on the server alone.
     if (o.eff) effs.push(o.eff);
+    else if (o.unanswered) effOk = false;
     else if (!o.client.trim() || clientBindsLocalsOnly(o.client)) effs.push(() => o.server);
     else effOk = false;
   }
@@ -4156,6 +4162,8 @@ function dropClientTodos(scope: Scope, stats: TranslateStats, todos: TodoItem[],
 }
 
 function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
+  const todoMark = todos.length;
+  const coverMark = scope.cover.length;
   const col = expr(s.collection, scope);
   // The collection is evaluated once, before the body. Slot it against these
   // bindings even though the body is translated first and may reassign them.
@@ -4252,10 +4260,16 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   scope.listUpdates = updates;
   scope.listUpdateTests = updateTests;
   scope.listUpdateTemps = updateTemps;
+  const walked = s.collection.kind === 'member' ? memberPath(s.collection) : null;
+  const outerWalk = scope.subformLoops.get(s.name);
+  if (walked && walked.root === 'input' && walked.path.length === 1) scope.subformLoops.set(s.name, walked.path[0]!);
+  else scope.subformLoops.delete(s.name);
   let body: Out;
   try {
     body = underLoop(scope, assigned, () => statement(s.body, scope, stats, todos), s.body);
   } finally {
+    if (outerWalk === undefined) scope.subformLoops.delete(s.name);
+    else scope.subformLoops.set(s.name, outerWalk);
     scope.listUpdates = outerUpdates;
     scope.listUpdateTests = outerTests;
     scope.listUpdateTemps = outerTemps;
@@ -4306,7 +4320,15 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
     flushMaps(scope, false);
     scope.rowFrames.pop();
   }
-  account(stats, todos, { todo: col.todo || clientTodo, shim: col.shim || col.query || !!clientIter, constructs }, s.span);
+  // The browser's copy of the loop cannot run, but the server run walks the same
+  // rows and every client action in the body is one it can answer: it queues
+  // them as effects under one marker and the browser keeps no copy.
+  const answered = !scope.noClient && scope.serverEffects && scope.replayBarrier === 0 && !!body.eff && !col.todo && (clientTodo || todos.slice(todoMark).some(isClientTodo));
+  if (answered) {
+    dropClientTodos(scope, stats, todos, todoMark, coverMark);
+    dropClientNames(scope, assigned, declaredBefore);
+  }
+  account(stats, todos, { todo: col.todo || (clientTodo && !answered), shim: col.shim || col.query || !!clientIter, constructs: answered ? col.constructs : constructs }, s.span);
   const name = jsIdent(s.name);
   const iter = iterSource;
   // collection.html — iterations equal the number of values, so an empty
@@ -4329,12 +4351,18 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   // record.set is the only call that queues a pending field write, so a loop
   // whose body never calls it gets no flush wrapper at all: an unconditional
   // flush would put a write-capable shim call in code that only reads.
-  const queuesFieldWrite = /\bshim\.record\.set\(/.test(body.server);
-  const serverLoop = body.server.trim()
-    ? (col.query || rowSource) && queuesFieldWrite
-      ? `try {\n${indent(`${head} {\n${indent(body.server)}\n}`)}\n} finally {\n${indent('await shim.datastore.flush(ctx);')}\n}`
-      : `${head} {\n${indent(body.server)}\n}`
-    : '';
+  const loopServer = (inner: string): string =>
+    inner.trim()
+      ? (col.query || rowSource) && /\bshim\.record\.set\(/.test(inner)
+        ? `try {\n${indent(`${head} {\n${indent(inner)}\n}`)}\n} finally {\n${indent('await shim.datastore.flush(ctx);')}\n}`
+        : `${head} {\n${indent(inner)}\n}`
+      : '';
+  const serverLoop = loopServer(body.server);
+  const eff = body.eff ? (key: string): string => loopServer(body.eff!(key)) : undefined;
+  if (answered) {
+    const key = JSON.stringify(`e${scope.slot++}`);
+    return { server: eff!(key), client: `actions.push({ op: "serverEffect", key: ${key} });`, eff };
+  }
   const clientPart = (): string => {
     if (!body.client.trim() || clientDropped) return '';
     if (rangeSlot) {
@@ -4360,6 +4388,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   return {
     server: serverLoop,
     client: clientPart(),
+    ...(eff ? { eff } : {}),
   };
 }
 
@@ -4834,12 +4863,21 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     recordStateWrite(path.root === 'input' ? `input.${path.path[0]}` : `rec.${path.root}`, scope, fixed, value);
     // A server value the browser cannot be handed as a slot: the server run answers
     // with what it left in the field, where the write sat in the script.
-    const setValue = path.root === 'input' && path.path.length === 1 && !value.todo ? `{ op: "setValue", targets: [${JSON.stringify(path.path[0])}], args: [shim.input.get(ctx, ${JSON.stringify(path.path[0])})] }` : null;
-    if (!client && value.serverOnly && setValue && scope.serverEffects && scope.replayBarrier === 0 && !scope.noClient && scope.writeGuards.every((g) => g.ok)) {
+    const setValue =
+      path.path.length !== 1 || value.todo
+        ? null
+        : path.root === 'input'
+          ? `{ op: "setValue", targets: [${JSON.stringify(path.path[0])}], args: [shim.input.get(ctx, ${JSON.stringify(path.path[0])})] }`
+          : `shim.client.rowValue(ctx, ${jsIdent(path.root)}, ${JSON.stringify(path.path[0])})`;
+    if (!client && value.serverOnly && setValue && path.root === 'input' && scope.serverEffects && scope.replayBarrier === 0 && !scope.noClient && scope.writeGuards.every((g) => g.ok)) {
       return serverEffectOut(scope, setValue, value.constructs, stats, todos, span, fixed);
     }
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
-    return { server: fixed, client, ...(setValue ? { eff: (key) => `${fixed}\n${queueEffect(key, setValue)}` } : {}) };
+    return {
+      server: fixed,
+      client,
+      ...(setValue ? { eff: (key) => `${fixed}\n${queueEffect(key, setValue)}` } : !client && value.serverOnly ? { unanswered: true as const } : {}),
+    };
   }
   if (path && scope.query.has(path.root)) {
     if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
@@ -5572,8 +5610,12 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   // A server read in a `:ui` argument (`row.Items:ui.add(fetched_list)`) is a prefetch slot, like a client condition;
   // a read-only `thisapp` call there is an event-time client call.
   const clientArgs = ui ? args.map((a) => clientExpr(a, scope, 'client-condition-uses-server', true)) : [];
-  const uiTask = (values: readonly { code: string }[]): string =>
-    `{ op: "ui", method: ${JSON.stringify(e.path.slice(1).join('.') || method)}, target: ${typeof target === 'string' && target.startsWith('[') ? target : `[${target}]`}, args: [${values.map((a) => a.code).join(', ')}] }`;
+  const uiTask = (values: readonly { code: string }[], at: string = target): string =>
+    `{ op: "ui", method: ${JSON.stringify(e.path.slice(1).join('.') || method)}, target: ${at.startsWith('[') ? at : `[${at}]`}, args: [${values.map((a) => a.code).join(', ')}] }`;
+  // A row of a loop over a subform is addressed by its column: the same values
+  // for every row the loop walks, so the loop variable must not be in them.
+  const walkedSubform = obj ? scope.subformLoops.get(obj.root) : undefined;
+  const effTarget = walkedSubform !== undefined ? (args.some((a) => a.reads.includes(obj!.root)) ? null : JSON.stringify([walkedSubform, ...obj!.path])) : obj && scope.local.has(obj.root) ? null : target;
   if (ui && serverEffectTask(scope, args, clientArgs)) return serverEffectOut(scope, uiTask(args), args.flatMap((a) => a.constructs), stats, todos, span);
   const constructs = args.flatMap((a) => a.constructs);
   if (!ui) constructs.push(`colon:${method}`);
@@ -5587,7 +5629,7 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   return {
     server: '',
     client: `actions.push(${uiTask(clientArgs)});`,
-    ...(args.some((a) => a.todo) ? {} : { eff: (key) => queueEffect(key, uiTask(args)) }),
+    ...(args.some((a) => a.todo) || effTarget === null ? {} : { eff: (key) => queueEffect(key, uiTask(args, effTarget)) }),
   };
 }
 

@@ -126,12 +126,86 @@ test('an arm with a client action the reply cannot carry keeps the counted todo'
   assert.doesNotMatch(r.server, /shim\.client\.effect/);
 });
 
-test('the same if inside a loop or without a client run keeps the counted todo', () => {
-  const loop = ['for each u in Users[Mail != ""] {', '  id = insert into Users [Mail = u.Mail];', '  if (id > 0) {', '    openUrl("#Report:R", "same window");', '  }', '}'].join('\n');
-  assert.ok(counted(translate(loop, options)) > 0);
-  assert.doesNotMatch(translate(loop, options).server, /shim\.client\.effect/);
+test('the same if inside a try arm or without a client run keeps the counted todo', () => {
+  const attempt = ['try {', '  id = insert into Users [Mail = "a"];', '  if (id > 0) {', '    openUrl("#Report:R", "same window");', '  }', '} catch (e) {', '  info e;', '}'].join('\n');
+  assert.ok(counted(translate(attempt, options)) > 0);
+  assert.doesNotMatch(translate(attempt, options).server, /shim\.client\.effect/);
+  assert.equal(counted(translate(OPEN, { ...options, serverEffects: false })), 1);
   assert.equal(counted(translate(OPEN, { ...options, serverOnly: true })), 0);
   assert.doesNotMatch(translate(OPEN, { ...options, serverOnly: true }).server, /shim\.client\.effect/);
+});
+
+// The education shape: a loop over the rows of a subform adds one list to a column of each, and the
+// list reads a field the script wrote, so only the server run can build it.
+const COLUMN = [
+  'input.Name = "n";',
+  'ids = List();',
+  'for each u in Users[Mail == input.Name] {',
+  '  ids.add(u.Mail);',
+  '}',
+  'for each r in input.Items {',
+  '  r.Pick:ui.add(ids);',
+  '}',
+].join('\n');
+const withItems = { ...options, inputFields: [...options.inputFields, 'Items'] };
+
+test('a loop over the rows of a subform that adds one list to a column of each is answered by the server run', async () => {
+  const r = translate(COLUMN, withItems);
+  assert.deepEqual(r.todos, []);
+  assert.doesNotMatch(r.client, /shim\.todo\(|"Pick"|\bfor \(/);
+  const key = keyOf(r);
+  assert.match(r.server, new RegExp(`for \\(var r of shim\\.each\\(ctx, shim\\.input\\.get\\(ctx, "Items"\\)\\)\\) \\{\\n  shim\\.client\\.effect\\(ctx, "${key}", \\{ op: "ui", method: "add", target: \\["Items","Pick"\\], args: \\[ids\\] \\}\\);`));
+  const effects = await run(r, { Users: [{ ROWID: '1', Mail: 'n' }] }, { Items: [{ Pick: 'x' }, { Pick: 'y' }] });
+  assert.deepEqual(effects[key], [
+    { op: 'ui', method: 'add', target: ['Items', 'Pick'], args: [['n']] },
+    { op: 'ui', method: 'add', target: ['Items', 'Pick'], args: [['n']] },
+  ]);
+  assert.equal((await run(r, { Users: [{ ROWID: '1', Mail: 'n' }] }, { Items: [] }))[key], undefined);
+  assert.equal(counted(translate(COLUMN, { ...withItems, serverEffects: false })), 1);
+});
+
+test('a loop that hands the row itself to the task keeps the counted todo', () => {
+  const r = translate(COLUMN.replace('r.Pick:ui.add(ids)', 'r.Pick:ui.add(r.Code + ids.size())'), withItems);
+  assert.doesNotMatch(r.server, /shim\.client\.effect/);
+});
+
+// The volunteer shape: each pass of a loop over the new rows writes the date of the row the event
+// fired on, or alerts, depending on a date read from the server.
+const DATES = [
+  'ev = Users[ID == 3];',
+  'start = ev.Mail.toDate();',
+  'for each r in input.Items {',
+  '  if (start > zoho.currenttime) {',
+  '    alert "Too late";',
+  '  } else {',
+  '    row.Pick = start;',
+  '    start = start.addDay(1);',
+  '  }',
+  '}',
+].join('\n');
+
+test('a row write and an alert under a server-read date in a loop are queued in loop order, the row addressed by index', async () => {
+  const r = translate(DATES, { ...options, inputFields: [...options.inputFields, 'Items'], rowNames: ['row'] });
+  assert.deepEqual(r.todos, []);
+  const key = keyOf(r);
+  assert.match(r.server, new RegExp(`shim\\.client\\.effect\\(ctx, "${key}", shim\\.client\\.rowValue\\(ctx, d_row, "Pick"\\)\\);`));
+  const runtime = createRuntime({ dryRun: true, seed: { Users: [{ ROWID: '3', Mail: '2020-01-01' }] } });
+  const record = { Items: [{ Pick: null }, { Pick: null }] };
+  const ctx = runtime.context({ record, old: {}, principal: { profile: 'Administrator' }, subformRow: { field: 'Items', index: 1 } });
+  const body = new (Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (ctx: unknown, shim: unknown) => Promise<void>)('ctx', 'shim', `const d_row = shim.subform.currentRow(ctx, "Items");\n${r.server}`);
+  await body(ctx, runtime.shim);
+  const queued = JSON.parse(JSON.stringify(ctx.clientEffects ?? {}))[key] as Effect[];
+  assert.deepEqual(queued.map((e) => [e.op, e.targets, e.row]), [['setValue', ['Items.Pick'], 1], ['setValue', ['Items.Pick'], 1]]);
+  // Outside a subform row event the value has no row to land in, so nothing is queued.
+  const none = runtime.context({ record, old: {}, principal: { profile: 'Administrator' } });
+  assert.equal(runtime.shim.client.rowValue(none, record.Items[1], 'Pick'), null);
+});
+
+test('an arm that writes a field the browser can never receive keeps the counted todo', () => {
+  const src = ['id = insert into Users [Mail = "a"];', 'n = id.toString().length();', 'if (n > 0) {', '  input.Items.Pick = id;', '  openUrl("#Report:R", "same window");', '}'].join('\n');
+  const r = translate(src, withItems);
+  assert.equal(counted(r), 1);
+  assert.doesNotMatch(r.server, /shim\.client\.effect/);
 });
 
 interface BrowserRuntime {
@@ -162,5 +236,16 @@ test('the browser keeps an alert and a visibility change from a reply and refuse
     { op: 'disable' },
   ]) {
     assert.deepEqual(settle(marker, { effects: { e0: [bad] } }), [], JSON.stringify(bad));
+  }
+});
+
+test('the browser puts a row value into the row it names and refuses a row that is not an index', async () => {
+  const runtime = await browser();
+  const { settle } = runtime.browserShim().client;
+  const marker = [{ op: 'serverEffect', key: 'e0' }];
+  const row = { op: 'setValue', targets: ['Items.Pick'], args: ['2020-01-01'], row: 1 };
+  assert.deepEqual(settle(marker, { effects: { e0: [row] } }), [row]);
+  for (const row of [-1, 1.5, '1', null, {}]) {
+    assert.deepEqual(settle(marker, { effects: { e0: [{ op: 'setValue', targets: ['Items.Pick'], args: ['x'], row }] } }), [], JSON.stringify(row));
   }
 });

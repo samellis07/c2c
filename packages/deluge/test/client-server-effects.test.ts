@@ -48,14 +48,19 @@ test('a task in a server-only unit has no client and no effect', () => {
   assert.doesNotMatch(r.server, /shim\.client\.effect/);
 });
 
-test('a task in a loop or a try arm keeps the counted todo', () => {
-  const loop = 'for each u in Users[Mail != ""] {\n  newId = insert into Users [Mail = u.Mail];\n  input.Organizers:ui.add(newId);\n}';
+test('a task in a try arm keeps the counted todo', () => {
   const attempt = 'try {\n  newId = insert into Users [Mail = zoho.loginuserid];\n  input.Organizers:ui.add(newId);\n} catch (e) {\n  info e;\n}';
-  for (const src of [loop, attempt]) {
-    const r = translate(src, { ...options, serverEffects: true });
-    assert.ok(counted(r) > 0, src);
-    assert.doesNotMatch(r.server, /shim\.client\.effect/, src);
-  }
+  const r = translate(attempt, { ...options, serverEffects: true });
+  assert.ok(counted(r) > 0);
+  assert.doesNotMatch(r.server, /shim\.client\.effect/);
+});
+
+test('a task in a loop is answered by the loop as a whole, one marker for every pass', () => {
+  const loop = 'for each u in Users[Mail != ""] {\n  newId = insert into Users [Mail = u.Mail];\n  input.Organizers:ui.add(newId);\n}';
+  const r = translate(loop, { ...options, serverEffects: true });
+  assert.equal(counted(r), 0);
+  assert.equal([...r.client.matchAll(/op: "serverEffect"/g)].length, 1);
+  assert.match(r.server, /for \(var u of [^\n]*\) \{[^]*shim\.client\.effect\(ctx, "e\d+", \{ op: "ui", method: "add", target: \["Organizers"\], args: \[newId\] \}\);\n\}/);
 });
 
 test('markers keep the script order with the client tasks around them', () => {
