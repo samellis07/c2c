@@ -83,6 +83,39 @@ test('thisapp.call binds ctx.row for for-each-record functions', async () => {
   assert.equal(await ctx.shim.thisapp.call(ctx, ['OnLog'], [meta]), 'x');
 });
 
+test('input.<field> in a for-each-record function writes the clicked record only where the profile has the field grant', async () => {
+  const access = { roles: [], profiles: { Clerk: { Log: { write: true, fields: ['Note', 'Secret'], writable: ['Note'] } } } };
+  const meta = { __row: true as const, form: 'Log', rowId: '1', values: { Note: 'x', Secret: 's' } };
+  const functions = {
+    OnLog: {
+      call: async (c: { shim: { input: { set(c: unknown, path: string[], value: unknown): unknown } } }) => {
+        c.shim.input.set(c, ['Note'], 'changed');
+        return meta.values.Note;
+      },
+      rowForm: 'Log',
+    },
+    OnSecret: {
+      call: async (c: { shim: { input: { set(c: unknown, path: string[], value: unknown): unknown } } }) => c.shim.input.set(c, ['Secret'], 'stolen'),
+      rowForm: 'Log',
+    },
+  };
+  const runtime = createRuntime({ dryRun: false, ...zone, functions: functions as never, access } as never);
+  const ctx = runtime.context({ record: {}, old: {}, principal: { profile: 'Clerk' } });
+  assert.equal(await ctx.shim.thisapp.call(ctx, ['OnLog'], [meta]), 'changed');
+  await assert.rejects(() => ctx.shim.thisapp.call(ctx, ['OnSecret'], [meta]), /cannot write Log\.Secret/);
+  assert.equal(meta.values.Secret, 's', 'an ungranted field is never written');
+  assert.equal(
+    runtime.transcript.some((entry) => entry.op === 'error' && entry.code === 'RECORD_ACCESS_DENIED' && entry.form === 'Log' && entry.field === 'Secret'),
+    true,
+  );
+});
+
+test('thisapp.call refuses a record of another form for a for-each-record function', async () => {
+  const other = { __row: true, form: 'Payroll', rowId: '9', values: { Amount: '1' } };
+  const { ctx } = live({ OnLog: { call: async (c) => c.shim.record.get(c.row, 'Amount'), rowForm: 'Log' } });
+  await assert.rejects(() => ctx.shim.thisapp.call(ctx, ['OnLog'], [other]), /is a Payroll record but the function runs on Log/);
+});
+
 test('thisapp.call records a transcript entry in live mode', async () => {
   const { runtime, ctx } = live({ 'F.g': { call: async () => 1 } });
   await ctx.shim.thisapp.call(ctx, ['F', 'g'], []);

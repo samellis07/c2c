@@ -3142,7 +3142,29 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       set(ctx, path, value) {
         note({ op: 'input.set', path, value });
-        if (ctx.rowInput && ctx.row && path.length === 1) return shim.record.set(ctx.row, path, value);
+        if (ctx.rowInput && ctx.row && path.length === 1) {
+          // `input.<field> = x` in a for-each-record function writes the clicked record: it takes the
+          // same field grant and write rules as a record assignment, before the local row changes.
+          const meta = ctx.row as RowMeta;
+          const field = path[0]!;
+          if (options.access) {
+            try {
+              const decision = authorizeWrite(options.access, ctx.principal, meta.form, { [field]: value });
+              if (!Object.prototype.hasOwnProperty.call(decision.values, field)) {
+                throw new RecordAccessError(
+                  `record access: profile ${ctx.principal?.profile ?? '(none)'} cannot write ${meta.form}.${field}`,
+                );
+              }
+            } catch (err) {
+              if (err instanceof RecordAccessError) {
+                note({ op: 'error', code: err.code, message: err.message, form: meta.form, field });
+              }
+              throw err;
+            }
+          }
+          checkedWrite(meta.form, stringifyValues({ [field]: value }), false);
+          return shim.record.set(ctx.row, path, value);
+        }
         return setPath(ctx.record, path, value);
       },
       insert(ctx, path, value) {
@@ -4154,6 +4176,11 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         delete child.formNonce;
         if (entry.rowForm) {
           const source = args.find((arg) => arg && typeof arg === 'object' && !Array.isArray(arg));
+          if (source && typeof source === 'object' && '__row' in source && (source as RowMeta).form !== entry.rowForm) {
+            throw new DelugeRuntimeError(
+              `thisapp.${name}: the record passed in is a ${(source as RowMeta).form} record but the function runs on ${entry.rowForm}`,
+            );
+          }
           child.row =
             source && typeof source === 'object' && '__row' in source
               ? (source as RowMeta)
