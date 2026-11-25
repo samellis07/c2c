@@ -4062,10 +4062,9 @@ export function compileHtmlpage(
   // A statement island in a `<style>` body only computes: the sanitizer
   // removes the element, so nothing it does reaches the output, and the page's
   // dropped-CSS step still counts every tag in the stylesheet. One that opens a
-  // URL would be a redirect the removed element hides, so it stays refused.
+  // URL prints the link a statement island's openUrl prints anywhere else.
   for (const isl of islands) {
-    if (isl.kind === 'expr' || isl.context === 'text' || isl.context === 'comment') continue;
-    if (isl.context === 'cssbody' && !/\bopenUrl\b/i.test(isl.text)) continue;
+    if (isl.kind === 'expr' || isl.context === 'text' || isl.context === 'comment' || isl.context === 'cssbody') continue;
     return fail('island in an unsafe position');
   }
 
@@ -4197,7 +4196,9 @@ export function compileHtmlpage(
     if (isl.context === 'cssbody' && (isl.kind === 'stmts' || isl.wasStmts)) {
       // The statements run (their reads and conditions are checked like any
       // island's) but print nothing: the element they sit in is removed.
-      scriptParts.push(isl.wasStmts ? `${isl.text.trim().replace(/;$/, '')};` : isl.text);
+      const code = isl.wasStmts ? `${isl.text.trim().replace(/;$/, '')};` : rewriteOpenUrls(isl.text);
+      if (code === null) return fail('openUrl could not be rewritten');
+      scriptParts.push(code);
       // The rule group that follows prints where the branch runs, as a marker
       // the page's carried CSS selects on (see styleBranchMarkers).
       const after = chunks[isl.i + 1];
