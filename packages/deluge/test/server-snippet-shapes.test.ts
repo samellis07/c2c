@@ -399,7 +399,10 @@ content
 <div>Hi</div>
 <%}%>`,
   );
-  assert.equal(writes.ok, false);
+  // Its openUrl prints the link a statement island's openUrl prints anywhere else, so the page does not lose the way to the form.
+  assert.equal(writes.ok, true, `refused: ${writes.reason}`);
+  assert.match(writes.file?.source ?? '', /\["k"\]: "L", \["v"\]: "#Form:Sales"/);
+  assert.doesNotMatch(writes.html ?? '', /<style/);
 });
 
 test('shape script-element island: <%=expr%> in <script> text compiles and the script is counted as dropped', () => {
