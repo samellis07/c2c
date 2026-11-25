@@ -41,6 +41,8 @@ const NAV = {
   'Bill Page': ['Bill_Page', `openUrl("#Page:Detail?param1=" + input.ID,"same window");`],
   'Literal Attack': ['Literal_Attack', `openUrl("#Page:Detail?param1=<img src=x onerror=alert(1)>","same window");`],
   'Filtered Report': ['Filtered_Report', `openUrl("#Report:All_Requests?Note=" + input.Name,"same window");`],
+  'Unknown Field': ['Unknown_Field', `openUrl("#Form:Request?Nope=" + input.ID,"popup window");`],
+  'Unknown Field With Known': ['Unknown_Field_With_Known', `openUrl("#Form:Request?Nope=" + input.ID + "&Item_Ref=" + input.ID,"popup window");`],
   'Report Op Filter': ['Report_Op_Filter', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Note_op=26","same window");`],
 } as const;
 
@@ -54,7 +56,6 @@ const COUNTED = {
   'Report Op Second Filter': ['Report_Op_Second_Filter', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Note_op=26&Kind=Loan","same window");`],
   'Report Unknown Field': ['Report_Unknown_Field', `openUrl("#Report:All_Requests?Nope=" + input.Name,"same window");`],
   'Report Two Filters': ['Report_Two_Filters', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Kind=Loan","same window");`],
-  'Unknown Field': ['Unknown_Field', `openUrl("#Form:Request?Nope=" + input.ID,"popup window");`],
   'Unknown Read': ['Unknown_Read', `openUrl("#Form:Request?Note=" + input.Missing,"popup window");`],
   'Unknown Form': ['Unknown_Form', `openUrl("#Form:Nowhere","popup window");`],
   'Deep Read': ['Deep_Read', `openUrl("#Form:Request?Item_Ref=" + input.Name.ID,"popup window");`],
@@ -208,6 +209,8 @@ test('an openUrl-only workflow to an own form, report or page is a navigation; a
     href: '#/report/All_Requests',
     params: [{ name: 'Note', field: 'Name' }],
   });
+  assert.deepEqual(byName.get('Unknown Field')?.navigate, { kind: 'form', target: 'Request', href: '#/form/Request', params: [] });
+  assert.deepEqual(byName.get('Unknown Field With Known')?.navigate, { kind: 'form', target: 'Request', href: '#/form/Request', params: [{ name: 'Item_Ref', field: 'ROWID' }] });
   assert.deepEqual(byName.get('Report Op Filter')?.navigate, {
     kind: 'report',
     target: 'All_Requests',
@@ -279,6 +282,8 @@ test('the static client links each navigation with values only from the row it r
     'Bill Page #/page/Detail?param1=7',
     'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
     'Filtered Report #/report/All_Requests?Note=Desk%20%26%20chair',
+    'Unknown Field #/form/Request',
+    'Unknown Field With Known #/form/Request?Item_Ref=7',
     'Report Op Filter #/report/All_Requests?Note=Desk%20%26%20chair&Note_op=26',
   ]);
   // Row 8's row-backed values are absent: those actions are disabled rather
@@ -290,6 +295,8 @@ test('the static client links each navigation with values only from the row it r
     'Open Secret #/form/Secret?Item_Ref=8',
     'Bill Page #/page/Detail?param1=8',
     'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
+    'Unknown Field #/form/Request',
+    'Unknown Field With Known #/form/Request?Item_Ref=8',
   ]);
   // Counted actions draw no link.
   assert.doesNotMatch(rows, /External|Mixed|Computed|Report Unknown Field|Report Two Filters|Undeclared Param|Undeclared Nested|Case Mismatch|Missing Page|Deep Lookup|Missing Leaf|Head Not Lookup/);
@@ -639,13 +646,14 @@ test('mutation test: breaking parameter delegation or target validation breaks c
     params: [{ name: 'Ref_ID', field: 'ROWID' }],
   });
 
-  // Mutate: if target form field does not match ('Ref_ID' vs 'Wrong_Field'), navigation is refused
+  // Mutate: a target form field that does not match ('Ref_ID' vs 'Wrong_Field') is left off the link
   const mutatedDs = ds.replace('Ref_ID=', 'Wrong_Field=');
   const mutatedApp = deriveIr(parse(mutatedDs));
   const mutatedUi = buildUi(mutatedApp);
   const mutatedAction = mutatedUi.model.reports[0]!.customActions[0]!;
-  assert.equal(mutatedAction.preview, true, 'mutated unknown field turns action off');
-  assert.equal(mutatedAction.navigate, undefined, 'mutated unknown field produces no navigation');
+  // Creator ignores a parameter the form has no field for, so the form still opens, without it.
+  assert.equal(mutatedAction.preview, undefined, 'mutated unknown field still opens the form');
+  assert.deepEqual(mutatedAction.navigate, { kind: 'form', target: 'Target', href: '#/form/Target', params: [] });
 });
 
 test('a legacy #View: openUrl target resolves to the matching report or page, not a counted todo', () => {
@@ -1759,7 +1767,6 @@ test('interpolated own-app URLs, collection .getall() IDs, and 2-segment record-
     [
       'Reconfigure function CustomAction.BrokenShortEdit: its openUrl target is not a supported own-app form, report, or page link (invalid record-edit link).',
       'Reconfigure function Foreign_Slug_Btn: its openUrl target is not a supported own-app form, report, or page link (target is not an own-app #Form, #Report, or #Page route).',
-      'Reconfigure function Typo_Field_Btn: its openUrl target is not a supported own-app form, report, or page link (target form Add_Quotation has no field Titl).',
     ],
   );
 
@@ -1796,7 +1803,14 @@ test('interpolated own-app URLs, collection .getall() IDs, and 2-segment record-
     record: { field: 'ROWID' },
     params: [{ name: 'Title', value: 'Updated' }],
   });
-  for (const bad of ['Broken Short Edit', 'Foreign Slug', 'Typo Field']) {
+  // A field the form lacks is ignored by Creator: the form still opens, without that value.
+  assert.deepEqual(byName.get('Typo Field')?.navigate, {
+    kind: 'form',
+    target: 'Add_Quotation',
+    href: '#/form/Add_Quotation',
+    params: [{ name: 'Purchase_requisition', field: 'ROWID' }],
+  });
+  for (const bad of ['Broken Short Edit', 'Foreign Slug']) {
     assert.equal(byName.get(bad)?.preview, true, `${bad} stays turned off`);
     assert.equal(byName.get(bad)?.navigate, undefined, `${bad} has no navigation`);
   }
@@ -1815,7 +1829,7 @@ test('interpolated own-app URLs, collection .getall() IDs, and 2-segment record-
   const punctuatedGen = generate(punctuatedApp);
   assert.equal(
     punctuatedGen.todos.filter((t) => t.construct === 'openurl-unsupported-target').length,
-    3,
+    2,
   );
   const { model: punctuatedModel } = buildUi(punctuatedApp);
   const punctuatedAct = punctuatedModel.reports[0]!.customActions.find((a) => a.name === 'Add Quotation');

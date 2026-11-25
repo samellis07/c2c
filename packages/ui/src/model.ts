@@ -1310,7 +1310,8 @@ function navFromOpenUrl(
         if (raw.includes('\u0000')) return undefined;
         continue;
       }
-      if (!formField(targetForm, name)) return undefined;
+      // Creator ignores a parameter that matches none of the form's fields; the form still opens.
+      if (!formField(targetForm, name)) continue;
     } else if (targetPage) {
       if (!(targetPage.params ?? []).includes(name)) return undefined;
     } else if (kind === 'report' && !record) {

@@ -3273,9 +3273,9 @@ function classifyOpenUrlStmt(
         }
         continue;
       }
-      if (!formField(targetForm, paramName)) {
-        return { kind: 'unsupported', target: text, reason: `target form ${targetName} has no field ${paramName}` };
-      }
+      // A form opened with a value for a field it does not have still opens:
+      // Creator ignores a parameter that matches none of the form's fields.
+      if (!formField(targetForm, paramName)) continue;
       if (paramValue.includes('\u0000') && !/^\u0000\d+\u0000$/.test(paramValue)) {
         return { kind: 'unsupported', target: text, reason: `parameter ${paramName} is part literal, part row read` };
       }
