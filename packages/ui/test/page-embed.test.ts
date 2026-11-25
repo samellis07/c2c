@@ -429,7 +429,7 @@ test('zc-component params that cannot be applied stay counted TODOs', () => {
   const tags = [
     `<div elName='zc-component' viewLinkName='All_Rows' params='zc_AddRec=false'></div>`,
     `<div elName='zc-component' viewLinkName='All_Rows' params='zc_SubmitVal=Submit'></div>`,
-    `<div elName='zc-component' viewLinkName='All_Rows' params='Name=Ann'></div>`,
+    `<div elName='zc-component' viewLinkName='All_Rows' params='Name=Ann Lee'></div>`,
     `<div elName='zc-component' viewLinkName='All_Rows' params='zc_Header=no'></div>`,
     `<div elName='zc-component' viewLinkName='All_Rows' params='zc_Header'></div>`,
     `<div elName='zc-component' formLinkName='Intake' params='zc_SuccMsg=Saved'></div>`,
