@@ -620,6 +620,19 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
 // dialog under `zc_LoadIn=dialog`, which the page route has no counterpart for, so that flag is left out like any undeclared name.
 const PAGE_HREF = /^(?:(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>(?:#Page:|(?:view-embed|page-embed)\/)|#Page:)([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
 
+/** The query of a generated link from `includeParams` output: a literal, a forwarded page input or a supplied read, encoded. */
+function linkQuery(params: readonly string[], supplied: string[]): string {
+  return params
+    .map((p) => {
+      const eq = p.indexOf('=');
+      const key = p.slice(0, eq);
+      const value = p.slice(eq + 1);
+      if (value === '*') return `${key}=<%=encodeUrl(${supplied.shift()})%>`;
+      return value.startsWith('@') ? `${key}=<%=encodeUrl(input.${value.slice(1)})%>` : `${key}=${value}`;
+    })
+    .join('&amp;');
+}
+
 function rewritePageParamLinks(template: string, app: App, page: string, ownParams: ReadonlySet<string>): string {
   if (!/#Page:|(?:view|page)-embed\//i.test(template)) return template;
   return replaceAnchorElements(template, (whole, attrs, inner) => {
@@ -636,15 +649,7 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
     const params = includeParams(m[2] ?? '', target?.params ?? [], ownParams, 'omit', supplied);
     // The caller's identity (`zoho.loginuser`) never rides a page link; only a record value or a page parameter does.
     if (params === null || supplied.some((read) => /^zoho\b/i.test(read))) return whole;
-    const query = params
-      .map((p) => {
-        const eq = p.indexOf('=');
-        const key = p.slice(0, eq);
-        const value = p.slice(eq + 1);
-        if (value === '*') return `${key}=<%=encodeUrl(${supplied.shift()})%>`;
-        return value.startsWith('@') ? `${key}=<%=encodeUrl(input.${value.slice(1)})%>` : `${key}=${value}`;
-      })
-      .join('&amp;');
+    const query = linkQuery(params, supplied);
     const href = `#/page/${encodeURIComponent(target?.name ?? name)}${query ? `?${query}` : ''}`;
     const nextAttrs = attrs.slice(0, hrefMatch.index) + `href=${hrefMatch[1]}${href}${hrefMatch[1]}` + attrs.slice(hrefMatch.index + hrefMatch[0].length);
     return `<a${nextAttrs}>${inner}</a>`;
@@ -655,13 +660,15 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
  * A literal `href="<%=zoho.appuri%>#Form:<Form>"` or `#Report:<Report>` link to
  * a form or report of this app (the address island and the host optional, as
  * for a page link) is the route Creator opens: `#/form/<Form>` or
- * `#/report/<Report>`. Only Creator's own `zc_` display flags may follow the
- * name, so no filter or prefill is lost; a name the app does not have, or any
- * other query, leaves the href as written.
+ * `#/report/<Report>`. Creator's `zc_` display flags are left out. A report
+ * link may also carry `ID=<record id>`, a bounded literal or a bare read the
+ * render supplies, which the report route reads as the filter to that record;
+ * a form link carries no value, so nothing is lost. A name the app does not
+ * have, or any other query, leaves the href as written.
  */
-const OWN_ROUTE_HREF = /^(?:(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>)?#(Form|Report):([A-Za-z_]\w*)(?:\?([^"'<>%]*))?$/i;
+const OWN_ROUTE_HREF = /^(?:(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>)?#(Form|Report):([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
 
-function rewriteOwnRouteLinks(template: string, app: App): string {
+function rewriteOwnRouteLinks(template: string, app: App, ownParams: ReadonlySet<string>): string {
   if (!/#(?:Form|Report):/i.test(template)) return template;
   return replaceAnchorElements(template, (whole, attrs, inner) => {
     const hrefMatch = /\bhref\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
@@ -670,9 +677,11 @@ function rewriteOwnRouteLinks(template: string, app: App): string {
     const isForm = m[1]!.toLowerCase() === 'form';
     const name = m[2]!;
     if (!(isForm ? app.forms : app.reports).some((item) => item.name === name)) return whole;
-    const flags = (m[3] ?? '').replace(/&amp;/g, '&').split('&').filter(Boolean);
-    if (!flags.every((part) => /^zc_/i.test(part))) return whole;
-    const href = `#/${isForm ? 'form' : 'report'}/${encodeURIComponent(name)}`;
+    const supplied: string[] = [];
+    const params = includeParams((m[3] ?? '').replace(/&amp;/g, '&'), isForm ? [] : ['ID'], ownParams, 'refuse', supplied);
+    if (params === null || supplied.some((read) => /^zoho\b/i.test(read))) return whole;
+    const query = linkQuery(params, supplied);
+    const href = `#/${isForm ? 'form' : 'report'}/${encodeURIComponent(name)}${query ? `?${query}` : ''}`;
     return `<a${attrs.slice(0, hrefMatch.index)}href=${hrefMatch[1]}${href}${hrefMatch[1]}${attrs.slice(hrefMatch.index + hrefMatch[0].length)}>${inner}</a>`;
   });
 }
@@ -3974,7 +3983,7 @@ export function compileHtmlpage(
   // already exposes as `input.<name>`, never a value a caller invents.
   const ownPageParams = new Set([...head.params, ...(app.pages.find((item) => item.name === page)?.params ?? [])]);
   head.template = rewritePageParamLinks(head.template, app, page, ownPageParams);
-  head.template = rewriteOwnRouteLinks(head.template, app);
+  head.template = rewriteOwnRouteLinks(head.template, app, ownPageParams);
   // A `#Page:` href the rewrite above could not prove safe (unknown page, an
   // undeclared or repeated parameter, a value other than a bounded literal or
   // one forwarded `input.p`, the page linking itself) must never reach the
