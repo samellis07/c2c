@@ -3243,7 +3243,7 @@ export function applyActions(actions, root) {
       for (const target of action.targets || []) {
         const name = typeof target === 'string' ? target : '';
         notes.push(`set:${name}`);
-        writeFieldValue(root, name, value);
+        writeFieldValue(root, name, value, Number.isInteger(action.row) ? action.row : undefined);
       }
     } else if (op === 'openUrl') {
       const url = Array.isArray(action.args) ? action.args[0] : action.url;
@@ -6528,7 +6528,9 @@ function isServerEffect(effect) {
   if (effect.op === 'show' || effect.op === 'hide' || effect.op === 'enable' || effect.op === 'disable') return names(effect.targets);
   if (!Array.isArray(effect.args)) return false;
   if (effect.op === 'openUrl') return effect.args.length >= 1 && effect.args.length <= 2 && effect.args.every((arg) => typeof arg === 'string');
-  if (effect.op === 'setValue') return effect.args.length === 1 && names(effect.targets) && effect.targets.length === 1;
+  if (effect.op === 'setValue') {
+    return effect.args.length === 1 && names(effect.targets) && effect.targets.length === 1 && (effect.row === undefined || (Number.isInteger(effect.row) && effect.row >= 0));
+  }
   if (effect.op === 'subform') return effect.method === 'insert' && effect.args.length === 1 && names(effect.target);
   return (
     effect.op === 'ui' &&

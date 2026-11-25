@@ -7813,11 +7813,11 @@ test('alert verdicts follow the innermost event header', () => {
   }
 });
 
-test('alert in subform add row unmasks client-condition-uses-server when condition depends on server query', async () => {
+test('alert in subform add row under a server-read date is answered by the server run', async () => {
   // volunteer-portal Add_Log / Run_Scripts_On_Always / on add row of Volunteered_Log:
-  // Unlocking alert on subform add row unmasks client-side condition evaluation for the enclosing
-  // if block. Because startingDate derives from a server database query (Create_Event), the client
-  // condition cannot be evaluated purely in the client and correctly records client-condition-uses-server.
+  // Because startingDate derives from a server database query (Create_Event), the browser cannot
+  // evaluate the loop's conditions. The form event's server half runs the same loop once; it queues
+  // the alert and the row's date as effects under one marker and the browser keeps only the marker.
   const g = generate(
     app({
       forms: [
@@ -7855,9 +7855,12 @@ test('alert in subform add row unmasks client-condition-uses-server when conditi
 
   const client = g.files.find((f) => f.path === 'client/handlers/add-log/on-add-row-of-volunteered-log.mjs');
   assert.ok(client, 'client handler should be generated');
-  assert.match(stripComments(client.source), /actions\.push\(\{ op: "alert", message: "Sorry Logs cannot be added to Future Days" \}\)/);
-  assert.match(stripComments(client.source), /await shim\.todo\(ctx, "client-condition-uses-server"\)/);
-  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1);
+  assert.match(stripComments(client.source), /actions\.push\(\{ op: "serverEffect", key: "e\d+" \}\)/);
+  assert.doesNotMatch(stripComments(client.source), /shim\.todo|op: "alert"/);
+  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 0);
+  const route = g.files.find((f) => f.path === 'functions/aio/add-log/on-add-row-of-volunteered-log.mjs')!.source;
+  assert.match(route, /shim\.client\.effect\(ctx, "e\d+", \{ op: "alert", message: "Sorry Logs cannot be added to Future Days" \}\);/);
+  assert.match(route, /shim\.client\.effect\(ctx, "e\d+", shim\.client\.rowValue\(ctx, d_row, "Event_Dates"\)\);/);
   assert.equal(g.todos.some((t) => t.construct.startsWith('alert-')), false);
   const rep = JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as { alertDiagnostics: unknown[] };
   assert.equal(rep.alertDiagnostics.length, 0);
@@ -7870,7 +7873,7 @@ test('alert in subform add row unmasks client-condition-uses-server when conditi
   const runtime = createRuntime({ dryRun: true });
   const actions = await mod.clientActions!(runtime.context({ record: { Event_Name: 'EVT1', Volunteered_Log: [{}] } }));
   assert.ok(Array.isArray(actions));
-  assert.ok(runtime.transcript.some((t) => t.op === 'todo' && t.construct === 'client-condition-uses-server'));
+  assert.ok(!runtime.transcript.some((t) => t.op === 'todo'));
 });
 
 test('real volunteer portal Add_Log validate handler alerts on future dates only', { skip: !process.env.C2C_FIXTURES_DIR && 'needs C2C_FIXTURES_DIR' }, async () => {

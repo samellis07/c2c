@@ -50,7 +50,7 @@ function serverConditionApp(condition: string, prefix = ''): App {
         form: 'Reservation',
         event: 'on user input',
         deluge: {
-          text: `${prefix}for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(${condition} && a == b && Reservation[ID != 0].count() > 0) { alert "overlap"; } else { alert "free"; } } }`,
+          text: `${prefix}for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(${condition} && a == b && Reservation[ID != 0].count() > 0) { reload; } else { reload; } } }`,
           span: Z,
         },
       }),
@@ -147,7 +147,7 @@ test('a writing callee inside the condition expression keeps the counted todo', 
           form: 'Orders',
           event: 'on user input',
           deluge: {
-            text: 'for each a in Orders[ID != 0].Hours { for each b in Orders[ID != 0].Hours { if(thisapp.Util.Write(a) && Orders[ID != 0].count() > 0) { alert "w"; } } }',
+            text: 'for each a in Orders[ID != 0].Hours { for each b in Orders[ID != 0].Hours { if(thisapp.Util.Write(a) && Orders[ID != 0].count() > 0) { reload; } } }',
             span: Z,
           },
         }),

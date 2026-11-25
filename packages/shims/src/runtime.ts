@@ -439,7 +439,7 @@ export type ContextInput = Partial<
 export type ClientEffect =
   | { op: 'ui'; method: string; target: string[]; args: unknown[] }
   | { op: 'openUrl'; args: unknown[] }
-  | { op: 'setValue'; targets: string[]; args: unknown[] }
+  | { op: 'setValue'; targets: string[]; args: unknown[]; row?: number }
   | { op: 'subform'; method: 'insert'; target: string[]; args: unknown[] }
   | { op: 'alert'; message: unknown }
   | { op: 'show' | 'hide' | 'enable' | 'disable'; targets: string[] };
@@ -1231,7 +1231,12 @@ export interface Shim {
      * field value or subform rows only this run knows) under the marker `key` the browser left in its action
      * list. The reply to the browser's run carries them as `effects`.
      */
-    effect(ctx: ShimContext, key: string, effect: ClientEffect): void;
+    effect(ctx: ShimContext, key: string, effect: ClientEffect | null): void;
+    /**
+     * Server half: the field value of the subform row the event fired on, as the
+     * effect that puts it into that row's cell. Null when `row` is not that row.
+     */
+    rowValue(ctx: ShimContext, row: unknown, name: string): ClientEffect | null;
     /**
      * Browser only: the action list with every `serverEffect` marker replaced by
      * the effects the run's reply holds under its key. A marker the run did not
@@ -4540,8 +4545,15 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return ctx.formNonce;
       },
       effect(ctx, key, effect) {
+        if (!effect) return;
         const queued = (ctx.clientEffects ??= {});
         (queued[key] ??= []).push(effect);
+      },
+      rowValue(ctx, row, name) {
+        const at = ctx.subformRow;
+        const rows = at ? ctx.record[at.field] : undefined;
+        if (!at || !Array.isArray(rows) || rows[at.index] !== row) return null;
+        return { op: 'setValue', targets: [`${at.field}.${name}`], args: [(row as Record<string, unknown>)[name]], row: at.index };
       },
       async prefetch(ctx, path) {
         const first = await prefetchOnce(ctx, path, false);
