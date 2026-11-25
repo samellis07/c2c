@@ -11,6 +11,16 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - This release's documentation does not record a run of the generated output against a deployed Catalyst project or live Zoho; test the deployment before relying on it.
 - Creator placement relative to On Validate and other items marked `[UNVERIFIED]` in the source documentation remain unverified (`docs/ui.md`).
 
+## Manual steps that come from broken references in the source app
+
+Some manual steps are not platform limits. The source app refers to something that does not exist, and the converter does not guess a nearest match, because a guessed destination or field would send users somewhere the original never went. The generated app keeps the rest of the behavior and counts the broken part as a manual step whose reason names the missing target.
+
+- A `#Form:`, `#Report:` or `#Page:` link, or an `openUrl` target, whose form, report or page is not in the app, or whose pseudo-route is malformed (a misspelled prefix, or a query written without `=`). The navigation is not carried.
+- A report or click parameter that names a field the form does not have, or spells it with different capitalization, or passes a variable nothing in the source defines. The click is not wired to a filter.
+- An embedded component (`zc-component`) that names a form or report the app does not define, or whose markup is cut off.
+
+To resolve one: read the reason in `c2c analyze` (it names the missing form, field or route), then either correct the reference in the source app and convert again, or wire the navigation or filter by hand in the generated app. These items stay counted in `docs/determinism-status.md` until the reference exists.
+
 ## Platform limits and their manual steps
 
 Each row below is a construct that `c2c analyze` reports as a manual step because the generated app cannot reproduce it. The construct names match `docs/determinism-status.md`. For each one: what Creator does, what the generated app does instead, why the two differ, and what to do by hand. Where the reason is a browser or platform rule rather than something this tree enforces, the row says so.
