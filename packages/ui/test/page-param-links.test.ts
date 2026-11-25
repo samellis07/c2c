@@ -48,6 +48,13 @@ test('a forwarded page parameter becomes a generated link with an encodeUrl isla
   assert.match(out.file?.source ?? '', /"#\/page\/Inner\?date="/);
 });
 
+test('a bare Creator page fragment is translated like an appuri-prefixed link', () => {
+  const out = compile('#Page:Inner?date=<%=input.date%>');
+  assert.equal(out.ok, true, out.reason ?? 'compile failed');
+  assert.match(out.file?.source ?? '', /shim\.string\.encodeUrl\(shim\.input\.get\(ctx, "date"\)\)/);
+  assert.match(out.file?.source ?? '', /"#\/page\/Inner\?date="/);
+});
+
 test('a literal page parameter becomes a fully static generated link', () => {
   const out = compile('<%=zoho.appuri%>#Page:Inner?date=2024-01-05');
   assert.equal(out.ok, true, out.reason ?? 'compile failed');
