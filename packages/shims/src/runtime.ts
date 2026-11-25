@@ -3384,6 +3384,8 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return q;
       },
       async rows(ctx, query) {
+        // A name no statement bound (assigned only in an arm that did not run) fetched nothing.
+        if (query == null) return [];
         const scoped = scopeRead(ctx, query.form, query.criteria);
         return readQueryRows(ctx, query, scoped);
       },
@@ -3410,6 +3412,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         }
       },
       async aggregate(ctx, query, fn, field) {
+        if (query == null) return aggregateSeed([], fn, field, undefined);
         // `count()` and `distinct ID` read no field: no field grant is needed.
         // `count(field)` does read the field (it counts the values it holds).
         const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' || field == null || field === '' ? undefined : field);
@@ -3435,6 +3438,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return matchRow(values, bound, meta ? decimalsOf(meta.form) : {});
       },
       async column(ctx, query, field) {
+        if (query == null) return [];
         const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : field);
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'column', form: query.form, field, where, limit: LIMITS.zcqlRowsPerQuery, dryRun, authorized: !!options.access });
@@ -3448,6 +3452,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return got.map((row) => (field === 'ID' ? logicalId(row) : projectFields(row, scoped.fields)[field]));
       },
       async field(ctx, query, field) {
+        if (query == null) return null;
         const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : field);
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'field', form: query.form, field, where, dryRun, authorized: !!options.access });
