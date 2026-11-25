@@ -664,8 +664,9 @@ function lookupKey(table: Record<string, readonly string[]> | undefined, name: s
 function resolveNavigation(result: unknown, routes?: NavRoutes, options: { ignoreUndeclared?: boolean } = {}): NavInstruction | null {
   if (!isNavResult(result)) return null;
   if (result.kind !== 'navigate') return { kind: result.kind } as NavInstruction;
-  const target: 'same' | 'new' = result.target === 'new' ? 'new' : 'same';
+  const target: 'same' | 'new' = Object.prototype.hasOwnProperty.call(result, 'target') && result.target === 'new' ? 'new' : 'same';
   // `zoho.appuri` stands for the app's own address and is an opaque value at run time.
+  if (!Object.prototype.hasOwnProperty.call(result, 'url')) return null;
   let url = navText(result.url).replace(/^(?:\[object Object\])+/, '').trim();
   if (!url) return null;
   // The app's own address in front of a route (`zoho.appuri + "#Form:X"`) is no part of the route.
@@ -675,9 +676,9 @@ function resolveNavigation(result: unknown, routes?: NavRoutes, options: { ignor
   const embed = /^(?:https?:\/\/[^#?]*\/)?(?:view-embed|page-embed)\/([A-Za-z_]\w*)(?:\?(.*))?$/i.exec(url);
   if (embed) url = `#View:${embed[1]}${embed[2] === undefined ? '' : `?${embed[2]}`}`;
   if (/^#Script:/i.test(url)) return scriptNavInstruction(url) ?? null;
-  const m = /^#(Form|Report|Page|View):([^?]+?)(?:\?(.*))?$/i.exec(url);
+  const m = /^#(Form|Report|Page|View|From):([^?]+?)(?:\?(.*))?$/i.exec(url);
   if (!m) return { kind: 'navigate', url, target };
-  const kind = m[1]!.toLowerCase();
+  const kind = m[1]!.toLowerCase() === 'from' ? 'report' : m[1]!.toLowerCase();
   const name = m[2]!.trim();
   const pairs = (m[3] ?? '').split('&').filter(Boolean).map((pair) => {
     const eq = pair.indexOf('=');
