@@ -656,6 +656,9 @@ function resolveNavigation(result: unknown, routes?: NavRoutes, options: { ignor
   // The app's own address in front of a route (`zoho.appuri + "#Form:X"`) is no part of the route.
   const own = /^https?:\/\/[^#?]*(#(?:Form|Report|Page|View|Script):.*)$/i.exec(url);
   if (own) url = own[1]!;
+  // The embedded view of a page or report (`view-embed/Name?x=1`, the app's address before it or none) opens the same route a `#View:` link does.
+  const embed = /^(?:https?:\/\/[^#?]*\/)?(?:view-embed|page-embed)\/([A-Za-z_]\w*)(?:\?(.*))?$/i.exec(url);
+  if (embed) url = `#View:${embed[1]}${embed[2] === undefined ? '' : `?${embed[2]}`}`;
   if (/^#Script:/i.test(url)) return scriptNavInstruction(url) ?? null;
   const m = /^#(Form|Report|Page|View):([^?]+?)(?:\?(.*))?$/i.exec(url);
   if (!m) return { kind: 'navigate', url, target };
