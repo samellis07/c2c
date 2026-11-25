@@ -123,6 +123,10 @@ function c2cMarkup(value, notes, href) {
     }
     if (lt > at) out.push(c2cMkText(text.slice(at, lt)));
     if (text.startsWith("<!--", lt)) {
+      // HTML's bogus-comment state closes an empty comment at the first >:
+      // both the empty and hyphenated forms are comments, followed by live text/markup.
+      if (text.startsWith("<!-->", lt)) { at = lt + 5; continue; }
+      if (text.startsWith("<!--->", lt)) { at = lt + 6; continue; }
       var end = text.indexOf("-->", lt + 4);
       at = end < 0 ? text.length : end + 3;
       continue;

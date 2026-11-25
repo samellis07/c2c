@@ -4535,6 +4535,15 @@ test('a markup value keeps an inline raster image and its allowed attributes, an
   assert.doesNotMatch(loud.html, /onclick|data-x/);
 });
 
+test('a markup value follows the HTML parser for abruptly closed and malformed comments', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<% shown = thisapp.Util.wrap(input.q); %>\n<%= shown %>`;
+  const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const abrupt = await renderPage(app, snippet, { q: '<!--><p>live</p>' });
+  assert.match(abrupt.html, /<p>live<\/p>/);
+  const malformed = await renderPage(app, snippet, { q: '<!--not closed><p>hidden</p>' });
+  assert.doesNotMatch(malformed.html, /hidden/);
+});
+
 test('the client sanitizer keeps an exact inline raster image src on an img and nothing else with a data URL', async () => {
   const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
     sanitizeSnippet(raw: string, doc: unknown): string;

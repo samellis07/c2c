@@ -67,6 +67,7 @@ test('template sanitizer keeps a class token by the same rule as the generator a
     assert.equal(fromTemplate, runtime.sanitizeSnippet(html, doc), html);
   }
   assert.equal(sanitizeSnippet('<div class="a modal skip-link b">x</div>', doc as unknown as Document), '<div class="a b">x</div>');
+  assert.equal(sanitizeSnippet('<div class="a _overlay_abc123 b">x</div>', doc as unknown as Document), '<div class="a b">x</div>');
   // One list in three places, and it names every class either shell stylesheet lifts out of flow.
   assert.deepEqual([...SHELL_OVERLAY_CLASSES].sort(), [...BUILD_OVERLAY_CLASSES].sort());
   assert.deepEqual([...SHELL_OVERLAY_CLASSES].sort(), [...runtime.SHELL_OVERLAY_CLASSES].sort());
@@ -79,5 +80,5 @@ test('template sanitizer keeps a class token by the same rule as the generator a
     }
   }
   assert.ok(lifted.size > 0);
-  for (const cls of lifted) assert.ok(SHELL_OVERLAY_CLASSES.has(cls), `${cls} is lifted out of flow by a shell stylesheet but not reserved`);
+  for (const cls of lifted) assert.ok(SHELL_OVERLAY_CLASSES.has(cls) || /^_overlay_[A-Za-z0-9_-]+$/i.test(cls), `${cls} is lifted out of flow by a shell stylesheet but not reserved`);
 });
