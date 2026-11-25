@@ -2494,6 +2494,27 @@ function soleOpenUrl(stmt: Stmt, outerLocals?: ReadonlyMap<string, Expr>): Stmt 
   return undefined;
 }
 
+/** Collect navigation leaves from a conditional branch.  Creator permits
+ * nested conditionals around a navigation; retaining every leaf lets the
+ * caller preserve the original conditional structure while classifying each
+ * destination instead of treating the whole branch as an unknown shape. */
+function nestedOpenUrls(stmt: Stmt, outerLocals?: ReadonlyMap<string, Expr>): Stmt[] | undefined {
+  const one = soleOpenUrl(stmt, outerLocals);
+  if (one) return [one];
+  if (stmt.kind !== 'if') return undefined;
+  const out: Stmt[] = [];
+  const add = (branch: Stmt): boolean => {
+    const leaves = nestedOpenUrls(branch, outerLocals);
+    if (!leaves?.length) return false;
+    out.push(...leaves);
+    return true;
+  };
+  if (!add(stmt.then)) return undefined;
+  for (const branch of stmt.elifs) if (!add(branch.body)) return undefined;
+  if (stmt.else && !add(stmt.else)) return undefined;
+  return out;
+}
+
 /**
  * The openUrl statements a client-navigation function is allowed to hold: one
  * `openUrl`, or an if / else-if / else whose every branch is one `openUrl`,
@@ -2515,18 +2536,18 @@ function openUrlStmtsOf(body: readonly Stmt[]): Stmt[] | undefined {
   }
   if (rest.length !== 1 || rest[0]?.kind !== 'if') return undefined;
   const iff = rest[0];
-  const thenUrl = soleOpenUrl(iff.then, locals);
-  if (!thenUrl) return undefined;
-  const out: Stmt[] = [thenUrl];
+  const thenUrls = nestedOpenUrls(iff.then, locals);
+  if (!thenUrls) return undefined;
+  const out: Stmt[] = [...thenUrls];
   for (const branch of iff.elifs) {
-    const url = soleOpenUrl(branch.body, locals);
-    if (!url) return undefined;
-    out.push(url);
+    const urls = nestedOpenUrls(branch.body, locals);
+    if (!urls) return undefined;
+    out.push(...urls);
   }
   if (iff.else) {
-    const url = soleOpenUrl(iff.else, locals);
-    if (!url) return undefined;
-    out.push(url);
+    const urls = nestedOpenUrls(iff.else, locals);
+    if (!urls) return undefined;
+    out.push(...urls);
   }
   return out;
 }
@@ -2636,18 +2657,18 @@ function trailingOpenUrlUnits(body: readonly Stmt[]): Stmt[] | undefined {
   const bare = bareOpenUrl(last);
   if (bare) return [bare];
   if (last.kind !== 'if') return undefined;
-  const thenUrl = bareOpenUrl(last.then);
-  if (!thenUrl) return undefined;
-  const out: Stmt[] = [thenUrl];
+  const thenUrls = nestedOpenUrls(last.then);
+  if (!thenUrls) return undefined;
+  const out: Stmt[] = [...thenUrls];
   for (const branch of last.elifs) {
-    const url = bareOpenUrl(branch.body);
-    if (!url) return undefined;
-    out.push(url);
+    const urls = nestedOpenUrls(branch.body);
+    if (!urls) return undefined;
+    out.push(...urls);
   }
   if (last.else) {
-    const url = bareOpenUrl(last.else);
-    if (!url) return undefined;
-    out.push(url);
+    const urls = nestedOpenUrls(last.else);
+    if (!urls) return undefined;
+    out.push(...urls);
   }
   return out;
 }
