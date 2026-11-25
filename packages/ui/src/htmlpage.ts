@@ -822,6 +822,12 @@ function embedFieldNames(app: App, kind: string, name: string): string[] {
   return (form?.fields ?? []).filter((field) => field.subfields.length === 0 && !field.lookup && !/^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')).map((field) => field.name);
 }
 
+/** Lookup columns of the embedded form: a key naming one is never applied or left out (the value is display text, the column holds a row id). */
+function embedLookupNames(app: App, kind: string, name: string): ReadonlySet<string> {
+  const form = kind === 'form' ? app.forms.find((item) => item.name === name) : app.forms.find((item) => item.name === app.reports.find((report) => report.name === name)?.form);
+  return new Set((form?.fields ?? []).filter((field) => field.lookup).map((field) => field.name.toLowerCase()));
+}
+
 /**
  * The embed's applicable params, or null when any one cannot be applied. A key
  * that is not a display flag must name a field of the embedded form (or the
@@ -837,6 +843,7 @@ function componentParams(
   fields: readonly string[] = [],
   slots: readonly string[] = [],
   own: ReadonlySet<string> = new Set(),
+  lookups: ReadonlySet<string> = new Set(),
 ): { untitled: boolean; hidden: string[]; params: ComponentParam[] } | null {
   // A reference without its `;` still reads as `&` where an `&` follows, as the browser reads an attribute value.
   const text = raw.replace(/&amp;|&amp(?=&)/gi, '&').trim();
@@ -866,6 +873,7 @@ function componentParams(
       continue;
     }
     if (!/^[A-Za-z_]\w*$/.test(rawKey) || PARAM_RESERVED.has(key) || /^zc_/i.test(rawKey)) return null;
+    if (lookups.has(key)) return null;
     const matches = fields.filter((field) => field.toLowerCase() === key);
     // A report filter on a key that is no field would show more records than Creator does; a form prefill of one fills nothing.
     if (matches.length > 1 || (matches.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
@@ -941,7 +949,7 @@ function embeddedComponents(
     const rawParams = attrs.get('params');
     // A token outside `params` is an island in another attribute: not an embed.
     if (slots.length && attrKeys.some((key) => key !== 'params' && (attrs.get(key) ?? '').includes('\u0001'))) return null;
-    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own) : null;
+    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupNames(app, kind, name)) : null;
     if (known && !hostile && params) {
       const keys = params.params.map((item) => item.key);
       const component: EmbeddedComponent = { kind: kind as 'form' | 'report', name, ...(keys.length ? { params: keys } : {}) };
