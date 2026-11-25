@@ -585,10 +585,27 @@ export interface NavRoutes {
   pages?: Record<string, readonly string[]>;
 }
 
-export type NavInstruction = { kind: 'navigate'; url: string; target: 'same' | 'new' } | { kind: 'reload' };
+/** The pseudo-instruction kinds Creator's `#Script:` openUrl targets map to; each one acts on the page itself rather than naming a route. */
+export type PageNavKind = 'closeDialog' | 'closePage' | 'refreshParent';
+export type NavInstruction = { kind: 'navigate'; url: string; target: 'same' | 'new' } | { kind: 'reload' } | { kind: PageNavKind };
+
+const SCRIPT_NAV: Record<string, NavInstruction> = {
+  'page.refresh': { kind: 'reload' },
+  'page.reload': { kind: 'reload' },
+  'dialog.close': { kind: 'closeDialog' },
+  'page.close': { kind: 'closePage' },
+  'page.parent.refresh': { kind: 'refreshParent' },
+};
+
+/** Creator's `#Script:<name>` openUrl targets the page can perform; any other `#Script:*` is no navigation. */
+export function scriptNavInstruction(url: string): NavInstruction | undefined {
+  const m = /^#Script:(.+)$/i.exec(url.trim());
+  const found = m ? SCRIPT_NAV[m[1]!.trim().toLowerCase()] : undefined;
+  return found ? { ...found } : undefined;
+}
 
 function isNavResult(value: unknown): value is { kind: string; url?: unknown; target?: unknown } {
-  return !!value && typeof value === 'object' && !Array.isArray(value) && ((value as { kind?: unknown }).kind === 'navigate' || (value as { kind?: unknown }).kind === 'reload');
+  return !!value && typeof value === 'object' && !Array.isArray(value) && ['navigate', 'reload', 'closeDialog', 'closePage', 'refreshParent'].includes(String((value as { kind?: unknown }).kind));
 }
 
 function navText(value: unknown): string {
@@ -613,7 +630,7 @@ function lookupKey(table: Record<string, readonly string[]> | undefined, name: s
 /** Maps a Creator openUrl target to this app's own hash route; anything else is passed through for the page's own URL gate to judge. */
 function resolveNavigation(result: unknown, routes?: NavRoutes): NavInstruction | null {
   if (!isNavResult(result)) return null;
-  if (result.kind === 'reload') return { kind: 'reload' };
+  if (result.kind !== 'navigate') return { kind: result.kind } as NavInstruction;
   const target: 'same' | 'new' = result.target === 'new' ? 'new' : 'same';
   // `zoho.appuri` stands for the app's own address and is an opaque value at run time.
   let url = navText(result.url).replace(/^(?:\[object Object\])+/, '').trim();
@@ -621,7 +638,7 @@ function resolveNavigation(result: unknown, routes?: NavRoutes): NavInstruction 
   // The app's own address in front of a route (`zoho.appuri + "#Form:X"`) is no part of the route.
   const own = /^https?:\/\/[^#?]*(#(?:Form|Report|Page|View|Script):.*)$/i.exec(url);
   if (own) url = own[1]!;
-  if (/^#Script:page\.refresh$/i.test(url)) return { kind: 'reload' };
+  if (/^#Script:/i.test(url)) return scriptNavInstruction(url) ?? null;
   const m = /^#(Form|Report|Page|View):([^?]+?)(?:\?(.*))?$/i.exec(url);
   if (!m) return { kind: 'navigate', url, target };
   const kind = m[1]!.toLowerCase();

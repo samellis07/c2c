@@ -169,6 +169,27 @@ test('a page refresh is a reload, and a script call that is not a refresh stays 
   assert.ok(g.todos.some((t) => /^openurl-/.test(t.construct)), `an unknown script call is still counted: ${g.todos.map((t) => t.construct)}`);
 });
 
+for (const [script, kind] of [
+  ['#Script:page.reload', 'reload'],
+  ['#Script:dialog.close', 'closeDialog'],
+  ['#Script:page.close', 'closePage'],
+  ['#Script:page.parent.refresh', 'refreshParent'],
+] as const) {
+  test(`${script} is carried as a ${kind} instruction`, async (t) => {
+    const run = await loadFunction(t, demo(['t.Status = "Done";', `openUrl("${script}", "same window");`].join('\n')));
+    assert.deepEqual(run.todos.filter((c) => NAV.test(c)), []);
+    assert.deepEqual(run.resolve(await run.call({ Status: 'Open' })), { kind });
+  });
+}
+
+test('the last navigation that runs wins, whichever kind it is', async (t) => {
+  const run = await loadFunction(
+    t,
+    demo(['t.Status = "Done";', 'openUrl("#Form:Audit", "same window");', 'openUrl("#Script:dialog.close", "same window");'].join('\n')),
+  );
+  assert.deepEqual(run.resolve(await run.call({ Status: 'Open' })), { kind: 'closeDialog' });
+});
+
 test('a target that names a form, page parameter or filter this app does not have resolves to no navigation', async (t) => {
   const run = await loadFunction(
     t,
