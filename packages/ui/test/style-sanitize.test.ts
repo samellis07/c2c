@@ -326,6 +326,8 @@ test('CSS tokenizer scopes selectors and refuses fetches, unsafe selectors, malf
   assert.deepEqual(carryStaticStyle('.x{color:red}', '[data-page="a"]'), { css: '[data-page="a"] .x{color:red}', droppedRules: 0, dropped: [] });
   const responsive = carryStaticStyle('@media (min-width: 768px) { .x > .y { width: 20% } }', '[data-page="a"]');
   assert.deepEqual(responsive, { css: '@media (min-width: 768px){[data-page="a"] .x > .y{width: 20%}}', droppedRules: 0, dropped: [] });
+  const creatorDuplicateAt = carryStaticStyle('@@media only screen and (max-width:768px) { .x { width: 20px } }', '[data-page="a"]');
+  assert.deepEqual(creatorDuplicateAt, { css: '@media only screen and (max-width:768px){[data-page="a"] .x{width: 20px}}', droppedRules: 0, dropped: [] });
   assert.equal(carryStaticStyle('@media (url(x)) {.x{color:red}}', '[data-page="a"]').droppedRules, 1);
 });
 

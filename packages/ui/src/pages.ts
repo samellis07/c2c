@@ -743,6 +743,10 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
       drop('unparsed CSS'); break;
     }
     let head = css.slice(start, i).trim();
+    // Creator exports a duplicated at-sign for media queries in some page
+    // snippets (`@@media`).  It is still the same inert responsive rule; keep
+    // the query while preserving all normal condition and body validation.
+    head = head.replace(/^@@(?=media\b)/i, '@');
     at = ruleHead(head);
     let depth = 1, end = i + 1; quote = ''; comment = false;
     for (; end < css.length && depth; end++) {
