@@ -77,6 +77,7 @@ test('the same name stays counted when it could hold anything but the page input
     `\tprojID = input.pid.toLong() + 1;`,
     `\tprojID = input.pid;`,
     `\tprojID = input.pid.toLong();\n\tfor each projID in Projects\n\t{\n\t}`,
+    `\tprojID = input.pid.toLong();\n\tprojID\n\t=\n\t7;`,
     `\twhile (input.pid == "1")\n\t{\n\t\tprojID = input.pid.toLong();\n\t}`,
     `\tfor each r in Projects\n\t{\n\t\tprojID = input.pid.toLong();\n\t}`,
     `\tif (input.pid == "1")\n\t{\n\t\twhile (true)\n\t\t{\n\t\t\tprojID = input.pid.toLong();\n\t\t}\n\t}`,
