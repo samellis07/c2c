@@ -3125,6 +3125,31 @@ export function rewriteRecordSummaryFrames(template: string, app?: App, source?:
   });
 }
 
+/** Attributes of a blank frame that change nothing the page shows: its name only targeted a navigation, the rest tune content. */
+const BLANK_FRAME_ATTRS = new Set(['allowtransparency', 'class', 'name', 'scrolling', 'src', 'style', 'zc_mobileview']);
+const NO_BORDER = /(?:^|;)[\t\n\f\r ]*border[\t\n\f\r ]*:[\t\n\f\r ]*(?:none|0(?:px)?)[\t\n\f\r ]*(?:;|$)/i;
+
+/**
+ * A frame with an empty `src`, no content and no border is the blank box the
+ * browser draws for `about:blank`, sized by its style. It becomes a `<div>`
+ * carrying that style and class, the same box, because the sanitizer drops an
+ * `iframe`. A frame that could show anything else (an address, an island in
+ * its tag, a width or height attribute, frame content, a visible default
+ * border, a value that needs escaping) is left as written and stays counted.
+ */
+function rewriteBlankFrames(template: string): string {
+  return replaceIframeElements(template, (whole, attrs, inner) => {
+    if (inner.trim() !== '' || attrs.includes('<%')) return whole;
+    const parsed = parseZmlAttributes(attrs);
+    const names = Object.keys(parsed);
+    if (!names.every((name) => BLANK_FRAME_ATTRS.has(name)) || parsed.src === undefined || parsed.src.trim() !== '') return whole;
+    if (!NO_BORDER.test(parsed.style ?? '')) return whole;
+    const kept = ['class', 'style'].filter((name) => parsed[name] !== undefined);
+    if (kept.some((name) => /["&<>]/.test(parsed[name] ?? ''))) return whole;
+    return `<div${kept.map((name) => ` ${name}="${parsed[name]}"`).join('')}></div>`;
+  });
+}
+
 /**
  * Replace each complete `<iframe ...>...</iframe>` element, scanning once from
  * left to right. Attributes are read quote-aware (a quote with no closing
@@ -3687,6 +3712,24 @@ function rewriteEmbedIframes(template: string, app: App): string {
 }
 
 /**
+ * A template whose markup ends in an end tag that never reaches its `>` (the
+ * `</div` a hand edit left) followed only by the statement island that closes
+ * the function. Nothing follows the island, so the rendered markup ends inside
+ * that tag, and the HTML tokenizer drops a tag it meets the end of the input
+ * in. The compiled markup leaves it out instead of putting an island inside a
+ * tag. Any other shape keeps its position check.
+ */
+const CLOSING_BRACE_ISLAND = new RegExp(`^<%[${TAG_WS}]*\\}[${TAG_WS}]*%>[${TAG_WS}]*$`);
+const CUT_OFF_END_TAG = new RegExp(`^</[A-Za-z][\\w:-]*[${TAG_WS}]*$`);
+function dropCutOffEndTag(template: string): string {
+  const island = template.lastIndexOf('<%');
+  if (island < 0 || !CLOSING_BRACE_ISLAND.test(template.slice(island))) return template;
+  const tag = template.lastIndexOf('</', island);
+  if (tag < 0 || !CUT_OFF_END_TAG.test(template.slice(tag, island))) return template;
+  return template.slice(0, tag) + template.slice(island);
+}
+
+/**
  * Compile a decoded `htmlpage` template into a generated endpoint plus the
  * sanitized static shell. Returns `{ ok: false }` for anything outside the
  * handled classes; the caller keeps the same manual TODO as before.
@@ -3705,7 +3748,9 @@ export function compileHtmlpage(
   });
   const head = splitTemplate(decoded);
   head.template = inlineConstantStyleCalls(head.template, app);
+  head.template = dropCutOffEndTag(head.template);
   head.template = rewriteRecordSummaryFrames(inlineSummaryUrlVariable(head.template), app, decoded);
+  head.template = rewriteBlankFrames(head.template);
   const fnFiles: HtmlpageFile[] = [];
   head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)), {
     app,
