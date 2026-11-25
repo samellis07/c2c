@@ -30,8 +30,8 @@ TODO item per untranslated construct occurrence.
 | apps with no residual todos | 42/67 |
 | apps with no residual todos and no silent drops (deterministic) | 42/67 (62.7%) |
 | silent drops (total) | 0 |
-| residual TODO items | 57 |
-| distinct TODO kinds | 26 |
+| residual TODO items | 56 |
+| distinct TODO kinds | 25 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -57,7 +57,7 @@ TODO item per untranslated construct occurrence.
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
 | `Map report Today_Inspection_Map is shown as a list because Add_New_Inspection has no address field to plot.` | 1 |
 | `Report (app identifier) has a `customlayouts` settings block (template (app identifier)) that Catalyst generates no equivalent for.` | 1 |
-| `Report (app identifier) has an `options` setting (week start day = monday) that Catalyst does not carry into the generated timeline report.` | 1 |
+| `Report (app identifier) lists column Record_Status, a Creator built-in record column; the generated schema has no column for it.` | 1 |
 
 ## Top 0 silent-drop kinds
 
@@ -72,12 +72,12 @@ clears the app. The count is apps, not items.
 | construct | apps |
 |---|---:|
 | `Server-side Deluge snippet requires manual translation` | 3 |
+| `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background-image` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background-image declaration)` | 1 |
-| `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 | `ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 
 ## Machine-readable
@@ -164,10 +164,6 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Report (app identifier) has a `customlayouts` settings block (template (app identifier)) that Catalyst generates no equivalent for.",
-      "count": 1
-    },
-    {
-      "construct": "Report (app identifier) has an `options` setting (week start day = monday) that Catalyst does not carry into the generated timeline report.",
       "count": 1
     },
     {
@@ -282,13 +278,6 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "Report (app identifier) has an `options` setting (week start day = monday) that Catalyst does not carry into the generated timeline report.",
-        "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
         "Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.",
         "Server-side Deluge snippet requires manual translation"
       ],
@@ -360,6 +349,12 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
+        "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
         "ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
       ],
       "items": 1
@@ -367,7 +362,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 57,
+  "todoTotal": 56,
   "totalApps": 67
 }
 ```
