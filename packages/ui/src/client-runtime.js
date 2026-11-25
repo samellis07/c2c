@@ -1137,7 +1137,7 @@ export function boardLanes(report, rows) {
     if (report.view === 'kanban') key = cellText(row, report.groupField);
     else {
       key = cellText(row, report.startField).split(/[ T]/)[0];
-      if (report.view === 'calendar' && report.displayType === 'week') {
+      if ((report.view === 'calendar' && report.displayType === 'week') || (report.view === 'timeline' && report.weekStartDay)) {
         const source = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(key);
         const normalized = source
           ? `${source[3]}-${String(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(source[2]) + 1).padStart(2, '0')}-${source[1].padStart(2, '0')}T00:00:00Z`
@@ -1145,7 +1145,8 @@ export function boardLanes(report, rows) {
         const date = new Date(normalized);
         if (!Number.isNaN(date.getTime())) {
           const day = date.getUTCDay();
-          date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1));
+          const weekStartsSunday = report.view === 'timeline' && report.weekStartDay === 'sunday';
+          date.setUTCDate(date.getUTCDate() - (weekStartsSunday ? day : day === 0 ? 6 : day - 1));
           key = date.toISOString().slice(0, 10);
         }
       }
