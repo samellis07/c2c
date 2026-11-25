@@ -81,11 +81,16 @@ test('the cause text follows the set of reaching definitions for every generated
 
 test('a path that truly reaches the ui.add with no definition says so', () => {
   for (const src of [
-    'if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); }\ninput.Room:ui.add(m);',
     'if (input.N == "A") { if (input.N == "B") { m = Rooms[ID != 0].Room_No.getAll(); } }\ninput.Room:ui.add(m);',
-    'if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); } else { y = 1; }\ninput.Room:ui.add(m);',
   ]) {
     assert.match(manual(src)[0] ?? '', /reads `m`, which is not assigned on every path/, src);
+  }
+  // One arm that assigns it straight in the arm is replayed under its test.
+  for (const src of [
+    'if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); }\ninput.Room:ui.add(m);',
+    'if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); } else { y = 1; }\ninput.Room:ui.add(m);',
+  ]) {
+    assert.deepEqual(manual(src), [], src);
   }
 });
 

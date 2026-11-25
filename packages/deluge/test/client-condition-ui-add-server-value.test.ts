@@ -80,8 +80,14 @@ test('a ui.add fed by an app function the generator did not prove read-only name
 });
 
 test('a ui.add reading a binding that does not dominate it names the local', () => {
-  const [one] = step('if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); }\ninput.Room:ui.add(m);');
+  const [one] = step('if (input.N == "A") { if (input.N == "B") { m = Rooms[ID != 0].Room_No.getAll(); } }\ninput.Room:ui.add(m);');
   assert.match(one ?? '', /reads `m`, which is not assigned on every path/);
+});
+
+test('a ui.add reading a name one arm assigns straight in the arm replays it under that arm\'s test', () => {
+  const r = translate('if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); }\ninput.Room:ui.add(m);', { formNames: ['Rooms'], inputFields: ['N', 'Room'] });
+  assert.deepEqual(r.todos, []);
+  assert.match(r.prefetch, /var m = \(\(shim\.input\.get\(ctx, "N"\) == "A"\) \? await shim\.datastore\.column\(.*\) : undefined\);/);
 });
 
 test('manual steps name the precise dependency cause for every binding shape', () => {
@@ -96,7 +102,7 @@ test('manual steps name the precise dependency cause for every binding shape', (
     ['try/catch write arms', 'try { m = insert into Staff [Name = input.N]; } catch (e) { m = insert into Staff [Name = input.N]; } input.Room:ui.add(m);', /from a write, mail or outbound call/],
     ['app function then arm mutation', 'rooms = thisapp.Rooms.book(input.N).get("Rooms"); if (input.N == "A") { rooms.add("X"); } input.Room:ui.add(rooms);', /takes its value through `rooms` from thisapp\./],
     ['write result', 'if (input.N == "A") { r = insert into Staff [Name = input.N]; input.Assignee:ui.add(r); }', /through `r` from a write, mail or outbound call/],
-    ['non-dominating binding', 'if (input.N == "A") { m = Rooms[ID != 0].Room_No.getAll(); } input.Room:ui.add(m);', /reads `m`, which is not assigned on every path/],
+    ['non-dominating binding', 'if (input.N == "A") { if (input.N == "B") { m = Rooms[ID != 0].Room_No.getAll(); } } input.Room:ui.add(m);', /reads `m`, which is not assigned on every path/],
     ['pre-branch mutated in arm', 'rooms = thisapp.Rooms.book(input.N).get("Rooms"); if (input.N == "A") { rooms.add("X"); } input.Room:ui.add(rooms);', /takes its value through `rooms` from thisapp\./],
     ['loop-carried (fully replayable)', 'rooms = Rooms[ID != 0].Room_No.getAll(); for each r in Rooms[ID != 0] { rooms.add(r.Room_No); } input.Room:ui.add(rooms);', /^$/],
     ['shadowed internal name', 'rooms = Rooms[ID != 0].Room_No.getAll(); if (input.N == "A") { rooms = thisapp.Rooms.book(input.N).get("Rooms"); } input.Room:ui.add(rooms);', /prefetch cannot replay safely/],

@@ -1759,15 +1759,21 @@ test('an else-if arm replays a value the then arm reassigns', async () => {
   assert.equal(slots.c0, 5);
 });
 
-test('a read after an if does not replay a binding an arm may have replaced', () => {
+test('a read after an if replays the binding an arm may have replaced as a choice between the two', () => {
   // The else arm leaves `n` alone, but the then-arm may have replaced the
-  // count. The condition after the if has no single value.
+  // count: the value after the if is `Flag ? replaced : earlier`, in that order.
   const t = translate(
     'n = Orders[ID != 0].count();\nif (input.Flag) {\n  n = Orders[ID == 0].count();\n  alert "a";\n} else {\n  alert "b";\n}\nif (n > 3) { alert "c"; }',
     { inputFields: ['Flag'] },
   );
-  assert.equal(t.todos.filter((item) => item.construct === 'client-condition-uses-server').length, 1);
-  assert.doesNotMatch(stripComments(t.prefetch), /var n =/);
+  assert.equal(t.todos.filter((item) => item.construct === 'client-condition-uses-server').length, 0);
+  assert.match(stripComments(t.prefetch), /var n = \(shim\.input\.get\(ctx, "Flag"\) \? await shim\.datastore\.aggregate\(.*"ID", value: 0.* : n\);/);
+  // The arm's write to the very form its value reads leaves the todo.
+  const written = translate(
+    'n = Orders[ID != 0].count();\nif (input.Flag) {\n  insert into Orders [Name = "x"];\n  n = Orders[ID != 0].count();\n}\nif (n > 3) { alert "c"; }',
+    { inputFields: ['Flag'], formNames: ['Orders'] },
+  );
+  assert.equal(written.todos.filter((item) => item.construct === 'client-condition-uses-server').length, 1);
 });
 
 test('a name any if arm binds non-client-ready stays refused in every arm order', () => {
@@ -5153,7 +5159,7 @@ test('a server-only test or loop with a client effect keeps the counted todo', (
   assert.ok(loop.todos.some((item) => item.construct === 'client-loop-uses-server'));
 });
 
-test('a dropped client half may call pure list helpers but not a list mutator', () => {
+test('a dropped client half may call pure list helpers; a list mutator only taints the list', () => {
   const pure = translate(
     [
       'resp = getUrl("https://example.test/items").toJSONList();',
@@ -5168,6 +5174,7 @@ test('a dropped client half may call pure list helpers but not a list mutator', 
   );
   assert.equal(pure.todos.length, 0);
   assert.doesNotMatch(stripComments(pure.client), /for \(|shim\.todo/);
+  // A loop that only adds to a local list shows and sends nothing: the server runs it.
   const mutates = translate(
     [
       'seen = List();',
@@ -5175,7 +5182,19 @@ test('a dropped client half may call pure list helpers but not a list mutator', 
       'for each item in resp { seen.add("x"); }',
     ].join('\n'),
   );
-  assert.ok(mutates.todos.some((item) => item.construct === 'client-loop-uses-server'));
+  assert.equal(mutates.todos.length, 0);
+  assert.doesNotMatch(stripComments(mutates.client), /for \(|shim\.list\.add/);
+  // The client no longer holds that list: a later client read of it is a counted todo, never the stale empty list.
+  const read = translate(
+    [
+      'seen = List();',
+      'resp = getUrl("https://example.test/items").toJSONList();',
+      'for each item in resp { seen.add("x"); }',
+      'if (seen.size() > 0) { alert "found"; }',
+    ].join('\n'),
+  );
+  assert.ok(read.todos.some((item) => item.construct === 'client-condition-uses-server'));
+  assert.doesNotMatch(stripComments(read.client), /shim\.list\.size\(seen\)/);
 });
 
 test('replaceAllIgnoreCase and replaceFirstIgnoreCase emit their shims in both forms', () => {

@@ -3693,9 +3693,10 @@ function serverOnlyAction(parts: { todo: boolean; constructs: string[] }[], span
 
 /**
  * Client code that only binds plain locals: each line is a comment, a brace
- * or else, an `if` head, or `[var ]name = expr;`. An expression may call only
- * the pure shim helpers (a whole-namespace entry or a single helper of the
- * element allowlist, never `each` or a list mutator), and never awaits, assigns, or touches
+ * or else, an `if` head, `[var ]name = expr;`, or a list update `shim.list.<mutator>(name, …)`
+ * (the caller taints the list, so a later client read is a server read). An
+ * expression may call only the pure shim helpers (a whole-namespace entry or a
+ * single helper of the element allowlist, never `each` or a list mutator), and never awaits, assigns, or touches
  * `input`, `row` or `actions`. Such a half has nothing the client can show or send.
  */
 function clientBindsLocalsOnly(code: string): boolean {
@@ -3715,6 +3716,11 @@ function clientBindsLocalsOnly(code: string): boolean {
     if (head) return pure(head[1]!);
     const put = /^\(shim\.set\(([A-Za-z_$][\w$]*), (.*)\)\);$/.exec(t);
     if (put) return declared.has(put[1]!) && pure(put[2]!.replace(/\bshim\.input\.get\(ctx,\s*"(?:\\.|[^"\\])*"\)/g, '0'));
+    // A list update of a collection an earlier statement declared: the caller
+    // taints every name the dropped half mutates, so a later client read
+    // is a server read, not the stale list.
+    const update = /^shim\.list\.([A-Za-z]+)\(([A-Za-z_$][\w$]*)(?:, (.*))?\);$/.exec(t);
+    if (update) return LIST_MUTATORS.has(update[1]!.toLowerCase()) && pure(update[3] ?? '');
     const bind = /^(var )?([A-Za-z_$][\w$]*) = (.*);$/.exec(t);
     if (bind?.[1]) declared.add(bind[2]!);
     return !!bind && pure(bind[3]!);
@@ -3732,6 +3738,37 @@ function dropClientNames(scope: Scope, names: Iterable<string>, declaredBefore: 
     scope.clientData.delete(name);
   }
   for (const name of [...scope.declaredClient]) if (!declaredBefore.has(name)) scope.declaredClient.delete(name);
+}
+
+/**
+ * Whether the arm writes something its own value reads: a form its query reads,
+ * an input field it reads, or anything an app call may reach. A prefetch that
+ * replays the value alone would then read the state from before those writes.
+ */
+function armWriteConflict(body: Stmt, binding: Binding, scope: Scope): boolean {
+  const w = loopWrites(body, scope);
+  if (w.all || formsInCode(binding.code).some((f) => w.forms.has(f))) return true;
+  const written = new Set<string>();
+  walk(body, (n) => {
+    if (n.kind === 'ui') {
+      // `clear Field` empties the field the replayed read would still see filled.
+      const cleared = n as unknown as Extract<Stmt, { kind: 'ui' }>;
+      if (cleared.action === 'clear') for (const target of cleared.targets) written.add(`input.${rootLocal(target) ?? ''}`);
+    } else if (n.kind === 'assign') {
+      const target = (n as unknown as Extract<Stmt, { kind: 'assign' }>).target;
+      const path = target.kind === 'member' || target.kind === 'index' ? memberPath(target) : null;
+      if (path) written.add(`${path.root}.${path.path[0] ?? ''}`);
+    }
+  });
+  if (!written.size) return false;
+  return (binding.stateReads ?? []).some((key) => key === 'input' || key === 'old' || written.has(key));
+}
+
+/** The arm assigns `name` in exactly one statement of its own top level and nowhere else (not in a nested `if`, loop or try). */
+function assignsOnceAtTop(stmt: Stmt, name: string): boolean {
+  const top = stmt.kind === 'block' ? stmt.body : [stmt];
+  const direct = (cur: Stmt): boolean => cur.kind === 'assign' && cur.target.kind === 'name' && cur.target.name === name && !cur.declType;
+  return top.filter(direct).length === 1 && top.every((cur) => direct(cur) || !assignedNames(cur).has(name));
 }
 
 /**
@@ -3923,6 +3960,61 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
       scope.bindings.set(guardedName, {
         code: `(${test.code} ? ${thenB.code} : ${s.else ? elseB!.code : id})`,
         reads,
+        unboundReads: [],
+        appFunction: false,
+        todo: false,
+        deps,
+        seq: scope.clock.seq++,
+        flow: scope.flowStack[scope.flowStack.length - 1]!,
+      });
+    }
+  }
+  // A name some arms of an `if` / `else if` / `else` chain each assign once, straight
+  // in the arm, from a read of values bound before the chain is, after it,
+  // `test ? value : (test2 ? value2 : previous)`: the value the server half
+  // holds. The prefetch replays that under the tests instead of refusing a
+  // binding that does not dominate. A path that assigns nothing keeps what the
+  // name held before (`undefined` for a name never bound, as the server half's
+  // hoisted `var` does), and a read of that reaches no rows. A name the client
+  // keeps holding (every arm leaves a value it computes) has no use for a replay.
+  const pureTest = (t: Fx): boolean => !t.todo && !t.sideEffect && !t.appFunction && !t.unboundReads.length && !t.reads.some((r) => r.startsWith('\0'));
+  if (armTests.every(pureTest)) {
+    for (const name of [...assigned].sort()) {
+      if (!scope.bindings.get(name)?.reaching || !scope.serverOnly.has(name) || scope.clientData.has(name)) continue;
+      const prior = atTest.bindings.get(name);
+      if (prior && !armReplayable(prior)) continue;
+      const held = prior ? jsIdent(name) : 'undefined';
+      const values: string[] = [];
+      const joined = new Set<string>(prior ? [name] : []);
+      for (const t of armTests) for (const r of t.reads) joined.add(r);
+      const shapes = new Set<string>();
+      let replay = true;
+      for (let bi = 0; bi < bodies.length && replay; bi++) {
+        if (!perArm[bi]!.assigns.has(name)) {
+          values.push(held);
+          continue;
+        }
+        const arm = armFinals[bi]!.get(name);
+        replay =
+          !!arm &&
+          assignsOnceAtTop(bodies[bi]!, name) &&
+          armReplayable(arm) &&
+          arm.reads.every((r) => arm.deps.get(r) === atTest.bindings.get(r)) &&
+          !armWriteConflict(bodies[bi]!, arm, scope);
+        if (!replay) break;
+        for (const r of arm!.reads) joined.add(r);
+        shapes.add(classSignature(perArm[bi]!.classes, name).join());
+        values.push(arm!.code);
+      }
+      if (!replay || shapes.size > 1) continue;
+      let code = s.else ? values[bodies.length - 1]! : held;
+      for (let i = armTests.length - 1; i >= 0; i--) code = `(${armTests[i]!.code} ? ${values[i]} : ${code})`;
+      const names = [...joined].sort();
+      const deps = new Map<string, Binding | undefined>();
+      for (const r of names) deps.set(r, atTest.bindings.get(r));
+      scope.bindings.set(name, {
+        code,
+        reads: names,
         unboundReads: [],
         appFunction: false,
         todo: false,
