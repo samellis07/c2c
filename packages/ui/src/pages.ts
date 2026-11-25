@@ -1378,7 +1378,35 @@ const EMBED_DROPPED_TAGS = new Set(['embed', 'frame', 'iframe', 'object']);
 
 const REPORTED_DROPPED_TAGS = new Set(['script', 'style', 'svg', 'template', ...EMBED_DROPPED_TAGS]);
 
-export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[]): string {
+/**
+ * Library scripts, by exact address, that start nothing on their own: Bootstrap
+ * 3's JavaScript only acts on `data-*` hooks in the markup (and on a jQuery
+ * plugin call from other script). It is not counted as a removed script only
+ * when the caller proved the whole app carries no hook (appHasNoScriptHook).
+ */
+const HOOK_ONLY_SCRIPTS = new Set(['https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js']);
+
+/**
+ * What a library script could act on: any `data-` attribute, an event-handler
+ * attribute, a jQuery plugin call, jQuery itself or a character reference that
+ * could spell one. Any hit keeps the script a counted removal.
+ */
+const SCRIPT_HOOKS = [/data-[a-z]/i, /\bon[a-z]+\s*=/i, /\.(?:modal|tooltip|popover|dropdown|collapse|tab|carousel|affix|scrollspy|alert|button)\s*\(/i, /jquery/i, /&#/];
+
+const scriptHookFree = new WeakMap<object, boolean>();
+
+/** True when no text anywhere in the app (markup, functions, workflows) could hand a library script work. */
+export function appHasNoScriptHook(app: object): boolean {
+  let free = scriptHookFree.get(app);
+  if (free === undefined) {
+    const text = JSON.stringify(app);
+    free = !SCRIPT_HOOKS.some((hook) => hook.test(text));
+    scriptHookFree.set(app, free);
+  }
+  return free;
+}
+
+export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[], hookFree = false): string {
   const win = domWindow();
   const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
   const sink = parsed.createElement('template');
@@ -1390,7 +1418,10 @@ export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: s
     const visit = (node: DomNode) => {
       if (node.nodeType === 1) {
         const tag = (node.tagName || '').toLowerCase();
-        const loses = tag === 'iframe' ? !videoEmbedSrc(node.getAttribute('src') ?? '') : true;
+        const loses =
+          tag === 'iframe'
+            ? !videoEmbedSrc(node.getAttribute('src') ?? '')
+            : tag !== 'script' || !(hookFree && HOOK_ONLY_SCRIPTS.has(node.getAttribute('src') ?? '') && !(node.textContent ?? '').trim());
         if (REPORTED_DROPPED_TAGS.has(tag) && loses) droppedTags.push(tag);
         for (const child of listOf(node.childNodes)) visit(child);
       }
@@ -2491,6 +2522,7 @@ export function elementFromZml(
       }),
       undefined,
       droppedTags,
+      env?.app !== undefined && appHasNoScriptHook(env.app),
     );
     if (env?.emit) for (const f of staticFnFiles) env.emit(f);
     const styleRules = droppedStyleRules(source);
