@@ -2826,7 +2826,7 @@ function delegatesToLiftableNavigation(app: App, fn: FunctionDef): { text: strin
  * classification by a different path that could drift from it.
  */
 export function actionNavigationLifted(app: App, fn: FunctionDef): boolean {
-  return liftTrailingActionNavigation(app, fn) !== undefined || delegatesToLiftableNavigation(app, fn) !== undefined;
+  return liftTrailingActionNavigation(app, fn) !== undefined || delegatesToLiftableNavigation(app, fn) !== undefined || navCaptureEligible(app, fn);
 }
 
 /**
@@ -2873,6 +2873,88 @@ export function actionNavigationDropReason(app: App, fn: FunctionDef): string | 
     if (result.kind === 'unsupported') return result.reason ?? 'its target is not a supported own-app form, report, or page route';
   }
   return undefined;
+}
+
+/**
+ * Why an `openUrl` target can be carried as a runtime navigation instruction:
+ * a reload of the current page, a target already proved an own-app route, or a
+ * target built from values only known when the workflow runs (a local, a
+ * field, a function argument). The page re-checks every instruction against
+ * its URL policy before acting, so an unsafe value is refused there. A target
+ * that is definitely not navigable (an unknown form, a `#Script:` call that is
+ * not a page refresh, a literal `javascript:` URL) is not carried.
+ */
+function navTargetCapturable(app: App, fn: FunctionDef, stmt: Stmt, locals: ReadonlyMap<string, Expr>): boolean {
+  if (stmt.kind !== 'openUrl' || !stmt.args.length || stmt.args.length > 3) return false;
+  const first = unparenExpr(stmt.args[0]!);
+  if (first.kind === 'string' && /^\s*#Script:/i.test(first.value)) return /^\s*#Script:page\.refresh\s*$/i.test(first.value);
+  // A local the target is built from is read as the value it was given, so a
+  // target that is definitely not navigable is told apart from one only known
+  // at run time.
+  const resolved: Stmt = locals.size ? { ...stmt, args: stmt.args.map((a) => substituteLocalReads(a, locals)) } : stmt;
+  const result = classifyOpenUrlStmt(app, fn, resolved, new Map());
+  if (result.kind === 'supported') return true;
+  return /^(?:complex dynamic expression in openUrl|unknown identifier )/.test(result.reason ?? '');
+}
+
+/**
+ * True when `fn` navigates through `openUrl` from any position (several
+ * branches, before or after other statements, built from several values), or
+ * calls an app function that does, and every such navigation can be carried
+ * as the function's returned instruction. A function that returns a value of
+ * its own cannot also return the instruction, so it is not eligible.
+ */
+export function navCaptureEligible(app: App, fn: FunctionDef, seen: Set<string> = new Set()): boolean {
+  if (fn.deluge.length !== 1) return false;
+  const key = fn.name.toLowerCase();
+  if (seen.has(key)) return false;
+  seen.add(key);
+  let body: Stmt[];
+  try {
+    body = parse(fn.deluge[0]!.text).body;
+  } catch {
+    return false;
+  }
+  let ok = true;
+  let navigates = false;
+  // Locals assigned exactly once in the body, in source order.
+  const assignCount = new Map<string, number>();
+  walk(body, (n) => {
+    const a = n as Extract<Stmt, { kind: 'assign' }>;
+    if (n.kind === 'assign' && a.target.kind === 'name') assignCount.set(a.target.name.toLowerCase(), (assignCount.get(a.target.name.toLowerCase()) ?? 0) + 1);
+  });
+  const locals = new Map<string, Expr>();
+  walk(body, (n) => {
+    if (n.kind === 'assign') {
+      const a = n as Extract<Stmt, { kind: 'assign' }>;
+      if (a.op === '=' && a.target.kind === 'name' && assignCount.get(a.target.name.toLowerCase()) === 1) locals.set(a.target.name.toLowerCase(), substituteLocalReads(a.value, locals));
+    } else if (n.kind === 'openUrl') {
+      navigates = true;
+      if (!navTargetCapturable(app, fn, n as Stmt, locals)) ok = false;
+    } else if (n.kind === 'return' && (n as Extract<Stmt, { kind: 'return' }>).value) {
+      ok = false;
+    } else if (n.kind === 'expr') {
+      const call = (n as Extract<Stmt, { kind: 'expr' }>).expr;
+      const calleeName = call.kind === 'call' ? calleePathName(call.callee) : undefined;
+      const callee = calleeName ? app.functions.find((item) => item.name.toLowerCase() === calleeName.toLowerCase()) : undefined;
+      if (callee && callee !== fn && (liftTrailingActionNavigation(app, callee) !== undefined || navCaptureEligible(app, callee, new Set(seen)))) navigates = true;
+    }
+  });
+  return ok && navigates;
+}
+
+/** The route names a workflow's `openUrl` may resolve against, as the literal the generated dispatch endpoint passes to `shim.nav.resolve`. */
+export function navRoutesSource(app: App): string {
+  const forms: Record<string, string[]> = {};
+  for (const form of app.forms) forms[form.name] = form.fields.map((f) => f.name);
+  const reports: Record<string, string[]> = {};
+  for (const report of app.reports) {
+    const form = report.form ? app.forms.find((f) => f.name.toLowerCase() === report.form!.toLowerCase()) : undefined;
+    reports[report.name] = form ? form.fields.map((f) => f.name) : [];
+  }
+  const pages: Record<string, string[]> = {};
+  for (const page of app.pages) pages[page.name] = [...(page.params ?? [])];
+  return JSON.stringify({ forms, reports, pages });
 }
 
 /** The patched text and original-span coverage rows for `fn`, if `emitFunction` lifts its navigation (either directly or through one hop of delegation) — else undefined. */
@@ -3235,10 +3317,24 @@ function emitFunction(
   const liftedText = lift?.text;
   const deluge = lift ? [{ ...fn.deluge[0]!, text: lift.text }] : fn.deluge;
   const binding = functionRowBinding(fn);
-  let slot = 0;
-  const parts = deluge.map((d) => {
-    const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
-    slot = tr.nextSlot;
+  const translateParts = (navCapture: boolean) => {
+    let slot = 0;
+    return deluge.map((d) => {
+      const tr = translateInApp(app, d.text, { ...functionScriptOptions(app, fn, slot), navCapture });
+      slot = tr.nextSlot;
+      return { d, tr };
+    });
+  };
+  let translated = translateParts(false);
+  // An openUrl that sits anywhere among real server statements (not just as
+  // the last action) is captured into the function's returned navigation
+  // instead of being dropped, when every target in it could be navigable.
+  const navCapture =
+    liftedText === undefined &&
+    translated.some(({ tr }) => tr.server.trim()) &&
+    navCaptureEligible(app, fn);
+  if (navCapture) translated = translateParts(true);
+  const parts = translated.map(({ d, tr }) => {
     addStats(stats, tr.stats);
     todos.push(...shift(tr.todos, d));
     statementCoverage.push(...coverShift(tr.coverage, d, `function ${fn.name}`));
@@ -3261,6 +3357,7 @@ function emitFunction(
   // functionScriptOptions is serverOnly: a function has no client half, so
   // there is no client module, prefetch module, or client-call endpoint.
   let server = parts.map((p) => p.server).filter((s) => s.trim()).join('\n');
+  if (navCapture) server = `let c2c_nav = null;\n${server}\nreturn c2c_nav;`;
   const name = slug(fn.name || 'function');
   // A declared function with an empty body is still a function. Skipping it
   // leaves the declaration out of the tree and out of the readiness report.
@@ -3297,7 +3394,7 @@ function emitFunction(
       }
       return;
     }
-  } else if (liftedText === undefined && server.trim() && /\bopenurl\s*\(/i.test(fn.deluge.map((d) => d.text).join('\n'))) {
+  } else if (liftedText === undefined && !navCapture && server.trim() && /\bopenurl\s*\(/i.test(fn.deluge.map((d) => d.text).join('\n'))) {
     // The function also produced real server code (e.g. a guard read before
     // the navigation), so classifyClientOpenUrl's whole-function shape still
     // matches but the earlier branch above never runs. Keep the server code

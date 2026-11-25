@@ -12,7 +12,7 @@ import { closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, ty
 import { compareEnUs } from '../../core/src/order.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
-import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, functionRowBinding, generate as generateDeluge, blueprintFieldSpecs, multiLookupsOf, schemaRuntimeOptions, type GeneratedFile } from '../../deluge/src/generate.js';
+import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, functionRowBinding, generate as generateDeluge, navRoutesSource, blueprintFieldSpecs, multiLookupsOf, schemaRuntimeOptions, type GeneratedFile } from '../../deluge/src/generate.js';
 import { analyzeConnections } from '../../deluge/src/connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, fileFieldsByForm, subformLinksFor, writeLiveSource } from '../../deluge/src/field-store.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
@@ -2870,12 +2870,17 @@ ${recordForm
       }
       selected.push(row);
     }
-    for (const row of selected) await ctx.shim.thisapp.call(ctx, workflowPath, [row]);
+    // Creator navigates the browser after the workflow ends; the last
+    // navigation any record's run asked for is the one carried back.
+    let navigation = null;
+    for (const row of selected) navigation = ctx.shim.nav.merge(navigation, await ctx.shim.thisapp.call(ctx, workflowPath, [row]));
     await ctx.shim.datastore.flush(ctx);
-    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, operation: ${JSON.stringify(operation)}, count: rowIds.length, rows: rowIds, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
-        : `    await ctx.shim.thisapp.call(ctx, workflowPath, []);
+    const nav = ctx.shim.nav.resolve(navigation, ${navRoutesSource(app)});
+    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, operation: ${JSON.stringify(operation)}, count: rowIds.length, rows: rowIds, ...(nav ? { nav } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
+        : `    const navigation = await ctx.shim.thisapp.call(ctx, workflowPath, []);
     await ctx.shim.datastore.flush(ctx);
-    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`}`
+    const nav = ctx.shim.nav.resolve(navigation, ${navRoutesSource(app)});
+    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, ...(nav ? { nav } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`}`
     : `    send(res, 422, { dryRun: false, wrote: false, refused: true, error: ${JSON.stringify(`custom action ${name} has no generated function to run`)} });
     return;`;
   return `${banner(bannerLines)}${policyPrelude('../access-policy.json', false, `${dispatchable ? 'import { createRuntime } from "creator-to-catalyst/shims";\nimport { functions } from "../thisapp.mjs";\n' : ''}`)}

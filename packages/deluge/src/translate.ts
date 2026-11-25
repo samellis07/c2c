@@ -240,6 +240,14 @@ export interface TranslateOptions {
    */
   serverOnly?: boolean;
   /**
+   * With `serverOnly`: each `openUrl` becomes an assignment into the per-call
+   * `c2c_nav` navigate instruction (the last one that runs wins, like
+   * Creator's browser navigation after the workflow), a bare app-function
+   * call forwards the callee's own instruction, and a bare `return;` returns
+   * it. The function wrapper declares `c2c_nav` and returns it at the end.
+   */
+  navCapture?: boolean;
+  /**
    * Deluge names the generated prefetch module binds without a replayed
    * assignment: a custom function's parameters (`var [params] = ctx.args`) and
    * `row` in a subform row event (`shim.subform.currentRow`). A prefetch slot
@@ -701,6 +709,8 @@ interface Scope {
   alertEvent: AlertEventClass;
   /** TranslateOptions.serverOnly: no client half. */
   noClient: boolean;
+  /** TranslateOptions.navCapture: openUrl assigns the `c2c_nav` instruction. */
+  navCapture: boolean;
   /** Raw source, for comment-tail lookup. */
   src: string;
   /**
@@ -3058,6 +3068,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     slot: options.slotStart ?? 0,
     alertEvent: options.alertEvent ?? 'allowed',
     noClient: options.serverOnly ?? false,
+    navCapture: !!options.navCapture && !!options.serverOnly,
     src,
     commentTails: commentTails(src),
     schema: options.schema,
@@ -3324,6 +3335,12 @@ function statementBody(s: Stmt, scope: Scope, stats: TranslateStats, todos: Todo
       return { server: '', client: 'actions.push({ op: "reload" });' };
     case 'openUrl': {
       const args = s.args.map((a) => expr(a, scope));
+      if (scope.noClient && scope.navCapture && args.length) {
+        account(stats, todos, { todo: args.some((a) => a.todo), shim: true, constructs: args.flatMap((a) => a.constructs) }, s.span);
+        const winArg = s.args[1];
+        const target = winArg === undefined || (winArg.kind === 'string' && winArg.value.trim().toLowerCase() === 'same window') ? 'same' : 'new';
+        return { server: `c2c_nav = { ["kind"]: "navigate", ["url"]: ${args[0]!.code}, ["target"]: ${JSON.stringify(target)} };`, client: '' };
+      }
       if (scope.noClient) return serverOnlyAction(args, s.span, stats, todos);
       // A server read in the URL (`openUrl base + Form[criteria].ID`) is a prefetch slot, like a client condition.
       const clientArgs = args.map((a) => clientExpr(a, scope));
@@ -4056,6 +4073,7 @@ function tryStmt(s: Extract<Stmt, { kind: 'try' }>, scope: Scope, stats: Transla
 function returnStmt(s: Extract<Stmt, { kind: 'return' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   if (!s.value) {
     account(stats, todos, { todo: false, shim: false, constructs: [] }, s.span);
+    if (scope.navCapture) return { server: 'return c2c_nav;', client: '' };
     return { server: 'return;', client: 'return;' };
   }
   const v = expr(s.value, scope);
@@ -4917,7 +4935,12 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
       scope.bindings.delete(receiver.root);
     }
   }
-  const line = v.code.trim().endsWith(';') ? v.code : `${v.code};`;
+  let line = v.code.trim().endsWith(';') ? v.code : `${v.code};`;
+  // A bare app-function call keeps its callee's navigation: the callee's
+  // `openUrl` still navigates after the whole workflow, like in Creator.
+  if (scope.navCapture && /^await shim\.thisapp\.call\(/.test(v.code.trim())) {
+    line = `c2c_nav = shim.nav.merge(c2c_nav, ${v.code.trim().replace(/;$/, '')});`;
+  }
   if (v.serverOnly) {
     const clientUpdate = clientListUpdateLine(e, v, updatePrior, scope);
     if (clientUpdate !== null) {

@@ -572,6 +572,111 @@ export function rangeSlotRequest(body: unknown): { slot?: string; from: number; 
   return { slot: raw, from: start, to: end, empty: end < start };
 }
 
+/** The routes a workflow's `openUrl` can name inside this app: form field names, report field names, page parameters. */
+export interface NavRoutes {
+  forms?: Record<string, readonly string[]>;
+  reports?: Record<string, readonly string[]>;
+  pages?: Record<string, readonly string[]>;
+}
+
+export type NavInstruction = { kind: 'navigate'; url: string; target: 'same' | 'new' } | { kind: 'reload' };
+
+function isNavResult(value: unknown): value is { kind: string; url?: unknown; target?: unknown } {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && ((value as { kind?: unknown }).kind === 'navigate' || (value as { kind?: unknown }).kind === 'reload');
+}
+
+function navText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  return '';
+}
+
+function lookupName(table: Record<string, readonly string[]> | undefined, name: string): readonly string[] | undefined {
+  if (!table) return undefined;
+  const wanted = name.trim().toLowerCase();
+  for (const key of Object.keys(table)) if (key.toLowerCase() === wanted) return table[key];
+  return undefined;
+}
+
+function lookupKey(table: Record<string, readonly string[]> | undefined, name: string): string | undefined {
+  if (!table) return undefined;
+  const wanted = name.trim().toLowerCase();
+  return Object.keys(table).find((key) => key.toLowerCase() === wanted);
+}
+
+/** Maps a Creator openUrl target to this app's own hash route; anything else is passed through for the page's own URL gate to judge. */
+function resolveNavigation(result: unknown, routes?: NavRoutes): NavInstruction | null {
+  if (!isNavResult(result)) return null;
+  if (result.kind === 'reload') return { kind: 'reload' };
+  const target: 'same' | 'new' = result.target === 'new' ? 'new' : 'same';
+  // `zoho.appuri` stands for the app's own address and is an opaque value at run time.
+  let url = navText(result.url).replace(/^(?:\[object Object\])+/, '').trim();
+  if (!url) return null;
+  // The app's own address in front of a route (`zoho.appuri + "#Form:X"`) is no part of the route.
+  const own = /^https?:\/\/[^#?]*(#(?:Form|Report|Page|View|Script):.*)$/i.exec(url);
+  if (own) url = own[1]!;
+  if (/^#Script:page\.refresh$/i.test(url)) return { kind: 'reload' };
+  const m = /^#(Form|Report|Page|View):([^?]+?)(?:\?(.*))?$/i.exec(url);
+  if (!m) return { kind: 'navigate', url, target };
+  const kind = m[1]!.toLowerCase();
+  const name = m[2]!.trim();
+  const pairs = (m[3] ?? '').split('&').filter(Boolean).map((pair) => {
+    const eq = pair.indexOf('=');
+    const decode = (text: string): string => {
+      try {
+        return decodeURIComponent(text);
+      } catch {
+        return text;
+      }
+    };
+    return eq < 0 ? ([decode(pair), ''] as const) : ([decode(pair.slice(0, eq)), decode(pair.slice(eq + 1))] as const);
+  });
+  const query: string[] = [];
+  const addQuery = (key: string, value: string): void => {
+    if (value !== '') query.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  };
+  const finish = (path: string): NavInstruction => ({ kind: 'navigate', url: query.length ? `${path}?${query.join('&')}` : path, target });
+  if (kind === 'form') {
+    const key = lookupKey(routes?.forms, name);
+    if (!key) return null;
+    const fields = routes!.forms![key]!.map((f) => f.toLowerCase());
+    let record = '';
+    for (const [k, v] of pairs) {
+      if (/^zc_/i.test(k) || /^viewlinkname$/i.test(k)) continue;
+      if (/^reclinkid$/i.test(k)) {
+        record = v;
+        continue;
+      }
+      if (!fields.includes(k.toLowerCase())) return null;
+      addQuery(k, v);
+    }
+    return finish(record ? `#/form/${encodeURIComponent(key)}/edit/${encodeURIComponent(record)}` : `#/form/${encodeURIComponent(key)}`);
+  }
+  let asPage = kind === 'page';
+  if (kind === 'view') asPage = !lookupKey(routes?.reports, name) && !!lookupKey(routes?.pages, name);
+  if (asPage) {
+    const key = lookupKey(routes?.pages, name);
+    if (!key) return null;
+    const params = routes!.pages![key]!;
+    for (const [k, v] of pairs) {
+      if (/^zc_/i.test(k)) continue;
+      if (!params.includes(k)) return null;
+      addQuery(k, v);
+    }
+    return finish(`#/page/${encodeURIComponent(key)}`);
+  }
+  const key = lookupKey(routes?.reports, name);
+  if (!key) return null;
+  const fields = lookupName(routes?.reports, key)!.map((f) => f.toLowerCase());
+  let filters = 0;
+  for (const [k, v] of pairs) {
+    if (/^zc_/i.test(k)) continue;
+    if (/_op$/i.test(k) || !fields.includes(k.toLowerCase()) || ++filters > 1) return null;
+    addQuery(k, v);
+  }
+  return finish(`#/report/${encodeURIComponent(key)}`);
+}
+
 export interface Shim {
   /**
    * Multi-event form handlers wrap each event body in this call so the host
@@ -978,6 +1083,17 @@ export interface Shim {
   isFile(value: unknown): boolean;
   ifnull(value: unknown, replacement: unknown): unknown;
   log: { info(ctx: ShimContext, value: unknown): void };
+  /**
+   * Navigation an `openUrl` inside a workflow asked for. Creator navigates the
+   * browser after the workflow ends, to the target evaluated when the last
+   * executed `openUrl` ran.
+   */
+  nav: {
+    /** The instruction a called function returned wins over none; a later one wins over an earlier one. */
+    merge(previous: unknown, returned: unknown): unknown;
+    /** The instruction as the page may act on it (an own-app route, a reload, a path), or null when it names no route this app has. */
+    resolve(result: unknown, routes?: NavRoutes): NavInstruction | null;
+  };
   convert: {
     toLong(value: unknown, ctx: ShimContext, ...extra: unknown[]): number | bigint;
     toNumber(value: unknown, ctx: ShimContext, ...extra: unknown[]): number | bigint;
@@ -4149,6 +4265,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       info(_ctx, value) {
         note({ op: 'info', value });
       },
+    },
+    nav: {
+      merge: (previous, returned) => (isNavResult(returned) ? returned : previous),
+      resolve: resolveNavigation,
     },
     convert: {
       toLong, toNumber, toDecimal, toList, toMap, toListString, toJSONCollection,
