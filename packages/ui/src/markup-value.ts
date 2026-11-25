@@ -8,12 +8,14 @@
  * allowlist instead of being trusted or escaped whole. Known tags and
  * attributes are re-serialized with every value escaped; an unknown tag shows
  * as text; an attribute outside the list is dropped; an `<img>` keeps only an
- * inline raster `data:` source. The output still passes the endpoint's audit
- * and the client sanitizer.
+ * inline raster `data:` source; an `<a>` keeps only a target the endpoint
+ * resolves to an own-app route (the navigation `shim.nav.resolve` applies to an
+ * `openUrl`) or a web or mail address. The output still passes the endpoint's
+ * audit and the client sanitizer.
  */
 
 /** Element tags a markup value keeps. */
-const MARKUP_TAGS = ['b', 'br', 'div', 'em', 'i', 'img', 'p', 'small', 'span', 'strong', 'u'] as const;
+const MARKUP_TAGS = ['a', 'b', 'br', 'div', 'em', 'i', 'img', 'p', 'small', 'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'u'] as const;
 
 /** Style properties a markup value keeps; every value passes the endpoint's CSS value grammar. */
 const MARKUP_STYLE_PROPS = [
@@ -36,6 +38,8 @@ var C2C_MK_STYLE_PROPS = ${JSON.stringify(Object.fromEntries(MARKUP_STYLE_PROPS.
 var C2C_MK_IMAGE_SRC = /${MARKUP_IMAGE_SRC}/;
 var C2C_MK_TAG_AT = /<(\\/?)([A-Za-z][A-Za-z0-9]*)/y;
 var C2C_MK_ATTR_AT = /[A-Za-z_:][-A-Za-z0-9_:.]*/y;
+// Presentation the page's sanitizer never keeps; dropping it is no news.
+var C2C_MK_QUIET = { border: 1, cellspacing: 1, cellpadding: 1, target: 1, rel: 1 };
 
 // Text between tags: a character reference stays one (it can only show a
 // character), every other ampersand and angle bracket is escaped.
@@ -101,7 +105,7 @@ function c2cMkStyle(value) {
   return kept.join(";");
 }
 
-function c2cMarkup(value, notes) {
+function c2cMarkup(value, notes, href) {
   var text = String(value == null ? "" : value);
   if (text.length > ${MARKUP_VALUE_MAX}) {
     notes.push("a markup value was too large and rendered empty");
@@ -162,7 +166,13 @@ function c2cMarkup(value, notes) {
       else if (attr === "title" || (name === "img" && attr === "alt")) html += " " + attr + '="' + c2cEsc(val.slice(0, 200)) + '"';
       else if (name === "img" && (attr === "width" || attr === "height") && /^[0-9]{1,4}%?$/.test(val)) html += " " + attr + '="' + val + '"';
       else if (name === "img" && attr === "src" && C2C_MK_IMAGE_SRC.test(val)) source = ' src="' + val + '"';
-      else note("a markup value attribute the page does not keep was removed");
+      else if ((name === "td" || name === "th") && (attr === "colspan" || attr === "rowspan") && /^[0-9]{1,3}$/.test(val)) html += " " + attr + '="' + val + '"';
+      else if (name === "a" && attr === "href") {
+        var target = href(val);
+        if (target) html += ' href="' + c2cEsc(target) + '"';
+        else note("a link in a markup value names no page, form, report or web address of this app and has no target");
+      }
+      else if (!Object.prototype.hasOwnProperty.call(C2C_MK_QUIET, attr)) note("a markup value attribute the page does not keep was removed");
     }
     if (name === "img") {
       if (!source) {
