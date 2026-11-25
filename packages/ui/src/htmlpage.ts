@@ -3046,13 +3046,13 @@ export function rewriteZmlButtonLinks(template: string, app: App, pageParams: Re
   if (!/<button\b/i.test(template)) return template;
   const islands = islandRanges(template);
   if (!islands) return template;
-  const forms = new Set(app.forms.map((form) => form.name));
+  const formNames = new Set(app.forms.map((form) => form.name));
   const reports = new Set(app.reports.map((report) => report.name));
   let out = '';
   let at = 0;
   for (const tag of buttonTags(template)) {
     if (!tag.selfClose || islands.some(([from, to]) => tag.start >= from && tag.start < to)) continue;
-    const link = zmlButtonLink(tag.attrText, app, forms, reports, pageParams);
+    const link = zmlButtonLink(tag.attrText, app, formNames, reports, pageParams);
     if (link === null) continue;
     out += template.slice(at, tag.start) + link;
     at = tag.end;
