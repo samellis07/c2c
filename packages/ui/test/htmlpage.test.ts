@@ -4420,11 +4420,11 @@ test('a statement island inside a style body that writes or redirects stays a co
 
 // A value that holds markup prints through `c2cMarkup` (markup-value.ts), never raw and never as escaped tags.
 
-async function renderPage(app: App, snippet: string, input: Record<string, unknown> = {}) {
+async function renderPage(app: App, snippet: string, input: Record<string, unknown> = {}, rows: Record<string, Record<string, unknown>[]> = SEEDED) {
   const ui = generateUi(app);
   const uiPaths = new Set(ui.files.map((f) => f.path));
   const files = [...ui.files, ...generate(app).files.filter((f) => !uiPaths.has(f.path)).map((f) => ({ path: f.path, data: f.source }))];
-  const live = await liveStore(SEEDED);
+  const live = await liveStore(rows);
   try {
     const mod = await loadTree(files, uiSnippetFiles(ui.model)[0].path);
     const out = await invoke(mod.default as never, { ...USER, body: { input } });
@@ -4556,6 +4556,7 @@ async function renderPhoto(opts: {
   photo?: string | null;
   fetchBody?: Buffer;
   fetchStatus?: number;
+  fetchResponse?: () => Response;
   store?: boolean;
   user?: typeof USER;
   policy?: Record<string, Record<string, FieldGrant>>;
@@ -4571,7 +4572,7 @@ async function renderPhoto(opts: {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string) => {
     fetched.push(String(url));
-    return new Response(new Uint8Array(opts.fetchBody ?? PNG_BYTES), { status: opts.fetchStatus ?? 200 });
+    return opts.fetchResponse ? opts.fetchResponse() : new Response(new Uint8Array(opts.fetchBody ?? PNG_BYTES), { status: opts.fetchStatus ?? 200 });
   }) as typeof fetch;
   const live = await liveStore({ Items: [{ Name: 'Widget', Photo: opts.photo === undefined ? PHOTO_KEY : opts.photo }] });
   try {
@@ -4788,4 +4789,40 @@ test('an info statement in a called function is only a log line and keeps the re
   // The page script itself would show it as a client message, which an endpoint cannot do.
   const direct = `htmlpage hp1()\ncontent\n<%\ninfo "render";\n%>\n<p>Home</p>`;
   assert.equal(compileHtmlpage(appOf(`${ORDERS}\n${pageWithSnippet(direct)}`), 'Home', 'hp1', direct).ok, false);
+});
+
+test('an object far larger than the image limits is never read to its end', async () => {
+  let cancelled = false;
+  let sent = 0;
+  const stream = () =>
+    new Response(
+      new ReadableStream({
+        pull(controller) {
+          sent += 1 << 20;
+          controller.enqueue(new Uint8Array(1 << 20));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    );
+  const { html, notes } = await renderPhoto({ fetchResponse: stream });
+  assert.equal(html.trim(), '<p>Widget</p>');
+  assert.deepEqual(notes, ['an image is over the size the page inlines and is not shown']);
+  assert.ok(cancelled, 'the download was cancelled');
+  assert.ok(sent <= 8 << 20, `read ${sent} bytes of an endless body`);
+  const declared = await renderPhoto({ fetchResponse: () => new Response(new Uint8Array(PNG_BYTES), { headers: { 'content-length': String(64 << 20) } }) });
+  assert.deepEqual(declared.notes, ['an image is over the size the page inlines and is not shown'], 'a declared length over the limit is refused before reading');
+});
+
+test('attack: a markup value built to restart the tag scan at every angle bracket is read in linear time', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nr = Orders[ID == ${FIRST_ID}];\nboxed = thisapp.Util.wrap(r.Status);\n%>\n<%= boxed %>`;
+  const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  for (const unit of ["<a b='", '<a b="', '<div class=', "<img src='x' <img "]) {
+    const status = unit.repeat(Math.ceil((1 << 20) / unit.length));
+    const started = Date.now();
+    const { html } = await renderPage(app, snippet, {}, { Orders: [{ Status: status, Amount: 1 }] });
+    assert.ok(Date.now() - started < 5000, `${unit}: ${Date.now() - started} ms`);
+    assert.deepEqual(renderedHtmlElements(html).map((el) => el.tag), ['div'], `${unit}: only the wrapper is an element`);
+  }
 });

@@ -1348,6 +1348,7 @@ function endpointModule(opts: {
 }): string {
   const banner = `/**\n${[
     `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to ${opts.hasWrites ? 'an endpoint with setup writes' : 'a read-only endpoint'}.`,
+    ...(opts.hasWrites ? ['Setup writes run only for an administrator profile (and the application owner under a zoho.adminuserid check); any other caller still gets the page, with those writes skipped.'] : []),
     `Advanced I/O POST ${opts.path}`,
     'Static markup was sanitized with the snippet allowlist at generation; every interpolated value is HTML-escaped',
     'for its context (text or attribute). The client sanitizes the response again before inserting it.',
@@ -1977,11 +1978,20 @@ function inlineInsertCalls(app: App, script: string, body: Stmt[]): string {
     const fn = path ? appFunction(app, path) : undefined;
     if (!fn || !/^\s*void\b/.test(fn.signature ?? '') || fnSignatureParams(fn.signature).length > 0) continue;
     const texts = fn.deluge.map((d) => d.text.trim()).filter(Boolean);
-    const inserts = texts.length > 0 && texts.every((text) => parse(text).body.every((stmt) => stmt.kind === 'expr' && stmt.expr.kind === 'insert'));
+    const inserts = texts.length > 0 && texts.every((text) => onlyInserts(text));
     if (inserts) edits.push({ start: s.span.start, end: s.span.end, text: `${texts.join('\n').replace(/;\s*$/, '')};` });
   }
   for (const edit of edits.reverse()) out = `${out.slice(0, edit.start)}${edit.text}${out.slice(edit.end)}`;
   return out;
+}
+
+/** True when the Deluge text parses to `insert into` statements and nothing else. */
+function onlyInserts(text: string): boolean {
+  try {
+    return parse(text).body.every((stmt) => stmt.kind === 'expr' && stmt.expr.kind === 'insert');
+  } catch {
+    return false;
+  }
 }
 
 /** The app function a `thisapp.<fn>()` path names: the exact name, then the case-insensitive one the generated registry also resolves. */
