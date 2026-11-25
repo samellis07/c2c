@@ -18,7 +18,7 @@ targets. The gap between the two numbers is the apps held back only by silent dr
 A residual TODO item is an untranslated Deluge hole or one generated UI stub
 (a field, report, page, or ZML item). Each UI stub is included in the residual,
 so an app with a stub is not deterministic.
-0 of the 38 deterministic apps still have UI TODO stubs (0 in total).
+0 of the 40 deterministic apps still have UI TODO stubs (0 in total).
 
 The builtin catalogue lists 20 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
@@ -27,19 +27,18 @@ TODO item per untranslated construct occurrence.
 | | |
 |---|---:|
 | corpus apps | 67 |
-| apps with no residual todos | 38/67 |
-| apps with no residual todos and no silent drops (deterministic) | 38/67 (56.7%) |
+| apps with no residual todos | 40/67 |
+| apps with no residual todos and no silent drops (deterministic) | 40/67 (59.7%) |
 | silent drops (total) | 0 |
-| residual TODO items | 79 |
-| distinct TODO kinds | 30 |
+| residual TODO items | 71 |
+| distinct TODO kinds | 29 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
 
 | construct | count |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 29 |
-| `client-condition-uses-server` | 6 |
+| `Server-side Deluge snippet requires manual translation` | 28 |
 | `Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.` | 6 |
 | `openurl-unsupported-target` | 3 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 3 |
@@ -48,7 +47,6 @@ TODO item per untranslated construct occurrence.
 | `openurl-dropped-with-server-logic` | 2 |
 | `The <iframe> element is removed from this page snippet by the sanitizer` | 2 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 2 |
-| `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
 | `Custom action (app identifier) is not migrated; its button is turned off.` | 1 |
 | `Embedded zc-component form (app identifier) has no generated view` | 1 |
 | `Field (app identifier) sets `annotation = true`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.` | 1 |
@@ -58,6 +56,8 @@ TODO item per untranslated construct occurrence.
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background-image, background, background, background` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background, background, background` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): text-align, text-align` | 1 |
+| `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
+| `Map report Today_Inspection_Map is shown as a list because Add_New_Inspection has no address field to plot.` | 1 |
 
 ## Top 0 silent-drop kinds
 
@@ -71,20 +71,18 @@ clears the app. The count is apps, not items.
 
 | construct | apps |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 3 |
-| `client-condition-uses-server` | 1 |
+| `Server-side Deluge snippet requires manual translation` | 4 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 1 |
-| `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 | `ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 
 ## Machine-readable
 
 ```json
 {
-  "deterministicApps": 38,
+  "deterministicApps": 40,
   "deterministicWithUiTodos": {
     "apps": 0,
     "uiTodos": 0
@@ -92,11 +90,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "Server-side Deluge snippet requires manual translation",
-      "count": 29
-    },
-    {
-      "construct": "client-condition-uses-server",
-      "count": 6
+      "count": 28
     },
     {
       "construct": "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
@@ -128,10 +122,6 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "The <script> element is removed from this page snippet by the sanitizer",
-      "count": 2
-    },
-    {
-      "construct": "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
       "count": 2
     },
     {
@@ -207,65 +197,30 @@ clears the app. The count is apps, not items.
       "count": 1
     },
     {
+      "construct": "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
+      "count": 1
+    },
+    {
       "construct": "ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
       "count": 1
     }
   ],
-  "noTodoApps": 38,
+  "noTodoApps": 40,
   "perAppConstructSets": [
-    {
-      "constructs": [
-        "client-condition-uses-server"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
-        "Embedded zc-component form (app identifier) has no generated view",
-        "openurl-dropped-unrecognized-branch-shape"
-      ],
-      "items": 5
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background-image, background, background, background",
-        "Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background, background, background"
-      ],
-      "items": 3
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "sendmail-attachment:view",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 5
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 4
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)",
-        "The <iframe> element is removed from this page snippet by the sanitizer"
-      ],
-      "items": 7
-    },
     {
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
         "openurl-unsupported-target"
       ],
       "items": 2
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
+        "Embedded zc-component form (app identifier) has no generated view",
+        "openurl-dropped-unrecognized-branch-shape"
+      ],
+      "items": 4
     },
     {
       "constructs": [
@@ -299,6 +254,13 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Field (app identifier) sets `show onload = true`; the generated image field opens its camera only when the user taps the control, never automatically when the form loads.",
         "Report (app identifier) lists column Record_Status, a Creator built-in record column; the generated schema has no column for it."
+      ],
+      "items": 2
+    },
+    {
+      "constructs": [
+        "Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background-image, background, background, background",
+        "Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background, background, background"
       ],
       "items": 2
     },
@@ -353,6 +315,19 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
+        "sendmail-attachment:view",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 4
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
       "items": 1
@@ -367,7 +342,15 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 2
+      "items": 3
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)",
+        "The <iframe> element is removed from this page snippet by the sanitizer"
+      ],
+      "items": 6
     },
     {
       "constructs": [
@@ -404,12 +387,6 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
         "ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
       ],
       "items": 1
@@ -417,7 +394,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 79,
+  "todoTotal": 71,
   "totalApps": 67
 }
 ```
