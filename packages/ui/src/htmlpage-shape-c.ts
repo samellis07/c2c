@@ -17,7 +17,9 @@
  *        resolves either to the authenticated caller, never a client value;
  *        an administrator check also requires the caller to be the owner).
  *        No other identity-like field in that
- *        insert may read a client value. A `zoho.adminuserid`-scoped check (b)
+ *        insert may read a client value. The same guard also covers `rec.Field = value`
+ *        for a `rec` bound once to that identical read, when the field is not identity-like and
+ *        the value does not read a client value: the record is the one the insert just created. A `zoho.adminuserid`-scoped check (b)
  *        additionally requires the caller to be the application owner at
  *        runtime (the endpoint compares the principal to C2C_ADMIN_USER_ID).
  *    A null test, a looser comparison, or any extra operand (`||`, `&&`)
@@ -435,6 +437,22 @@ function writeExprOk(e: Expr, guard: WriteGuard, assigns: Map<string, AssignInfo
   return !e.entries.some((en) => IDENTITY_FIELD.test(en.key) && readsClientInput(en.value, assigns));
 }
 
+/**
+ * Under a provisioning existence check on an identity slot, a field set on the record that same check read:
+ * the name is bound once, above the write, to the identical `Form[Field == zoho.*userid]` read, so the write
+ * reaches only the record the guarded insert just created for that identity (the check proved none existed).
+ * An identity-like field, or a value that reads the request, is never set this way.
+ */
+function provisionedFieldWriteOk(s: Stmt, guard: WriteGuard, at: StmtMeta | undefined, assigns: Map<string, AssignInfo[]>): boolean {
+  if (guard.kind !== 'provision' || !('field' in guard.read) || !at) return false;
+  if (s.kind !== 'assign' || s.op !== '=' || s.target.kind !== 'member') return false;
+  const record = unwrap(s.target.object);
+  if (record.kind !== 'name' || IDENTITY_FIELD.test(s.target.property) || readsClientInput(s.value, assigns)) return false;
+  const bound = boundOnce(record.name, at, assigns);
+  const read = bound ? identityRead(bound) : null;
+  return !!read && read.prop === guard.read.prop && read.form.toLowerCase() === guard.read.form.toLowerCase() && read.field.toLowerCase() === guard.read.field.toLowerCase();
+}
+
 function isWriteStmt(s: Stmt, criteriaVars: Set<string>): boolean {
   if (s.kind === 'update') return true;
   if (s.kind === 'assign') {
@@ -724,8 +742,9 @@ export function isShapeCGuarded(ast: Script): ShapeCGuard {
     if (isWriteStmt(s, criteriaVars)) {
       writeCount++;
       // Statement writes (update, field assignment) need the admin guard;
-      // a provisioning existence check covers only its bound insert.
-      if (inLoop || !guards.some((guard) => guard.kind === 'admin')) {
+      // a provisioning existence check covers its bound insert and the fields set on the record it read.
+      const stmtMeta = meta.get(s);
+      if (inLoop || !guards.some((guard) => guard.kind === 'admin' || provisionedFieldWriteOk(s, guard, stmtMeta, assigns))) {
         allWritesValid = false;
       }
     }

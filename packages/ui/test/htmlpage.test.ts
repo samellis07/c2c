@@ -5219,6 +5219,63 @@ test('shape C: a sweep that rewrites the rows a server-side criteria selects run
   }
 });
 
+const CODED_ACCOUNTS = `${ACCOUNTS.replace(/\t\}$/, '')}\tCode\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}`;
+const PROVISIONED_CODE = `htmlpage hp1()
+content
+<p><%
+n = Accounts[Email == zoho.adminuserid].count();
+if (n <= 0) {
+  insert into Accounts [ Email = zoho.adminuserid Role = "Admin" ];
+  rec = Accounts[Email == zoho.adminuserid];
+  rec.Code = "#acct" + rec.Role;
+}
+%>Ready</p>`;
+
+test('a setup write that numbers the record it just provisioned runs for the owner once and is skipped for anyone else', async () => {
+  const { files, model } = generateUi(appOf(`${CODED_ACCOUNTS}\n${pageWithSnippet(PROVISIONED_CODE)}`));
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0]!.path);
+  const source = String(files.find((f) => f.path === uiSnippetFiles(model)[0]!.path)!.data);
+  assert.match(source, /shim\.datastore\.setField\(ctx, d_rec, "Code"/);
+  assert.match(source, /const mayWrite = adminProfiles\.includes\(principal\.profile\) && !!ownerId && String\(principal\.userId \|\| ""\) === ownerId;/);
+  const live = await liveStore({});
+  try {
+    const other = await invoke(mod.default as never, { user: { profile: 'Administrator', loginUser: 'eve@example.com', userId: 'u3' }, body: { input: {} } });
+    assert.equal(other.status, 200, JSON.stringify(other.body));
+    assert.deepEqual(other.body.notes, ['a setup write was skipped because the caller may not run it']);
+    assert.deepEqual(live.tables.get('Accounts') ?? [], []);
+    const first = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const again = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    const rows = live.tables.get('Accounts') ?? [];
+    assert.equal(rows.length, 1);
+    assert.deepEqual([rows[0]!.Email, rows[0]!.Role, rows[0]!.Code], ['u1', 'Admin', '#acctAdmin']);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a field set on a fetched record stays a snippet unless the provisioning check read that same record', () => {
+  const stays: Array<[string, string]> = [
+    ['identity field', PROVISIONED_CODE.replace('rec.Code = "#acct" + rec.Role', 'rec.Email = "x"')],
+    ['request value', PROVISIONED_CODE.replace('"#acct" + rec.Role', 'input.c')],
+    ['request value through a name', PROVISIONED_CODE.replace('rec.Code =', 'v = input.c;\n  rec.Code = v +').replace('"#acct" + rec.Role', '"x"')],
+    ['another read', PROVISIONED_CODE.replace('rec = Accounts[Email == zoho.adminuserid]', 'rec = Accounts[Role == "Admin"]')],
+    ['the caller instead of the owner', PROVISIONED_CODE.replace('rec = Accounts[Email == zoho.adminuserid]', 'rec = Accounts[Email == zoho.loginuserid]')],
+    ['record rebound', PROVISIONED_CODE.replace('  rec.Code', '  rec = Accounts[Role == "x"];\n  rec.Code')],
+    ['compound assignment', PROVISIONED_CODE.replace('rec.Code =', 'rec.Code +=')],
+    ['indexed record', PROVISIONED_CODE.replace('rec.Code =', 'rec.get(0).Code =')],
+    ['outside the check', PROVISIONED_CODE.replace('  rec.Code = "#acct" + rec.Role;\n}', '}\nrec.Code = "#acct";')],
+    ['an unrelated count', PROVISIONED_CODE.replace('Accounts[Email == zoho.adminuserid].count()', 'Accounts[Role == "x"].count()')],
+  ];
+  for (const [label, snippet] of stays) {
+    const { model } = buildUi(appOf(`${CODED_ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], label);
+    assert.equal(uiSnippetFiles(model).length, 0, label);
+  }
+});
+
 test('a number a style body computes is set as a custom property on a wrapper only when it is a safe number', async () => {
   const snippet = `htmlpage hp1()
 content
