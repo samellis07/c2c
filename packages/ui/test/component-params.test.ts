@@ -157,6 +157,44 @@ test('embed parameters that cannot be proven keep the snippet counted', () => {
   }
 });
 
+test('a form prefill key that names no field fills nothing and leaves the embed otherwise intact', () => {
+  const { model } = buildUi(appWith(embed(FORM_TAG('zc_Header=false&amp;Date1=<%=input.who%>&amp;Name=<%=row.Name%>'))));
+  assert.deepEqual(snippetTodos(model), []);
+  const el = snippetOf(model);
+  assert.deepEqual(el?.components, [{ kind: 'form', name: 'Intake', params: ['Name'] }]);
+  assert.doesNotMatch(el?.html ?? '', /Date1/);
+  const alone = buildUi(appWith(embed(FORM_TAG('Date1=<%=input.who%>'))));
+  assert.deepEqual(snippetTodos(alone.model), []);
+  assert.deepEqual(snippetOf(alone.model)?.components, [{ kind: 'form', name: 'Intake' }]);
+});
+
+test('attack: a prefill key that names no field is still refused when its value is not a bounded literal or a bare read', () => {
+  for (const value of ['<%=row.Name + "x"%>', '<%=row.Name.toUpperCase()%>', '<%=input.other%>', 'a b', 'x%26y', 'a<%=row.Name%>']) {
+    const { model } = buildUi(appWith(embed(FORM_TAG(`Date1=${value}`))));
+    assert.equal(snippetOf(model)?.components, undefined, value);
+  }
+  for (const key of ['__proto__', 'constructor', 'zc_Unknown', '<%=row.Name%>']) {
+    const { model } = buildUi(appWith(embed(FORM_TAG(`${key}=x`))));
+    assert.equal(snippetOf(model)?.components, undefined, key);
+  }
+  const repeated = buildUi(appWith(embed(FORM_TAG('Date1=x&amp;date1=y'))));
+  assert.equal(snippetOf(repeated.model)?.components, undefined, 'a repeated unknown key');
+  const report = buildUi(appWith(embed(REPORT_TAG('Date1=x'))));
+  assert.equal(snippetOf(report.model)?.components, undefined, 'a report filter on a key that is no field would show more records');
+});
+
+test('an ampersand reference written without its semicolon reads as an ampersand before another one', () => {
+  const { model } = buildUi(appWith(embed(FORM_TAG('zc_Header=false&amp&Name=<%=row.Name%>'))));
+  assert.deepEqual(snippetTodos(model), []);
+  assert.deepEqual(snippetOf(model)?.components, [{ kind: 'form', name: 'Intake', params: ['Name'] }]);
+  // Before a letter or `=` the reference stays text: `&ampName` is the key `ampName`, not `&Name`.
+  const text = buildUi(appWith(embed(FORM_TAG('Name=a&ampName=<%=row.Name%>'))));
+  assert.deepEqual(snippetOf(text.model)?.components, [{ kind: 'form', name: 'Intake', params: ['Name'] }]);
+  assert.match(snippetOf(text.model)?.html ?? '', /data-zml="component-form:Intake\?Name=a"/);
+  const dangling = buildUi(appWith(embed(FORM_TAG('Name=a&amp'))));
+  assert.equal(snippetOf(dangling.model)?.components, undefined, 'a trailing reference with nothing after it is no parameter');
+});
+
 test('a hand-written parameterised marker is never trusted', () => {
   const { model } = buildUi(appWith(embed(`<div data-zml="component-form:Intake?Name=x"></div>`)));
   assert.equal(snippetOf(model)?.components, undefined);

@@ -8,10 +8,12 @@
  * one key it is bound to. Page parameters have no declared type in Creator —
  * `input.<name>` is always the raw decoded query string — so there is
  * nothing to type-check: int-looking, text and date-looking values all take
- * the same path. Anything the compiler cannot prove safe (an unknown page,
- * an undeclared or repeated parameter, any other expression, the page
- * linking to itself) must never fall through to a working-but-unvalidated
- * link: the whole snippet stays the counted TODO.
+ * the same path. A name the target page does not declare is left out of the
+ * link: Creator hands a page only the parameters it declares. A page the app
+ * does not have keeps its route and no parameter, as it leads nowhere in
+ * Creator either. Anything the compiler cannot prove safe (a repeated
+ * parameter, any other expression) must never fall through to a
+ * working-but-unvalidated link: the whole snippet stays the counted TODO.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -77,11 +79,12 @@ test('attack: a hostile forwarded value is percent-encoded, never concatenated r
   assert.match(out.file?.source ?? '', /shim\.string\.encodeUrl/);
 });
 
-test('attack: an undeclared or repeated query parameter keeps the whole snippet counted, never a silent drop', () => {
+test('attack: a repeated query parameter or a prototype key keeps the whole snippet counted, never a silent drop', () => {
   for (const href of [
-    '<%=zoho.appuri%>#Page:Inner?date=1&passdate=false',
     '<%=zoho.appuri%>#Page:Inner?date=1&date=2',
     '<%=zoho.appuri%>#Page:Inner?__proto__=1',
+    '<%=zoho.appuri%>#Page:Inner?date=1&passdate=false&passdate=true',
+    '<%=zoho.appuri%>#Page:Inner?constructor=1',
   ]) {
     const out = compile(href);
     assert.equal(out.ok, false, href);
@@ -89,13 +92,47 @@ test('attack: an undeclared or repeated query parameter keeps the whole snippet 
   }
 });
 
-test('attack: an unknown page, an expression other than a bare forward, and path traversal all stay refused', () => {
+test('a parameter the target page does not declare is left out of the generated link', () => {
+  const out = compile('<%=zoho.appuri%>#Page:Inner?date=<%=input.date%>&passdate=false');
+  assert.equal(out.ok, true, out.reason ?? 'compile failed');
+  assert.match(out.file?.source ?? '', /"#\/page\/Inner\?date="/);
+  assert.doesNotMatch(out.file?.source ?? '', /passdate/);
+  const literal = compile('<%=zoho.appuri%>#Page:Inner?passdate=false');
+  assert.equal(literal.ok, true, literal.reason ?? 'compile failed');
+  assert.match(literal.html ?? '', /href="#\/page\/Inner"/);
+  assert.doesNotMatch(literal.html ?? '', /passdate/);
+});
+
+test('attack: an undeclared parameter still has to carry a bounded literal or a forwarded parameter of this page', () => {
+  for (const value of ['<%=input.date+"x"%>', '<%=zoho.loginuser%>', '<%=input.other%>', '%22', 'javascript:alert(1)', 'a/b', '<%=input.date%><%=input.date%>']) {
+    const out = compile(`<%=zoho.appuri%>#Page:Inner?date=1&passdate=${value}`);
+    assert.equal(out.ok, false, value);
+  }
+});
+
+test('a link to a page the app does not have keeps its route, carries no parameter, and a differently cased name resolves to the declared page', () => {
+  const missing = compile('<%=zoho.appuri%>#Page:Take_Attendance_2?calen=<%=input.date%>&passdate=false');
+  assert.equal(missing.ok, true, missing.reason ?? 'compile failed');
+  assert.match(missing.html ?? '', /href="#\/page\/Take_Attendance_2"/);
+  assert.doesNotMatch(`${missing.html}${missing.file?.source}`, /calen|passdate/);
+  const cased = compile('<%=zoho.appuri%>#Page:inner?date=3');
+  assert.equal(cased.ok, true, cased.reason ?? 'compile failed');
+  assert.match(cased.html ?? '', /href="#\/page\/Inner\?date=3"/);
+});
+
+test('a link whose page name folds to two pages and matches neither exactly stays counted', () => {
+  const twins = appOf(`${page('Inner(date)')}\n${page('inner(date)')}\n${page('Outer(date)')}`);
+  assert.equal(compileHtmlpage(twins, 'Outer', 'Outer1', linkSnippet('<%=zoho.appuri%>#Page:INNER?date=1')).ok, false);
+  assert.equal(compileHtmlpage(twins, 'Outer', 'Outer1', linkSnippet('<%=zoho.appuri%>#Page:Inner?date=1')).ok, true);
+});
+
+test('attack: an expression other than a bare forward, and path traversal stay refused', () => {
   for (const href of [
-    '<%=zoho.appuri%>#Page:No_Such_Page?date=1',
     '<%=zoho.appuri%>#Page:Inner?date=<%=input.date+"x"%>',
     '<%=zoho.appuri%>#Page:Inner?date=<%=zoho.loginuser%>',
     '<%=zoho.appuri%>#Page:../Inner?date=1',
     '<%=zoho.appuri%>#Page:Inner?date=%22',
+    '<%=zoho.appuri%>#Page:No_Such_Page?date=<%=input.date+"x"%>',
   ]) {
     const out = compile(href);
     assert.equal(out.ok, false, href);
