@@ -40,6 +40,8 @@ import {
 } from './htmlpage.js';
 
 const SHAPE_C_SHIM = new Set(['datastore.insert', 'datastore.update', 'datastore.setField']);
+/** The queued row writes a sweep translates to: each assignment is checked when made, the flush applies them. */
+const SWEEP_SHIM = new Set(['record.set', 'datastore.flush']);
 
 function walkExpr(e: Expr, onExpr: (e: Expr) => void): void {
   onExpr(e);
@@ -190,6 +192,13 @@ function unwrap(e: Expr): Expr {
   return e;
 }
 
+/** The operands of an `a && b && c` chain, looking through parentheses. */
+function conjuncts(e: Expr): Expr[] {
+  e = unwrap(e);
+  if (e.kind === 'binary' && (e.op === '&&' || e.op.toLowerCase() === 'and')) return [...conjuncts(e.left), ...conjuncts(e.right)];
+  return [e];
+}
+
 /** Only this exact comparison proves that the authenticated app admin is the caller. */
 function isAuthenticatedAdminGuard(e: Expr): boolean {
   e = unwrap(e);
@@ -242,6 +251,21 @@ function identityRead(e: Expr): IdentityRead | null {
     return prop ? { form: object.name, field: right.name, prop } : null;
   }
   return null;
+}
+
+/** `Form[ID != 0]`: every record of one form, nothing else (no second term, sort or range). */
+function allRecordsRead(e: Expr): { form: string } | null {
+  e = unwrap(e);
+  if (e.kind !== 'criteria' || e.sort || e.range) return null;
+  const object = unwrap(e.object);
+  if (object.kind !== 'name') return null;
+  const crit = unwrap(e.criteria);
+  if (crit.kind !== 'binary' || crit.op !== '!=') return null;
+  const left = unwrap(crit.left);
+  const right = unwrap(crit.right);
+  if (left.kind !== 'name' || left.name.toLowerCase() !== 'id') return null;
+  if (right.kind !== 'number' || Number(right.text) !== 0) return null;
+  return { form: object.name };
 }
 
 interface StmtMeta {
@@ -329,7 +353,7 @@ function provisioningRead(
   test: Expr,
   ifMeta: StmtMeta,
   assigns: Map<string, AssignInfo[]>,
-): IdentityRead | null {
+): ProvisionRead | null {
   test = unwrap(test);
   if (test.kind !== 'binary' || (test.op !== '==' && test.op !== '<=')) return null;
   const right = unwrap(test.right);
@@ -344,16 +368,19 @@ function provisioningRead(
   const callee = unwrap(left.callee);
   if (callee.kind !== 'member' || callee.property.toLowerCase() !== 'count') return null;
   const recv = unwrap(callee.object);
-  if (recv.kind === 'criteria') return identityRead(recv);
+  if (recv.kind === 'criteria') return identityRead(recv) ?? allRecordsRead(recv);
   if (recv.kind !== 'name') return null;
   const read = boundOnce(recv.name, ifMeta, assigns);
-  return read ? identityRead(read) : null;
+  return read ? (identityRead(read) ?? allRecordsRead(read)) : null;
 }
+
+/** An identity existence check, or the empty-form check `Form[ID != 0].count() == 0`. */
+type ProvisionRead = IdentityRead | { form: string };
 
 type WriteGuard =
   | { kind: 'none' }
   | { kind: 'admin' }
-  | { kind: 'provision'; read: IdentityRead };
+  | { kind: 'provision'; read: ProvisionRead };
 
 const NO_GUARD: WriteGuard = { kind: 'none' };
 
@@ -393,12 +420,18 @@ function readsClientInput(e: Expr, assigns: Map<string, AssignInfo[]>, seen = ne
 function writeExprOk(e: Expr, guard: WriteGuard, assigns: Map<string, AssignInfo[]>): boolean {
   if (guard.kind === 'admin') return true;
   if (guard.kind !== 'provision' || e.kind !== 'insert') return false;
+  const read = guard.read;
   const form = unwrap(e.form);
-  if (form.kind !== 'name' || form.name.toLowerCase() !== guard.read.form.toLowerCase()) return false;
-  const checked = e.entries.filter((en) => en.key.toLowerCase() === guard.read.field.toLowerCase());
+  if (form.kind !== 'name' || form.name.toLowerCase() !== read.form.toLowerCase()) return false;
+  if (!('field' in read)) {
+    // Empty-form bootstrap: the form holds no record yet, so the insert may seed it. No
+    // value may come from the request, so the first caller cannot choose what is stored.
+    return !e.entries.some((en) => readsClientInput(en.value, assigns));
+  }
+  const checked = e.entries.filter((en) => en.key.toLowerCase() === read.field.toLowerCase());
   // The caller's own id, or the id the check read: under an administrator check the endpoint requires the caller to be the owner.
   const bound = identityProp(checked[0]?.value as Expr);
-  if (checked.length !== 1 || (bound !== 'loginuserid' && bound !== guard.read.prop)) return false;
+  if (checked.length !== 1 || (bound !== 'loginuserid' && bound !== read.prop)) return false;
   return !e.entries.some((en) => IDENTITY_FIELD.test(en.key) && readsClientInput(en.value, assigns));
 }
 
@@ -417,14 +450,149 @@ function isWriteStmt(s: Stmt, criteriaVars: Set<string>): boolean {
   return false;
 }
 
+function rootName(e: Expr): string | null {
+  let cur: Expr = e;
+  while (cur.kind === 'member' || cur.kind === 'index' || cur.kind === 'paren' || cur.kind === 'call') {
+    cur = cur.kind === 'paren' ? cur.expr : cur.kind === 'call' ? cur.callee : cur.object;
+  }
+  return cur.kind === 'name' ? cur.name.toLowerCase() : null;
+}
+
+/**
+ * Names that can hold a fetched record or collection: assigned from a read,
+ * from another such name, or the row variable of a loop over one. Order and
+ * branches are ignored, so a name that is ever bound that way counts.
+ */
+function recordNames(ast: Script): Set<string> {
+  const bound = new Set<string>();
+  const holds = (e: Expr): boolean => {
+    e = unwrap(e);
+    if (exprHasCriteria(e)) return true;
+    const root = rootName(e);
+    return root !== null && bound.has(root);
+  };
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const root of ast.body) {
+      walkStmt(
+        root,
+        (stmt) => {
+          let name: string | undefined;
+          if (stmt.kind === 'assign' && stmt.target.kind === 'name' && stmt.op === '=' && holds(stmt.value)) name = stmt.target.name.toLowerCase();
+          if (stmt.kind === 'forEach' && !stmt.iteratesIndex && !stmt.index && holds(stmt.collection)) name = stmt.name.toLowerCase();
+          if (name !== undefined && !bound.has(name)) {
+            bound.add(name);
+            changed = true;
+          }
+        },
+        () => {},
+      );
+    }
+  }
+  return bound;
+}
+
+/**
+ * Sweeps: `for each r in Form[criteria] { r.Field = value; ... }` whose
+ * criteria and values come from the snippet and the server clock (never the
+ * request) and whose body holds nothing but field assignments to the row
+ * variable. Creator rewrites the matching rows on every render; the generated
+ * route does the same per row through the checked write path, once per render.
+ */
+function findSweeps(ast: Script, assigns: Map<string, AssignInfo[]>): Set<Stmt> {
+  const sweeps = new Set<Stmt>();
+  for (const root of ast.body) {
+    walkStmt(
+      root,
+      (stmt) => {
+        if (stmt.kind !== 'forEach' || stmt.iteratesIndex || stmt.index) return;
+        const collection = unwrap(stmt.collection);
+        if (collection.kind !== 'criteria' || unwrap(collection.object).kind !== 'name') return;
+        if (!shapeCExprOk(collection) || readsClientInput(collection, assigns)) return;
+        const loopVar = stmt.name.toLowerCase();
+        const body = stmt.body.kind === 'block' ? stmt.body.body : [stmt.body];
+        if (body.length === 0) return;
+        const loopVarOnly = (e: Expr) => {
+          let ok = true;
+          walkExpr(e, (node) => {
+            if (node.kind === 'criteria' || node.kind === 'insert') ok = false;
+            if (node.kind === 'name' && node.name.toLowerCase() !== 'zoho' && node.name.toLowerCase() !== loopVar) ok = false;
+          });
+          return ok;
+        };
+        const assignsRow = body.every((inner) => {
+          if (inner.kind !== 'assign' || inner.op !== '=' || inner.target.kind !== 'member') return false;
+          const object = unwrap(inner.target.object);
+          if (object.kind !== 'name' || object.name.toLowerCase() !== loopVar) return false;
+          return shapeCExprOk(inner.value) && loopVarOnly(inner.value);
+        });
+        if (assignsRow) sweeps.add(stmt);
+      },
+      () => {},
+    );
+  }
+  return sweeps;
+}
+
 function isWriteExpr(e: Expr): boolean {
   return e.kind === 'insert';
+}
+
+/**
+ * True when a field is written through a fetched record or collection in a
+ * way the guard rules do not cover: a row variable of a loop, an element by
+ * index, or an alias of either. A sweep's own assignments and the whole-record
+ * variables the admin guard handles do not count.
+ */
+export function hasUnguardedRecordWrite(ast: Script): boolean {
+  const meta = indexStmts(ast);
+  const sweeps = findSweeps(ast, collectAssigns(ast, meta));
+  const covered = collectCriteriaVars(ast);
+  const bound = recordNames(ast);
+  let found = false;
+  const visit = (s: Stmt): void => {
+    if (found || sweeps.has(s)) return;
+    if (s.kind === 'assign' && s.target.kind !== 'name') {
+      const root = rootName(s.target);
+      const viaIndex = (() => {
+        let cur = s.target as Expr;
+        while (cur.kind === 'member' || cur.kind === 'index' || cur.kind === 'paren' || cur.kind === 'call') {
+          if (cur.kind === 'index' || cur.kind === 'call') return true;
+          cur = cur.kind === 'paren' ? cur.expr : cur.object;
+        }
+        return false;
+      })();
+      if (root !== null && bound.has(root) && (viaIndex || !covered.has(root))) found = true;
+    }
+    switch (s.kind) {
+      case 'block':
+        s.body.forEach(visit);
+        break;
+      case 'if':
+        visit(s.then);
+        s.elifs.forEach((elif) => visit(elif.body));
+        if (s.else) visit(s.else);
+        break;
+      case 'forEach':
+      case 'while':
+        visit(s.body);
+        break;
+      case 'try':
+        visit(s.body);
+        if (s.catchBody) visit(s.catchBody);
+        break;
+      default:
+        break;
+    }
+  };
+  ast.body.forEach(visit);
+  return found;
 }
 
 /** True when the AST contains any setup write (insert into, update, or field write). */
 export function hasShapeCWrites(ast: Script): boolean {
   const criteriaVars = collectCriteriaVars(ast);
-  let found = false;
+  let found = findSweeps(ast, collectAssigns(ast, indexStmts(ast))).size > 0;
   for (const s of ast.body) {
     walkStmt(
       s,
@@ -448,6 +616,8 @@ export interface ShapeCGuard {
    * (`C2C_ADMIN_USER_ID`) before any write runs.
    */
   requireOwner: boolean;
+  /** The snippet holds a sweep, whose row assignments translate to queued writes and one flush. */
+  sweeps: boolean;
 }
 
 /**
@@ -459,6 +629,7 @@ export function isShapeCGuarded(ast: Script): ShapeCGuard {
   const criteriaVars = collectCriteriaVars(ast);
   const meta = indexStmts(ast);
   const assigns = collectAssigns(ast, meta);
+  const sweeps = findSweeps(ast, assigns);
 
   let allWritesValid = true;
   let writeCount = 0;
@@ -466,11 +637,12 @@ export function isShapeCGuarded(ast: Script): ShapeCGuard {
   const provisionWrites = new Map<WriteGuard, number>();
 
   function testGuard(test: Expr, ifMeta: StmtMeta | undefined): WriteGuard {
-    if (isAuthenticatedAdminGuard(test)) return { kind: 'admin' };
+    // `admin && other`: the then-branch runs only when the admin comparison holds.
+    if (conjuncts(test).some(isAuthenticatedAdminGuard)) return { kind: 'admin' };
     if (!ifMeta) return NO_GUARD;
     const read = provisioningRead(test, ifMeta, assigns);
     if (!read) return NO_GUARD;
-    if (read.prop === 'adminuserid') requireOwner = true;
+    if ('prop' in read && read.prop === 'adminuserid') requireOwner = true;
     return { kind: 'provision', read };
   }
 
@@ -576,6 +748,12 @@ export function isShapeCGuarded(ast: Script): ShapeCGuard {
       }
       case 'forEach':
         checkExpr(s.collection, inLoop, guards);
+        if (sweeps.has(s)) {
+          // A sweep is the one loop that may write; it may not sit inside another loop.
+          writeCount++;
+          if (inLoop) allWritesValid = false;
+          break;
+        }
         checkStmt(s.body, true, guards);
         break;
       case 'while':
@@ -616,7 +794,7 @@ export function isShapeCGuarded(ast: Script): ShapeCGuard {
   }
 
   const ok = writeCount > 0 && allWritesValid;
-  return { ok, requireOwner: ok && requireOwner };
+  return { ok, requireOwner: ok && requireOwner, sweeps: ok && sweeps.size > 0 };
 }
 
 export function shapeCExprOk(e: Expr): boolean {
@@ -687,7 +865,7 @@ export function shapeCStmtOk(s: Stmt): boolean {
  * datastore.setField, ensuring no functions.* and no unshimmed awaits. A
  * `thisapp.<fn>()` call passes only when `appCall` proves its callee read-only.
  */
-export function shapeCServerOk(server: string, appCall?: (path: string[]) => boolean): boolean {
+export function shapeCServerOk(server: string, appCall?: (path: string[]) => boolean, sweeps = false): boolean {
   if (/\bfunctions\./.test(server)) return false;
   for (const match of server.matchAll(/\bshim\.([A-Za-z_][\w.]*)\s*\(/g)) {
     const name = match[1] ?? '';
@@ -696,7 +874,7 @@ export function shapeCServerOk(server: string, appCall?: (path: string[]) => boo
       if (!path || !appCall(path)) return false;
       continue;
     }
-    if (!readOnlyShim(name) && !SHAPE_C_SHIM.has(name)) return false;
+    if (!readOnlyShim(name) && !SHAPE_C_SHIM.has(name) && !(sweeps && SWEEP_SHIM.has(name))) return false;
   }
   if (assignsDatastoreRead(server) || mutatesFetchedRead(server)) return false;
   if (/\bawait\s+(?!shim\.)/.test(server)) return false;

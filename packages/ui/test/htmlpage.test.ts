@@ -2607,11 +2607,12 @@ test('unquoted value with space/quote/> stays inside one quoted attribute', asyn
   }
 });
 
+// A loop that only assigns literal values to its row is a sweep; see the shape C sweep tests.
 test('a for-each loop that writes stays a snippet and does not update rows', async () => {
   await assertStaysSnippet(
     `<%
 for each row in Orders[Status == "open"] {
-  row.Status = "pwned";
+  row.Status = input.s;
 }
 %>
 <p>x</p>`,
@@ -4901,7 +4902,232 @@ content
   }
 });
 
+test('shape C: an admin comparison joined by && guards a provisioning insert, once per render', async () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+if (zoho.loginuserid == zoho.adminuserid && Accounts[Email == zoho.adminuserid].count() == 0) {
+  insert into Accounts [
+    Email = zoho.adminuserid
+    Role = "Admin"
+  ];
+}
+%>
+Ready
+</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0]!.path);
+  const live = await liveStore({});
+  try {
+    const clerk = await invoke(mod.default as never, { ...CLERK, body: { input: {} } });
+    assert.equal(clerk.status, 200, JSON.stringify(clerk.body));
+    assert.equal((live.tables.get('Accounts') ?? []).length, 0);
+    const first = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const second = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(second.status, 200, JSON.stringify(second.body));
+    const rows = live.tables.get('Accounts') ?? [];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].Email, 'u1');
+  } finally {
+    live.restore();
+  }
+});
+
 test('a template that already writes a branch marker title is a counted snippet', () => {
   const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', 'htmlpage hp1()\ncontent\n<%{ %><span title="c2c-css-abcdef012345"></span><p><%= input.v %></p><%}%>');
   assert.equal(compiled.ok, false);
+});
+
+test('shape C negative: an admin comparison under || or ! does not guard a write', () => {
+  const guards = [
+    'zoho.loginuserid == zoho.adminuserid || Accounts[Email == zoho.adminuserid].count() == 0',
+    '!(zoho.loginuserid == zoho.adminuserid && Accounts[Email == zoho.adminuserid].count() == 0)',
+    'input.force == true && Accounts[Email == zoho.adminuserid].count() == 0 || zoho.loginuserid == zoho.adminuserid',
+    'zoho.loginuserid == input.admin && Accounts[Email == zoho.adminuserid].count() == 0',
+  ];
+  for (const guard of guards) {
+    const snippet = `htmlpage hp1()\ncontent\n<p><%\nif (${guard}) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Done</p>`;
+    const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], guard);
+    assert.equal(uiSnippetFiles(model).length, 0, guard);
+  }
+});
+
+test('shape C: an empty-form check seeds the form with the caller once, through the checked write path', async () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+rows = Accounts[ID != 0];
+if (rows.count() == 0) {
+  insert into Accounts [
+    Email = zoho.loginuserid
+    Role = "Owner"
+  ];
+}
+%>
+Ready
+</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0]!.path);
+  const live = await liveStore({});
+  try {
+    const clerk = await invoke(mod.default as never, { ...CLERK, body: { input: {} } });
+    assert.equal(clerk.status, 403, JSON.stringify(clerk.body));
+    assert.equal((live.tables.get('Accounts') ?? []).length, 0);
+    const first = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const second = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(second.status, 200, JSON.stringify(second.body));
+    const rows = live.tables.get('Accounts') ?? [];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].Email, 'u1');
+    assert.equal(rows[0].Role, 'Owner');
+    // Origin is checked before the write as for every write render.
+    const foreign = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin: 'https://evil.example' } });
+    assert.equal(foreign.status, 403);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C negative: an empty-form check does not admit request values, a second write, or another form', () => {
+  const cases: Array<[string, string]> = [
+    ['request value', 'if (Accounts[ID != 0].count() == 0) {\n  insert into Accounts [ Email = input.who Role = "Owner" ];\n}'],
+    ['request value through a name', 'who = input.who;\nif (Accounts[ID != 0].count() == 0) {\n  insert into Accounts [ Email = who Role = "Owner" ];\n}'],
+    ['two inserts', 'if (Accounts[ID != 0].count() == 0) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Owner" ];\n  insert into Accounts [ Email = zoho.loginuserid Role = "Copy" ];\n}'],
+    ['other form', 'if (Accounts[ID != 0].count() == 0) {\n  insert into Orders [ Status = "open" ];\n}'],
+    ['filtered read', 'if (Accounts[Role == "Owner"].count() == 0) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Owner" ];\n}'],
+    ['not empty', 'if (Accounts[ID != 0].count() == 1) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Owner" ];\n}'],
+    ['extra operand', 'if (Accounts[ID != 0].count() == 0 || input.force == true) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Owner" ];\n}'],
+    ['update after the check', 'if (Accounts[ID != 0].count() == 0) {\n  Accounts[Role == "Owner"].Role = "Gone";\n}'],
+    ['in a loop', 'for each r in Accounts[Role == "x"] {\n  if (Accounts[ID != 0].count() == 0) {\n    insert into Accounts [ Email = zoho.loginuserid Role = "Owner" ];\n  }\n}'],
+  ];
+  for (const [name, island] of cases) {
+    const snippet = `htmlpage hp1()\ncontent\n<p><%\n${island}\n%>Done</p>`;
+    const { model } = buildUi(appOf(`${ACCOUNTS}\n${ORDERS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], name);
+    assert.equal(uiSnippetFiles(model).length, 0, name);
+  }
+});
+
+test('shape C: a read-only thisapp call may sit beside a guarded setup write, a writing callee may not', async () => {
+  const accountsCount = { name: 'Util.accountCount', signature: 'int Util.accountCount()', deluge: 'return Accounts[ID != 0].count();' };
+  const snippet = `htmlpage hp1()\ncontent\n<p><%\nif (zoho.loginuserid == zoho.adminuserid && Accounts[Email == zoho.adminuserid].count() == 0) {\n  insert into Accounts [ Email = zoho.adminuserid Role = "Admin" ];\n}\n%>Accounts: <%= thisapp.Util.accountCount() %></p>`;
+  const app = appWithFns([accountsCount], `${ACCOUNTS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  assert.match(compiled.file?.source ?? '', /import \{ functions \} from "\.\.\/thisapp\.mjs";/);
+  const ui = generateUi(app);
+  assert.equal(ui.model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 0);
+  const uiPaths = new Set(ui.files.map((f) => f.path));
+  const files = [...ui.files, ...generate(app).files.filter((f) => !uiPaths.has(f.path)).map((f) => ({ path: f.path, data: f.source }))];
+  const live = await liveStore({});
+  try {
+    const mod = await loadTree(files, uiSnippetFiles(ui.model)[0].path);
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal((live.tables.get('Accounts') ?? []).length, 1);
+  } finally {
+    live.restore();
+  }
+  const writers: Array<[string, string]> = [
+    ['callee inserts', 'insert into Accounts [ Email = "x" Role = "y" ];\nreturn 1;'],
+    ['callee mails', 'sendmail [ from: zoho.adminuserid to: "a@example.com" subject: "x" message: "y" ];\nreturn 1;'],
+    ['callee sets a field', 'r = Accounts[Role == "x"];\nr.Role = "z";\nreturn 1;'],
+  ];
+  for (const [name, deluge] of writers) {
+    const bad = appWithFns([{ name: 'Util.accountCount', signature: 'int Util.accountCount()', deluge }], `${ACCOUNTS}\n${pageWithSnippet(snippet)}`);
+    assert.equal(compileHtmlpage(bad, 'Home', 'hp1', snippet).ok, false, name);
+  }
+});
+
+test('shape C negative: a loop-variable or fetched-record field write beside a guarded setup write is still refused', () => {
+  const guardedInsert = 'if (zoho.loginuserid == zoho.adminuserid) {\n  insert into Accounts [ Email = zoho.adminuserid Role = "Admin" ];\n}';
+  const writes: Array<[string, string]> = [
+    ['loop variable', 'for each r in Accounts[Role == "x"] {\n  r.Role = input.z;\n}'],
+    ['loop variable behind a branch', 'for each r in Accounts[Role == "x"] {\n  if (r.Role == "x") {\n    r.Role = "z";\n  }\n}'],
+    ['fetched record', 'rec = Accounts[Role == "x"];\nrec.Role = "z";'],
+    ['fetched record by index', 'rows = Accounts[Role == "x"];\nrows.get(0).Role = "z";'],
+  ];
+  for (const [name, write] of writes) {
+    const snippet = `htmlpage hp1()\ncontent\n<p><%\n${guardedInsert}\n${write}\n%>Done</p>`;
+    const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], name);
+    assert.equal(uiSnippetFiles(model).length, 0, name);
+  }
+});
+
+test('shape C: a sweep that rewrites the rows a server-side criteria selects runs through the checked row writes, once per row', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<p><%\nfor each o in Orders[Status == "closed" && Name != "Ended"]\n{\n\to.Name = "Ended";\n}\n%>Open: <%= Orders[Status == "open"].count() %></p>`;
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0]!.path);
+  const live = await liveStore({
+    Orders: [
+      { Name: 'a', Status: 'closed', Amount: 1 },
+      { Name: 'b', Status: 'open', Amount: 2 },
+      { Name: 'c', Status: 'closed', Amount: 3 },
+    ],
+  });
+  try {
+    const clerk = await invoke(mod.default as never, { ...CLERK, body: { input: {} } });
+    assert.equal(clerk.status, 403, JSON.stringify(clerk.body));
+    const foreign = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin: 'https://evil.example' }, body: { input: {} } });
+    assert.equal(foreign.status, 403);
+    assert.deepEqual((live.tables.get('Orders') ?? []).map((r) => r.Name), ['a', 'b', 'c']);
+    // A request value cannot reach the criteria or the stored value.
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { Status: 'open', Name: 'hacked' } } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.match(String(out.body.html), /Open: 1/);
+    assert.deepEqual((live.tables.get('Orders') ?? []).map((r) => r.Name), ['Ended', 'b', 'Ended']);
+    const again = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    assert.deepEqual((live.tables.get('Orders') ?? []).map((r) => r.Name), ['Ended', 'b', 'Ended']);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C: a failing row write fails the sweep render without html', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<p><%\nfor each o in Orders[Status == "closed"]\n{\n\to.Name = "Ended";\n}\n%>Done</p>`;
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0]!.path);
+  const live = await liveStore({ Orders: [{ Name: 'a', Status: 'closed', Amount: 1 }] });
+  try {
+    live.datastore.update = async () => {
+      throw new Error('database connection lost');
+    };
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 500, JSON.stringify(out.body));
+    assert.equal('html' in out.body, false);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C negative: a sweep takes no request value, no other statement, and no nesting', () => {
+  const cases: Array<[string, string]> = [
+    ['criteria from input', 'for each o in Orders[Status == input.s] {\n  o.Name = "x";\n}'],
+    ['criteria through a name', 's = input.s;\nfor each o in Orders[Status == s] {\n  o.Name = "x";\n}'],
+    ['value from input', 'for each o in Orders[Status == "closed"] {\n  o.Name = input.n;\n}'],
+    ['value through a name', 'n = input.n;\nfor each o in Orders[Status == "closed"] {\n  o.Name = n;\n}'],
+    ['value from another read', 'for each o in Orders[Status == "closed"] {\n  o.Name = Orders[Status == "open"].Name;\n}'],
+    ['other row', 'for each o in Orders[Status == "closed"] {\n  p = Orders[Status == "open"];\n  p.Name = "x";\n}'],
+    ['with an insert', 'for each o in Orders[Status == "closed"] {\n  o.Name = "x";\n  insert into Orders [ Name = "y" ];\n}'],
+    ['nested', 'for each a in Orders[Status == "closed"] {\n  for each o in Orders[Status == "open"] {\n    o.Name = "x";\n  }\n}'],
+    ['update inside a branch of the row', 'for each o in Orders[Status == "closed"] {\n  if (o.Amount > 1) {\n    o.Name = "x";\n  }\n}'],
+    ['compound assignment on a list', 'for each o in Orders[Status == "closed"] {\n  o.Name += "x";\n}'],
+  ];
+  for (const [name, island] of cases) {
+    const snippet = `htmlpage hp1()\ncontent\n<p><%\n${island}\n%>Done</p>`;
+    const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], name);
+    assert.equal(uiSnippetFiles(model).length, 0, name);
+  }
 });
