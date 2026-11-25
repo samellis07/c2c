@@ -48,6 +48,18 @@ test('a forwarded page parameter becomes a generated link with an encodeUrl isla
   assert.match(out.file?.source ?? '', /"#\/page\/Inner\?date="/);
 });
 
+test('a bare read the render supplies becomes an encodeUrl island in the generated link, and only a bare read of this page\'s own parameters', () => {
+  const snippet = (value: string) => `htmlpage Outer1()\ncontent\n<%{\n row = Rows[ID != 0];\n%>\n<a href="<%=zoho.appuri%>#Page:Inner?date=${value}">go</a>\n<%\n}%>`;
+  const rows = appOf(`\tform Rows\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n${page('Inner(date)')}\n${page('Outer(date)')}`);
+  const out = compileHtmlpage(rows, 'Outer', 'Outer1', snippet('<%=row.ID%>'));
+  assert.equal(out.ok, true, out.reason ?? 'compile failed');
+  assert.match(out.file?.source ?? '', /shim\.string\.encodeUrl\(await shim\.datastore\.field\(ctx, d_row, "ID"\)\)/);
+  assert.match(out.file?.source ?? '', /"#\/page\/Inner\?date="/);
+  for (const value of ['<%=input.other%>', '<%=row.ID + 1%>', '<%=row.ID%><%=row.ID%>', '<%=__proto__.ID%>']) {
+    assert.equal(compileHtmlpage(rows, 'Outer', 'Outer1', snippet(value)).ok, false, value);
+  }
+});
+
 test('a bare Creator page fragment is translated like an appuri-prefixed link', () => {
   const out = compile('#Page:Inner?date=<%=input.date%>');
   assert.equal(out.ok, true, out.reason ?? 'compile failed');
@@ -136,7 +148,6 @@ test('a link whose page name folds to two pages and matches neither exactly stay
 test('attack: an expression other than a bare forward, and path traversal stay refused', () => {
   for (const href of [
     '<%=zoho.appuri%>#Page:Inner?date=<%=input.date+"x"%>',
-    '<%=zoho.appuri%>#Page:Inner?date=<%=zoho.loginuser%>',
     '<%=zoho.appuri%>#Page:../Inner?date=1',
     '<%=zoho.appuri%>#Page:Inner?date=%22',
     '<%=zoho.appuri%>#Page:No_Such_Page?date=<%=input.date+"x"%>',
