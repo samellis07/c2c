@@ -34,7 +34,7 @@ import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
 import { allStmts, markupFlow, thisappPath } from './markup-flow.js';
 import { fileFieldsFor } from '../../deluge/src/field-store.js';
-import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
+import { hasShapeCWrites, hasUnguardedRecordWrite, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
 import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, recordSummaryIdShape, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 
 export interface HtmlpageFile {
@@ -1076,8 +1076,9 @@ export function assignsCriteriaField(target: Expr): boolean {
 /** Root name of a member/index chain (`r.Sub[0].Field` → `r`), else null. */
 function chainRoot(e: Expr): string | null {
   let cur: Expr = e;
-  while (cur.kind === 'member' || cur.kind === 'index' || cur.kind === 'paren') {
-    cur = cur.kind === 'paren' ? cur.expr : cur.object;
+  // `rows.get(0).X`: a call on the binding yields its element, so the chain continues through the callee.
+  while (cur.kind === 'member' || cur.kind === 'index' || cur.kind === 'paren' || cur.kind === 'call') {
+    cur = cur.kind === 'paren' ? cur.expr : cur.kind === 'call' ? cur.callee : cur.object;
   }
   return cur.kind === 'name' ? cur.name : null;
 }
@@ -3340,7 +3341,7 @@ export function compileHtmlpage(
   let shapeCGuard: ShapeCGuard | undefined;
   if (isShapeC) {
     shapeCGuard = isShapeCGuarded(ast);
-    if (!shapeCGuard.ok) return fail('island writes are unguarded');
+    if (!shapeCGuard.ok || hasUnguardedRecordWrite(ast)) return fail('island writes are unguarded');
     if (!ast.body.every(shapeCStmtOk)) return fail('island outside the handled classes');
   } else {
     if (!ast.body.every((stmt) => stmtOk(stmt))) return fail('island outside the handled classes');
@@ -3384,7 +3385,7 @@ export function compileHtmlpage(
   // that is not one of those reads stays the same counted snippet.
   const appCall = (callee: string[]) => readOnlyAppFunction(app, callee, new Set(), calleeServers, flow.functions.has(callee.join('.').toLowerCase()));
   if (isShapeC) {
-    if (!shapeCServerOk(server, appCall)) return fail('island is not an allowed write render');
+    if (!shapeCServerOk(server, appCall, shapeCGuard?.sweeps)) return fail('island is not an allowed write render');
   } else {
     if (!islandReadOnly(server, appCall)) return fail('island is not a read-only render');
   }
