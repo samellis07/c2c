@@ -1286,6 +1286,15 @@ function navFromOpenUrl(
       continue;
     }
     let paramName = name;
+    if (kind === 'report' && !targetForm && !targetPage && !record && /_op$/i.test(name) && raw === '26') {
+      // Creator's CONTAINS operator rides on the field's own value pair,
+      // which is the one filter this link carries.
+      const base = name.slice(0, -3).toLowerCase();
+      const siblings = (suffix: string) => query.split('&').filter((item) => item.split('=')[0]!.toLowerCase() === base + suffix).length;
+      if (!base || siblings('') !== 1 || siblings('_op') !== 1) return undefined;
+      params.push({ name, value: raw });
+      continue;
+    }
     if (targetForm) {
       // `recLinkID` picks the record the form's edit screen opens and
       // `viewLinkName` names the report the link left; both are Creator
@@ -1305,7 +1314,7 @@ function navFromOpenUrl(
     } else if (targetPage) {
       if (!(targetPage.params ?? []).includes(name)) return undefined;
     } else if (kind === 'report' && !record) {
-      if (eq <= 0 || !raw || /_op$/i.test(name) || /^filter$/i.test(name) || params.length > 0) return undefined;
+      if (eq <= 0 || !raw || /_op$/i.test(name) || /^filter$/i.test(name) || params.some((item) => !/_op$/i.test(item.name))) return undefined;
       const reportFormName = app.reports.find((item) => item.name === target)?.form;
       const reportForm = reportFormName ? app.forms.find((item) => item.name.toLowerCase() === reportFormName.toLowerCase()) : undefined;
       const rField = reportForm ? formField(reportForm, name) : undefined;

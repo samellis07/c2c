@@ -3448,3 +3448,20 @@ test('browser report row paints a format that compares two columns of the row', 
   assert.match(tds.find((td) => td.textContent === '9')?.getAttribute('style') || '', /color:red/);
   assert.equal(tds.find((td) => td.textContent === '100')?.getAttribute('style') || '', '');
 });
+
+test('a CONTAINS click parameter (_op=26) is carried with its value, and one without a value stays manual', () => {
+  const app = { forms: [], reports: [{ name: 'All_Calls' }], pages: [], sections: [], devices: [], functions: [] } as unknown as App;
+  const env = { app, page: 'Home' };
+  const [carried] = elementsFromZml(
+    parseZml(`<text value='X' action='OpenReport' componentLinkName='All_Calls' parameters='Customer=555&amp;Customer_op=26'/>`),
+    env,
+  );
+  assert.equal(carried.parameters, 'Customer=555&Customer_op=26');
+  assert.equal(carried.droppedParameters, undefined);
+  const [orphan] = elementsFromZml(
+    parseZml(`<text value='X' action='OpenReport' componentLinkName='All_Calls' parameters='Customer_op=26'/>`),
+    env,
+  );
+  assert.equal(orphan.parameters, undefined);
+  assert.equal(orphan.droppedParameters, 'Customer_op=26');
+});

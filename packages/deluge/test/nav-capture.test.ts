@@ -252,3 +252,16 @@ test('a page route leaves out a parameter the page does not declare only when th
   assert.equal(nav('#Page:Missing?Task_Id=7', { ignoreUndeclared: true }), null, 'an unknown page is still no route');
   assert.equal(nav('#Report:All?Secret=1', { ignoreUndeclared: true }), null, 'a report filter on an unknown field is still refused');
 });
+
+test('a report link filtered with the Creator CONTAINS operator (Field_op=26) is carried with its filter', async (t) => {
+  const run = await loadFunction(t, demo('openUrl("#Report:All_Tasks?Note=" + t.Note + "&Note_op=26", "new window");'));
+  assert.deepEqual(run.todos.filter((c) => NAV.test(c)), []);
+  assert.deepEqual(run.resolve(await run.call({ Note: 'ab c' })), { kind: 'navigate', url: '#/report/All_Tasks?Note=ab%20c&Note_op=26', target: 'new' });
+});
+
+test('a CONTAINS operator without its value pair, or any other operator, stays a counted item', () => {
+  for (const url of ['#Report:All_Tasks?Note_op=26', '#Report:All_Tasks?Note=x&Note_op=2', '#Report:All_Tasks?Note=x&Note_op=26&Status=y', '#Report:All_Tasks?Nope=x&Nope_op=26', '#Report:All_Tasks?Note=x&Note_op=26&Note_op=26']) {
+    const g = generate(demo(`openUrl("${url}", "same window");`));
+    assert.ok(g.todos.some((c) => /^openurl-unsupported/.test(c.construct) || /^openurl-dropped/.test(c.construct)), url);
+  }
+});

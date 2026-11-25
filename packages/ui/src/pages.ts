@@ -1610,8 +1610,8 @@ export function translatableClickParameters(parameters: string | undefined, page
     }
     // An `_op` the client runtime's clickParamConditions cannot translate
     // drops the condition on the route, so the whole string stays manual.
-    if (!/^(20|32|45|58)$/.test(cond.op)) return false;
-    if ((cond.op === '20' || cond.op === '58') && cond.value === undefined) return false;
+    if (!/^(20|26|32|45|58)$/.test(cond.op)) return false;
+    if ((cond.op === '20' || cond.op === '26' || cond.op === '58') && cond.value === undefined) return false;
     if (cond.op === '58') {
       // BETWEEN applies only when the value splits into two bounds, and a
       // page input substitutes unknown text, so only a literal `v1;v2` wires.

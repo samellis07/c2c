@@ -41,13 +41,17 @@ const NAV = {
   'Bill Page': ['Bill_Page', `openUrl("#Page:Detail?param1=" + input.ID,"same window");`],
   'Literal Attack': ['Literal_Attack', `openUrl("#Page:Detail?param1=<img src=x onerror=alert(1)>","same window");`],
   'Filtered Report': ['Filtered_Report', `openUrl("#Report:All_Requests?Note=" + input.Name,"same window");`],
+  'Report Op Filter': ['Report_Op_Filter', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Note_op=26","same window");`],
 } as const;
 
 const COUNTED = {
   External: ['External_Link', `openUrl("https://example.com/items?id=" + input.ID,"new window");`],
   'Two Links': ['Two_Links', `openUrl("#Form:Request","popup window");\nopenUrl("#Report:All_Requests","same window");`],
   Computed: ['Computed_Link', `openUrl(input.Name,"same window");`],
-  'Report Op Filter': ['Report_Op_Filter', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Note_op=26","same window");`],
+  'Report Op Other': ['Report_Op_Other', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Note_op=2","same window");`],
+  'Report Op Orphan': ['Report_Op_Orphan', `openUrl("#Report:All_Requests?Note_op=26","same window");`],
+  'Report Op Twice': ['Report_Op_Twice', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Note_op=26&Note_op=26","same window");`],
+  'Report Op Second Filter': ['Report_Op_Second_Filter', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Note_op=26&Kind=Loan","same window");`],
   'Report Unknown Field': ['Report_Unknown_Field', `openUrl("#Report:All_Requests?Nope=" + input.Name,"same window");`],
   'Report Two Filters': ['Report_Two_Filters', `openUrl("#Report:All_Requests?Note=" + input.Name + "&Kind=Loan","same window");`],
   'Unknown Field': ['Unknown_Field', `openUrl("#Form:Request?Nope=" + input.ID,"popup window");`],
@@ -204,6 +208,15 @@ test('an openUrl-only workflow to an own form, report or page is a navigation; a
     href: '#/report/All_Requests',
     params: [{ name: 'Note', field: 'Name' }],
   });
+  assert.deepEqual(byName.get('Report Op Filter')?.navigate, {
+    kind: 'report',
+    target: 'All_Requests',
+    href: '#/report/All_Requests',
+    params: [
+      { name: 'Note', field: 'Name' },
+      { name: 'Note_op', value: '26' },
+    ],
+  });
   for (const name of Object.keys(NAV)) assert.equal(byName.get(name)?.preview, undefined, `${name} is enabled`);
   for (const name of Object.keys(COUNTED)) {
     assert.equal(byName.get(name)?.preview, true, `${name} stays turned off`);
@@ -266,6 +279,7 @@ test('the static client links each navigation with values only from the row it r
     'Bill Page #/page/Detail?param1=7',
     'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
     'Filtered Report #/report/All_Requests?Note=Desk%20%26%20chair',
+    'Report Op Filter #/report/All_Requests?Note=Desk%20%26%20chair&Note_op=26',
   ]);
   // Row 8's row-backed values are absent: those actions are disabled rather
   // than opened with partial or bare routes.
@@ -278,7 +292,7 @@ test('the static client links each navigation with values only from the row it r
     'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
   ]);
   // Counted actions draw no link.
-  assert.doesNotMatch(rows, /External|Mixed|Computed|Report Op Filter|Report Unknown Field|Report Two Filters|Undeclared Param|Undeclared Nested|Case Mismatch|Missing Page|Deep Lookup|Missing Leaf|Head Not Lookup/);
+  assert.doesNotMatch(rows, /External|Mixed|Computed|Report Unknown Field|Report Two Filters|Undeclared Param|Undeclared Nested|Case Mismatch|Missing Page|Deep Lookup|Missing Leaf|Head Not Lookup/);
   // The phone card carries the same links.
   const card = rt.cardActions(ui, '7', { ROWID: '7', Name: 'Desk' }).filter((item) => item.href && !item.href.startsWith('#/report/All_Items'));
   assert.equal(card.find((item) => item.label === 'Note It')?.href, '#/form/Request?Note=Desk&Kind=Loan');
@@ -1000,7 +1014,7 @@ test('a #Report: or #View: openUrl target with a single equality field filter on
   const app = deriveIr(parse(ds));
   const gen = generate(app);
   const unsupportedTodos = gen.todos.filter((t) => t.construct === 'openurl-unsupported-target');
-  assert.equal(unsupportedTodos.length, 1, 'only the operator filter parameter is counted as unsupported');
+  assert.equal(unsupportedTodos.length, 0, 'the CONTAINS operator filter is carried');
 
   const { model } = buildUi(app);
   const rep = model.reports.find((r) => r.name === 'All_Machines')!;
@@ -1027,13 +1041,22 @@ test('a #Report: or #View: openUrl target with a single equality field filter on
     href: '#/report/Installed_Softwares',
     params: [{ name: 'Machine_Name', field: 'Machine_Name' }],
   });
-  assert.equal(opFilter?.preview, true);
-  assert.equal(opFilter?.navigate, undefined);
+  assert.equal(opFilter?.preview, undefined);
+  assert.deepEqual(opFilter?.navigate, {
+    kind: 'report',
+    target: 'Installed_Softwares',
+    href: '#/report/Installed_Softwares',
+    params: [
+      { name: 'Machine_Name', field: 'Machine_Name' },
+      { name: 'Machine_Name_op', value: '26' },
+    ],
+  });
 
   const rt = (await runtime()) as Runtime & {
     actionNavHref(nav: unknown, row: unknown): string | undefined;
     reportClickFilter(hash: string): { field: string; value: string } | null;
   };
+  assert.equal(rt.actionNavHref(opFilter?.navigate, { ROWID: '12', Machine_Name: 'Mac Pro' }), '#/report/Installed_Softwares?Machine_Name=Mac%20Pro&Machine_Name_op=26');
   const href = rt.actionNavHref(viewSoft?.navigate, { ROWID: '12', Machine_Name: 'MacBook Pro & Studio' });
   assert.equal(href, '#/report/Installed_Softwares?Machine_Name=MacBook%20Pro%20%26%20Studio');
   assert.deepEqual(rt.reportClickFilter(href!), { field: 'Machine_Name', value: 'MacBook Pro & Studio' });
@@ -1799,3 +1822,9 @@ test('interpolated own-app URLs, collection .getall() IDs, and 2-segment record-
   assert.equal(punctuatedAct?.navigate?.href, '#/form/Add_Quotation');
 });
 
+
+test('a report route with Field_op=26 filters by contains, and an unknown operator adds no filter', async () => {
+  const rt = (await runtime()) as Runtime & { reportRouteFilters(query: string, ctx: unknown): unknown[] };
+  assert.deepEqual(rt.reportRouteFilters('Customer=555&Customer_op=26', {}), [{ field: 'Customer', op: 'contains', value: '555' }]);
+  assert.deepEqual(rt.reportRouteFilters('Customer=555&Customer_op=2', {}), []);
+});

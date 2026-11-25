@@ -1631,7 +1631,7 @@ function clickParamDate(ctx) {
 
 /**
  * The `Field_op=<n>` codes the corpus's OpenReport parameters use, as filter
- * leaves: 20 is `< value`, 32 is today, 45 in this month, 58 between v1;v2.
+ * leaves: 20 is `< value`, 26 is contains, 32 is today, 45 in this month, 58 between v1;v2.
  * Date bounds resolve in the app time zone like the report's own relative
  * criteria; a missing zone drops the condition rather than guess a day.
  */
@@ -1649,6 +1649,7 @@ function clickParamConditions(field, value, op, ctx) {
       { field, op: '<', value: end },
     ];
   }
+  if (op === '26') return [{ field, op: 'contains', value: resolve(value) }];
   if (op === '45') {
     const day = clickParamDate(ctx);
     const start = `${day.slice(0, 7)}-01`;
