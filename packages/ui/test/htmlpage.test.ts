@@ -4550,6 +4550,19 @@ test('a markup function printed whole by a text island, alone or joined with ano
   assert.doesNotMatch(plain.html, /&lt;div/);
 });
 
+test('a constant style element a text island prints is carried as page CSS and never printed as text', async () => {
+  const sheet = { name: 'Util.sheet', signature: 'string Util.sheet()', deluge: 's = "<style>";\ns = s + ".w {color: red;}";\ns = s + "</style>";\nreturn s;' };
+  const snippet = `htmlpage hp1()\ncontent\n<%= thisapp.Util.sheet() + thisapp.Util.wrap(input.q) %>`;
+  const app = appWithFns([wrapFn, sheet], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  assert.doesNotMatch(compiled.file?.source ?? '', /Util\.sheet|"sheet"/);
+  const { html, notes } = await renderPage(app, snippet, { q: 'ok' });
+  assert.match(html, /<div class="w">ok<\/div>/);
+  assert.doesNotMatch(html, /style|color: red|&lt;/);
+  assert.deepEqual(notes, []);
+});
+
 test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
   const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "<li>" + thisapp.Util.wrap(input.q) + "</li>";\n%>\n<ul><%= row %></ul>`;
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);

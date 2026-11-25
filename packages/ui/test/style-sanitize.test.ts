@@ -1423,6 +1423,45 @@ test('a style function island that is not constant CSS stays a counted Deluge ta
   assert.equal(inlineConstantStyleCalls('<style><%=thisapp.style.home()%></style>', appWith(logic as ReturnType<typeof styleFn>)).includes('<%='), true);
 });
 
+const sheetFn = (name: string, text: string, signature = `string ${name}()`) => ({
+  ...styleFn(name, ''),
+  signature,
+  deluge: [{ text, span: { start: 0, end: 0 } }],
+});
+
+test('a function that builds one constant style element by concatenation carries its CSS where the page prints it', () => {
+  const built = sheetFn('css.lib', 'sheet = "";\nsheet = sheet + "<style>";\nsheet = sheet + ".row {margin: 0;}";\nsheet = sheet + "</style>";\nreturn sheet;');
+  const app = appWith(built);
+  const once = inlineConstantStyleCalls('<div><%=thisapp.css.lib()%></div>', app);
+  assert.equal(once, '<div><style>.row {margin: 0;}</style></div>');
+  assert.match(carriedStyleRules(once, scope).css, /\[data-page="Home"\] \.row\{margin: 0\}/);
+  const chained = inlineConstantStyleCalls('<%=thisapp.css.lib() + thisapp.fn.rows(input.id)%>', app);
+  assert.equal(chained, '<style>.row {margin: 0;}</style><%=thisapp.fn.rows(input.id)%>');
+  assert.equal(inlineConstantStyleCalls('&lt;%= thisapp.css.lib() %&gt;', app).startsWith('<style>'), true);
+  const single = inlineConstantStyleCalls('<%=thisapp.css.one()%>', appWith(sheetFn('css.one', 'css = "<style>a{color:red}</style>";\nreturn css;')));
+  assert.equal(single, '<style>a{color:red}</style>');
+});
+
+test('a function that is not one constant style element stays an island', () => {
+  const cases = [
+    sheetFn('css.lib', 'sheet = "<style>a{color:red}</style>";\nreturn sheet;', 'string css.lib(string c)'),
+    sheetFn('css.lib', 'sheet = "<style>a{color:" + input.c + "}</style>";\nreturn sheet;'),
+    sheetFn('css.lib', 'sheet = "<style>a{color:red}</style><b>x</b>";\nreturn sheet;'),
+    sheetFn('css.lib', 'sheet = "<style>a{color:red}</style>";\nsheet = sheet + Orders.count();\nreturn sheet;'),
+    sheetFn('css.lib', 'sheet = "<style>a{color:red}</style>";\nother = "x";\nreturn sheet;'),
+    sheetFn('css.lib', 'if (true) { sheet = "<style>a{color:red}</style>"; }\nreturn sheet;'),
+    sheetFn('css.lib', 'sheet = "<style>a{content:\\"&lt;\\"}</style>";\nreturn sheet;'),
+    sheetFn('css.lib', 'sheet = "<style>a{color:red}</style>";\nreturn "x";'),
+  ];
+  for (const fn of cases) {
+    const raw = '<div><%=thisapp.css.lib()%></div>';
+    assert.equal(inlineConstantStyleCalls(raw, appWith(fn)), raw, fn.deluge[0]!.text);
+  }
+  const app = appWith(sheetFn('css.lib', 'sheet = "<style>a{color:red}</style>";\nreturn sheet;'));
+  const nested = '<style><%=thisapp.css.lib()%></style>';
+  assert.equal(inlineConstantStyleCalls(nested, app), nested);
+});
+
 test('unsafe CSS from a constant style function is still dropped and named', () => {
   const unsafe: [string, string][] = [
     ['.a{background: url(https://x.example/i.png)}', 'background declaration'],
