@@ -2962,6 +2962,79 @@ export interface ConvertZmlOptions {
   reports?: ReadonlySet<string>;
 }
 
+/** One island that is a whole button parameter value: a bare read, no calls, operators or quotes. */
+const BUTTON_PARAM_ISLAND = /^<%=[ \t]*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*){0,4}(?:\.(?:toLong|toString)\(\))?)[ \t]*%>$/;
+const BUTTON_PARAMS_MAX = 8;
+
+/**
+ * A ZML `<button>` whose action opens an own form or report becomes a link to
+ * that generated route, the way a page-level button does: `#/form/<name>` with
+ * each `parameters` pair as a prefill query value, `#/report/<name>` with one
+ * equality filter. A value is a bounded literal or one bare read, encoded when
+ * the page renders; the target and every key must exist in this app. Anything
+ * else (another action, an island in any other attribute, a key that names no
+ * field, a read the page does not declare) returns null and the button stays
+ * as written.
+ */
+function zmlButtonLink(attrText: string, app: App | undefined, forms: ReadonlySet<string>, reports: ReadonlySet<string>, pageParams: ReadonlySet<string>): string | null {
+  const attrs = parseZmlAttributes(attrText);
+  const action = (attrs.action ?? '').replace(/\s+/g, '').toLowerCase();
+  const kind = action === 'form' || action === 'openform' ? 'form' : action === 'report' || action === 'openreport' ? 'report' : '';
+  if (!kind || !app) return null;
+  // determinism-allow: a yes/no test over every attribute; order cannot reach output
+  if (Object.entries(attrs).some(([name, value]) => name !== 'parameters' && value.includes('<%'))) return null;
+  const target = (kind === 'form' ? formActionTarget(attrs.action ?? '', attrs) : reportActionTarget(attrs.action ?? '', attrs)) ?? '';
+  const label = (attrs.text ?? '').trim();
+  if (!label || !/^[A-Za-z0-9_]+$/.test(target) || !(kind === 'form' ? forms : reports).has(target)) return null;
+  const formName = kind === 'form' ? target : app.reports.find((report) => report.name === target)?.form;
+  const fields = new Set((app.forms.find((form) => form.name === formName)?.fields ?? []).filter((field) => field.subfields.length === 0 && !field.lookup).map((field) => field.name));
+  const lookups = new Set((app.forms.find((form) => form.name === formName)?.fields ?? []).filter((field) => field.lookup).map((field) => field.name));
+  const pairs: string[] = [];
+  const raw = (attrs.parameters ?? '').replace(/&amp;/gi, '&').trim();
+  for (const part of raw ? raw.split('&') : []) {
+    const eq = part.indexOf('=');
+    const key = eq < 0 ? '' : part.slice(0, eq).trim();
+    const value = eq < 0 ? '' : part.slice(eq + 1).trim();
+    if (!/^[A-Za-z_]\w*$/.test(key) || PARAM_RESERVED.has(key.toLowerCase()) || /^zc_/i.test(key) || pairs.length >= BUTTON_PARAMS_MAX) return null;
+    // A report equality compares a stored scalar; a form prefill may also carry a row id into a lookup.
+    if (!fields.has(key) && !(kind === 'form' && lookups.has(key))) return null;
+    const island = BUTTON_PARAM_ISLAND.exec(value);
+    if (island) {
+      const read = island[1];
+      const segments = read.replace(/\.(?:toLong|toString)\(\)$/, '').split('.');
+      if (segments.some((segment) => PARAM_RESERVED.has(segment.toLowerCase()))) return null;
+      if (segments[0] === 'input' && (segments.length !== 2 || !pageParams.has(segments[1]))) return null;
+      pairs.push(`${key}=<%=encodeUrl(${read})%>`);
+    } else if (LITERAL_PARAM.test(value) && !value.includes('<%')) pairs.push(`${key}=${encodeURIComponent(value)}`);
+    else return null;
+  }
+  if (kind === 'report' && pairs.length > 1) return null;
+  return `<a class="button" href="#/${kind}/${target}${pairs.length ? `?${pairs.join('&')}` : ''}"${zmlAttributesToStyle(attrs)}>${escapeHtml(label)}</a>`;
+}
+
+/**
+ * Pre-pass for compileHtmlpage: each self-closing ZML button `zmlButtonLink`
+ * accepts is written as its link; every other button stays as written. A
+ * `<button` inside a Deluge island is code, not markup.
+ */
+export function rewriteZmlButtonLinks(template: string, app: App, pageParams: ReadonlySet<string>): string {
+  if (!/<button\b/i.test(template)) return template;
+  const islands = islandRanges(template);
+  if (!islands) return template;
+  const forms = new Set(app.forms.map((form) => form.name));
+  const reports = new Set(app.reports.map((report) => report.name));
+  let out = '';
+  let at = 0;
+  for (const tag of buttonTags(template)) {
+    if (!tag.selfClose || islands.some(([from, to]) => tag.start >= from && tag.start < to)) continue;
+    const link = zmlButtonLink(tag.attrText, app, forms, reports, pageParams);
+    if (link === null) continue;
+    out += template.slice(at, tag.start) + link;
+    at = tag.end;
+  }
+  return out + template.slice(at);
+}
+
 /**
  * `forms` is the set of app form link names: an icon's Form click action
  * becomes a `#/form/<name>` link only when its target is exactly one of them.
@@ -3990,6 +4063,7 @@ export function compileHtmlpage(
     schema: opts.schema,
     reports: new Set(app.reports.map((r) => r.name)),
   });
+  head.template = rewriteZmlButtonLinks(head.template, app, new Set(head.params));
   head.template = rewriteEmbedIframes(head.template, app);
   head.template = rewriteFormEmbedFrames(head.template, app);
   head.template = rewriteIslandBackgrounds(rewriteIslandLabels(head.template));
