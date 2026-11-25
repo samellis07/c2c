@@ -156,6 +156,8 @@ function lit(value: unknown): string {
   // ZCQL has no boolean literal: a decision cell is the varchar 'true'/'false'.
   if (typeof value === 'boolean') return `'${value ? 'true' : 'false'}'`;
   if (typeof value === 'bigint') return value.toString();
+  // A computed date compares by the stored text; its JSON form is quoted and has a `T`.
+  if (value instanceof DelugeDate) return `'${formatBound(value, 'datetime')}'`;
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return `'${text.replace(/'/g, "''")}'`;
 }

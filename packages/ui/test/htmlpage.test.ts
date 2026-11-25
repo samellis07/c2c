@@ -4720,6 +4720,24 @@ test('a font element in a markup value keeps a safe colour and drops any other a
   assert.doesNotMatch(hostile.html, /onmouseover/);
 });
 
+test('a dashboard prints a markup function that reads the last day, and asks for the setup form only while it is empty', async () => {
+  const recent = {
+    name: 'Page.recent',
+    signature: 'string Page.recent()',
+    deluge: 'str = "<ul>";\nfor each r in Orders[ID != 0 && Added_Time >= zoho.currenttime.subDay(1)] sort by Added_Time desc\n{\nstr = str + "<li><font style=\'color:red;\'>#" + r.Status + "</font><hr></li>";\n}\nstr = str + "</ul>";\nreturn str;',
+  };
+  const snippet = `htmlpage hp1()\ncontent\n<%{\nif(Orders[ID == 0].count() == 0)\n{\nopenUrl("#Form:Orders","popup window");\n}\n%>\n<div><%=thisapp.Page.recent()%></div>\n<%\n}%>`;
+  const app = appWithFns([recent], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const stamp = (offsetDays: number) => new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
+  const rows = { Orders: [{ Status: 'new', Amount: 1, Added_Time: stamp(-0.1) }, { Status: 'stale', Amount: 2, Added_Time: stamp(-3) }] };
+  const { html } = await renderPage(app, snippet, {}, rows);
+  assert.match(html, /<li><font style="color:red">#new<\/font><hr><\/li>/);
+  assert.doesNotMatch(html, /stale/, 'a row older than a day is not listed');
+  assert.match(html, /data-zml="popup-form:Orders"/);
+});
+
 test('a markup function called inside a concatenation that builds a markup value prints through the markup print', async () => {
   const snippet = `htmlpage hp1()\ncontent\n<%\nrow = "<li>" + thisapp.Util.wrap(input.q) + "</li>";\n%>\n<ul><%= row %></ul>`;
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
@@ -4795,6 +4813,17 @@ test('a markup value keeps an inline raster image and its allowed attributes, an
   const loud = await renderPage(app, snippet, { q: `<img src="data:image/png;base64,${png}" onclick="alert(1)" data-x="1">` });
   assert.deepEqual(loud.notes, ['a markup value attribute the page does not keep was removed']);
   assert.doesNotMatch(loud.html, /onclick|data-x/);
+});
+
+test('a markup value keeps a coloured font run and a rule, and drops what a font may not carry', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nshown = "<li><font style='color:red;'>#" + input.q + "</font> <font color='#391d12' size='3' onclick='x()' face='y'>b</font><hr></li>";\n%>\n<ul><%= shown %></ul>`;
+  const app = appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const { html, notes } = await renderPage(app, snippet, { q: '7<script>x</script>' });
+  assert.equal(html.trim(), '<ul><li><font style="color:red">#7&lt;script&gt;x&lt;/script&gt;</font> <font color="#391d12" size="3">b</font><hr></li></ul>');
+  assert.deepEqual(notes, ['a markup value held <script>, which is shown as text', 'a markup value attribute the page does not keep was removed']);
+  const hostile = `htmlpage hp1()\ncontent\n<%\nshown = "<font color='red;x:url(//e)'>a</font>";\n%>\n<%= shown %>`;
+  const bad = await renderPage(appOf(`${ORDERS}\n${pageWithSnippet(hostile)}`), hostile, {});
+  assert.equal(bad.html.trim(), '<font>a</font>');
 });
 
 test('a markup value follows the HTML parser for abruptly closed and malformed comments', async () => {
