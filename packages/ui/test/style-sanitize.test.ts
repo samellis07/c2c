@@ -414,15 +414,46 @@ test('a <style> sheet wrapped in HTML comments carries like a browser parses it'
   assert.deepEqual(mixed.dropped, ['background declaration']);
 });
 
-test('legacy *prop and _prop IE-only hack declarations are refused and counted', () => {
+test('legacy *prop, _prop and \\9 IE-only hack declarations carry nothing and are not a loss', () => {
+  // Every browser Creator supports ignores these at parse time, so the page
+  // never applied them: leaving them out is the same rendering, not a loss.
   const result = carryStaticStyle('.a{*zoom:1;_height:50%;color:red}', '[data-page="a"]');
-  assert.equal(result.droppedRules, 2);
+  assert.equal(result.droppedRules, 0);
   assert.equal(result.css, '[data-page="a"] .a{color:red}');
-  for (const css of ['.a{*behavior:url(x.htc)}', '.a{_width:expression(alert(1))}', '.a{*background:url(//x.test/a)}', '.a{color:red\\9}']) {
+  const trailing = carryStaticStyle('.b{background-color:#004099 \\9;margin:0}', '[data-page="a"]');
+  assert.equal(trailing.droppedRules, 0);
+  assert.equal(trailing.css, '[data-page="a"] .b{margin:0}');
+  // A hack never smuggles a fetch, script or expression into the carried CSS.
+  for (const css of ['.a{*behavior:url(x.htc)}', '.a{_width:expression(alert(1))}', '.a{*background:url(//x.test/a)}', '.a{color:red\\9}', '.a{background:url(//x.test/a) \\9}']) {
     const res = carryStaticStyle(css, '[data-page="a"]');
-    assert.equal(res.css, '', `expected empty css for: ${css}`);
-    assert.equal(res.droppedRules, 1, `expected 1 dropped declaration for: ${css}`);
+    assert.doesNotMatch(res.css, /[:(]/, `expected no declaration carried for: ${css}`);
   }
+  // A refused value is still counted when it is not a hack: only the hack shape is inert.
+  assert.equal(carryStaticStyle('.a{background:url(//x.test/a)}', '[data-page="a"]').droppedRules, 1);
+});
+
+test('a stray close parenthesis invalidates only its own declaration, as a browser reads it', () => {
+  // `rgb(...))` is invalid CSS: the browser ignores that one declaration and keeps the rest of the rule.
+  const result = carryStaticStyle('#header{background-color:#333;box-shadow:0 0 7px rgb(33, 122, 239, 0.23));height:70px;position:relative}', '[data-page="a"]');
+  assert.equal(result.droppedRules, 0);
+  assert.equal(result.css, '[data-page="a"] #header{background-color:#333;height:70px;position:relative}');
+  // The paren never turns a later `;` into text: a fetch after it is still refused and counted.
+  const hostile = carryStaticStyle('.a{box-shadow:0 0 1px red));background:url(//x.test/a);color:blue}', '[data-page="a"]');
+  assert.equal(hostile.css, '[data-page="a"] .a{color:blue}');
+  assert.deepEqual(hostile.dropped, ['background declaration']);
+  // An unclosed open paren still fails closed on the whole rule.
+  assert.equal(carryStaticStyle('.a{box-shadow:0 0 1px rgb(1,2,3;color:blue}', '[data-page="a"]').css, '');
+});
+
+test('a rule with an empty selector in its list is invalid CSS and is not a loss', () => {
+  // `.a, {..}`: the whole rule is invalid in a browser, so nothing it said ever applied.
+  for (const head of ['.a,', ',.a', '.a,,.b']) {
+    const res = carryStaticStyle(`${head}{color:red}`, '[data-page="a"]');
+    assert.equal(res.css, '', head);
+    assert.equal(res.droppedRules, 0, head);
+  }
+  // An unsafe selector in the list is still refused and counted.
+  assert.equal(carryStaticStyle('.a,[x=\\61]{color:red}', '[data-page="a"]').droppedRules, 1);
 });
 
 test('static <style> CSS with font-family, -webkit-box-orient, and -webkit-line-clamp carries with 0 dropped rules', () => {
@@ -1173,15 +1204,20 @@ test('legacy digit-named properties carry with a checked value, like scrollbar-3
   assert.deepEqual(refused.dropped, ['scrollbar-3dlight-color declaration']);
 });
 
-test('a stray token without a colon is skipped like a browser, but a suspicious one counts', () => {
+test('a piece without a colon is skipped like a browser and is not a loss', () => {
   const carried = carryStaticStyle('.a { color: red; inherit; width: 1px; !important }', '[data-page="a"]');
   assert.equal(carried.css, '[data-page="a"] .a{color: red;width: 1px}');
   assert.deepEqual(carried.dropped, []);
-  for (const css of ['.a { color: red; a=b }', '.a { color: red; x(y) }', '.a { color: red; <b> }']) {
+  // Creator exports a half-typed `border-left` as `border- 1px solid rgb(..)`; the browser never applied it either.
+  for (const css of ['.a { color: red; a=b }', '.a { color: red; x(y) }', '.a { color: red; <b> }', '.a { color: red; border- 1px solid rgb(93,155,215) }']) {
     const result = carryStaticStyle(css, '[data-page="a"]');
     assert.equal(result.css, '[data-page="a"] .a{color: red}', css);
-    assert.deepEqual(result.dropped, ['unparsed declaration'], css);
+    assert.deepEqual(result.dropped, [], css);
   }
+  // A colon-less piece never hides a following declaration or smuggles one in.
+  const hostile = carryStaticStyle('.a { url(//x.test/a); background:url(//x.test/b); color: blue }', '[data-page="a"]');
+  assert.equal(hostile.css, '[data-page="a"] .a{color: blue}');
+  assert.deepEqual(hostile.dropped, ['background declaration']);
 });
 
 test('an IE alpha() filter carries as its modern opacity equivalent; fetching filters stay refused', () => {

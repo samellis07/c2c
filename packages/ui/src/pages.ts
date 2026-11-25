@@ -689,15 +689,19 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
   // Safe declarations are kept; each refused one is named by its property.
   const declarations = (rawBody: string, check: (part: string, colon: number) => string | undefined = cleanSheetDeclaration): string[] | null => {
     const body = blankCdoCdc(rawBody);
-    const out: string[] = []; let start = 0, depth = 0, quote = '', comment = false, lineComment = false;
+    const out: string[] = []; let start = 0, depth = 0, quote = '', comment = false, lineComment = false, stray = false;
     const emit = (text: string): void => {
+      // A close parenthesis with no open one makes its declaration invalid; a
+      // browser ignores that declaration alone and reads on after its `;`.
+      if (stray) { stray = false; return; }
       const part = text.trim();
       if (!part || part.includes(TEMPLATE_MARK)) return;
       const colon = part.indexOf(':');
-      // A token run with no colon and no assignment, quote, escape, call or
-      // markup is not a declaration at all: a browser skips it, the way the
-      // inline-style sanitizer skips it, rather than counting a loss.
-      if (colon <= 0) { if (/[=@\\'"()<>]/.test(part)) drop('unparsed declaration'); return; }
+      // A piece with no colon is not a declaration: a browser drops it up to
+      // the next `;` whatever it holds (`border- 1px solid red`, `a=b`, `<b>`),
+      // so it never applied and is not counted as a loss.
+      if (colon <= 0) return;
+      if (legacyHackDeclaration(part, colon)) return;
       const cleaned = check(part, colon);
       if (!cleaned) { drop(declarationLabel(part.slice(0, colon))); return; }
       out.push(names.size && /^\s*(?:-[a-z]+-)?animation(?:-name)?\s*:/i.test(cleaned) ? renameAnimations(cleaned, names, prefix) : cleaned);
@@ -713,7 +717,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
       if (depth === 0 && ch === '/' && body[n + 1] === '/') { emit(body.slice(start, n)); lineComment = true; n++; continue; }
       if (ch === '"' || ch === "'") { quote = ch; continue; }
       if (ch === '{' || ch === '}') return null;
-      if (ch === '(') depth++; else if (ch === ')') depth--;
+      if (ch === '(') depth++; else if (ch === ')') { if (depth > 0) depth--; else stray = true; }
       else if (ch === ';' && depth === 0) { emit(body.slice(start, n)); start = n + 1; }
     }
     if (depth !== 0 || quote || comment) return null;
@@ -845,7 +849,10 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
     // A selector opening with a combinator would hang off the scope itself ('[data-page] ~ *') and reach the page's siblings.
     if (sels.some((s) => s[0] === '~' || s[0] === '+' || s[0] === '>')) { drop('leading combinator selector'); continue; }
     const safeSelector = (s: string) => !!s && !/[{};@\\<]/.test(s) && !/url\s*\(|expression\s*\(/i.test(s);
-    if (!selectorSyntaxOkay || selectorDepth !== 0 || selectorQuote || !sels.every(safeSelector)) { drop('selector'); continue; }
+    if (!selectorSyntaxOkay || selectorDepth !== 0 || selectorQuote) { drop('selector'); continue; }
+    // An empty selector in the list (`.a, {..}`) makes the whole rule invalid CSS: a browser never applied it.
+    if (sels.some((s) => !s)) continue;
+    if (!sels.every(safeSelector)) { drop('selector'); continue; }
     const before = dropped.length;
     const decl = declarations(body);
     if (!decl) { drop('unparsed declaration'); continue; }
@@ -1156,6 +1163,17 @@ function atRuleLabel(text: string): string | undefined {
 }
 
 /** The property a refused declaration names, or a generic label for a malformed one. */
+/**
+ * A declaration every browser Creator supports ignores at parse time: an
+ * IE-only `*prop`/`_prop` name, or a value ending in the `\9`/`\0` hack
+ * (the escape makes the value an unknown identifier). The page never applied
+ * it, so leaving it out changes nothing and is not counted as a loss.
+ */
+function legacyHackDeclaration(part: string, colon: number): boolean {
+  if (/^[*_][-a-z0-9]+$/.test(flatCss(part.slice(0, colon)))) return true;
+  return /^[^\\]*\\[90](?:\\0)?\s*(?:!\s*important\s*)?$/i.test(part.slice(colon + 1));
+}
+
 function declarationLabel(prop: string): string {
   const name = prop.trim().toLowerCase();
   return /^-?[-a-z0-9]{1,60}$/.test(name) ? `${name} declaration` : 'unparsed declaration';
