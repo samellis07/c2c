@@ -69,7 +69,8 @@ export function navOk(url: unknown, allowedHosts: readonly string[]): boolean {
   const host = httpsHost(raw);
   if (!host || !allowedHosts.includes(host)) return false;
   const authority = /^https:\/\/([^/?#\\]+)/i.exec(raw)?.[1] ?? '';
-  return !authority.startsWith('@');
+  // Credentials in the authority still reach the browser: refuse them even when the host is allow-listed.
+  return !authority.includes('@');
 }
 
 /**

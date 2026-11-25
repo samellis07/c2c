@@ -162,7 +162,9 @@ export function navigationAllowed(url: string, allowedHosts: ReadonlySet<string>
   if (DENIED_HREF_SCHEMES.some((scheme) => flat.startsWith(scheme)) || flat.startsWith('file:') || flat.startsWith('//')) return false;
   if (isSameAppNavTarget(raw)) return !/[\u0000- \\]/.test(raw);
   const host = httpsHost(raw);
-  return !!host && allowedHosts.has(host);
+  if (!host || !allowedHosts.has(host)) return false;
+  // Credentials in the authority (https://user:pass@allowed.example/) still reach the browser: refuse them even when the host is allow-listed.
+  return !/^https:\/\/[^/?#\\]*@/i.test(raw);
 }
 
 /**
@@ -206,9 +208,8 @@ export function navigationPolicyFunctionSource(): string {
   var m = /^https:\\/\\/([^/?#\\\\]+)/i.exec(raw);
   if (!m) return false;
   var authority = m[1];
-  var at = authority.lastIndexOf("@");
-  var hostPart = at >= 0 ? authority.slice(at + 1) : authority;
-  var host = hostPart.split(":")[0].toLowerCase();
+  if (authority.indexOf("@") >= 0) return false;
+  var host = authority.split(":")[0].toLowerCase();
   return !!host && allowedHosts.indexOf(host) >= 0;
 }`;
 }
