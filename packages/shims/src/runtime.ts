@@ -247,6 +247,13 @@ export interface RuntimeOptions {
    */
   writeRules?: Record<string, readonly WriteRuleColumn[]>;
   /**
+   * form -> composite field (a name or an address) -> its part names. The
+   * store keeps one column per part (`Name_first_name`); a live read of a form
+   * listed here also carries the composite as one value, so `rec.Name` prints
+   * its parts joined by spaces and `rec.Name.first_name` reads the part.
+   */
+  composites?: Record<string, Readonly<Record<string, readonly string[]>>>;
+  /**
    * form -> the generated write schema (the field tree with composite and
    * subform children). The submit handler authorizes the request against it;
    * the update path re-authorizes the write payload, and a composite field
@@ -2945,7 +2952,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
   ): Promise<Record<string, unknown>[]> {
     const fn = options.datastore?.query;
     if (!fn) return Promise.reject(new Error(`no datastore query adapter for ${form}`));
-    return fn(form, where, limit, offset, orderBy, columns);
+    const parts = options.composites && Object.hasOwn(options.composites, form) ? options.composites[form]! : undefined;
+    const read = fn(form, where, limit, offset, orderBy, columns);
+    return parts ? read.then((rows) => rows.map((row) => withComposites(row, parts))) : read;
   }
 
   /**
@@ -3441,27 +3450,27 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       async column(ctx, query, field) {
         if (query == null) return [];
-        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : field);
+        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : fieldHead(field));
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'column', form: query.form, field, where, limit: LIMITS.zcqlRowsPerQuery, dryRun, authorized: !!options.access });
         const seeded = await readSeed(seed, dryRun, query.form, scoped.criteria, query.sort, query.range, decimalsOf(query.form));
-        if (seeded) return seeded.map((row) => (field === 'ID' ? logicalId(row) : projectFields(row, scoped.fields)[field]));
+        if (seeded) return seeded.map((row) => (field === 'ID' ? logicalId(row) : readCell(projectFields(row, scoped.fields), field)));
         if (dryRun || !options.datastore?.query) {
           refuseLive('column');
           return [];
         }
         const got = await readLive(query, scoped.criteria, where, query.range, query.sort);
-        return got.map((row) => (field === 'ID' ? logicalId(row) : projectFields(row, scoped.fields)[field]));
+        return got.map((row) => (field === 'ID' ? logicalId(row) : readCell(projectFields(row, scoped.fields), field)));
       },
       async field(ctx, query, field) {
         if (query == null) return null;
-        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : field);
+        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' ? undefined : fieldHead(field));
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'field', form: query.form, field, where, dryRun, authorized: !!options.access });
         const seeded = await readSeed(seed, dryRun, query.form, scoped.criteria, query.sort, query.range, decimalsOf(query.form));
         if (seeded) {
           const row = seeded[0];
-          return row ? (field === 'ID' ? logicalId(row) : projectFields(row, scoped.fields)[field]) : null;
+          return row ? (field === 'ID' ? logicalId(row) : readCell(projectFields(row, scoped.fields), field)) : null;
         }
         if (dryRun || !options.datastore?.query) {
           refuseLive('field');
@@ -3480,7 +3489,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             ? await liveRows(query.form, scoped.criteria, where, query.range ?? { from: 0, to: 0 }, query.sort)
             : await queryPage(query.form, where, 1, 0, orderByClause(query.sort));
         // Deluge `Form[criteria].Field` is null when no record matches.
-        const value = got[0] ? (field === 'ID' ? logicalId(got[0]) : projectFields(got[0], scoped.fields)[field]) : null;
+        const value = got[0] ? (field === 'ID' ? logicalId(got[0]) : readCell(projectFields(got[0], scoped.fields), field)) : null;
         rememberCounterRead(query, query.form, field, value, false, got[0] ? String(rowIdentity(got[0]) ?? '') : undefined);
         return value;
       },
@@ -4746,6 +4755,47 @@ export type PageQuery = (
 
 function fieldName(field: unknown): string {
   return typeof field === 'string' ? field : '';
+}
+
+/** `Name.first_name` is read through its field `Name`: the grant names the composite, never a part. */
+function fieldHead(field: string): string {
+  const dot = field.indexOf('.');
+  return dot > 0 ? field.slice(0, dot) : field;
+}
+
+/** A cell by field name; `Name.first_name` walks into the composite a read row carries. */
+function readCell(values: Record<string, unknown>, field: string): unknown {
+  if (Object.hasOwn(values, field)) return values[field];
+  const dot = field.indexOf('.');
+  if (dot <= 0) return undefined;
+  const whole = values[field.slice(0, dot)];
+  return whole && typeof whole === 'object' && !Array.isArray(whole) && Object.hasOwn(whole, field.slice(dot + 1)) ? (whole as Record<string, unknown>)[field.slice(dot + 1)] : undefined;
+}
+
+/**
+ * A stored row with each composite field of its form as one value: its parts
+ * from the `<field>_<part>` columns, printing as the non-empty parts joined by
+ * spaces. A field every part of which is blank stays absent, like an empty
+ * value; a column the row already holds under the field's own name is kept.
+ */
+function withComposites(row: Record<string, unknown>, composites: Readonly<Record<string, readonly string[]>>): Record<string, unknown> {
+  let out = row;
+  for (const field of Object.keys(composites)) {
+    if (Object.hasOwn(row, field)) continue;
+    const cells: Record<string, unknown> = {};
+    const shown: string[] = [];
+    for (const part of composites[field]!) {
+      const value = row[`${field}_${part}`];
+      if (value === undefined) continue;
+      cells[part] = value;
+      if (value !== null && value !== '') shown.push(String(value));
+    }
+    if (!shown.length) continue;
+    Object.defineProperty(cells, 'toString', { value: () => shown.join(' '), enumerable: false });
+    if (out === row) out = { ...row };
+    out[field] = cells;
+  }
+  return out;
 }
 
 /** A record's `ID` reads as its Catalyst ROWID: logical ID is never a stored column. */

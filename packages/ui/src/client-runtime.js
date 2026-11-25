@@ -1765,6 +1765,12 @@ export function reportRouteFilters(query, ctx) {
       note(opm[1], opByField, value);
       continue;
     }
+    // `Lookup:display` compares the text the report shows for the lookup.
+    const shown = /^([A-Za-z_][A-Za-z0-9_]*):display$/.exec(name);
+    if (shown) {
+      note(name, valueByField, value);
+      continue;
+    }
     // A `Parent.Field` path resolves as a lookup comparison, like the same
     // dotted leaf in a report's own criteria.
     if (!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(name)) continue;
@@ -1773,6 +1779,11 @@ export function reportRouteFilters(query, ctx) {
   const filters = [];
   for (const field of order) {
     const op = opByField.get(field);
+    const shown = /^([A-Za-z_][A-Za-z0-9_]*):display$/.exec(field);
+    if (shown) {
+      filters.push({ field: shown[1], op: 'display', value: valueByField.get(field) });
+      continue;
+    }
     try {
       filters.push(...clickParamConditions(field, valueByField.get(field), op, ctx));
     } catch {
@@ -2137,8 +2148,8 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
   }
 }
 
-/** An embed key: a field name, or `Lookup.Target` (a report's filter on a lookup field's display text). */
-const COMPONENT_KEY = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?$/;
+/** An embed key: a field name, `Lookup.Target` (a report's filter on a lookup field's stored display field), or `Lookup:display` (on the text the report shows for it). */
+const COMPONENT_KEY = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|:display)?$/;
 
 /** The declaration a compiled snippet makes for one embedded component: `kind:Name` or `kind:Name?Key1,Key2`. */
 function componentSpec(item) {

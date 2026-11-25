@@ -218,7 +218,7 @@ export interface UiElement {
   /** Pages of this app the snippet embedded by `page-embed` iframe, drawn inline at their markers. */
   includes?: string[];
   /** Generated forms/reports embedded by a zc-component marker. */
-  components?: { kind: 'form' | 'report'; name: string }[];
+  components?: { kind: 'form' | 'report'; name: string; params?: string[] }[];
   /** A ZML `<embed>` element with a static http(s) URL, drawn as an iframe. */
   embed?: { url: string; width?: string; height?: string };
   children: UiElement[];
