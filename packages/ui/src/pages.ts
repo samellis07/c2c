@@ -1371,20 +1371,6 @@ const EMBED_DROPPED_TAGS = new Set(['embed', 'frame', 'iframe', 'object']);
 
 const REPORTED_DROPPED_TAGS = new Set(['script', 'style', 'svg', 'template', ...EMBED_DROPPED_TAGS]);
 
-/**
- * Library scripts, by exact address, that start nothing on their own: Bootstrap
- * 3's JavaScript only acts on `data-*` hooks in the markup (and throws at load
- * without jQuery). A snippet that loads one and has no hook runs no behaviour
- * with it, so removing it loses nothing; the same address next to a hook, or any
- * other address, is still a removed script.
- */
-const HOOK_ONLY_SCRIPTS = new Set(['https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js']);
-const BOOTSTRAP_HOOK = /\bdata-(?:toggle|target|dismiss|ride|spy|slide|slide-to|parent|content|placement|trigger|offset)\b/i;
-
-function hookOnlyScript(node: DomNode, raw: string): boolean {
-  return HOOK_ONLY_SCRIPTS.has(node.getAttribute('src') ?? '') && !(node.textContent ?? '').trim() && !BOOTSTRAP_HOOK.test(raw);
-}
-
 export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[]): string {
   const win = domWindow();
   const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
@@ -1397,7 +1383,7 @@ export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: s
     const visit = (node: DomNode) => {
       if (node.nodeType === 1) {
         const tag = (node.tagName || '').toLowerCase();
-        const loses = tag === 'iframe' ? !videoEmbedSrc(node.getAttribute('src') ?? '') : tag !== 'script' || !hookOnlyScript(node, raw);
+        const loses = tag === 'iframe' ? !videoEmbedSrc(node.getAttribute('src') ?? '') : true;
         if (REPORTED_DROPPED_TAGS.has(tag) && loses) droppedTags.push(tag);
         for (const child of listOf(node.childNodes)) visit(child);
       }

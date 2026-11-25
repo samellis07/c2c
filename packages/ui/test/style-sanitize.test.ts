@@ -1691,10 +1691,9 @@ function scriptTodos(markup: string): string[] {
   return model.todos.filter((todo) => /<script> element/.test(todo.reason)).map((todo) => todo.reason);
 }
 
-test('the Bootstrap 3 script beside no data hook starts nothing, so removing it is not a loss', () => {
-  assert.deepEqual(scriptTodos(`<p>Hi</p><script src="${BOOTSTRAP_JS}" integrity="sha384-x" crossorigin="anonymous"></script>`), []);
-  const { html } = pageModel([`<p>Hi</p><script src="${BOOTSTRAP_JS}"></script>`]);
-  assert.doesNotMatch(html[0]?.html ?? '', /script|bootstrap/i);
+test('a Bootstrap 3 script stays a counted removed script: a lifecycle attribute or a hook in another snippet could still act', () => {
+  assert.equal(scriptTodos(`<p>Hi</p><script src="${BOOTSTRAP_JS}" integrity="sha384-x" crossorigin="anonymous"></script>`).length, 1);
+  assert.equal(scriptTodos(`<script src="${BOOTSTRAP_JS}" onload="$('#m').modal('show')"></script>`).length, 1);
 });
 
 test('a library script that could act stays a counted removed script', () => {
