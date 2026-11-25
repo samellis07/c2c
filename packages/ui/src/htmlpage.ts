@@ -943,7 +943,10 @@ function embeddedComponents(
   const rewritten = template.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag) => {
     if (!tag.includes('<%')) return embed(tag, []) ?? tag;
     const slots: string[] = [];
-    const tokenized = tag.replace(/<%=[ \t]*([^%<>'"\\\u0001]*?)[ \t]*%>/g, (_m, read: string) => `\u0001${slots.push(read) - 1}\u0001`);
+    // Match the whole island body, then trim spaces and tabs in a linear pass
+    // (a regex with optional blanks on both sides of a lazy body backtracks
+    // polynomially on long runs of tabs).
+    const tokenized = tag.replace(/<%=([^%<>'"\\\u0001]*)%>/g, (_m, read: string) => `\u0001${slots.push(trimSpaceTab(read)) - 1}\u0001`);
     // What the tokenizer cannot read keeps the old reading of the tag: cut at
     // the first `>`, which may still count as an unparsed component.
     const legacy = () => {
@@ -3237,4 +3240,13 @@ function islandOrdinal(chunks: Chunk[], target: Chunk): number {
     if (c === target) return n;
   }
   return n;
+}
+
+/** Strip leading and trailing spaces and tabs only (no regex, linear). */
+function trimSpaceTab(text: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && (text[start] === ' ' || text[start] === '\t')) start++;
+  while (end > start && (text[end - 1] === ' ' || text[end - 1] === '\t')) end--;
+  return text.slice(start, end);
 }
