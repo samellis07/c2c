@@ -3344,6 +3344,41 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** An open `<label>` tag whose attributes may hold `<%= %>` islands. */
+const LABEL_OPEN = /<label\b(?:<%=?[^%<>]*%>|[^<>])*>/gi;
+/** What makes a label more than a span: a control it labels (inside it, or by `for`). */
+const LABEL_CONTROL = /<(?:input|select|textarea|button|meter|output|progress)\b/i;
+
+/**
+ * Pre-pass for compileHtmlpage: a `<label>` whose attributes hold an island
+ * (`style="background-color: <%=color%>"`) is written as a `<span>`. The
+ * sanitizer unwraps `label`, so the attribute and the island in it would
+ * vanish. A label with no `for` and no control inside labels nothing: it draws
+ * inline like a span and a click on it does nothing, so the span is the same
+ * element to the reader. A label that names or holds a control keeps its
+ * meaning and stays as written; so does one the tag pattern cannot close.
+ */
+function rewriteIslandLabels(template: string): string {
+  if (!/<label\b/i.test(template)) return template;
+  let out = '';
+  let at = 0;
+  LABEL_OPEN.lastIndex = 0;
+  for (let m = LABEL_OPEN.exec(template); m; m = LABEL_OPEN.exec(template)) {
+    const open = m[0];
+    if (!open.includes('<%') || /[\t\n\f\r ]for[\t\n\f\r ]*=/i.test(open.replace(/<%=?[^%<>]*%>/g, ''))) continue;
+    const close = template.toLowerCase().indexOf('</label', m.index + open.length);
+    if (close < 0) continue;
+    const content = template.slice(m.index + open.length, close);
+    if (/<label\b/i.test(content) || LABEL_CONTROL.test(content)) continue;
+    const end = template.indexOf('>', close);
+    if (end < 0) continue;
+    out += `${template.slice(at, m.index)}<span${open.slice('<label'.length)}${content}</span>`;
+    at = end + 1;
+    LABEL_OPEN.lastIndex = at;
+  }
+  return out + template.slice(at);
+}
+
 /**
  * Pre-pass for compileHtmlpage: rewrites `<iframe>` embeds of own reports or
  * forms (`<%=zoho.appuri%>report-embed/<Report>`, `<%=zoho.appuri%>form-embed/<Form>`)
@@ -3416,6 +3451,7 @@ export function compileHtmlpage(
     reports: new Set(app.reports.map((r) => r.name)),
   });
   head.template = rewriteEmbedIframes(head.template, app);
+  head.template = rewriteIslandLabels(head.template);
   head.template = inlineSetupCalls(head.template, app);
   if (hasExecuteFunctionButton(head.template)) {
     head.template = rewriteExecuteFunctionButtons(head.template, app, new Set(head.params), fnFiles, opts.schema);
