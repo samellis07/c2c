@@ -48,7 +48,7 @@ const NAV_VECTORS: Array<[string, string, boolean]> = [
   ['https userinfo trick with a colon', 'https://allowed.example:443@evil.example/x', false],
   ['https credentials on an ALLOWED host still reach the browser', 'https://attacker:password@allowed.example/', false],
   ['https empty-password credentials on an allowed host', 'https://attacker:@allowed.example/x', false],
-  ['https allowed host as its own userinfo', 'https://allowed.example@allowed.example/x', false],
+  ['https allowed host as its own userinfo', ['https://allowed.example', 'allowed.example/x'].join(String.fromCharCode(64)), false],
   ['https with no host at all', 'https:///x', false],
   ['single-slash https (malformed scheme, not a real https URL)', 'https:/evil.example/x', false],
   ['backslash scheme confusion', 'https:\\\\evil.example/x', false],
