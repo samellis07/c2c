@@ -3302,6 +3302,17 @@ function classifyOpenUrlStmt(
       if (eq <= 0 || !paramValue) {
         return { kind: 'unsupported', target: text, reason: `report filter parameter ${paramName} has no value` };
       }
+      if (/_op$/i.test(paramName) && paramValue === '26') {
+        // Creator's CONTAINS operator: it only means something next to the
+        // field's own value pair, and that pair is the one filter counted.
+        const base = paramName.slice(0, -3).toLowerCase();
+        const pairs = query.split('&').filter(Boolean);
+        const named = (suffix: string): number => pairs.filter((p) => p.split('=')[0]!.toLowerCase() === base + suffix).length;
+        if (!base || named('') !== 1 || named('_op') !== 1) {
+          return { kind: 'unsupported', target: text, reason: `report filter operator parameter ${paramName} has no single value pair` };
+        }
+        continue;
+      }
       if (/_op$/i.test(paramName) || /^filter$/i.test(paramName)) {
         return { kind: 'unsupported', target: text, reason: `report filter operator parameter ${paramName} is not supported` };
       }

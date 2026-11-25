@@ -698,10 +698,19 @@ function resolveNavigation(result: unknown, routes?: NavRoutes, options: { ignor
   if (!key) return null;
   const fields = lookupName(routes?.reports, key)!.map((f) => f.toLowerCase());
   let filters = 0;
+  const contains = new Set<string>();
+  for (const [k, v] of pairs) {
+    // `Field_op=26` is Creator's CONTAINS on the field's own value pair.
+    if (!/_op$/i.test(k) || v !== '26') continue;
+    const base = k.slice(0, -3).toLowerCase();
+    if (fields.includes(base) && pairs.filter(([name]) => name.toLowerCase() === base).length === 1 && pairs.filter(([name]) => name.toLowerCase() === k.toLowerCase()).length === 1) contains.add(base);
+  }
   for (const [k, v] of pairs) {
     if (/^zc_/i.test(k)) continue;
+    if (/_op$/i.test(k) && v === '26' && contains.has(k.slice(0, -3).toLowerCase())) continue;
     if (/_op$/i.test(k) || !fields.includes(k.toLowerCase()) || ++filters > 1) return null;
     addQuery(k, v);
+    if (contains.has(k.toLowerCase())) addQuery(`${k}_op`, '26');
   }
   return finish(`#/report/${encodeURIComponent(key)}`);
 }

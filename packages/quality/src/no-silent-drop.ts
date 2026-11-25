@@ -1825,7 +1825,7 @@ function takeElement(pool: UiElement[], source: ZmlNode): UiElement | undefined 
  * Whether every condition leaf in a carried report-link `parameters` string
  * is one the client runtime applies (`clickParamConditions` in
  * client-runtime.js). The string being present on `ui.parameters` is not
- * proof every leaf wired: an `_op` outside 20/32/45/58, or a BETWEEN (58)
+ * proof every leaf wired: an `_op` outside 20/26/32/45/58, or a BETWEEN (58)
  * value that does not split into two bounds, drops that leaf on the route,
  * so the string is only partly carried. Mirrors reportParamsQuery's
  * once-decode, name shape, and `_op` grouping; a `${name}`/`input.name`
@@ -1864,6 +1864,10 @@ function reportParamsFullyCarried(parameters: string): boolean {
     const cond = conditions.get(field)!;
     if (cond.op === undefined) continue;
     if (cond.op === '20' || cond.op === '32' || cond.op === '45') continue;
+    if (cond.op === '26') {
+      if (cond.value === undefined) return false;
+      continue;
+    }
     if (cond.op === '58') {
       if (cond.input) continue;
       const parts = String(cond.value).split(';');
