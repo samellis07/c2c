@@ -226,6 +226,13 @@ export interface TranslateOptions {
    */
   alertEvent?: AlertEventClass;
   /**
+   * The script is a form `on validate` handler. The server half runs it at
+   * submit and refuses the save with the alert text, so a browser copy of an
+   * `if` whose arms only alert and cancel the submit is a pre-check the
+   * server already enforces.
+   */
+  validateEvent?: boolean;
+  /**
    * The unit has no client half: a schedule or a standalone function. The
    * generator writes no browser module for either (a schedule's job module is
    * server-only; a function's client module is never loaded by a UI target),
@@ -707,6 +714,9 @@ interface Scope {
   loopDepth: number;
   slot: number;
   alertEvent: AlertEventClass;
+  validateEvent: boolean;
+  /** The server code of the last non-literal `alert` message, for the `cancel submit` right after it. */
+  lastAlertCode: string | null;
   /** TranslateOptions.serverOnly: no client half. */
   noClient: boolean;
   /** TranslateOptions.navCapture: openUrl assigns the `c2c_nav` instruction. */
@@ -3264,6 +3274,8 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     loopDepth: 0,
     slot: options.slotStart ?? 0,
     alertEvent: options.alertEvent ?? 'allowed',
+    validateEvent: options.validateEvent ?? false,
+    lastAlertCode: null,
     noClient: options.serverOnly ?? false,
     navCapture: !!options.navCapture && !!options.serverOnly,
     src,
@@ -3386,8 +3398,14 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
   const server: string[] = [];
   const client: string[] = [];
   let alertText: string | null = null;
+  // A computed alert message, as server code, for the `cancel submit` that
+  // directly follows it: the refusal carries the text Creator would show.
+  let alertCode: string | null = null;
   for (const s of list) {
-    if (s.kind === 'alert') alertText = s.value.kind === 'string' ? s.value.value : null;
+    if (s.kind === 'alert') {
+      alertText = s.value.kind === 'string' ? s.value.value : null;
+      scope.lastAlertCode = null;
+    }
     const before = { ...stats };
     const declared = new Set(scope.declaredClient);
     const top = scope.flowStack.length === 1 && s.kind !== 'block';
@@ -3397,8 +3415,9 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
       s.kind === 'cancelDelete'
         ? cancelDeleteOut(s, alertText, stats, todos)
         : s.kind === 'cancelSubmit'
-          ? cancelSubmitOut(s, alertText, stats, todos)
+          ? cancelSubmitOut(s, alertText, stats, todos, alertText === null ? alertCode : null)
           : statement(s, scope, stats, todos);
+    alertCode = s.kind === 'alert' && alertText === null ? scope.lastAlertCode : null;
     if (s.kind === 'cancelDelete' || s.kind === 'cancelSubmit') {
       scope.cover.push({ kind: s.kind, start: s.span.start, end: s.span.end, bucket: coverBucket(before, stats) });
     }
@@ -3512,7 +3531,9 @@ function statementBody(s: Stmt, scope: Scope, stats: TranslateStats, todos: Todo
       // unverified, not proven disallowed.
       // https://www.zoho.com/deluge/help/misc-tasks/alert-task.html
       if (scope.alertEvent === 'allowed') {
-        return clientPush('alert', expr(s.value, scope), s.span, scope, stats, todos);
+        const message = expr(s.value, scope);
+        scope.lastAlertCode = message.todo || message.appFunction || message.sideEffect ? null : message.code;
+        return clientPush('alert', message, s.span, scope, stats, todos);
       }
       const note = scope.commentTails.has(lineStart(scope.src, s.span.start)) ? 'follows-comment-line' : undefined;
       const construct =
@@ -3621,9 +3642,10 @@ function cancelDeleteOut(s: Extract<Stmt, { kind: 'cancelDelete' }>, alertText: 
 /**
  * The client stops the submit; the server refuses it too, so a direct POST cannot skip on validate.
  */
-function cancelSubmitOut(s: Extract<Stmt, { kind: 'cancelSubmit' }>, alertText: string | null, stats: TranslateStats, todos: TodoItem[]): Out {
+function cancelSubmitOut(s: Extract<Stmt, { kind: 'cancelSubmit' }>, alertText: string | null, stats: TranslateStats, todos: TodoItem[], alertCode: string | null = null): Out {
   account(stats, todos, { todo: false, shim: true, constructs: [] }, s.span);
-  return { server: `await shim.validate.cancelSubmit(ctx, ${JSON.stringify(alertText)});`, client: 'actions.push({ op: "cancelSubmit" });' };
+  const text = alertCode !== null ? `String((${alertCode}) ?? "")` : JSON.stringify(alertText);
+  return { server: `await shim.validate.cancelSubmit(ctx, ${text});`, client: 'actions.push({ op: "cancelSubmit" });' };
 }
 
 function clientPush(op: string, value: Fx, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
@@ -3716,8 +3738,35 @@ function singleAssignName(stmt: Stmt): string | null {
   return cur.kind === 'assign' && cur.target.kind === 'name' && !cur.declType ? cur.target.name : null;
 }
 
+/**
+ * An arm made only of `alert` and `cancel submit`: it refuses the submit and
+ * changes nothing else. `null` when the statement holds anything more, or an
+ * alert no `cancel submit` follows (the submit would go on after showing it).
+ */
+function refusalArm(stmt: Stmt): { cancels: boolean } | null {
+  const flat: Stmt[] = [];
+  const collect = (cur: Stmt): boolean => {
+    if (cur.kind === 'block') return cur.body.every(collect);
+    flat.push(cur);
+    return cur.kind === 'alert' || cur.kind === 'cancelSubmit';
+  };
+  if (!collect(stmt)) return null;
+  // Nothing, a bare `cancel submit`, or one `alert` directly before it: the
+  // server half then refuses with that alert's text.
+  if (flat.length === 0) return { cancels: false };
+  if (flat.length === 1) return flat[0]!.kind === 'cancelSubmit' ? { cancels: true } : null;
+  return flat.length === 2 && flat[0]!.kind === 'alert' && flat[1]!.kind === 'cancelSubmit' ? { cancels: true } : null;
+}
+
+function refusalArms(s: Extract<Stmt, { kind: 'if' }>): boolean {
+  const arms = [s.then, ...s.elifs.map((e) => e.body), ...(s.else ? [s.else] : [])].map(refusalArm);
+  return arms.every((a) => a !== null) && arms.some((a) => a?.cancels);
+}
+
 function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   const declaredBefore = new Set(scope.declaredClient);
+  const todoMark = todos.length;
+  const coverMark = scope.cover.length;
   // Tests are translated, and later slotted, against the bindings in force
   // before any arm. An assignment inside the then-arm must not become the
   // value an else-if test replays. Each arm is translated from those same
@@ -3885,10 +3934,34 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
     : [];
   // A test only the server can evaluate over arms that only bind locals: the
   // server runs the if and the client keeps no copy of it.
-  const clientDropped =
+  let clientDropped =
     clientTests.some((c) => c.todo) &&
     [then.client, ...elifBodies.map((b) => b.client), els?.client ?? ''].every((c) => !c.trim() || clientBindsLocalsOnly(c));
   if (clientDropped) dropClientNames(scope, assigned, declaredBefore);
+  // `on validate`: the server half runs the same if at submit and refuses the
+  // save with the alert text (a 422 the form shows as its banner), so an if
+  // whose arms only alert and cancel the submit loses nothing when the browser
+  // cannot evaluate it: the pre-check is dropped, the refusal still happens.
+  const hasAlert = (stmt: Stmt): boolean => (stmt.kind === 'block' ? stmt.body.some(hasAlert) : stmt.kind === 'alert');
+  const textKept = bodies.every((b, i) => !hasAlert(b) || !/\bcancelSubmit\(ctx, null\)/.test(translated[i]!.server));
+  if (!clientDropped && scope.validateEvent && !scope.noClient && refusalArms(s) && textKept) {
+    const isClientTodo = (t: TodoItem): boolean => t.construct === 'client-condition-uses-server' || t.construct === 'client-loop-uses-server';
+    const armTodos = todos.slice(todoMark).filter(isClientTodo);
+    if (clientTests.some((c) => c.todo) || armTodos.length) {
+      const kept = todos.slice(todoMark).filter((t) => !isClientTodo(t));
+      todos.length = todoMark;
+      todos.push(...kept);
+      // An arm statement that counted a todo only for the dropped browser copy
+      // now translates (the server half carries it): re-bucket its ledger row.
+      for (const row of scope.cover.slice(coverMark)) {
+        if (row.bucket !== 'todo' || kept.some((t) => t.start < row.end && t.end > row.start)) continue;
+        row.bucket = 'shimmed';
+        stats.todo--;
+        stats.shimmed++;
+      }
+      clientDropped = true;
+    }
+  }
   const clientCondTodo = !clientDropped && clientTests.some((c) => c.todo);
   if (clientCondTodo) constructs.push('client-condition-uses-server');
   account(stats, todos, { todo: condTodo || clientCondTodo, shim: condShim || clientTests.some((c) => c.shim), constructs }, s.span);
@@ -5303,7 +5376,7 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
 function fnStmt(s: Extract<Stmt, { kind: 'fn' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   // An `alert` inside a function body is always unverified: callers are not
   // analysed, so it is never credited to or blamed on the enclosing event.
-  const fnScope = { ...scope, local: new Set(scope.local), alertEvent: 'unverified' as AlertEventClass };
+  const fnScope = { ...scope, local: new Set(scope.local), alertEvent: 'unverified' as AlertEventClass, validateEvent: false };
   for (const p of s.params) fnScope.local.add(p.name);
   // A write inside a function body runs when the function is called, not in
   // program order here — and the outer guards do not enclose it.

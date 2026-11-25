@@ -4118,6 +4118,7 @@ export function workflowScriptOptions(app: App, w: Workflow): TranslateOptions {
   return {
     replayFunctions: [...replayFunctionNames(app)].sort(),
     alertEvent: alertEventClass(w.event),
+    validateEvent: /^on validate\b/.test(w.event.split(' / ').pop()?.trim().toLowerCase() ?? ''),
     prefetchBound: subformEventField(w.event) ? ['row'] : [],
     // Server-condition functions are named for the workflow they came from:
     // form link name + script name, with the line number inside the script.
