@@ -30,7 +30,7 @@ TODO item per untranslated construct occurrence.
 | apps with no residual todos | 42/67 |
 | apps with no residual todos and no silent drops (deterministic) | 42/67 (62.7%) |
 | silent drops (total) | 0 |
-| residual TODO items | 55 |
+| residual TODO items | 53 |
 | distinct TODO kinds | 25 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
@@ -38,7 +38,7 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 17 |
+| `Server-side Deluge snippet requires manual translation` | 15 |
 | `Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.` | 6 |
 | `openurl-unsupported-target` | 3 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 3 |
@@ -76,6 +76,8 @@ clears the app. The count is apps, not items.
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background-image` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
+| `openurl-unsupported-target` | 1 |
+| `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background-image declaration)` | 1 |
 | `ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
@@ -92,7 +94,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "Server-side Deluge snippet requires manual translation",
-      "count": 17
+      "count": 15
     },
     {
       "construct": "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
@@ -271,17 +273,15 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "openurl-unsupported-target",
-        "Server-side Deluge snippet requires manual translation"
+        "openurl-unsupported-target"
       ],
-      "items": 2
+      "items": 1
     },
     {
       "constructs": [
-        "Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.",
-        "Server-side Deluge snippet requires manual translation"
+        "Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it."
       ],
-      "items": 2
+      "items": 1
     },
     {
       "constructs": [
@@ -362,7 +362,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 55,
+  "todoTotal": 53,
   "totalApps": 67
 }
 ```
