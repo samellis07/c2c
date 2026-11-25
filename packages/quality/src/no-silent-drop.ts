@@ -385,6 +385,10 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
         rows.push({ kind: 'field-property', name, status: 'counted', via: propertyTodo ? 'UI todo' : 'todo' });
         continue;
       }
+      if (item.label.startsWith('property ') && propertyNoteProves(field.properties.find((p) => `property ${p.key}` === item.label)!, field, ui)) {
+        rows.push({ kind: 'field-property', name, status: 'emitted', via: 'UI note' });
+        continue;
+      }
       if (item.proved(ui, columns)) {
         rows.push({ kind: 'field-property', name, status: 'emitted', via: 'field setting' });
         continue;
@@ -721,6 +725,25 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
     const value = text.toLowerCase();
     if (['disable', 'disabled', 'false', 'off', 'none'].includes(value)) return true;
     return value === 'enable' && ui?.toolbar === true;
+  }
+  return false;
+}
+
+/**
+ * Some accepted limitations are deliberately represented as generated UI
+ * notes rather than TODOs.  Treat only the notes for the specific property as
+ * coverage: a generic note must not hide an unrelated field setting.
+ */
+function propertyNoteProves(p: Property, field: Field, ui: UiField | undefined): boolean {
+  const remoteBrowseSources = new Set(['google_docs', 'zoho_docs']);
+  const key = p.key.trim().toLowerCase().replace(/\s+/g, ' ');
+  const note = ui?.note ?? '';
+  if (key === 'browse') {
+    const sources = unquote(p.value).split(',').map((token) => token.trim().toLowerCase()).filter((token) => token && token !== 'local_drive');
+    return sources.length > 0 && sources.every((source) => remoteBrowseSources.has(source)) && /remote browse options \([^)]*\) are not carried/i.test(note);
+  }
+  if (key === 'duration' && field.type?.trim().toLowerCase() === 'video') {
+    return /creator duration\s*=\s*[^ ]+\s+is not enforced/i.test(note) && /uploaded video remains supported/i.test(note);
   }
   return false;
 }
