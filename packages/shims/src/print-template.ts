@@ -246,6 +246,9 @@ export function replaceStyleCalls(text: string, decide: (name: string, args: str
   return out + text.slice(i);
 }
 
+// A `name=value` pair such as `width=3%`: a browser's CSS parser skips a declaration with no colon, so it styled nothing in Creator either.
+const IGNORED_ASSIGNMENT = /^-?[a-z][-a-z]*\s*=\s*[-\w.%#\s]*$/i;
+
 /**
  * Split an inline style into the declarations kept and the ones refused.
  * Identical rules to the page generator's `cleanStyle`: each declaration is
@@ -264,7 +267,7 @@ export function cleanPrintStyle(value: string): { style: string; dropped: string
   for (const text of rawPieces) {
     const colon = text.indexOf(':');
     if (colon < 0) {
-      if (/[=@\\'"()]/.test(text)) dropped.push('?');
+      if (/[=@\\'"()]/.test(text) && !IGNORED_ASSIGNMENT.test(text)) dropped.push('?');
       continue;
     }
     const prop = flatCss(text.slice(0, colon));

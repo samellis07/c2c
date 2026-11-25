@@ -560,12 +560,19 @@ export function replaceStyleCalls(text: string, decide: (name: string, args: str
 }
 
 /**
+ * A declaration written `name=value`, as `width=3%` in a table cell. A browser's
+ * CSS parser skips a declaration with no colon, so it styled nothing in Creator
+ * either: there is nothing to carry and nothing lost.
+ */
+const IGNORED_ASSIGNMENT = /^-?[a-z][-a-z]*\s*=\s*[-\w.%#\s]*$/i;
+
+/**
  * Split an inline style into the declarations kept and the ones refused.
  * Each declaration is checked on its own: the property must be a plain CSS
  * name (never behavior or -moz-binding) and the value a safe style value, so
  * a refused declaration never takes the safe ones beside it. A trailing token
  * with no colon and no assignment, quote, escape, or call is not a declaration
- * and is left out. The browser runtime keeps an identical copy.
+ * and is left out, as is a plain `name=value` pair. The browser runtime keeps an identical copy.
  */
 export function cleanStyle(value: string): { style: string; dropped: string[] } {
   const kept: string[] = [];
@@ -579,7 +586,7 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
   for (const text of rawPieces) {
     const colon = text.indexOf(':');
     if (colon < 0) {
-      if (/[=@\\'"()]/.test(text)) dropped.push('?');
+      if (/[=@\\'"()]/.test(text) && !IGNORED_ASSIGNMENT.test(text)) dropped.push('?');
       continue;
     }
     const prop = flatCss(text.slice(0, colon));
@@ -1059,7 +1066,8 @@ function fontSrcSafe(raw: string): boolean {
       const inner = args.trim();
       const quoted = /^(['"])([\s\S]*)\1$/.exec(inner);
       const unquoted = quoted ? quoted[2]! : inner;
-      if (fn === 'url' && safeUrl(unquoted, true)) return ' ';
+      // `%20` is a space in a file name; the url policy refuses whitespace, so it is checked as a letter (a colon before a slash still reads as a scheme).
+      if (fn === 'url' && safeUrl(unquoted.replace(/%20/g, 'x'), true)) return ' ';
       if ((fn === 'local' || fn === 'format' || fn === 'tech') && (quoted ? !/['"\\<>]/.test(unquoted) : /^[\w .-]+$/.test(inner))) return ' ';
       return ' ';
     });
@@ -1067,6 +1075,36 @@ function fontSrcSafe(raw: string): boolean {
     text = next;
   }
   return !/[()'"\\@{};<>]/.test(text);
+}
+
+const INSECURE_FONT_URL = /^url\(\s*["']?\s*http:/i;
+const SPACED_QUOTED_URL = /url\(\s*(["'])([^"'<>{}\\\t\r\n\f]*)\1\s*\)/gi;
+
+/**
+ * A font-face `src` list as a Creator page's browser loads it. Creator is
+ * served over https, and a browser blocks an `http:` font as mixed content, so
+ * that entry loaded nothing there: it is left out and the entries that did
+ * load (a `local()` name, a same-origin address) stay. A space inside a quoted
+ * address is the address `%20` spells, so it is encoded instead of refused.
+ * Unbalanced quotes or parentheses leave the text as written for the caller's
+ * checks to refuse.
+ */
+function fontSrcLoadable(body: string): string {
+  const entries: string[] = [];
+  let depth = 0, quote = '', start = 0;
+  for (let n = 0; n <= body.length; n++) {
+    const ch = body[n] ?? ',';
+    if (quote) { if (ch === '\\') n++; else if (ch === quote) quote = ''; continue; }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')') { if (depth === 0) return body; depth--; }
+    else if (ch === ',' && depth === 0) { entries.push(body.slice(start, n).trim()); start = n + 1; }
+  }
+  if (quote || depth) return body;
+  return entries
+    .filter((entry) => !INSECURE_FONT_URL.test(entry))
+    .map((entry) => entry.replace(SPACED_QUOTED_URL, (match, q: string, inner: string) => (inner === inner.trim() ? `url(${q}${inner.replace(/ /g, '%20')}${q})` : match)))
+    .join(', ');
 }
 
 /**
@@ -1080,7 +1118,10 @@ function fontFaceDeclaration(part: string, colon: number): string | undefined {
   const cleaned = cleanSheetDeclaration(part, colon);
   if (cleaned) return cleaned;
   const body = part.slice(colon + 1).replace(/!\s*important\s*$/i, '').trim();
-  if (prop === 'src') return fontSrcSafe(body) ? part.trim() : undefined;
+  if (prop === 'src') {
+    const src = fontSrcLoadable(body);
+    return src && fontSrcSafe(src) ? `${part.slice(0, colon).trim()}: ${src}` : undefined;
+  }
   // Other descriptors are keywords, numbers, U+XXXX ranges and quoted names
   // or feature tags; a lifted string leaves plain value text, so anything
   // left outside the safe character set is not a descriptor value.
@@ -1330,6 +1371,20 @@ const EMBED_DROPPED_TAGS = new Set(['embed', 'frame', 'iframe', 'object']);
 
 const REPORTED_DROPPED_TAGS = new Set(['script', 'style', 'svg', 'template', ...EMBED_DROPPED_TAGS]);
 
+/**
+ * Library scripts, by exact address, that start nothing on their own: Bootstrap
+ * 3's JavaScript only acts on `data-*` hooks in the markup (and throws at load
+ * without jQuery). A snippet that loads one and has no hook runs no behaviour
+ * with it, so removing it loses nothing; the same address next to a hook, or any
+ * other address, is still a removed script.
+ */
+const HOOK_ONLY_SCRIPTS = new Set(['https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js']);
+const BOOTSTRAP_HOOK = /\bdata-(?:toggle|target|dismiss|ride|spy|slide|slide-to|parent|content|placement|trigger|offset)\b/i;
+
+function hookOnlyScript(node: DomNode, raw: string): boolean {
+  return HOOK_ONLY_SCRIPTS.has(node.getAttribute('src') ?? '') && !(node.textContent ?? '').trim() && !BOOTSTRAP_HOOK.test(raw);
+}
+
 export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[]): string {
   const win = domWindow();
   const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
@@ -1342,7 +1397,8 @@ export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: s
     const visit = (node: DomNode) => {
       if (node.nodeType === 1) {
         const tag = (node.tagName || '').toLowerCase();
-        if (REPORTED_DROPPED_TAGS.has(tag) && !(tag === 'iframe' && videoEmbedSrc(node.getAttribute('src') ?? ''))) droppedTags.push(tag);
+        const loses = tag === 'iframe' ? !videoEmbedSrc(node.getAttribute('src') ?? '') : tag !== 'script' || !hookOnlyScript(node, raw);
+        if (REPORTED_DROPPED_TAGS.has(tag) && loses) droppedTags.push(tag);
         for (const child of listOf(node.childNodes)) visit(child);
       }
     };
