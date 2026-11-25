@@ -2335,6 +2335,48 @@ export function appCallPath(rest: string): string[] | null {
   }
 }
 
+/**
+ * True when the call whose `(` is at `open` is `text.remove("literal")` over a text a string shim produced:
+ * the removed text is written in the source, and the value is the whole result of a `shim.string.*` call, or a
+ * name declared once as one. A date's text (`dt.toString()`, a datetime field) never reaches it, so the format the
+ * shim writes it in cannot change what is removed.
+ */
+function removesLiteralFromText(server: string, open: number): boolean {
+  const close = matchingParen(server, open);
+  if (close < 0 || server[close - 1] !== '"') return false;
+  let at = close - 2;
+  while (at >= open) {
+    if (server[at] === '"') {
+      let slashes = 0;
+      while (server[at - 1 - slashes] === '\\') slashes++;
+      if (slashes % 2 === 0) break;
+    }
+    at--;
+  }
+  const comma = server.lastIndexOf(',', at);
+  if (at <= open || comma <= open || !/^,[ \t]*$/.test(server.slice(comma, at))) return false;
+  return isStringShimText(server, server.slice(open + 1, comma).trim());
+}
+
+/** A whole `shim.string.*(...)` call, or a name declared once as `var name = shim.string.*(...);` and assigned nowhere else. */
+function isStringShimText(source: string, expr: string): boolean {
+  // The `// Deluge:` comment above each statement quotes the source and is no assignment.
+  const server = source.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
+  if (expr.startsWith('shim.string.')) {
+    const paren = expr.indexOf('(');
+    return paren > 0 && matchingParen(expr, paren) === expr.length - 1;
+  }
+  if (!/^[A-Za-z_]\w*$/.test(expr)) return false;
+  const declaration = `var ${expr} = `;
+  const at = server.indexOf(declaration);
+  if (at < 0 || server.indexOf(declaration, at + 1) >= 0) return false;
+  const initializer = server.slice(at + declaration.length);
+  if (!initializer.startsWith('shim.string.')) return false;
+  const close = matchingParen(initializer, initializer.indexOf('('));
+  if (close < 0 || initializer[close + 1] !== ';') return false;
+  return (server.match(new RegExp(`(?<![\\w.$])${expr}\\s*[-+*/%]?=(?!=)`, 'g')) ?? []).length === 1;
+}
+
 /** The call a render makes to `zoho.encryption.urlEncode`, the one `zoho.task` that never leaves the process. */
 const PURE_ZOHO_TASK = /^\s*ctx,\s*\["encryption",\s*"urlEncode"\]/;
 
@@ -2353,6 +2395,8 @@ export function islandReadOnly(server: string, appCall?: (path: string[]) => boo
     }
     // `zoho.encryption.urlEncode` is a pure local adapter: the runtime answers it without a Zoho call.
     if (name === 'zoho.task' && PURE_ZOHO_TASK.test(server.slice((match.index ?? 0) + match[0].length))) continue;
+    // `text.remove("literal")` over a string shim's text is a pure text edit.
+    if (name === 'list.removeText' && removesLiteralFromText(server, (match.index ?? 0) + match[0].length - 1)) continue;
     if (!readOnlyShim(name)) return false;
   }
   if (assignsDatastoreRead(server) || mutatesFetchedRead(server)) return false;
@@ -3484,6 +3528,90 @@ function rewriteIslandLabels(template: string): string {
   return out + template.slice(at);
 }
 
+/** An open `<div>` tag whose attributes may hold `<%= %>` islands. */
+const DIV_OPEN = /<div\b(?:<%=?[^%<>]*%>|[^<>])*>/gi;
+/** The `background-*` declarations a cover image carries; any other one keeps the div as written. */
+const IMAGE_BACKGROUND_PARTS = new Set(['background-repeat', 'background-size', 'background-position']);
+
+/** The island expression of `url(<%= x %>)`, bare or quoted, or null when the value is anything else. */
+function backgroundUrlIsland(value: string): string | null {
+  const text = value.trim();
+  if (!text.toLowerCase().startsWith('url(') || !text.endsWith(')')) return null;
+  const inner = text.slice(4, -1).trim();
+  const quote = inner.startsWith("'") || inner.startsWith('"') ? inner[0]! : '';
+  if (quote && !inner.endsWith(quote)) return null;
+  const island = inner.slice(quote.length, inner.length - quote.length);
+  if (!island.startsWith('<%=') || !island.endsWith('%>')) return null;
+  const expr = island.slice(3, -2);
+  return /[<>"'%;]/.test(expr) || !expr.trim() ? null : expr.trim();
+}
+
+/**
+ * Pre-pass for compileHtmlpage: an empty `<div>` whose own style paints a photo from an island
+ * (`background: url('<%=photo%>'); background-size: cover; background-position: center`) draws that
+ * photo as an `<img>` filling the div instead. The sanitizer refuses a `url()` in an inline style, so
+ * the declaration and the island in it would vanish; an image element fetches the same address through
+ * the page's URL rules, and `object-fit` is the same cover or contain scaling, centred or from the
+ * corner. Every other declaration stays on the div, which becomes the positioned box the image fills
+ * (padding box, where a background is drawn). A div that has content, repeats the image, sets another
+ * background part, is positioned `static`, or holds more than the one island stays as written.
+ */
+function rewriteIslandBackgrounds(template: string): string {
+  if (!/url\(/i.test(template)) return template;
+  let out = '';
+  let at = 0;
+  DIV_OPEN.lastIndex = 0;
+  for (let m = DIV_OPEN.exec(template); m; m = DIV_OPEN.exec(template)) {
+    const open = m[0];
+    const end = m.index + open.length;
+    if (!open.includes('<%') || template.slice(end, end + 6).toLowerCase() !== '</div>') continue;
+    const rewritten = divWithBackgroundImage(open);
+    if (rewritten === null) continue;
+    out += template.slice(at, m.index) + rewritten;
+    at = end + 6;
+    DIV_OPEN.lastIndex = at;
+  }
+  return out + template.slice(at);
+}
+
+function divWithBackgroundImage(open: string): string | null {
+  const styleAt = open.search(/[\t\n\f\r ]style="/i);
+  if (styleAt < 0) return null;
+  const valueStart = open.indexOf('"', styleAt) + 1;
+  const valueEnd = open.indexOf('"', valueStart);
+  if (valueEnd < 0) return null;
+  const value = open.slice(valueStart, valueEnd);
+  if (value.indexOf('<%') !== value.lastIndexOf('<%') || value.indexOf('%>') !== value.lastIndexOf('%>')) return null;
+  const rest: string[] = [];
+  let expr: string | null = null;
+  const bgParts = new Map<string, string>();
+  for (const declaration of value.split(';')) {
+    const colon = declaration.indexOf(':');
+    if (colon < 0) {
+      if (declaration.trim()) return null;
+      continue;
+    }
+    const name = declaration.slice(0, colon).trim().toLowerCase();
+    const body = declaration.slice(colon + 1).trim();
+    if (name === 'background' || name === 'background-image') {
+      expr = backgroundUrlIsland(body);
+      if (expr === null) return null;
+    } else if (IMAGE_BACKGROUND_PARTS.has(name)) bgParts.set(name, body.toLowerCase());
+    else if (name.startsWith('background') && name !== 'background-color') return null;
+    else rest.push(`${name}:${body}`);
+  }
+  const size = bgParts.get('background-size');
+  const position = bgParts.get('background-position');
+  if (expr === null || bgParts.get('background-repeat') !== 'no-repeat' || (size !== 'cover' && size !== 'contain')) return null;
+  if (position !== undefined && position !== 'center' && position !== 'center center') return null;
+  const placed = rest.find((d) => d.startsWith('position:'));
+  if (placed?.slice('position:'.length).trim().toLowerCase() === 'static') return null;
+  if (!placed) rest.push('position:relative');
+  const attrs = open.slice(0, styleAt) + open.slice(valueEnd + 1, -1);
+  const fill = `position:absolute;top:0;left:0;width:100%;height:100%;object-fit:${size};object-position:${position ? 'center' : '0 0'}`;
+  return `${attrs} style="${rest.join(';')}"><img src="<%=${expr}%>" alt="" style="${fill}"></div>`;
+}
+
 /**
  * Pre-pass for compileHtmlpage: rewrites `<iframe>` embeds of own reports or
  * forms (`<%=zoho.appuri%>report-embed/<Report>`, `<%=zoho.appuri%>form-embed/<Form>`)
@@ -3556,7 +3684,7 @@ export function compileHtmlpage(
     reports: new Set(app.reports.map((r) => r.name)),
   });
   head.template = rewriteEmbedIframes(head.template, app);
-  head.template = rewriteIslandLabels(head.template);
+  head.template = rewriteIslandBackgrounds(rewriteIslandLabels(head.template));
   head.template = inlineSetupCalls(head.template, app);
   if (hasExecuteFunctionButton(head.template)) {
     head.template = rewriteExecuteFunctionButtons(head.template, app, new Set(head.params), fnFiles, opts.schema);

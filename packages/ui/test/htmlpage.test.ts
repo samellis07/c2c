@@ -5516,3 +5516,54 @@ test('an island in the attributes of a label that labels nothing renders on a sp
     assert.equal(refused.ok, false, kept);
   }
 });
+
+const COVER_STYLE = "height: 155px;padding: 0px 25%;background: url('<%= input.p %>');background-repeat: no-repeat;background-size: cover;opacity:0.41;background-position: center;";
+
+test('an empty div that paints a photo from an island draws the photo as an image filling the div', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%{ %><div align="center" style="${COVER_STYLE}"></div><%}%>`;
+  const app = appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(app, snippet, { p: 'https://files.example.com/p.png?a=1&b=2' });
+  assert.match(html, /<div style="height:\s*155px;\s*padding:\s*0px 25%;\s*opacity:0\.41;\s*position:relative;?"><img src="https:\/\/files\.example\.com\/p\.png\?a=1&amp;b=2" alt="" style="position:absolute;\s*top:0;\s*left:0;\s*width:100%;\s*height:100%;\s*object-fit:cover;\s*object-position:center;?"><\/div>/, html);
+  assert.doesNotMatch(html, /url\(|background/, html);
+  const hostile = await renderPage(app, snippet, { p: 'javascript:alert(1)' });
+  assert.doesNotMatch(hostile.html, /javascript/i, hostile.html);
+  const quoted = await renderPage(app, snippet, { p: "x');background:url(https://evil.example/x" });
+  assert.match(quoted.html, /<img src="x&#39;\);background:url\(https:\/\/evil\.example\/x" alt="" style="position:absolute;/, quoted.html);
+  assert.equal(quoted.html.match(/ style="/g)?.length, 2, quoted.html);
+});
+
+test('a div that paints an island photo stays a counted snippet unless an image draws it the same way', () => {
+  const refused = (open: string, inner = '') =>
+    compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<%{ %>${open}${inner}</div><%}%>`).ok;
+  const style = (decl: string) => `<div style="${decl}">`;
+  assert.equal(refused(style(COVER_STYLE)), true);
+  assert.equal(refused(style(COVER_STYLE), 'x'), false, 'content over the photo');
+  assert.equal(refused(style(COVER_STYLE.replace('no-repeat', 'repeat'))), false, 'a tiled photo');
+  assert.equal(refused(style(COVER_STYLE.replace('background-size: cover;', ''))), false, 'a photo at its own size');
+  assert.equal(refused(style(COVER_STYLE.replace('center;', '10px 20px;'))), false, 'an offset photo');
+  assert.equal(refused(style(`${COVER_STYLE}background-attachment: fixed;`)), false, 'another background part');
+  assert.equal(refused(style(`${COVER_STYLE}position: static;`)), false, 'a static box');
+  assert.equal(refused(style(COVER_STYLE.replace("'<%= input.p %>'", "'x/<%= input.p %>'"))), false, 'a computed part of the address');
+  assert.equal(refused(style(COVER_STYLE.replace("'<%= input.p %>'", "'<%= input.p + input.q %>'"))), true, 'a computed address meets the image URL rules');
+  assert.equal(refused(style(COVER_STYLE.replace("'<%= input.p %>'", "'<%= input.p; %>'"))), false, 'a statement in the address');
+  assert.equal(refused(style(`${COVER_STYLE}color: <%= input.c %>;`)), false, 'a second island');
+});
+
+test('a text remove of a written literal over a string shim text is a read-only render, any other text remove is not', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\np = input.p.replaceFirst("/x/", "/a/");\nsrc = p.remove("<img src = \\"").getPrefix("\\"");\n%>\n<p><%= src %></p>`;
+  const app = appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(app, snippet, { p: '<img src = "/x/b.png" alt=x>' });
+  assert.match(html, /<p>\/a\/b\.png<\/p>/, html);
+  const declared = 'var p = shim.string.replaceFirst(input, "a", "b");\n';
+  assert.equal(islandReadOnly(`${declared}var q = shim.list.removeText(p, "x");`), true);
+  assert.equal(islandReadOnly('var q = shim.list.removeText(shim.string.replaceFirst(input, "a", "b"), "x");'), true);
+  assert.equal(islandReadOnly(`${declared}var q = shim.list.removeText(p, "x" + y);`), false, 'a computed needle');
+  assert.equal(islandReadOnly(`${declared}p = shim.date.text(d);\nvar q = shim.list.removeText(p, "x");`), false, 'a name assigned again');
+  assert.equal(islandReadOnly(`var p = shim.date.text(d);\nvar q = shim.list.removeText(p, "x");`), false, 'a date text');
+  assert.equal(islandReadOnly('var q = shim.list.removeText(p, "x");'), false, 'a name nothing declares');
+  assert.equal(islandReadOnly('var q = shim.list.removeText("a-b", "-");'), false, 'a written text');
+});
