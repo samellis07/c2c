@@ -149,7 +149,7 @@ function pageEmbedDetail(value: string): string {
 }
 
 /** Deluge code inside the snippet's `<% %>` islands. */
-function islandCode(source: string): string {
+export function islandCode(source: string): string {
   return splitIslands(source).islands.join('\n');
 }
 
@@ -245,16 +245,44 @@ function droppedTags(markup: string): string[] {
  * `<Form>[<field> == zoho.loginuserid|zoho.loginuser]`, and the URL reads `<var>.ID`.
  */
 export function isCallerFilteredVariable(source: string, varName: string, form: string, shape: 'id' | 'record' = 'id'): boolean {
-  if (!/^[A-Za-z_]\w*$/.test(varName) || !/^[A-Za-z_]\w*$/.test(form)) return false;
+  if (!/^[A-Za-z_]\w*$/.test(form)) return false;
+  const read = singleReadAssignment(source, varName);
+  if (!read || read.criteria.length === 0) return false;
+  if (shape === 'id' ? !/^\s*\.\s*ID$/i.test(read.tail) : read.tail.trim() !== '') return false;
+  if (read.form.toLowerCase() !== form.toLowerCase()) return false;
+  return CALLER_FILTER_CRITERIA.test(read.criteria);
+}
+
+/** One record named by a page parameter: `ID == input.p`, optionally `.toLong()`. */
+const PAGE_ID_CRITERIA = /^\s*ID\s*==\s*input\.[A-Za-z_]\w*(?:\.toLong\(\))?\s*$/i;
+
+/**
+ * The form read by the single assignment of `varName` when it picks one record
+ * by a page parameter (`Form[ID == input.p]`). The record route a summary URL
+ * points at authorizes whichever row it is handed, so the row one of this
+ * record's lookup fields names stays a read the caller is allowed to make.
+ */
+function pageRecordVariableForm(source: string, varName: string): string | null {
+  const read = singleReadAssignment(source, varName);
+  return read && read.tail.trim() === '' && PAGE_ID_CRITERIA.test(read.criteria) ? read.form : null;
+}
+
+/**
+ * The one statement that assigns `varName`, split as `<form>[<criteria>]<tail>`,
+ * or null when the variable is assigned more than once, not at statement
+ * start, or its value is not that read shape.
+ */
+function singleReadAssignment(source: string, varName: string): { form: string; criteria: string; tail: string } | null {
+  if (!/^[A-Za-z_]\w*$/.test(varName)) return null;
   const code = source.includes('<%') ? islandCode(source) : source;
   const assignRe = new RegExp(`(?<![.\\w])${varName}(?![\\w])\\s*=(?!=)`, 'g');
   const matches = [...code.matchAll(assignRe)];
-  if (matches.length !== 1) return false;
+  if (matches.length !== 1) return null;
   const match = matches[0];
   // Statement-start check, kept linear: strip trailing non-newline whitespace,
   // then the last character must be a separator or the text all whitespace.
   const before = code.slice(0, match.index).replace(/[^\S\r\n]+$/, '');
-  if (before !== '' && !/[;{}\r\n]$/.test(before)) return false;
+  if (before !== '' && !/[;{}\r\n]$/.test(before)) return null;
 
   const afterEqual = code.slice(match.index + match[0].length);
   const semiIdx = afterEqual.indexOf(';');
@@ -266,33 +294,35 @@ export function isCallerFilteredVariable(source: string, varName: string, form: 
   const closeIdx = openIdx < 0 ? -1 : rhs.indexOf(']', openIdx + 1);
   const rhsForm = openIdx < 0 ? '' : rhs.slice(0, openIdx).trim();
   const criteria = closeIdx < 0 ? '' : rhs.slice(openIdx + 1, closeIdx);
-  if (
-    closeIdx < 0 ||
-    !/^[A-Za-z_]\w*$/.test(rhsForm) ||
-    criteria.length === 0 ||
-    criteria.includes('[') ||
-    (shape === 'id' ? !/^\s*\.\s*ID$/i.test(rhs.slice(closeIdx + 1)) : rhs.slice(closeIdx + 1).trim() !== '')
-  ) {
-    return false;
-  }
-  if (rhsForm.toLowerCase() !== form.toLowerCase()) return false;
-  return CALLER_FILTER_CRITERIA.test(criteria);
+  if (closeIdx < 0 || !/^[A-Za-z_]\w*$/.test(rhsForm) || criteria.includes('[')) return null;
+  return { form: rhsForm, criteria, tail: rhs.slice(closeIdx + 1) };
 }
 
 /**
  * How a record-summary URL names its row, or null when the id is not one of the
  * proved shapes: a form read `Form[...].ID`, a page parameter, a variable that
- * holds exactly that read's id, or a variable that holds the caller-filtered
- * record read and the URL takes its `.ID`. The generated route authorizes the
+ * holds exactly that read's id, a variable that holds the caller-filtered
+ * record read and the URL takes its `.ID`, or a variable that holds the record
+ * a page parameter names and the URL takes the `.ID` of one of its lookup
+ * fields that points at the report's form. The generated route authorizes the
  * row it is handed, so every shape stays a read the caller is allowed to make.
  */
-export function recordSummaryIdShape(idExpr: string, form: string, source: string): { var?: string; record?: boolean } | null {
+export function recordSummaryIdShape(idExpr: string, form: string, source: string, app?: App): { var?: string; record?: boolean } | null {
   if (new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr)) return {};
   if (/^input\.[A-Za-z_]\w*$/.test(idExpr)) return {};
   if (/^[A-Za-z_]\w*$/.test(idExpr)) return isCallerFilteredVariable(source, idExpr, form) ? { var: idExpr } : null;
   const recordVar = /^([A-Za-z_]\w*)\s*\.\s*ID$/i.exec(idExpr);
   if (recordVar && isCallerFilteredVariable(source, recordVar[1], form, 'record')) return { var: recordVar[1], record: true };
+  const lookupId = /^([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\.\s*ID$/i.exec(idExpr);
+  if (lookupId && pageRecordLookupTargets(source, lookupId[1], lookupId[2], form, app)) return { var: lookupId[1], record: true };
   return null;
+}
+
+/** True when `<var>.<field>` is a lookup of the page-parameter record `var` that points at `form`. */
+function pageRecordLookupTargets(source: string, varName: string, fieldName: string, form: string, app?: App): boolean {
+  const readForm = app ? pageRecordVariableForm(source, varName) : null;
+  const field = app?.forms.find((item) => item.name === readForm)?.fields.find((item) => item.name === fieldName);
+  return field?.lookup?.form === form;
 }
 
 export function isKnownReportSummaryUrl(url: string, app?: App, source?: string): boolean {
@@ -308,7 +338,7 @@ export function isKnownReportSummaryUrl(url: string, app?: App, source?: string)
   if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return false;
 
   const idExpr = match[2].trim();
-  return recordSummaryIdShape(idExpr, form, source ?? '') !== null;
+  return recordSummaryIdShape(idExpr, form, source ?? '', app) !== null;
 }
 
 function findKnownSummaries(source: string, app?: App): KnownSummary[] {
@@ -328,7 +358,7 @@ function findKnownSummaries(source: string, app?: App): KnownSummary[] {
     const criteria = reportCriteria(report.criteria?.trim() || 'true');
     if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) continue;
     const idExpr = match[2].trim();
-    const shape = recordSummaryIdShape(idExpr, form, source);
+    const shape = recordSummaryIdShape(idExpr, form, source, app);
     if (shape) results.push({ report, form, varName: shape.var, ...(shape.record ? { record: true } : {}) });
   }
   return results;

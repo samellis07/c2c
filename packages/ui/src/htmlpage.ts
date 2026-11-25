@@ -36,8 +36,8 @@ import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.
 import { allStmts, markupFlow, thisappPath } from './markup-flow.js';
 import { fileFieldsFor } from '../../deluge/src/field-store.js';
 import { hasShapeCWrites, hasUnguardedRecordWrite, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
-import { displayTerms } from './decorations/lookups.js';
-import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, recordSummaryIdShape, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
+import { displayRefs, displayTerms } from './decorations/lookups.js';
+import { INTERNAL_RECORD_SUMMARY, MARKUP_LITERAL, islandCode, recordSummaryIdShape, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 
 export interface HtmlpageFile {
   path: string;
@@ -622,7 +622,8 @@ function rewritePageParamLinks(template: string, app: App, page: string, ownPara
     if (matches.length > 1 && !target) return whole;
     const supplied: string[] = [];
     const params = includeParams(m[2] ?? '', target?.params ?? [], ownParams, 'omit', supplied);
-    if (params === null) return whole;
+    // The caller's identity (`zoho.loginuser`) never rides a page link; only a record value or a page parameter does.
+    if (params === null || supplied.some((read) => /^zoho\b/i.test(read))) return whole;
     const query = params
       .map((p) => {
         const eq = p.indexOf('=');
@@ -836,6 +837,10 @@ const SLOT_TOKEN = /^\u0001(\d+)\u0001$/;
  * indexes and quotes keep the snippet counted.
  */
 const PARAM_READ = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\.(?:toLong|toString)\(\))?$/;
+// Creator snippets commonly pre-encode a value before placing it in a
+// component's params attribute. The generated route performs the same
+// form/query encoding, so prove the wrapper and carry its bounded read.
+const PARAM_ENCODED_READ = /^zoho\.encryption\.urlEncode\(\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\)$/i;
 const PARAM_RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** One key of an embed's `params` that fills a field: a bounded literal or a bare read evaluated at render. */
@@ -882,6 +887,32 @@ function embedLookupFields(app: App, kind: string, name: string): EmbedLookup[] 
     out.push({ name: field.name, ...(path ? { path } : displayComposable(app, field) ? { display: true as const } : {}) });
   }
   return out;
+}
+
+/** The last field a bare read names, without a closing `.toLong()` / `.toString()`. */
+function lastReadName(read: string): string {
+  return read.trim().replace(/\.(?:toLong|toString)\(\)$/, '').split('.').pop() ?? '';
+}
+
+/**
+ * A `Lookup:display` param whose one bare read names a stored field the
+ * lookup's text composes from several fields (`record.Case_Number` for a
+ * "number - title" text)
+ * filters on that field of the target (`Lookup.Field`), the way a single-field
+ * display does. Any other value is compared with the whole text.
+ */
+function shownFieldKeys(app: App, kind: string, name: string, params: ComponentParam[]): ComponentParam[] {
+  return params.map((param) => {
+    if (!param.key.endsWith(':display') || !('read' in param.value)) return param;
+    const head = param.key.slice(0, -':display'.length);
+    const lookup = embedForm(app, kind, name)?.fields.find((field) => field.name === head)?.lookup;
+    const target = lookup ? app.forms.find((item) => item.name === lookup.form) : undefined;
+    const read = lastReadName(param.value.read).toLowerCase();
+    const refs = lookup?.displayFormat ? displayRefs(lookup.displayFormat) : [];
+    const shown = refs.length > 1 ? refs.find((ref) => ref.toLowerCase() === read) : undefined;
+    const stored = target?.fields.find((field) => field.name === shown);
+    return stored && stored.subfields.length === 0 && !stored.lookup ? { ...param, key: `${head}.${stored.name}` } : param;
+  });
 }
 
 /**
@@ -932,7 +963,9 @@ function componentParams(
   // One island of a value: a bare read of a record field or a declared page input, checked the same way wherever it stands.
   const readOf = (slot: string): string | null => {
     const found = SLOT_TOKEN.exec(slot);
-    const read = found ? (slots[Number(found[1])] ?? '').trim() : '';
+    const text = found ? (slots[Number(found[1])] ?? '').trim() : '';
+    // The generated route encodes a value once, so a wrapper that encodes it first is carried as the bare read.
+    const read = PARAM_ENCODED_READ.exec(text)?.[1] ?? text;
     if (!PARAM_READ.test(read)) return null;
     const segments = read.split('.');
     if (segments.some((segment) => PARAM_RESERVED.has(segment.toLowerCase()))) return null;
@@ -1042,6 +1075,49 @@ function literalChoices(template: string, name: string): string[] | null {
 }
 
 /**
+ * A name set once to `zoho.encryption.urlEncode(<bounded read>);` and printed
+ * as a value in a zc-component `params` attribute. Creator wrote the encoded
+ * value into the query itself; the generated marker encodes the one value it
+ * carries, so the parameter takes the wrapper back in the place the name stood
+ * and {@link componentParams} proves the bounded read. The name and its root
+ * must be assigned once in the render code, so the read cannot have changed
+ * between the statement and the embed. Uses outside `params` keep the name.
+ */
+const ENCODED_VARIABLE =
+  /(^|[;{}\r\n])[ \t]*([A-Za-z_]\w*)[ \t]*=[ \t]*(zoho\.encryption\.urlEncode\([ \t]*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)[ \t]*\))[ \t]*;/g;
+
+function inlineEncodedParamVariables(template: string): string {
+  if (!/\belname\s*=\s*['"]zc-component['"]/i.test(template)) return template;
+  const code = islandCode(template);
+  const assigned = (name: string): number => [...code.matchAll(new RegExp(`(?<![\\w.])${name}[ \\t]*=(?!=)`, 'g'))].length;
+  const encoded = new Map<string, string>();
+  for (const match of template.matchAll(ENCODED_VARIABLE)) {
+    const [, , name, call, read] = match as unknown as [string, string, string, string, string];
+    const root = read.split('.')[0]!;
+    if (assigned(name) === 1 && (root === 'input' || assigned(root) === 1)) encoded.set(name, call);
+  }
+  if (!encoded.size) return template;
+  return template.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag) => {
+    if (!/\belname\s*=\s*['"]zc-component['"]/i.test(tag)) return tag;
+    return tag.replace(/(\bparams\s*=\s*)(["'])([^"']*)\2/i, (whole, head: string, quote: string, value: string) =>
+      `${head}${quote}${value.replace(/<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>/g, (island, name: string) => (encoded.has(name) ? `<%=${encoded.get(name)}%>` : island))}${quote}`,
+    );
+  });
+}
+
+/**
+ * A tag with each `<%= read %>` island replaced by a numbered token, and the
+ * island bodies in token order. Match the whole island body, then trim spaces
+ * and tabs in a linear pass (a regex with optional blanks on both sides of a
+ * lazy body backtracks polynomially on long runs of tabs).
+ */
+function tokenizeIslands(tag: string): { tokenized: string; slots: string[] } {
+  const slots: string[] = [];
+  const tokenized = tag.replace(/<%=([^%<>'"\\\u0001]*)%>/g, (_m, read: string) => `\u0001${slots.push(trimSpaceTab(read)) - 1}\u0001`);
+  return { tokenized, slots };
+}
+
+/**
  * Creator zc-component divs can name a generated form/report [UNVERIFIED]. Only a literal
  * link name whose params are all applicable display flags is provable; other embeds stay TODOs.
  */
@@ -1095,10 +1171,11 @@ function embeddedComponents(
     if (slots.length && attrKeys.some((key) => key !== 'params' && (attrs.get(key) ?? '').includes('\u0001'))) return null;
     const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupFields(app, kind, name)) : null;
     if (known && !hostile && params) {
-      const keys = params.params.map((item) => item.key);
+      const applied = shownFieldKeys(app, kind, name, params.params);
+      const keys = applied.map((item) => item.key);
       const component: EmbeddedComponent = { kind: kind as 'form' | 'report', name, ...(keys.length ? { params: keys } : {}) };
       components.push(component);
-      const query = params.params.map((item) => `${item.key}=${valueMarker(item.value)}`).join('&');
+      const query = applied.map((item) => `${item.key}=${valueMarker(item.value)}`).join('&');
       const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}${params.hidden.length ? `:hide-${params.hidden.join('-')}` : ''}${query ? `?${query}` : ''}`;
       markers.push(marker.replace(/<%=[^%]*%>/g, ''));
       if (!slots.length) return tag.replace(/>$/, ` data-zml="${marker}">`);
@@ -1123,13 +1200,16 @@ function embeddedComponents(
   const chosen = template.replace(choiceTag, (whole: string, inner: string, body: string, offset: number) => {
     if (inRanges(commented, offset)) return whole;
     const link = choiceLink.exec(inner);
-    if (!link || !ZC_COMPONENT_ELNAME.test(inner) || /<%/.test(inner.replace(link[0], ''))) return whole;
+    if (!link || !ZC_COMPONENT_ELNAME.test(inner)) return whole;
+    // What else the tag carries as islands is read once, as a plain embed reads it: `embed` accepts them in `params` only.
+    const { tokenized, slots } = tokenizeIslands(inner.replace(link[0], '\u0002'));
+    if (tokenized.includes('<%') || tokenized.includes('%>')) return whole;
     const values = literalChoices(template, link[2]);
     if (!values) return whole;
     const before = { components: components.length, markers: markers.length, todos: todos.length };
     const branches = values.map((value) => {
-      const open = `<div${inner.replace(link[0], link[0].replace(/<%=[^%]*%>/, value))}>`;
-      return { value, open: embed(open, []), literal: open };
+      const open = `<div${tokenized.replace('\u0002', link[0].replace(/<%=[^%]*%>/, value))}>`;
+      return { value, open: embed(open, slots), literal: open };
     });
     if (todos.length !== before.todos || branches.some((branch) => branch.open === null || branch.open === branch.literal)) {
       components.length = before.components;
@@ -1147,11 +1227,7 @@ function embeddedComponents(
   const rewritten = chosen.replace(/<div\b(?:<%=?[^%<>]*%>|[^>])*>/gi, (tag, offset: number) => {
     if (inRanges(commentedNow, offset)) return tag;
     if (!tag.includes('<%')) return embed(tag, []) ?? tag;
-    const slots: string[] = [];
-    // Match the whole island body, then trim spaces and tabs in a linear pass
-    // (a regex with optional blanks on both sides of a lazy body backtracks
-    // polynomially on long runs of tabs).
-    const tokenized = tag.replace(/<%=([^%<>'"\\\u0001]*)%>/g, (_m, read: string) => `\u0001${slots.push(trimSpaceTab(read)) - 1}\u0001`);
+    const { tokenized, slots } = tokenizeIslands(tag);
     // What the tokenizer cannot read keeps the old reading of the tag: cut at
     // the first `>`, which may still count as an unparsed component.
     const legacy = () => {
@@ -1463,8 +1539,8 @@ function exprOk(e: Expr): boolean {
  * `openUrl(...)` statements inside an island. A popup-window target naming a
  * form or report becomes a popup mark in the output ({@link settlePopups}
  * decides which ones the snippet popup lifter already carries); any other
- * popup is removed from the script; every other openUrl becomes a rendered
- * link part at its position in the output.
+ * popup, or one of a computed address, becomes a rendered link part like
+ * every other openUrl, so the user opens it with a click.
  */
 function rewriteOpenUrls(src: string): string | null {
   let tokens;
@@ -1503,10 +1579,10 @@ function rewriteOpenUrls(src: string): string | null {
     const stmtEnd =
       tokens[end + 1] && tokens[end + 1].kind === 'punct' && tokens[end + 1].text === ';' ? tokens[end + 1].end : tokens[end].end;
     const target = (args[1] ?? '').replace(/^['"]|['"]$/g, '');
-    if (/popup/i.test(target)) {
-      // A form or report named outright rides the render as a popup mark; whether the page keeps it is settled once the whole script is known.
-      const named = /^(["'])#(Form|Report):([A-Za-z_]\w*)(?:[?&][^"']*)?\1$/i.exec(args[0] ?? '');
-      edits.push({ start: t.start, end: stmtEnd, text: named ? `c2c_out.add({"k":"P","v":"${named[2]!.toLowerCase()}:${named[3]}"});` : '' });
+    // A form or report named outright rides the render as a popup mark; whether the page keeps it is settled once the whole script is known.
+    const named = /popup/i.test(target) ? /^(["'])#(Form|Report):([A-Za-z_]\w*)(?:[?&][^"']*)?\1$/i.exec(args[0] ?? '') : null;
+    if (named) {
+      edits.push({ start: t.start, end: stmtEnd, text: `c2c_out.add({"k":"P","v":"${named[2]!.toLowerCase()}:${named[3]}"});` });
       continue;
     }
     if (!args[0]) return null;
@@ -2259,6 +2335,9 @@ export function appCallPath(rest: string): string[] | null {
   }
 }
 
+/** The call a render makes to `zoho.encryption.urlEncode`, the one `zoho.task` that never leaves the process. */
+const PURE_ZOHO_TASK = /^\s*ctx,\s*\["encryption",\s*"urlEncode"\]/;
+
 /**
  * True when every shim call is read-only and every await is one of those calls.
  * A `thisapp.<fn>()` call is read-only only when `appCall` proves its callee.
@@ -2272,6 +2351,8 @@ export function islandReadOnly(server: string, appCall?: (path: string[]) => boo
       if (!path || !appCall(path)) return false;
       continue;
     }
+    // `zoho.encryption.urlEncode` is a pure local adapter: the runtime answers it without a Zoho call.
+    if (name === 'zoho.task' && PURE_ZOHO_TASK.test(server.slice((match.index ?? 0) + match[0].length))) continue;
     if (!readOnlyShim(name)) return false;
   }
   if (assignsDatastoreRead(server) || mutatesFetchedRead(server)) return false;
@@ -2918,6 +2999,30 @@ const CLIENT_PROJECTION_TODOS: ReadonlySet<string> = new Set(['client-condition-
 export const EXECUTE_FUNCTION_BUTTON = 'ZML ExecuteFunction button';
 
 /**
+ * A record-summary URL a snippet builds in a variable first
+ * (`src = zoho.appuri + "/record-summary/Report/" + record.Lookup.ID;`) and
+ * prints once as an iframe `src`. The variable is written back into the iframe
+ * as the literal URL form, so {@link rewriteRecordSummaryFrames} proves the
+ * same report and row shape it proves for a URL written in place. A variable
+ * used anywhere else stays as written.
+ */
+const SUMMARY_URL_VARIABLE =
+  /(^|[;{}\r\n])[ \t]*([A-Za-z_]\w*)[ \t]*=[ \t]*zoho\.appuri[ \t]*\+[ \t]*"\/?record-summary\/([A-Za-z_]\w*)\/"[ \t]*\+[ \t]*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)[ \t]*;/;
+
+function inlineSummaryUrlVariable(template: string): string {
+  const assign = SUMMARY_URL_VARIABLE.exec(template);
+  if (!assign) return template;
+  const [whole, lead, name, report, idExpr] = assign as unknown as [string, string, string, string, string];
+  const use = new RegExp(`(<iframe\\b[^>]*\\bsrc\\s*=\\s*)(["'])<%=\\s*${name}\\s*%>\\2`, 'i').exec(template);
+  if (!use) return template;
+  // The one assignment and the one printed use are the only places the name appears in code.
+  if ([...islandCode(template).matchAll(new RegExp(`(?<![\\w.])${name}(?!\\w)`, 'g'))].length !== 2) return template;
+  const url = `<%=zoho.appuri%>/record-summary/${report}/<%=${idExpr}%>`;
+  const without = template.slice(0, assign.index) + lead + template.slice(assign.index + whole.length);
+  return without.replace(use[0], `${use[1]}${use[2]}${url}${use[2]}`);
+}
+
+/**
  * Point the one known record-summary iframe shape at the generated route. The
  * URL's row id is still untrusted: the route uses the form's record endpoint,
  * which applies authorizeRead to that exact ROWID before returning fields.
@@ -2937,7 +3042,7 @@ export function rewriteRecordSummaryFrames(template: string, app?: App, source?:
       if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return whole;
     }
     const idExpr = match[2].trim();
-    if (!recordSummaryIdShape(idExpr, form, source ?? template)) return whole;
+    if (!recordSummaryIdShape(idExpr, form, source ?? template, app)) return whole;
     const routed = report ? `#/report/${report.name}/row/<%=${idExpr}%>` : `#/record/${form}/<%=${idExpr}%>`;
     const nextAttrs = attrs.slice(0, src.index) + `src=${src[1]}${routed}${src[1]}` + attrs.slice(src.index + src[0].length);
     const anchorAttrs = nextAttrs.replace(/\bsrc\s*=/i, 'href=');
@@ -3442,7 +3547,7 @@ export function compileHtmlpage(
   });
   const head = splitTemplate(decoded);
   head.template = inlineConstantStyleCalls(head.template, app);
-  head.template = rewriteRecordSummaryFrames(head.template, app, decoded);
+  head.template = rewriteRecordSummaryFrames(inlineSummaryUrlVariable(head.template), app, decoded);
   const fnFiles: HtmlpageFile[] = [];
   head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)), {
     app,
@@ -3483,6 +3588,7 @@ export function compileHtmlpage(
   head.template = embeds.template;
   const includes = embeds.includes;
   if (/component-(?:form|report):|popup-(?:form|report):/i.test(head.template)) return fail('marker collision');
+  head.template = inlineEncodedParamVariables(head.template);
   const embedded = embeddedComponents(head.template, app, ownPageParams);
   head.template = embedded.template;
   const withIncludes = (done: HtmlpageCompiled): HtmlpageCompiled => {
