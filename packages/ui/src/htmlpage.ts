@@ -999,13 +999,17 @@ function componentParams(
     if (!/^[A-Za-z_]\w*$/.test(rawKey) || PARAM_RESERVED.has(key) || /^zc_/i.test(rawKey)) return null;
     const matches = fields.filter((field) => field.toLowerCase() === key);
     const looked = lookups.filter((lookup) => lookup.name.toLowerCase() === key);
+    const slot = SLOT_TOKEN.exec(rawValue);
     // A form prefill of a lookup would have to pick the option whose label is the text, and a label can name several rows.
-    if (looked.length && (kind === 'form' || (!looked[0].path && !looked[0].display))) return null;
+    // The caller's own page input is no such text: Creator hands the URL value to the lookup as it came, a row id, and
+    // the prefill sets the select to the option with that value, so the input passes through unchanged.
+    const idPass = kind === 'form' && looked.length === 1 && slot !== null && /^input\.[A-Za-z_]\w*$/.test((slots[Number(slot[1])] ?? '').trim());
+    if (looked.length && !idPass && (kind === 'form' || (!looked[0].path && !looked[0].display))) return null;
     // A report filter on a key that is no field would show more records than Creator does; a form prefill of one fills nothing.
     if (matches.length + looked.length > 1 || (matches.length + looked.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
     seenKeys.add(key);
-    const outKey = matches[0] ?? looked[0]?.path ?? (looked[0]?.display ? `${looked[0].name}:display` : undefined);
-    if (SLOT_TOKEN.test(rawValue)) {
+    const outKey = matches[0] ?? (idPass ? looked[0].name : looked[0]?.path) ?? (looked[0]?.display ? `${looked[0].name}:display` : undefined);
+    if (slot) {
       const read = readOf(rawValue);
       if (read === null) return null;
       // A key that names no field of the form fills nothing, but its value was checked all the same.
@@ -3729,6 +3733,49 @@ function dropCutOffEndTag(template: string): string {
   return template.slice(0, tag) + template.slice(island);
 }
 
+/** `<%=zoho.appuri%>form-embed/<Form>` and the parameters Creator reads after it, behind `?` or a bare `/`. */
+const FORM_EMBED_SRC = /^<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>form-embed\/([A-Za-z_]\w*)(?:[/?]([\s\S]*))?$/i;
+const FORM_FRAME_ATTRS = new Set(['allowtransparency', 'class', 'frameborder', 'height', 'name', 'scrolling', 'src', 'style', 'width']);
+const FRAME_SIZE = /^\d{1,5}(?:%|px)?$/;
+
+/**
+ * An `<iframe>` of one of this app's forms whose address carries parameters
+ * (`<%=zoho.appuri%>form-embed/<Form>?zc_Header=false&Field=<%=input.p%>`)
+ * draws the form inline, prefilled, the way a `zc-component` embed does. It
+ * becomes that embed, so the one parameter grammar decides everything after:
+ * declared fields only, one bare read or bounded literal per value, a lookup
+ * field never. A frame whose look the embed would change (a visible default
+ * border, scrolling off, an attribute with an island, content in the frame,
+ * a size that is not a plain length) is left as written. The frame's `name`
+ * only targeted a navigation, and a navigation into it is its sender's own
+ * counted `openUrl` target.
+ */
+function rewriteFormEmbedFrames(template: string, app: App): string {
+  if (!/form-embed/i.test(template)) return template;
+  return replaceIframeElements(template, (whole, attrs, inner) => {
+    if (inner.trim() !== '') return whole;
+    const parsed = parseZmlAttributes(attrs);
+    if (!Object.keys(parsed).every((name) => FORM_FRAME_ATTRS.has(name))) return whole;
+    const match = FORM_EMBED_SRC.exec((parsed.src ?? '').trim());
+    if (!match || !app.forms.some((form) => form.name === match[1])) return whole;
+    if (Object.entries(parsed).some(([name, value]) => name !== 'src' && /[<>"'&]/.test(value))) return whole;
+    if (parsed.frameborder !== '0' && !NO_BORDER.test(parsed.style ?? '')) return whole;
+    if (parsed.scrolling !== undefined && parsed.scrolling.toLowerCase() !== 'auto') return whole;
+    const sizes: string[] = [];
+    for (const name of ['width', 'height']) {
+      const value = parsed[name];
+      if (value === undefined) continue;
+      if (!FRAME_SIZE.test(value)) return whole;
+      sizes.push(`${name}:${/^\d+$/.test(value) ? `${value}px` : value}`);
+    }
+    const query = (match[2] ?? '').trim();
+    if (/['"]/.test(query)) return whole;
+    const style = [parsed.style?.trim().replace(/;$/, ''), ...sizes].filter(Boolean).join(';');
+    const kept = [parsed.class === undefined ? '' : ` class="${parsed.class}"`, style ? ` style="${style}"` : ''].join('');
+    return `<div elName='zc-component' formLinkName='${match[1]}'${query ? ` params='${query}'` : ''}${kept}></div>`;
+  });
+}
+
 /**
  * Compile a decoded `htmlpage` template into a generated endpoint plus the
  * sanitized static shell. Returns `{ ok: false }` for anything outside the
@@ -3759,6 +3806,7 @@ export function compileHtmlpage(
     reports: new Set(app.reports.map((r) => r.name)),
   });
   head.template = rewriteEmbedIframes(head.template, app);
+  head.template = rewriteFormEmbedFrames(head.template, app);
   head.template = rewriteIslandBackgrounds(rewriteIslandLabels(head.template));
   head.template = inlineSetupCalls(head.template, app);
   if (hasExecuteFunctionButton(head.template)) {
