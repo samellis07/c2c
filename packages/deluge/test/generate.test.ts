@@ -8629,7 +8629,7 @@ test('a guard-read function whose branch assigns a local then navigates to an ow
   const module = g.files.find((f) => f.path === 'functions/custom/vote-vote.mjs');
   assert.ok(module, 'the guard read still produces a server module');
   assert.match(module!.source, /shim\.datastore\.aggregate/);
-  assert.match(module!.source, /return \{ \["kind"\]: "navigate", \["url"\]: url, \["target"\]: "new" \};/);
+  assert.match(module!.source, /return \{ \["kind"\]: "navigate", \["url"\]: (?:url|\("#Page:Voting_Page\?Idea=" \+ record_id\)), \["target"\]: "new" \};/);
   assert.equal(g.todos.some((t) => t.construct === 'openurl-dropped-with-server-logic'), false);
 });
 

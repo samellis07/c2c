@@ -27,11 +27,14 @@ import { navigableUrl } from './navigable-url.js';
 
 export { navigableUrl };
 
-export interface ActionNavInstruction {
-  kind: 'navigate';
-  url: string;
-  target?: 'same' | 'new';
-}
+export type ActionNavInstruction =
+  | {
+      kind: 'navigate';
+      url: string;
+      target?: 'same' | 'new';
+    }
+  /** Creator's `openUrl("#Script:page.refresh")`: the current page loads again. */
+  | { kind: 'reload' };
 
 export interface OpenUrlInstruction { url: string; window: string }
 export interface OpenUrlEffects {
@@ -79,6 +82,10 @@ export function navOk(url: unknown, allowedHosts: readonly string[]): boolean {
  * never gets a handle back to this page.
  */
 export function performActionNav(nav: ActionNavInstruction | undefined, allowedHosts: readonly string[], view: AppWindow): void {
+  if (nav?.kind === 'reload') {
+    view.location.reload();
+    return;
+  }
   if (!nav || nav.kind !== 'navigate' || !navOk(nav.url, allowedHosts)) return;
   if (nav.target === 'new') {
     view.open(nav.url, '_blank', 'noopener,noreferrer');
