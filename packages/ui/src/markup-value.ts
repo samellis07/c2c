@@ -234,8 +234,29 @@ async function c2cImage(env, value, form, field) {
     const signed = await signDownload(env.files, form, field, value);
     const res = await fetch(signed.url, { redirect: "error", signal: AbortSignal.timeout(10000) });
     if (!res.ok) return refuse("an image could not be read and is not shown");
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length > ${IMAGE_INLINE_MAX} || env.bytes + bytes.length > ${IMAGE_RENDER_MAX}) return refuse("an image is over the size the page inlines and is not shown");
+    const room = Math.min(${IMAGE_INLINE_MAX}, ${IMAGE_RENDER_MAX} - env.bytes);
+    const tooBig = () => refuse("an image is over the size the page inlines and is not shown");
+    if (Number(res.headers.get("content-length")) > room) return tooBig();
+    // Read only as much as fits, so an object far larger than the limit is never held in memory.
+    const reader = res.body.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      total += part.value.length;
+      if (total > room) {
+        await reader.cancel();
+        return tooBig();
+      }
+      chunks.push(part.value);
+    }
+    const bytes = new Uint8Array(total);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.length;
+    }
     const type = c2cImageType(bytes);
     if (!type) return refuse("an image field did not hold a PNG, JPEG, GIF or WebP image and is not shown");
     env.bytes += bytes.length;
