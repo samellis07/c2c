@@ -5444,10 +5444,11 @@ test(
     const hrm = parseProject(join(gallery, 'human-resource-management')).ir;
     const out = collectOutputs(hrm);
     assert.deepEqual(auditApp(hrm, out), []);
-    // Profile_Page, SearchPage, and Buttons each keep a server-side snippet no
-    // safe translation covers; Buttons also drops static <style> rules the
-    // sanitizer strips. Every one stays a counted UI todo, never a silent drop.
-    for (const name of ['Profile_Page.dsp', 'SearchPage.dsp', 'Buttons.dsp', 'Buttons.style']) {
+    // SearchPage keeps a server-side snippet no safe translation covers, and
+    // Buttons drops static <style> rules the sanitizer strips (its read-only
+    // statements in the style body now compile). Each stays a counted UI todo,
+    // never a silent drop.
+    for (const name of ['SearchPage.dsp', 'Buttons.style']) {
       assert.ok(
         out.model.todos.some((t) => t.area === 'zml' && t.name === name),
         `Human Resource Management page ${name} should carry a counted UI todo for its uncovered server snippet`,
