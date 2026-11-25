@@ -5380,15 +5380,8 @@ test(
     const timeTracker = parseProject(join(gallery, 'time-tracker')).ir;
     const out = collectOutputs(timeTracker);
     assert.deepEqual(auditApp(timeTracker, out), []);
-    // Every manual-step page todo this app needs stays a counted UI todo, not
-    // a silent drop: Member_View, DayChart, CalendarPage, Timer, and
-    // Dashboard each keep a server-side snippet no safe translation covers.
-    for (const name of ['Member_View.dsp', 'DayChart.dsp', 'CalendarPage.dsp', 'Timer.dsp', 'Dashboard.dsp']) {
-      assert.ok(
-        out.model.todos.some((t) => t.area === 'zml' && t.name === name),
-        `Time Tracker page ${name} should carry a counted UI todo for its uncovered server snippet`,
-      );
-    }
+    // Every page of this app compiles, so no page keeps a counted UI todo.
+    assert.deepEqual(out.model.todos.filter((t) => t.area === 'zml').map((t) => t.name), []);
   },
 );
 
@@ -5400,29 +5393,18 @@ test(
     const eventManagement = parseProject(join(gallery, 'event-management')).ir;
     const out = collectOutputs(eventManagement);
     assert.deepEqual(auditApp(eventManagement, out), []);
-<<<<<<< HEAD
-    // The four snippets compile; what the sanitizer still drops stays a counted
-    // UI todo, never a silent drop: the remote background images of book_event
-    // and Event_Search_Result, and Admin_Dashboard's Bootstrap script.
-    for (const name of ['book_event.dsp', 'Admin_Dashboard.dsp', 'Event_Search_Result.dsp']) {
-=======
-    // book_event, Event_Search_Result, and Map_View each keep a server-side
-    // snippet no safe translation covers; each stays a counted UI todo, never
-    // a silent drop.
-    for (const name of ['book_event.dsp', 'Event_Search_Result.dsp', 'Map_View.dsp']) {
->>>>>>> e17c7ff4d (Event Management Admin_Dashboard is carried whole once its hook-free Bootstrap script is not counted; the gallery test says so)
+    // book_event and Event_Search_Result keep a remote background image the
+    // sanitizer drops; each stays a counted UI todo, never a silent drop.
+    for (const name of ['book_event.dsp', 'Event_Search_Result.dsp']) {
       assert.ok(
         out.model.todos.some((t) => t.area === 'zml' && t.name === name),
         `Event Management page ${name} should carry a counted UI todo for what the sanitizer drops`,
       );
     }
-<<<<<<< HEAD
     assert.ok(!out.model.todos.some((t) => t.area === 'zml' && t.name === 'Map_View.dsp'), 'Map_View compiles to a map link');
-=======
     // Admin_Dashboard's snippet is carried whole. Its one removed element is the
     // Bootstrap 3 script, and nothing in the app holds a hook it could act on.
     assert.deepEqual(out.model.todos.filter((t) => t.name === 'Admin_Dashboard.dsp'), []);
->>>>>>> e17c7ff4d (Event Management Admin_Dashboard is carried whole once its hook-free Bootstrap script is not counted; the gallery test says so)
   },
 );
 
@@ -5434,16 +5416,9 @@ test(
     const hrm = parseProject(join(gallery, 'human-resource-management')).ir;
     const out = collectOutputs(hrm);
     assert.deepEqual(auditApp(hrm, out), []);
-    // SearchPage keeps a server-side snippet no safe translation covers, and
-    // Buttons drops static <style> rules the sanitizer strips (its read-only
-    // statements in the style body now compile). Each stays a counted UI todo,
-    // never a silent drop.
-    for (const name of ['SearchPage.dsp', 'Buttons.style']) {
-      assert.ok(
-        out.model.todos.some((t) => t.area === 'zml' && t.name === name),
-        `Human Resource Management page ${name} should carry a counted UI todo for its uncovered server snippet`,
-      );
-    }
+    // SearchPage compiles and Buttons' static <style> rules now carry, so no page
+    // of this app keeps a counted UI todo.
+    assert.deepEqual(out.model.todos.filter((t) => t.area === 'zml').map((t) => t.name), []);
   },
 );
 
