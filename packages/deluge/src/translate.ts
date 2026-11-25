@@ -634,7 +634,7 @@ interface Scope {
    * `assigned` is written somewhere in that body, so a binding created before
    * the body (`flow` less than `frame`) is not a single value for a read inside it.
    */
-  loops: { frame: number; assigned: Set<string> }[];
+  loops: { frame: number; assigned: Set<string>; writes?: LoopWrites }[];
   /** The binding object already replayed into the prefetch function per name. */
   emitted: Map<string, Binding>;
   /**
@@ -915,10 +915,95 @@ function clientExpr(
     const mapped = queueRowMap(value, closure.rows, scope);
     if (mapped) return { code: mapped, todo: false, shim: true };
   }
+  if (asCondition && todoConstruct === 'client-condition-uses-server' && elements.size === 0 && (closure.rows.length || blocked || value.reads.some((r) => scope.clientData.has(r)))) {
+    // The event-time server call keeps its place; the slot split only takes
+    // a condition that call refuses.
+    const call = counted();
+    if (!call.todo) return call;
+    const split = invariantServerSplit(value, scope);
+    if (split !== null) return { code: split, todo: false, shim: true };
+  }
   if (closure.rows.length || value.reads.some((r) => scope.clientData.has(r)) || blocked) return counted();
   const slot = slotExpr(value, scope);
   if (slot === null) return counted();
   return { code: slot, todo: false, shim: true };
+}
+
+/**
+ * A condition that mixes client values (an input field, a loop row) with a
+ * server scalar the loop does not change: `t = Form[…].sum(F)` read as
+ * `input.Q + t > row.Quantity`. The prefetch evaluates `t` once into a slot and
+ * the browser test binds the name to it, so the loop row compares against the
+ * same total the server loop would see on every iteration.
+ *
+ * Refused (the counted todo stays) when the value could differ per iteration:
+ * an enclosing loop writes a form the total reads, calls an app function or
+ * URL it cannot tie to a form, or assigns an input field the total reads; or
+ * the total is not a plain scalar the prefetch can replay.
+ */
+function invariantServerSplit(value: Fx, scope: Scope): string | null {
+  if (value.sideEffect || value.appFunction || value.todo || value.unboundReads.length || nonReadReplay(value.code) || unsupportedClientShims(value.code).length) return null;
+  const clientBound = (r: string): boolean =>
+    r === 'input' || r === 'old' || scope.clientData.has(r) || scope.clientDeclared.has(r) || (scope.local.has(r) && !scope.serverOnly.has(r));
+  const names = [...new Set(value.reads)].filter((r) => !clientBound(r));
+  if (!names.length) return null;
+  const formsRead = new Set<string>();
+  let readsInput = false;
+  const gather = (binding: Binding, seen: Set<Binding>): void => {
+    if (seen.has(binding)) return;
+    seen.add(binding);
+    for (const f of formsInCode(binding.code)) formsRead.add(f);
+    if (binding.reads.includes('input') || binding.code.includes('shim.input.')) readsInput = true;
+    if (binding.rowReads?.length) formsRead.add('');
+    for (const key of binding.stateReads ?? []) {
+      if (key.startsWith('input.')) readsInput = true;
+      else formsRead.add('');
+    }
+    for (const dep of binding.deps.values()) if (dep) gather(dep, seen);
+  };
+  for (const name of names) {
+    const binding = scope.bindings.get(name);
+    if (
+      !binding ||
+      !scope.local.has(name) ||
+      !scope.serverOnly.has(name) ||
+      scope.list.has(name) ||
+      scope.map.has(name) ||
+      scope.row.has(name) ||
+      scope.query.has(name) ||
+      scope.date.has(name) ||
+      scope.decimal.has(name)
+    ) {
+      return null;
+    }
+    gather(binding, new Set());
+  }
+  if (formsRead.has('')) return null;
+  for (const loop of scope.loops) {
+    const writes = loop.writes;
+    if (!writes) return null;
+    if (writes.all && formsRead.size) return null;
+    if (readsInput && writes.input) return null;
+    for (const f of formsRead) if (writes.forms.has(f)) return null;
+  }
+  const mark = scope.prefetch.length;
+  const emittedMark = new Map(scope.emitted);
+  const writesMark = new Set(scope.writesEmitted);
+  const slots: string[] = [];
+  for (const name of names) {
+    const slot = slotExpr({ ...value, code: jsIdent(name), reads: [name], unboundReads: [], sideEffect: false, rowReads: [], stateReads: [] }, scope);
+    if (slot === null) {
+      scope.prefetch.length = mark;
+      scope.emitted = emittedMark;
+      scope.writesEmitted = writesMark;
+      return null;
+    }
+    slots.push(slot);
+  }
+  const params = names.map(jsIdent).join(', ');
+  return value.code.includes('await ')
+    ? `(await (async (${params}) => (${value.code}))(${slots.join(', ')}))`
+    : `((${params}) => (${value.code}))(${slots.join(', ')})`;
 }
 
 /**
@@ -2465,13 +2550,125 @@ function collectionIsGetAll(e: Expr): boolean {
 }
 
 /**
+ * What one run of a loop body can change that a read hoisted out of the loop
+ * could see: the forms it writes (`all` when a write or call cannot be tied
+ * to a named form) and whether it assigns an `input` field.
+ */
+interface LoopWrites {
+  all: boolean;
+  forms: Set<string>;
+  input: boolean;
+}
+
+/** The form a fetch or write target names, through criteria, index and member steps. */
+function formRoot(e: Expr, scope: Scope): string | undefined {
+  let cur: Expr = e;
+  for (;;) {
+    switch (cur.kind) {
+      case 'paren':
+        cur = cur.expr;
+        break;
+      case 'criteria':
+      case 'index':
+      case 'member':
+        cur = cur.object;
+        break;
+      case 'call':
+        cur = cur.callee;
+        break;
+      case 'name':
+        return !scope.local.has(cur.name) && scope.formNames.has(cur.name) ? cur.name : undefined;
+      default:
+        return undefined;
+    }
+  }
+}
+
+/** Every form a prefetched query in `code` reads. */
+function formsInCode(code: string): string[] {
+  const forms: string[] = [];
+  for (const m of code.matchAll(/shim\.datastore\.query\(ctx, ("(?:[^"\\]|\\.)*")/g)) {
+    try {
+      forms.push(JSON.parse(m[1]!) as string);
+    } catch {
+      forms.push('');
+    }
+  }
+  return forms;
+}
+
+function rootLocal(e: Expr): string | undefined {
+  let cur: Expr = e;
+  for (;;) {
+    if (cur.kind === 'name') return cur.name;
+    if (cur.kind === 'member' || cur.kind === 'index') cur = cur.object;
+    else if (cur.kind === 'paren') cur = cur.expr;
+    else return undefined;
+  }
+}
+
+function loopWrites(body: Stmt, scope: Scope): LoopWrites {
+  const out: LoopWrites = { all: false, forms: new Set(), input: false };
+  const fetched = new Map<string, string>();
+  walk(body, (n) => {
+    if (n.kind !== 'assign') return;
+    const a = n as unknown as Extract<Stmt, { kind: 'assign' }>;
+    if (a.target.kind !== 'name') return;
+    const form = formRoot(a.value, scope);
+    if (form) fetched.set(a.target.name, form);
+  });
+  const target = (e: Expr): void => {
+    const form = formRoot(e, scope);
+    if (form) out.forms.add(form);
+    else out.all = true;
+  };
+  walk(body, (n) => {
+    switch (n.kind) {
+      case 'insert':
+        target((n as unknown as Extract<Expr, { kind: 'insert' }>).form);
+        break;
+      case 'update':
+      case 'deleteFrom':
+        target((n as unknown as Extract<Stmt, { kind: 'update' }>).target);
+        break;
+      case 'invokeurl':
+        out.all = true;
+        break;
+      case 'call': {
+        const callee = (n as unknown as Extract<Expr, { kind: 'call' }>).callee;
+        // A bare or `thisapp.` call runs an app function that may write any form.
+        const root = rootLocal(callee);
+        if (callee.kind === 'name' || root === 'thisapp' || root === 'standalone') out.all = true;
+        break;
+      }
+      case 'assign': {
+        const a = n as unknown as Extract<Stmt, { kind: 'assign' }>;
+        if (a.target.kind !== 'member' && a.target.kind !== 'index') break;
+        const root = rootLocal(a.target);
+        if (root === 'input' || root === 'old') {
+          out.input = true;
+          break;
+        }
+        const form = root ? (fetched.get(root) ?? formsInCode(scope.bindings.get(root)?.code ?? '')[0]) : undefined;
+        if (form) out.forms.add(form);
+        else out.all = true;
+        break;
+      }
+      default:
+        break;
+    }
+  });
+  return out;
+}
+
+/**
  * Runs `f` as a `for each` or `while` body. `assigned` is every name that
  * body writes, including the loop variable. A binding of one of those names
  * created before this frame does not dominate a slot resolved inside `f`.
  */
-function underLoop<T>(scope: Scope, assigned: Set<string>, f: () => T): T {
+function underLoop<T>(scope: Scope, assigned: Set<string>, f: () => T, body?: Stmt): T {
   const frame = scope.clock.flow;
-  scope.loops.push({ frame, assigned });
+  scope.loops.push({ frame, assigned, ...(body ? { writes: loopWrites(body, scope) } : {}) });
   // A record write in a loop body may run zero or many times — a count the
   // prefetch cannot replay in order, so writes here stay refused.
   scope.replayBarrier++;
@@ -3813,7 +4010,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   scope.listUpdateTemps = updateTemps;
   let body: Out;
   try {
-    body = underLoop(scope, assigned, () => statement(s.body, scope, stats, todos));
+    body = underLoop(scope, assigned, () => statement(s.body, scope, stats, todos), s.body);
   } finally {
     scope.listUpdates = outerUpdates;
     scope.listUpdateTests = outerTests;
@@ -4017,7 +4214,7 @@ function whileStmt(s: Extract<Stmt, { kind: 'while' }>, scope: Scope, stats: Tra
   // The test is read again every iteration, so it is slotted after the body
   // against the live bindings: a name the body assigns does not dominate it.
   // Reads inside the body of those names are refused by `underLoop`.
-  const body = underLoop(scope, assignedNames(s.body), () => statement(s.body, scope, stats, todos));
+  const body = underLoop(scope, assignedNames(s.body), () => statement(s.body, scope, stats, todos), s.body);
   const constructs = [...test.constructs];
   const needsSnapshot = !!(body.client.trim() && test.serverOnly && !test.clientReady);
   const snap = needsSnapshot
