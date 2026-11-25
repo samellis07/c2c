@@ -30,8 +30,8 @@ TODO item per untranslated construct occurrence.
 | apps with no residual todos | 38/67 |
 | apps with no residual todos and no silent drops (deterministic) | 38/67 (56.7%) |
 | silent drops (total) | 0 |
-| residual TODO items | 80 |
-| distinct TODO kinds | 31 |
+| residual TODO items | 79 |
+| distinct TODO kinds | 30 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -51,13 +51,13 @@ TODO item per untranslated construct occurrence.
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
 | `Custom action (app identifier) is not migrated; its button is turned off.` | 1 |
 | `Embedded zc-component form (app identifier) has no generated view` | 1 |
-| `Embedded zc-component report (app identifier) has no generated view` | 1 |
 | `Field (app identifier) sets `annotation = true`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.` | 1 |
 | `Field (app identifier) sets `duration = 150`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Field (app identifier) sets `show onload = true`; the generated image field opens its camera only when the user taps the control, never automatically when the form loads.` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background-image, background, background, background` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background, background, background` | 1 |
+| `Inline style declarations not carried over (unsafe or unsupported CSS): text-align, text-align` | 1 |
 
 ## Top 0 silent-drop kinds
 
@@ -76,6 +76,7 @@ clears the app. The count is apps, not items.
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
+| `The <script> element is removed from this page snippet by the sanitizer` | 1 |
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 | `ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 
@@ -139,10 +140,6 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Embedded zc-component form (app identifier) has no generated view",
-      "count": 1
-    },
-    {
-      "construct": "Embedded zc-component report (app identifier) has no generated view",
       "count": 1
     },
     {
@@ -279,13 +276,6 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "Embedded zc-component report (app identifier) has no generated view",
-        "The <script> element is removed from this page snippet by the sanitizer"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
         "Field (app identifier) sets `annotation = true`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.",
         "Report (app identifier) has a `customlayouts` settings block (template (app identifier)) that Catalyst generates no equivalent for."
       ],
@@ -408,6 +398,12 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
+        "The <script> element is removed from this page snippet by the sanitizer"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
         "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
       ],
       "items": 1
@@ -421,7 +417,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 80,
+  "todoTotal": 79,
   "totalApps": 67
 }
 ```
