@@ -4227,7 +4227,7 @@ test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo
 
   const cloudSources = dsApp(fileField('local_drive, google_docs, zoho_docs'));
   const cloudOut = collectOutputs(cloudSources);
-  assert.equal(rowStatus(cloudSources, cloudOut, 'Attachment.File_Attachment property browse'), 'counted');
+  assert.equal(rowStatus(cloudSources, cloudOut, 'Attachment.File_Attachment property browse'), 'emitted');
   const todo = cloudOut.model.todos.find((t) => t.name === 'Attachment.File_Attachment property browse');
   assert.equal(todo, undefined, 'remote browse limitation is represented in generated field output');
   const generatedField = cloudOut.model.forms[0]!.fields.find((field) => field.name === 'File_Attachment')!;
