@@ -111,7 +111,7 @@ test('a hardcoded host written ahead of the appuri island never survives into th
   const out = compile('https://other.example.com<%=zoho.appuri%>#Page:Inner?date=1');
   assert.equal(out.ok, true, out.reason ?? 'compile failed');
   assert.match(out.html ?? '', /href="#\/page\/Inner\?date=1"/);
-  assert.doesNotMatch(out.html ?? '', /other\.example\.com/);
+  assert.equal((out.html ?? '').split('other.example.com').length, 1, 'the written host text is never carried');
 });
 
 test('a page linking to itself with a different parameter value is a generated link too', () => {
