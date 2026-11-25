@@ -4629,13 +4629,26 @@ test('a statement island inside a style body that writes or redirects stays a co
   for (const body of [
     '<style><% insert into Orders [ Status : "open" ]; %></style><p>x</p>',
     '<style><% update Orders[Status == "open"] [ Status : "closed" ]; %></style><p>x</p>',
-    '<style><% openUrl("#Form:Orders", "same window"); %></style><p>x</p>',
-    '<style><% if (input.v == "x") { openUrl("#Form:Orders", "same window"); } %></style><p>x</p>',
+    '<style><% openUrl(input.v, "same window"); %></style><p>x</p>',
+    '<style><% if (input.v == "x") { openUrl("#Form:Orders" + input.v, "same window"); } %></style><p>x</p>',
+    '<style><% openUrl("https://x.test/", "same window"); %></style><p>x</p>',
+    '<style><% openUrl("#Form:Orders", "same window"); openUrl(input.v, "same window"); %></style><p>x</p>',
     '<style><% sendmail [ from : zoho.adminuserid to : input.v subject : "s" message : "m" ]; %></style><p>x</p>',
     '<style><% r = invokeUrl [ url : "https://x.test" type : GET ]; %></style><p>x</p>',
   ]) {
     const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
     assert.equal(compiled.ok, false, body);
+  }
+});
+
+test('a style-body statement island that only opens this app\'s own form or report, written out, compiles and prints the link', () => {
+  for (const body of [
+    '<style><% openUrl("#Form:Orders", "same window"); %></style><p>x</p>',
+    '<style><% if (input.v == "x") { openUrl("#Form:Orders", "same window"); } %></style><p>x</p>',
+  ]) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
+    assert.equal(compiled.ok, true, compiled.reason ?? body);
+    assert.match(compiled.file?.source ?? '', /\["k"\]: "L", \["v"\]: "#Form:Orders"/);
   }
 });
 
