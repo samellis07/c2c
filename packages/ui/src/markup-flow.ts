@@ -61,7 +61,7 @@ function calls(node: unknown, out: Extract<Expr, { kind: 'call' }>[] = []): Extr
   }
   const rec = node as Record<string, unknown>;
   if (rec.kind === 'call') out.push(rec as Extract<Expr, { kind: 'call' }>);
-  for (const key of Object.keys(rec)) if (key !== 'span') calls(rec[key], out);
+  for (const key of Object.keys(rec).sort()) if (key !== 'span') calls(rec[key], out);
   return out;
 }
 
@@ -133,7 +133,7 @@ export function markupFlow(
     const key = path.join('.').toLowerCase();
     (direct.has(call) ? used : stray).add(key);
   }
-  const functions = new Set([...used].filter((key) => !stray.has(key)));
+  const functions = new Set([...used].sort().filter((key) => !stray.has(key)));
   const prints: Span[] = [];
   for (const s of stmts) {
     if (s.kind !== 'expr' || s.expr.kind !== 'call') continue;
