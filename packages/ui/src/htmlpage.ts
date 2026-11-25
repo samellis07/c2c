@@ -2361,13 +2361,39 @@ function removesLiteralFromText(server: string, open: number): boolean {
 /** A date or datetime shim call anywhere in an expression: a string shim wrapped around a date's text is still a date's text. */
 const DATE_SHIM = /\bshim\.date\w*\./i;
 
-/** A whole `shim.string.*(...)` call, or a name declared once as `var name = shim.string.*(...);` and assigned nowhere else. */
-function isStringShimText(source: string, expr: string): boolean {
+/** The text of the first argument of the call whose `(` is at `open`, up to its top-level comma or `)`. */
+function firstArgument(expr: string, open: number): string {
+  let depth = 0;
+  let quote = '';
+  for (let i = open + 1; i < expr.length; i++) {
+    const ch = expr[i] ?? '';
+    if (quote) {
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = '';
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      if (depth === 0) return expr.slice(open + 1, i).trim();
+      depth--;
+    } else if (ch === ',' && depth === 0) return expr.slice(open + 1, i).trim();
+  }
+  return '';
+}
+
+/**
+ * A whole `shim.string.*(...)` call, or a name declared once as `var name = shim.string.*(...);` and assigned nowhere
+ * else, whose text starts from the page input, a written literal or another such string shim. A name that holds a date's
+ * text (or any other value) breaks the chain, so a string shim around it is no proof of a plain text.
+ */
+function isStringShimText(source: string, expr: string, depth = 0): boolean {
+  if (depth > 8) return false;
   // The `// Deluge:` comment above each statement quotes the source and is no assignment.
   const server = source.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
   if (expr.startsWith('shim.string.')) {
     const paren = expr.indexOf('(');
-    return paren > 0 && matchingParen(expr, paren) === expr.length - 1 && !DATE_SHIM.test(expr);
+    if (paren < 0 || matchingParen(expr, paren) !== expr.length - 1 || DATE_SHIM.test(expr)) return false;
+    const first = firstArgument(expr, paren);
+    return first === 'input' || /^input\.\w+$/.test(first) || /^shim\.input\.get\(ctx, "\w+"\)$/.test(first) || /^"(?:[^"\\]|\\.)*"$/.test(first) || isStringShimText(source, first, depth + 1);
   }
   if (!/^[A-Za-z_]\w*$/.test(expr)) return false;
   const declaration = `var ${expr} = `;
@@ -2377,8 +2403,8 @@ function isStringShimText(source: string, expr: string): boolean {
   if (!initializer.startsWith('shim.string.')) return false;
   const close = matchingParen(initializer, initializer.indexOf('('));
   if (close < 0 || initializer[close + 1] !== ';') return false;
-  if (DATE_SHIM.test(initializer.slice(0, close + 1))) return false;
-  return (server.match(new RegExp(`(?<![\\w.$])${expr}\\s*[-+*/%]?=(?!=)`, 'g')) ?? []).length === 1;
+  if ((server.match(new RegExp(`(?<![\\w.$])${expr}\\s*[-+*/%]?=(?!=)`, 'g')) ?? []).length !== 1) return false;
+  return isStringShimText(source, initializer.slice(0, close + 1), depth + 1);
 }
 
 /** The call a render makes to `zoho.encryption.urlEncode`, the one `zoho.task` that never leaves the process. */
