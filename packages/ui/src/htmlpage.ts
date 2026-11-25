@@ -28,7 +28,7 @@ import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
-import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, STYLE_VALUE_VAR_PREFIX, styleBranchId, styleBranchMarkers, styleValues, styleValueUnit } from './pages.js';
+import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, inlineConstantStyleCalls, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, STYLE_VALUE_VAR_PREFIX, styleBranchId, styleBranchMarkers, styleValues, styleValueUnit } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
@@ -3400,6 +3400,7 @@ export function compileHtmlpage(
     manualReasons: serverSnippetGuidance(decoded, reason, elementName, app).reasons,
   });
   const head = splitTemplate(decoded);
+  head.template = inlineConstantStyleCalls(head.template, app);
   head.template = rewriteRecordSummaryFrames(head.template, app, decoded);
   const fnFiles: HtmlpageFile[] = [];
   head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)), {

@@ -9,6 +9,7 @@
 
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { parse as parseDeluge } from '../../deluge/src/parser.js';
 import type { App, Form } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
@@ -1446,13 +1447,57 @@ function constantStyleFunction(app: App | undefined, name: string): string | und
 }
 
 /**
+ * The `<style>` element an app function returns, when it takes no arguments,
+ * is declared to return a string, and its body is straight-line: one name
+ * set to a literal, grown by `name = name + "literal";` and returned. The text
+ * must be one whole `<style>` element holding CSS with no tag, entity or
+ * backslash, so what the page prints is exactly that stylesheet. Anything else
+ * (parameters, logic, other values, markup beside the element) yields undefined.
+ */
+function constantStyleElement(app: App | undefined, name: string): string | undefined {
+  const fn = app?.functions?.find((f) => f.kind === 'deluge' && f.name === name);
+  if (!fn || fn.deluge.length !== 1) return undefined;
+  if ((fn.signature ?? '').replace(/\s+/g, ' ').trim() !== `string ${name}()`) return undefined;
+  let body;
+  try {
+    body = parseDeluge(fn.deluge[0]!.text ?? '').body;
+  } catch {
+    return undefined;
+  }
+  const last = body[body.length - 1];
+  if (body.length < 2 || last?.kind !== 'return' || last.value?.kind !== 'name') return undefined;
+  const variable = last.value.name;
+  let text = '';
+  for (let index = 0; index < body.length - 1; index++) {
+    const stmt = body[index]!;
+    if (stmt.kind !== 'assign' || stmt.op !== '=' || stmt.target.kind !== 'name' || stmt.target.name !== variable) return undefined;
+    const value = stmt.value;
+    if (value.kind === 'string' && index === 0) text = value.value;
+    else if (index > 0 && value.kind === 'binary' && value.op === '+' && value.left.kind === 'name' && value.left.name === variable && value.right.kind === 'string') text += value.right.value;
+    else return undefined;
+  }
+  const element = /^<style>([^<&\\]*)<\/style>$/i.exec(text.trim());
+  return element ? text.trim() : undefined;
+}
+
+/**
  * Replace each `<%=thisapp.fn()%>` island (raw or XML-escaped) whose function returns constant CSS
  * (see constantStyleFunction) with that CSS, so the page's stylesheet carries
  * it through the same sanitizer as the CSS written inline. Other islands stay.
+ * An island outside any `<style>` element whose function returns a whole
+ * constant `<style>` element (see constantStyleElement), alone or first in a
+ * `+` chain, is replaced by that element the same way; what follows the `+`
+ * stays an island.
  */
 export function inlineConstantStyleCalls(raw: string, app: App | undefined): string {
   if (!app || !/<%|&lt;%/.test(raw)) return raw;
-  return raw.replace(/(?:<|&lt;)%=\s*thisapp\.([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)\s*\(\s*\)\s*;?\s*%(?:>|&gt;)/g, (island, name: string) => constantStyleFunction(app, name) ?? island);
+  const bare = raw.replace(/(?:<|&lt;)%=\s*thisapp\.([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)\s*\(\s*\)\s*;?\s*%(?:>|&gt;)/g, (island, name: string) => constantStyleFunction(app, name) ?? island);
+  const outside = (at: number) => (bare.slice(0, at).match(/<\s*style\b/gi)?.length ?? 0) === (bare.slice(0, at).match(/<\s*\/\s*style\b/gi)?.length ?? 0);
+  return bare.replace(/(?:<|&lt;)%=\s*thisapp\.([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)\s*\(\s*\)\s*(?:\+\s*((?:(?!%(?:>|&gt;))[\s\S])+?)\s*)?;?\s*%(?:>|&gt;)/g, (island, name: string, rest: string | undefined, at: number) => {
+    const element = outside(at) ? constantStyleElement(app, name) : undefined;
+    if (!element) return island;
+    return rest ? `${element}<%=${rest}%>` : element;
+  });
 }
 
 /** Mask `<% … %>` template islands in one pass; an unclosed `<%` stays. */
