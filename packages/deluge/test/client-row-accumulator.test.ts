@@ -146,7 +146,7 @@ test('a local summed inside a loop the client cannot iterate is not assigned on 
     'for each rec in Orders[Status == thisapp.pick()] {',
     '  total = total + rec.Qty;',
     '}',
-    'if (total > 3) { alert "over"; }',
+    'if (total > 3) { reload; }',
   ].join('\n'));
   assert.ok(out.todos.includes('client-condition-uses-server'));
   const code = stripComments(out.client);

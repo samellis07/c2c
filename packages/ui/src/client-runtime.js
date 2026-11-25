@@ -6515,15 +6515,19 @@ function withStubFallback(target) {
 const UI_EFFECT_METHODS = new Set(['add', 'append', 'clear', 'select', 'deselect', 'selectAll', 'deselectAll']);
 
 /**
- * A server effect is a field `:ui` task, an `openUrl`, a field `setValue` or a
- * subform `insert` of the rows it was handed, and nothing else. An
+ * A server effect is a field `:ui` task, an `openUrl`, a field `setValue`, a
+ * subform `insert` of the rows it was handed, an `alert` message or a field
+ * `show`/`hide`/`enable`/`disable`, and nothing else. An
  * `openUrl` is still applied by applyActions, so it meets the same address
  * policy as one the browser queued itself.
  */
 function isServerEffect(effect) {
-  if (!effect || !Array.isArray(effect.args)) return false;
-  if (effect.op === 'openUrl') return effect.args.length >= 1 && effect.args.length <= 2 && effect.args.every((arg) => typeof arg === 'string');
+  if (!effect) return false;
   const names = (list) => Array.isArray(list) && list.length > 0 && list.every((part) => typeof part === 'string');
+  if (effect.op === 'alert') return typeof effect.message === 'string';
+  if (effect.op === 'show' || effect.op === 'hide' || effect.op === 'enable' || effect.op === 'disable') return names(effect.targets);
+  if (!Array.isArray(effect.args)) return false;
+  if (effect.op === 'openUrl') return effect.args.length >= 1 && effect.args.length <= 2 && effect.args.every((arg) => typeof arg === 'string');
   if (effect.op === 'setValue') return effect.args.length === 1 && names(effect.targets) && effect.targets.length === 1;
   if (effect.op === 'subform') return effect.method === 'insert' && effect.args.length === 1 && names(effect.target);
   return (
