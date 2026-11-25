@@ -1461,7 +1461,7 @@ export function renderReport(report) {
   const filterSelect = filters ? `<select data-filter aria-label="Filter"><option value=""></option>${filters}</select>` : '';
   // Record affordances are a trailing column — Creator's per-row Edit/Delete.
   const opsHead = (report.rowActions && (report.rowActions.edit || report.rowActions.delete)) || recordNavActions(report).length ? '<th scope="col" data-row-ops></th>' : '';
-  const bulkHead = report.rowActions && report.rowActions.edit ? '<th scope="col">Select</th>' : '';
+  const bulkHead = report.rowActions && report.rowActions.edit ? '<th scope="col" data-bulk-select-cell>Select</th>' : '';
   // Kanban, calendar and timeline fill grouped lanes; a map plots pins; every other view is a table.
   const rowsHtml = BOARD_VIEWS.has(report.view)
     ? '<div data-board></div>'
@@ -1965,9 +1965,9 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
   const call = (viewRef && viewRef.fetch) || globalThis.fetch;
   for (const slot of root.querySelectorAll('[data-zml^="component-"]')) {
     if (slot.getAttribute('data-component-done') === 'true') continue;
-    const match = /^component-(form|report):([A-Za-z_]\w*)(:untitled)?(?:\?([^]*))?$/.exec(slot.getAttribute('data-zml') || '');
+    const match = /^component-(form|report):([A-Za-z_]\w*)(:untitled)?(?::hide-([a-z-]+))?(?:\?([^]*))?$/.exec(slot.getAttribute('data-zml') || '');
     if (!match) continue;
-    const [, kind, name, untitled, query] = match;
+    const [, kind, name, untitled, hide, query] = match;
     const host = slot.closest('[data-page-components]');
     const declared = host ? (host.getAttribute('data-page-components') || '').split(' ') : [];
     // The marker's parameter keys must be exactly the ones the compiled snippet
@@ -1989,6 +1989,9 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
       slot.innerHTML = renderRoute(appModel, { name: kind, id: name }, slot.ownerDocument);
       // The embed's zc_Header=false hides the view title, nothing else.
       if (untitled) for (const title of slot.querySelectorAll(':scope > section > h1:first-child')) title.remove();
+      // A report embed's hidden controls (`zc_AddRec=false`...): only the names the stylesheet knows.
+      const hidden = kind === 'report' && hide ? hide.split('-').filter((token) => EMBED_HIDE.has(token)) : [];
+      if (hidden.length) slot.setAttribute('data-embed-hide', hidden.join(' '));
       const mount = componentMounts.get(appModel);
       if (kind === 'report' && params.keys.length) embedFilters.set(slot, reportRouteFilters(params.query));
       if (mount) mount(slot, kind, target, viewRef, kind === 'form' && params.keys.length ? params.values : undefined);
@@ -2051,6 +2054,9 @@ function componentQuery(text) {
   }
   return { keys, values, query: pairs.join('&') };
 }
+
+/** Report controls an embed's display flags may hide; `styles.ts` hides each under `[data-embed-hide]`. */
+const EMBED_HIDE = new Set(['add', 'bulk', 'delete', 'edit', 'filter', 'pages', 'search', 'select']);
 
 /** Filters a parameterised report embed applies to its own rows, per embed element. */
 const embedFilters = new WeakMap();

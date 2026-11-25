@@ -723,7 +723,7 @@ export const COMPONENT_UNTITLED = ':untitled';
  * value, field criteria or Deluge island is not applied, so the embed stays a
  * counted TODO.
  */
-const COMPONENT_FLAGS: Record<string, { kinds: readonly string[]; values: readonly string[] }> = {
+const COMPONENT_FLAGS: Record<string, { kinds: readonly string[]; values: readonly string[]; hide?: string }> = {
   zc_header: { kinds: ['form', 'report'], values: ['true', 'false'] },
   // Creator's secondary header toggle has no separate Catalyst rendering;
   // accepting it preserves an otherwise renderable generated embed.
@@ -732,6 +732,23 @@ const COMPONENT_FLAGS: Record<string, { kinds: readonly string[]; values: readon
   zc_succmsg: { kinds: ['form'], values: ['data added successfully!'] },
   zc_submitval: { kinds: ['form'], values: ['submit'] },
   zc_resetval: { kinds: ['form'], values: ['reset'] },
+  // A report's controls. `false` hides the control the generated report draws
+  // (the marker carries the name, the page hides it); `true` is the default.
+  // A flag whose control the generated report never draws needs nothing.
+  zc_footer: { kinds: ['report'], values: ['true', 'false'], hide: 'pages' },
+  zc_paging: { kinds: ['report'], values: ['true', 'false'], hide: 'pages' },
+  zc_addrec: { kinds: ['report'], values: ['true', 'false'], hide: 'add' },
+  zc_editrec: { kinds: ['report'], values: ['true', 'false'], hide: 'edit' },
+  zc_delrec: { kinds: ['report'], values: ['true', 'false'], hide: 'delete' },
+  zc_editbulkrec: { kinds: ['report'], values: ['true', 'false'], hide: 'bulk' },
+  zc_recselect: { kinds: ['report'], values: ['true', 'false'], hide: 'select' },
+  zc_filter: { kinds: ['report'], values: ['true', 'false'], hide: 'filter' },
+  zc_search: { kinds: ['report'], values: ['true', 'false'], hide: 'search' },
+  zc_duplrec: { kinds: ['report'], values: ['true', 'false'] },
+  zc_sumrow: { kinds: ['report'], values: ['true', 'false'] },
+  zc_colmenu: { kinds: ['report'], values: ['true', 'false'] },
+  zc_summary: { kinds: ['report'], values: ['true', 'false'] },
+  zc_saverec: { kinds: ['report'], values: ['true', 'false'] },
 };
 
 /** An island of an embed tag, held as a token until its tag attributes are parsed. */
@@ -771,10 +788,12 @@ function componentParams(
   fields: readonly string[] = [],
   slots: readonly string[] = [],
   own: ReadonlySet<string> = new Set(),
-): { untitled: boolean; params: ComponentParam[] } | null {
+): { untitled: boolean; hidden: string[]; params: ComponentParam[] } | null {
   const text = raw.replace(/&amp;/gi, '&').trim();
-  if (!text) return { untitled: false, params: [] };
+  if (!text) return { untitled: false, hidden: [], params: [] };
   let untitled = false;
+  const hidden = new Set<string>();
+  const seenFlags = new Set<string>();
   const params: ComponentParam[] = [];
   for (const part of text.split('&')) {
     if (!part) continue;
@@ -789,8 +808,10 @@ function componentParams(
     if (ZC_LINK.test(key) && value === name.toLowerCase()) continue;
     const flag = Object.prototype.hasOwnProperty.call(COMPONENT_FLAGS, key) ? COMPONENT_FLAGS[key] : undefined;
     if (flag) {
-      if (!flag.kinds.includes(kind) || !flag.values.includes(value)) return null;
+      if (!flag.kinds.includes(kind) || !flag.values.includes(value) || seenFlags.has(key)) return null;
+      seenFlags.add(key);
       if (key === 'zc_header') untitled = value === 'false';
+      if (flag.hide && value === 'false') hidden.add(flag.hide);
       continue;
     }
     if (!/^[A-Za-z_]\w*$/.test(rawKey) || PARAM_RESERVED.has(key) || /^zc_/i.test(rawKey)) return null;
@@ -811,7 +832,7 @@ function componentParams(
       return null;
     }
   }
-  return { untitled, params };
+  return { untitled, hidden: [...hidden].sort(), params };
 }
 
 /**
@@ -866,13 +887,13 @@ function embeddedComponents(
     const rawParams = attrs.get('params');
     // A token outside `params` is an island in another attribute: not an embed.
     if (slots.length && [...attrs.entries()].some(([key, value]) => key !== 'params' && value.includes('\u0001'))) return null;
-    const params = rawParams === undefined ? { untitled: false, params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own) : null;
+    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own) : null;
     if (known && !hostile && params) {
       const keys = params.params.map((item) => item.key);
       const component: EmbeddedComponent = { kind: kind as 'form' | 'report', name, ...(keys.length ? { params: keys } : {}) };
       components.push(component);
       const query = params.params.map((item) => ('literal' in item.value ? `${item.key}=${item.value.literal}` : `${item.key}=<%=encodeUrl(${item.value.read})%>`)).join('&');
-      const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}${query ? `?${query}` : ''}`;
+      const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}${params.hidden.length ? `:hide-${params.hidden.join('-')}` : ''}${query ? `?${query}` : ''}`;
       markers.push(marker.replace(/<%=[^%]*%>/g, ''));
       if (!slots.length) return tag.replace(/>$/, ` data-zml="${marker}">`);
       // The tag is rebuilt from its parsed attributes: the island-carrying

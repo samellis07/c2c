@@ -257,3 +257,40 @@ test('an iframe whose src follows a quoted attribute without a space is read lik
   assert.deepEqual(snippetTodos(model), []);
   assert.deepEqual(snippetOf(model)?.includes, ['Inner?who=@who']);
 });
+
+const REPORT_FLAGS = 'zc_Header=false&amp;zc_Footer=false&amp;zc_SecHeader=false&amp;zc_AddRec=false&amp;zc_EditRec=false&amp;zc_DelRec=true&amp;zc_DuplRec=false&amp;zc_EditBulkRec=false&amp;zc_Filter=false&amp;zc_Search=false&amp;zc_SumRow=false&amp;zc_ColMenu=false&amp;zc_Summary=false&amp;zc_RecSelect=false&amp;zc_SaveRec=false';
+
+test('report display flags that hide controls ride on the marker, beside a filter', () => {
+  const { model } = buildUi(appWith(embed(REPORT_TAG(`Name=<%=row.Name%>&amp;${REPORT_FLAGS}`))));
+  assert.deepEqual(snippetTodos(model), []);
+  const el = snippetOf(model);
+  assert.deepEqual(el?.components, [{ kind: 'report', name: 'All_Rows', params: ['Name'] }]);
+  assert.match(el?.html ?? '', /data-zml="component-report:All_Rows:untitled:hide-add-bulk-edit-filter-pages-search-select\?Name="/);
+});
+
+test('display flags the generated view cannot honor stay counted', () => {
+  const cases = [
+    REPORT_TAG('zc_AddRec=maybe'),
+    REPORT_TAG('zc_AddRec'),
+    REPORT_TAG('zc_Unknown=false'),
+    REPORT_TAG('zc_AddRec=false&amp;zc_AddRec=true'),
+    FORM_TAG('zc_AddRec=false'),
+    FORM_TAG('zc_Search=false'),
+  ];
+  for (const tag of cases) {
+    const { model } = buildUi(appWith(embed(tag)));
+    assert.equal(snippetOf(model)?.components, undefined, tag);
+  }
+});
+
+test('a marker hides only the controls it names, and an unknown name hides nothing', async () => {
+  const snippet = embed(REPORT_TAG(`Name=<%=row.Name%>&amp;zc_AddRec=false&amp;zc_Search=false`));
+  const { main } = await painted(snippet, `<div data-zml="component-report:All_Rows:hide-add-search?Name=Ann"></div>`);
+  const slot = main.querySelector('[data-zml^="component-report:"]') as unknown as { getAttribute(name: string): string | null } | null;
+  assert.equal(slot?.getAttribute('data-embed-hide'), 'add search');
+  const odd = await painted(snippet, `<div data-zml="component-report:All_Rows:hide-add-script?Name=Ann"></div>`);
+  const slot2 = odd.main.querySelector('[data-zml^="component-report:"]') as unknown as { getAttribute(name: string): string | null } | null;
+  assert.equal(slot2?.getAttribute('data-embed-hide'), 'add');
+  const proto = await painted(snippet, `<div data-zml="component-report:All_Rows:hide-__proto__?Name=Ann"></div>`);
+  assert.equal(proto.main.querySelector('section[data-report]'), null, 'a marker that does not parse is not drawn');
+});
