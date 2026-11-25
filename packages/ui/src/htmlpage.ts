@@ -468,7 +468,7 @@ export const PAGE_INCLUDE_PREFIX = 'page-include:';
 // whitespace, so an unquoted value still cannot glue straight into the next
 // attribute name.
 const IFRAME_ATTR = `(?:[${TAG_WS}]+|(?<=["']))[A-Za-z_:][\\w:.-]*(?:[${TAG_WS}]*=[${TAG_WS}]*(?:"[^"<]*"|'[^'<]*'|[^${TAG_WS}"'=<>\`%]+))?`;
-const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?[${TAG_WS}]+src[${TAG_WS}]*=[${TAG_WS}]*(["'])$`, 'i');
+const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?(?:[${TAG_WS}]+|(?<=["']))src[${TAG_WS}]*=[${TAG_WS}]*(["'])$`, 'i');
 const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
 
 /** A forwarded page parameter: exactly one `<%=input.<name>%>` island. */
@@ -2864,11 +2864,11 @@ export function compileHtmlpage(
   // job. Only an appuri-prefixed `#Page:` target the rewrite could not
   // resolve is refused here.
   if (/<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>#Page:/i.test(head.template)) return fail('marker collision');
-  const embeds = inlinePageEmbeds(head.template, app, page, new Set(head.params));
+  const embeds = inlinePageEmbeds(head.template, app, page, ownPageParams);
   head.template = embeds.template;
   const includes = embeds.includes;
   if (head.template.toLowerCase().includes('component-form:') || head.template.toLowerCase().includes('component-report:')) return fail('marker collision');
-  const embedded = embeddedComponents(head.template, app, new Set(head.params));
+  const embedded = embeddedComponents(head.template, app, ownPageParams);
   head.template = embedded.template;
   const withIncludes = (done: HtmlpageCompiled): HtmlpageCompiled => {
     // Every include must survive sanitization where it stood; a marker the

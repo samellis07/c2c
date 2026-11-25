@@ -47,7 +47,7 @@ const REPORT = `report All_Rows
   )
 }`;
 
-function appWith(snippet: string): App {
+function appWith(snippet: string, pageHead = 'page Outer'): App {
   const zml = `<zml><layout><row><column width='100%'><dsp id='Outer1'><![CDATA[${snippet}]]></dsp></column></row></layout></zml>`;
   return deriveIr(parse(`application "Demo"
 {
@@ -55,7 +55,7 @@ function appWith(snippet: string): App {
 	{
 ${FORM}
 ${REPORT}
-		page Outer
+		${pageHead}
 		{
 			Content=${JSON.stringify(zml)}
 		}
@@ -224,4 +224,36 @@ test('a hostile value stays one literal filter value', async () => {
   const { bodies } = await painted(snippet, `<div data-zml="component-report:All_Rows?Name=${value}"></div>`);
   const query = bodies.find((body) => body.op === 'query');
   assert.deepEqual(query?.filters, [{ field: 'Name', op: '==', value: 'x&Status=closed&Name_op=1#' }]);
+});
+
+test('a page parameter of the embedding page may fill an embed field', () => {
+  const tag = FORM_TAG('Name=<%=input.searchKey%>');
+  const body = `htmlpage Outer1()\ncontent\n<%{ %>${tag}<% }%>`;
+  const { model } = buildUi(appWith(body, 'page Outer(searchKey)'));
+  assert.deepEqual(snippetTodos(model), []);
+  assert.deepEqual(snippetOf(model)?.components, [{ kind: 'form', name: 'Intake', params: ['Name'] }]);
+  // The same read of a name no declaration holds stays counted.
+  const other = buildUi(appWith(`htmlpage Outer1()\ncontent\n<%{ %>${FORM_TAG('Name=<%=input.missing%>')}<% }%>`, 'page Outer(searchKey)'));
+  assert.equal(snippetOf(other.model)?.components, undefined);
+});
+
+test('an iframe whose src follows a quoted attribute without a space is read like the browser reads it', () => {
+  const app = (src: string) => deriveIr(parse(`application "Demo"
+{
+	section Front
+	{
+		page Inner(who)
+		{
+			Content=${JSON.stringify("<zml><layout><panel><text value='x'/></panel></layout></zml>")}
+		}
+		page Outer(who)
+		{
+			Content=${JSON.stringify(`<zml><layout><row><column width='100%'><dsp id='Outer1'><![CDATA[htmlpage Outer1()\ncontent\n<%{ %><iframe name='f' style="border:none;"src='<%=zoho.appuri%>view-embed/Inner?who=<%=input.who%>' ></iframe><% }%>${src}]]></dsp></column></row></layout></zml>`)}
+		}
+	}
+}
+`));
+  const { model } = buildUi(app(''));
+  assert.deepEqual(snippetTodos(model), []);
+  assert.deepEqual(snippetOf(model)?.includes, ['Inner?who=@who']);
 });
