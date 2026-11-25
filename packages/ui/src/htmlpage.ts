@@ -1224,7 +1224,13 @@ function insideLoop(code: string, offset: number): boolean {
       else if (ch === quote) quote = '';
       continue;
     }
-    if (ch === '"' || ch === "'") quote = ch;
+    if (ch === '/' && code[i + 1] === '/') {
+      const end = code.indexOf('\n', i);
+      i = end < 0 ? offset : end;
+    } else if (ch === '/' && code[i + 1] === '*') {
+      const end = code.indexOf('*/', i + 2);
+      i = end < 0 ? offset : end + 1;
+    } else if (ch === '"' || ch === "'") quote = ch;
     else if (ch === '{') {
       open.push(/(?:^|[^\w.$])(?:while|for)(?![\w$])/.test(head));
       head = '';

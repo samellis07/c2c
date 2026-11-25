@@ -93,6 +93,13 @@ test('a name set once to the page input inside a guarding if still carries; insi
   assert.deepEqual(refused(buildUi(appWith(page(guarded, ''))).model), []);
 });
 
+test('a loop keyword inside a comment is no loop, one in real code still is', () => {
+  const commented = (line: string) => `\t${line}\n\tif (input.pid != null)\n\t{\n\t\tprojID = input.pid.toLong();\n\t\tproject = Projects[ID == projID];\n\t\t%>\n${ACTIONS('Project=<%=projID%>')}\n<%\n\t}`;
+  for (const line of ['// while (false) {', '/* for each r in Projects { */']) {
+    assert.deepEqual(refused(buildUi(appWith(page(commented(line), ''))).model), [], line);
+  }
+});
+
 test('an elName with no link and a stray quote embeds nothing and no longer counts, one that names a link still counts', () => {
   assert.deepEqual(refused(buildUi(appWith(page(TO_LONG, `<div class="box" elName='zc-component' '>x</div>`))).model), []);
   assert.ok(refused(buildUi(appWith(page(TO_LONG, `<div class="box" elName='zc-component' formLinkName='Actions' '>x</div>`))).model).length > 0);
