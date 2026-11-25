@@ -570,6 +570,8 @@ export function replaceStyleCalls(text: string, decide: (name: string, args: str
  * either: there is nothing to carry and nothing lost.
  */
 const IGNORED_ASSIGNMENT = /^-?[a-z][-a-z]*\s*=\s*[-\w.%#\s]*$/i;
+/** `text-align:"center"`: no browser takes a quoted word for text-align, so it styled nothing in Creator either. */
+const IGNORED_QUOTED_ALIGN = /^(["'])[-a-z]+\1$/i;
 
 /**
  * Split an inline style into the declarations kept and the ones refused.
@@ -597,6 +599,7 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
     const prop = flatCss(text.slice(0, colon));
     const body = text.slice(colon + 1).replace(/!\s*important\s*$/i, '');
     const flat = flatCss(body);
+    if (prop === 'text-align' && IGNORED_QUOTED_ALIGN.test(body.trim())) continue;
     const safe =
       /^-?[-a-z]+$/.test(prop) &&
       prop !== 'behavior' &&
@@ -1286,13 +1289,18 @@ function safeStyleValue(raw: string, prop?: string): boolean {
   if (/['"]/.test(text)) return false;
   const flat = flatCss(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
-  const rest = replaceStyleCalls(text, (name: string, args: string) => {
-    const fn = name.toLowerCase();
-    if (STYLE_FUNCTIONS.has(fn) && (STYLE_ARGS.test(args) || (STYLE_PAINT_FUNCTIONS.has(fn) && STYLE_PAINT_ARGS.test(args)))) return ' ';
-    if (fn === 'calc' && calcArgsSafe(args)) return ' ';
-    return '(';
-  });
-  return !/[()]/.test(rest);
+  // Nested calls (a colour inside a gradient) resolve innermost first, one level per pass.
+  for (let pass = 0; pass < 4 && /[()]/.test(text); pass++) {
+    const next = replaceStyleCalls(text, (name: string, args: string) => {
+      const fn = name.toLowerCase();
+      if (STYLE_FUNCTIONS.has(fn) && (STYLE_ARGS.test(args) || (STYLE_PAINT_FUNCTIONS.has(fn) && STYLE_PAINT_ARGS.test(args)))) return ' ';
+      if (fn === 'calc' && calcArgsSafe(args)) return ' ';
+      return '(';
+    });
+    if (next === text) return false;
+    text = next;
+  }
+  return !/[()]/.test(text);
 }
 
 export function allowedAttr(tag: string, name: string): boolean {

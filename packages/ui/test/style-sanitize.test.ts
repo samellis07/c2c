@@ -213,6 +213,42 @@ test('a name=value pair styles nothing in a browser, so it is not a lost declara
   assert.doesNotMatch(html[0]?.html ?? '', /width=3/);
 });
 
+test('a gradient around colour calls is carried, and any nested call that is not a colour or number stays refused', () => {
+  const kept = [
+    'background:radial-gradient(rgb(120,120,120) ,\trgb(80,80,80))',
+    'background-image: linear-gradient(to right, rgba(0, 0, 0, .5), #fff)',
+    'background: linear-gradient(rgb(1,2,3),rgb(4,5,6))',
+  ];
+  for (const value of kept) assert.deepEqual(cleanStyle(value), { style: value, dropped: [] }, value);
+  const refused = [
+    'background:linear-gradient(url(x),red)',
+    'background:linear-gradient(rgb(1,2,3),foo(1))',
+    'background:linear-gradient(rgb(1,2,3),expression(1))',
+    'background:rotate(rgb(1,2,3))',
+    'background:calc(calc(1px + 2px))',
+    'background:rgb(rgb(1,2,3))',
+    'background:linear-gradient(rgb(1,2,3),rgb(4,5,6)',
+    'width:calc(rgb(1,2,3))',
+  ];
+  for (const value of refused) assert.deepEqual(cleanStyle(value), { style: '', dropped: [value.slice(0, value.indexOf(':'))] }, value);
+  const { model, html } = pageModel(['<div style="background:radial-gradient(rgb(120,120,120) , rgb(80,80,80))">x</div>']);
+  assert.deepEqual(model.todos.filter((item) => /Inline style/.test(item.reason)), []);
+  assert.match(html[0]?.html ?? '', /radial-gradient\(rgb\(120,120,120\) , rgb\(80,80,80\)\)/);
+});
+
+test('a quoted word for text-align styles nothing in a browser, so the build sanitizer skips it unreported', () => {
+  assert.deepEqual(cleanStyle('text-align:"center"; color: red'), { style: 'color: red', dropped: [] });
+  assert.deepEqual(cleanStyle("text-align:'center'"), { style: '', dropped: [] });
+  assert.deepEqual(cleanStyle('width:"10px"; color: red'), { style: 'color: red', dropped: ['width'] });
+  assert.deepEqual(cleanStyle('text-align:"a b"; color: red'), { style: 'color: red', dropped: ['text-align'] });
+});
+
+test('a quoted text-align the browser never applied is not a lost declaration', () => {
+  const { model, html } = pageModel(['<table><tr><td valign="top" style=text-align:"center"> </td><td style="color: red">x</td></tr></table>']);
+  assert.deepEqual(model.todos.filter((item) => /Inline style/.test(item.reason)), []);
+  assert.doesNotMatch(html[0]?.html ?? '', /data-style-dropped|text-align/);
+});
+
 test('a malformed inline declaration is named by its source text in the TODO, not as ?', () => {
   const { model, html } = pageModel([
     '<table><tr><td style = "@import x">1</td><td style="color: red">x</td></tr></table>',
