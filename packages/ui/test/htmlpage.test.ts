@@ -4774,7 +4774,7 @@ test('attack: a link in a markup value keeps only an own-app route, a web addres
   ];
   for (const [href, want] of kept) {
     const { html } = await renderPage(app, snippet, { q: `<a href="${href}">x</a>` });
-    assert.match(html, new RegExp(`<a href="${want.replace(/[.?]/g, '\\$&')}">x</a>`), href);
+    assert.match(html, new RegExp(`<a href="${want.replace(/[\\.?]/g, '\\$&')}">x</a>`), href);
   }
   for (const href of [
     'javascript:alert(1)',

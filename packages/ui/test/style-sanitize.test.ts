@@ -1631,5 +1631,5 @@ test('a page snippet with a YouTube player frame carries it and counts no remove
   const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`));
   const model = buildModel(app);
   assert.deepEqual(model.todos.filter((todo) => todo.area === 'zml'), []);
-  assert.match(JSON.stringify(model.pages[0]), /youtube-nocookie\.com\/embed\/CPjUpwUpOK8/);
+  assert.ok(JSON.stringify(model.pages[0]).includes('youtube-nocookie.com/embed/CPjUpwUpOK8'));
 });
