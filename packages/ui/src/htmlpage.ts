@@ -1625,6 +1625,8 @@ ${opts.hasWrites ? '      adminUserId: principal.userId || "",\n' : ''}${opts.ap
  * receiver is a datastore read is refused below.
  */
 const READ_ONLY_SHIM = new Set([
+  // A typed empty list (`List:Int()`) is a local value; it reads and writes nothing.
+  'list',
   'get',
   'set',
   'datastore.query',
