@@ -1207,9 +1207,34 @@ function pageInputIdNames(template: string, own: ReadonlySet<string>): Set<strin
     if (!own.has(param)) continue;
     const writes = [...code.matchAll(new RegExp(`(?<![\\w.])${name}[ \\t]*(?:=(?!=)|[-+*/]=|\\+\\+|--)`, 'g'))].length;
     const looped = new RegExp(`\\bfor[ \\t\\r\\n]+each[ \\t\\r\\n]+${name}(?![\\w])`, 'i').test(code);
-    if (writes === 1 && !looped) names.add(name);
+    if (writes === 1 && !looped && !insideLoop(code, match.index ?? 0)) names.add(name);
   }
   return names;
+}
+
+/** True when a `while`, `for` or `for each` block encloses the offset in island code; written strings are skipped. */
+function insideLoop(code: string, offset: number): boolean {
+  const open: boolean[] = [];
+  let head = '';
+  let quote = '';
+  for (let i = 0; i < offset; i++) {
+    const ch = code[i] ?? '';
+    if (quote) {
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '{') {
+      open.push(/(?:^|[^\w.$])(?:while|for)(?![\w$])/.test(head));
+      head = '';
+    } else if (ch === '}') {
+      open.pop();
+      head = '';
+    } else if (ch === ';') head = '';
+    else head += ch;
+  }
+  return open.includes(true);
 }
 
 /**
