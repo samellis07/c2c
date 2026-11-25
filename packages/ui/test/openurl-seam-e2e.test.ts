@@ -27,7 +27,7 @@ async function runtime() {
   return (await import(`data:text/javascript;base64,${Buffer.from(clientRuntimeSource()).toString('base64')}`)) as Record<string, unknown>;
 }
 
-test('generated report action applies ordered server nav, pseudo routes and URL policy', { todo: 'server lane c2c-kpi-openurl-fn-capture' }, async () => {
+test('generated report action applies ordered server nav, pseudo routes and URL policy', async () => {
   const built = buildUi(deriveIr(parse(source)));
   assert.ok(built.files.some((file) => file.path.includes('open')));
   const client = await runtime();
@@ -36,12 +36,16 @@ test('generated report action applies ordered server nav, pseudo routes and URL 
   assert.equal(typeof apply, 'function', 'client runtime must expose the openUrl seam');
   const dom = new JSDOM('<!doctype html><body><div data-banner></div></body>', { url: 'https://app.example/' });
   const effects: unknown[] = [];
+  (dom as any).window.open = (url: string) => {
+    effects.push(['new', url]);
+    return null;
+  };
   (apply as (root: unknown, nav: unknown, effects?: unknown) => void)((dom as any).window.document.body, NAV, { refresh: () => effects.push(['reload']), closeDialog: () => effects.push(['dialog']), refreshParent: () => effects.push(['parent']) });
   assert.deepEqual(effects, [['reload'], ['dialog'], ['parent'], ['new', 'https://allowed.example/arrival']]);
   void dom;
 });
 
-test('generated action refuses hostile returned URLs and preserves order', { todo: 'server lane c2c-kpi-openurl-fn-capture' }, async () => {
+test('generated action refuses hostile returned URLs and preserves order', async () => {
   const client = await runtime();
   const apply = client.applyOpenUrlNav;
   assert.equal(typeof apply, 'function', 'client runtime must expose the openUrl seam');

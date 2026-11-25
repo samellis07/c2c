@@ -22,7 +22,7 @@ async function loadNavigation(t: { after(fn: () => void): void }) {
   return import(pathToFileURL(join(out, 'lib/c2c-ui/runtime/navigation.js')).href) as Promise<{ applyOpenUrlNav: (...args: any[]) => void }>;
 }
 
-test('React generated action applies ordered nav response', { skip: SKIP, todo: 'server lane c2c-kpi-openurl-fn-capture' }, async (t) => {
+test('React generated action applies ordered nav response', { skip: SKIP }, async (t) => {
   const navigation = await loadNavigation(t);
   assert.equal(typeof navigation.applyOpenUrlNav, 'function');
   const effects: string[] = [];
@@ -37,7 +37,7 @@ test('React generated action applies ordered nav response', { skip: SKIP, todo: 
   assert.deepEqual(opened, [['https://allowed.example/arrival', '_blank', 'noopener,noreferrer']]);
 });
 
-test('React generated action refuses hostile returned URLs', { skip: SKIP, todo: 'server lane c2c-kpi-openurl-fn-capture' }, async (t) => {
+test('React generated action refuses hostile returned URLs', { skip: SKIP }, async (t) => {
   const navigation = await loadNavigation(t);
   const opened: unknown[] = [];
   const view = { location: { hash: '', href: 'https://app.example/' }, open: (...args: unknown[]) => opened.push(args) } as any;
