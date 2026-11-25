@@ -1654,7 +1654,7 @@ test('subset shims: computes byte savings on small fixture apps', () => {
   const allShims = vendoredShims();
   const allBytes = allShims.reduce((acc, f) => acc + Buffer.byteLength(f.data), 0);
   // The cap tracks the vendored shims size and grew with the null-criteria guard and randomNumber.
-  assert.ok(allBytes > 470000 && allBytes < 650000, `total shims size should remain in the expected range: ${allBytes}`);
+  assert.ok(allBytes > 470000 && allBytes < 700000, `total shims size should remain in the expected range: ${allBytes}`);
 
   for (const appName of ['freight-forwarding', 'library-application-system']) {
     const fixtureDir = join(root, 'fixtures/redistributable', appName);

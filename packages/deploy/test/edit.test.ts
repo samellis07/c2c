@@ -38,7 +38,10 @@ function sha(data: string | Buffer): string {
  * marker so a writeRules-only change compares equal.
  */
 function withoutWriteRules(text: string): string {
-  let out = text;
+  // The navigation resolver embeds the whole app's field map (it drops a link
+  // parameter that names a field the target lacks), so a column change
+  // rewrites it in every handler that carries navigation, like the writeRules.
+  let out = text.replace(/(nav\.resolve\(navigation, )\{.*\}(\);)/g, '$1{NAV_SCHEMA}$2');
   for (;;) {
     const at = out.indexOf('writeRules: {');
     if (at < 0) return out;
