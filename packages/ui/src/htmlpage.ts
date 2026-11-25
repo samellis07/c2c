@@ -2358,13 +2358,16 @@ function removesLiteralFromText(server: string, open: number): boolean {
   return isStringShimText(server, server.slice(open + 1, comma).trim());
 }
 
+/** A date or datetime shim call anywhere in an expression: a string shim wrapped around a date's text is still a date's text. */
+const DATE_SHIM = /\bshim\.date\w*\./i;
+
 /** A whole `shim.string.*(...)` call, or a name declared once as `var name = shim.string.*(...);` and assigned nowhere else. */
 function isStringShimText(source: string, expr: string): boolean {
   // The `// Deluge:` comment above each statement quotes the source and is no assignment.
   const server = source.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
   if (expr.startsWith('shim.string.')) {
     const paren = expr.indexOf('(');
-    return paren > 0 && matchingParen(expr, paren) === expr.length - 1;
+    return paren > 0 && matchingParen(expr, paren) === expr.length - 1 && !DATE_SHIM.test(expr);
   }
   if (!/^[A-Za-z_]\w*$/.test(expr)) return false;
   const declaration = `var ${expr} = `;
@@ -2374,6 +2377,7 @@ function isStringShimText(source: string, expr: string): boolean {
   if (!initializer.startsWith('shim.string.')) return false;
   const close = matchingParen(initializer, initializer.indexOf('('));
   if (close < 0 || initializer[close + 1] !== ';') return false;
+  if (DATE_SHIM.test(initializer.slice(0, close + 1))) return false;
   return (server.match(new RegExp(`(?<![\\w.$])${expr}\\s*[-+*/%]?=(?!=)`, 'g')) ?? []).length === 1;
 }
 

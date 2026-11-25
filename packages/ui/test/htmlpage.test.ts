@@ -5564,5 +5564,7 @@ test('a text remove of a written literal over a string shim text is a read-only 
   assert.equal(islandReadOnly(`${declared}p = shim.date.text(d);\nvar q = shim.list.removeText(p, "x");`), false, 'a name assigned again');
   assert.equal(islandReadOnly(`var p = shim.date.text(d);\nvar q = shim.list.removeText(p, "x");`), false, 'a date text');
   assert.equal(islandReadOnly('var q = shim.list.removeText(p, "x");'), false, 'a name nothing declares');
+  assert.equal(islandReadOnly('var q = shim.list.removeText(shim.string.trim(shim.date.text(d)), "x");'), false, 'a date text wrapped in a string shim');
+  assert.equal(islandReadOnly('var p = shim.string.toUpperCase(shim.date.text(d));\nvar q = shim.list.removeText(p, "x");'), false, 'a named date text wrapped in a string shim');
   assert.equal(islandReadOnly('var q = shim.list.removeText("a-b", "-");'), false, 'a written text');
 });
