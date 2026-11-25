@@ -68,7 +68,9 @@ const VECTORS: Array<[string, string, string | null, string[]]> = [
   ['trailing non-declaration identifier ignored', 'font-size:15px;text', 'font-size:15px', []],
   ['trailing brace stripped', 'width:1px;}', 'width:1px', []],
   // One bad declaration no longer takes the safe ones with it.
-  ['malformed declaration beside a valid one', 'margin=10px; color: red', 'color: red', ['?']],
+  ['name=value pair beside a valid one is skipped like a browser skips it', 'margin=10px; color: red', 'color: red', []],
+  ['pair with a call is still refused', 'margin=expression(1); color: red', 'color: red', ['?']],
+  ['pair with a quote is still refused', 'margin="1px"; color: red', 'color: red', ['?']],
   ['url() beside a width', 'width: 80%; background: url(//example.test/x)', 'width: 80%', ['background']],
   ['quoted semicolon', 'content:"a;b";color:red', 'color:red', ['content', '?']],
   ['escape in a second declaration', 'background:red;content:attr(data-x);background:u\\72 l(//example.test/?)', 'background:red', ['content', 'background']],
@@ -203,20 +205,28 @@ test('a page snippet that loses a style declaration is listed as a TODO', () => 
   assert.match(snippet?.html ?? '', /style="border: 1px solid rgb\(1, 2, 3\)"/);
 });
 
+test('a name=value pair styles nothing in a browser, so it is not a lost declaration', () => {
+  const { model, html } = pageModel(['<table><tr><td style = "width=3%">1</td><td style="color: red">x</td></tr></table>']);
+  assert.deepEqual(model.todos.filter((item) => /Inline style/.test(item.reason)), []);
+  assert.doesNotMatch(html[0]?.html ?? '', /data-style-dropped/);
+  assert.match(html[0]?.html ?? '', /style="color: red"/);
+  assert.doesNotMatch(html[0]?.html ?? '', /width=3/);
+});
+
 test('a malformed inline declaration is named by its source text in the TODO, not as ?', () => {
   const { model, html } = pageModel([
-    '<table><tr><td style = "width=3%">1</td><td style="color: red">x</td></tr></table>',
-    '<p style="margin=4px; color: blue">a</p><% if (true) { %><b>b</b><% } %>',
+    '<table><tr><td style = "@import x">1</td><td style="color: red">x</td></tr></table>',
+    '<p style="margin=expression(1); color: blue">a</p><% if (true) { %><b>b</b><% } %>',
   ]);
   const todos = model.todos.filter((item) => /Inline style/.test(item.reason));
   assert.deepEqual(
     todos.map((item) => item.reason),
     [
-      'Inline style declarations not carried over (unsafe or unsupported CSS): "width=3%"',
-      'Inline style declarations not carried over (unsafe or unsupported CSS): "margin=4px"',
+      'Inline style declarations not carried over (unsafe or unsupported CSS): "@import x"',
+      'Inline style declarations not carried over (unsafe or unsupported CSS): "margin=expression(1)"',
     ],
   );
-  assert.match(todos[0]?.manualStep ?? '', /lost the inline style declarations "width=3%" to the sanitizer/);
+  assert.match(todos[0]?.manualStep ?? '', /lost the inline style declarations "@import x" to the sanitizer/);
   assert.ok(todos.every((item) => !/declarations \?|: \?$/.test(`${item.reason} ${item.manualStep}`)), JSON.stringify(todos));
   // The source text only feeds the manual step; the generated element does not carry it.
   assert.ok(html.every((el) => el.refusedStyles === undefined));
@@ -224,11 +234,7 @@ test('a malformed inline declaration is named by its source text in the TODO, no
 });
 
 test('malformed inline declarations are listed in document order and a refused named property is not one', () => {
-  assert.deepEqual(malformedStyleDeclarations(`<a style="width=3%; color: red">x</a><b style='behavior: url(x)'>y</b><i style="@import x;  a  =  b ">z</i>`), [
-    'width=3%',
-    '@import x',
-    'a = b',
-  ]);
+  assert.deepEqual(malformedStyleDeclarations(`<a style="width=3%; color: red">x</a><b style='behavior: url(x)'>y</b><i style="@import x;  a  =  b ">z</i>`), ['@import x']);
   assert.deepEqual(malformedStyleDeclarations('<p style="color: red; margin: 0">ok</p><p>nostyle</p>'), []);
   assert.deepEqual(malformedStyleDeclarations(`<p style="x=${'1'.repeat(9000)}">big</p>`).map((text) => text.length), [80]);
 });
@@ -1678,6 +1684,37 @@ test('a page snippet with a YouTube player frame carries it and counts no remove
   assert.ok(JSON.stringify(model.pages[0]).includes('youtube-nocookie.com/embed/CPjUpwUpOK8'));
 });
 
+const BOOTSTRAP_JS = 'https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js';
+
+function scriptTodos(markup: string): string[] {
+  const { model } = pageModel([markup]);
+  return model.todos.filter((todo) => /<script> element/.test(todo.reason)).map((todo) => todo.reason);
+}
+
+test('the Bootstrap 3 script beside no data hook starts nothing, so removing it is not a loss', () => {
+  assert.deepEqual(scriptTodos(`<p>Hi</p><script src="${BOOTSTRAP_JS}" integrity="sha384-x" crossorigin="anonymous"></script>`), []);
+  const { html } = pageModel([`<p>Hi</p><script src="${BOOTSTRAP_JS}"></script>`]);
+  assert.doesNotMatch(html[0]?.html ?? '', /script|bootstrap/i);
+});
+
+test('a library script that could act stays a counted removed script', () => {
+  const hostile = [
+    `<button data-toggle="modal" data-target="#m">Open</button><script src="${BOOTSTRAP_JS}"></script>`,
+    `<script src="${BOOTSTRAP_JS}"></script><a data-dismiss="alert">x</a>`,
+    `<script src="${BOOTSTRAP_JS}">$('#m').modal('show')</script>`,
+    `<script src="${BOOTSTRAP_JS}"></script><script>$('#m').modal('show')</script>`,
+    '<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script>',
+    '<script src="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>',
+    '<script src="https://maxcdn.bootstrapcdn.com.evil.test/bootstrap/3.3.7/js/bootstrap.min.js"></script>',
+    '<script src="https://evil.test/https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>',
+    `<script src="${BOOTSTRAP_JS}?x=1"></script>`,
+    `<script src=" ${BOOTSTRAP_JS}"></script>`,
+    '<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>',
+    '<script>alert(1)</script>',
+  ];
+  for (const markup of hostile) assert.equal(scriptTodos(markup).length, 1, markup);
+});
+
 test('a number a Deluge tag computes inside a declaration value is carried as a custom property the render sets', () => {
   const raw = '<style>\n.pie { background: #bbe491; -webkit-transform: rotate(<%=a%>deg); transform: rotate(<%=a%>deg); }\n.bar { width: <%=w%>px; height: <%=h + 1%>%; margin: 0 <%=gap%>em; color: rgb(<%=r%>, 0, 0); }\n</style>';
   const carried = carriedStyleRules(raw, scope);
@@ -1714,4 +1751,42 @@ test('a Deluge tag that is not one whole number in a declaration value stays cou
     assert.ok(carried.dropped.length > 0 || /--cssvalue-a: 1px/.test(css) || css.includes('if (x)'), css);
     assert.deepEqual(styleValues(`<style>${css}</style>`), [], css);
   }
+});
+
+test('a font face keeps what a Creator browser loaded: spaced same-origin names and local(), not the blocked http: font', () => {
+  const { styleTodos, scopedCss } = pageModel([
+    [
+      '<style>',
+      "@font-face { font-family: 'ProximaNova Light'; src: url('fonts/ProximaNova Light.otf') format('opentype'); }",
+      "@font-face { font-family: 'Tangerine'; font-weight: 400; src: local('Tangerine'), url('http://fonts.gstatic.com/s/tangerine/v7/a.woff2') format('woff2'); }",
+      '</style><p>x</p>',
+    ].join('\n'),
+  ]);
+  assert.deepEqual(styleTodos, []);
+  assert.match(scopedCss, /@font-face\{font-family: 'ProximaNova Light';src: url\('fonts\/ProximaNova%20Light\.otf'\) format\('opentype'\)\}/);
+  assert.match(scopedCss, /src: local\('Tangerine'\)\}/);
+  assert.doesNotMatch(scopedCss, /gstatic|http:/);
+});
+
+test('a font face source that is hostile or loaded nothing the generated app may fetch stays counted', () => {
+  const hostile = [
+    "url('http://fonts.gstatic.com/s/a.woff2') format('woff2')",
+    "url('https://fonts.gstatic.com/s/a.woff2')",
+    "url('//evil.test/a b.otf')",
+    "url('java script:a.otf')",
+    "url('a b:c.otf')",
+    "url(' fonts/a.otf')",
+    "url('fonts/a\tb.otf')",
+    "url('fonts/a b.otf'",
+  ];
+  for (const src of hostile) {
+    const { styleTodos, scopedCss } = pageModel([`<style>@font-face { font-family: 'X'; src: ${src}; }</style><p>x</p>`]);
+    assert.doesNotMatch(scopedCss, /@font-face/, src);
+    assert.equal(styleTodos.length, 1, src);
+  }
+});
+
+test('a font face source with a stray parenthesis is invalid CSS and carries no source at all', () => {
+  const { scopedCss } = pageModel(["<style>@font-face { font-family: 'X'; src: url('fonts/a b.otf') ) , url('http://evil.test/x'); }</style><p>x</p>"]);
+  assert.doesNotMatch(scopedCss, /src|evil|url/);
 });
