@@ -18,7 +18,7 @@ targets. The gap between the two numbers is the apps held back only by silent dr
 A residual TODO item is an untranslated Deluge hole or one generated UI stub
 (a field, report, page, or ZML item). Each UI stub is included in the residual,
 so an app with a stub is not deterministic.
-0 of the 40 deterministic apps still have UI TODO stubs (0 in total).
+0 of the 39 deterministic apps still have UI TODO stubs (0 in total).
 
 The builtin catalogue lists 20 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
@@ -27,10 +27,10 @@ TODO item per untranslated construct occurrence.
 | | |
 |---|---:|
 | corpus apps | 67 |
-| apps with no residual todos | 40/67 |
-| apps with no residual todos and no silent drops (deterministic) | 40/67 (59.7%) |
+| apps with no residual todos | 39/67 |
+| apps with no residual todos and no silent drops (deterministic) | 39/67 (58.2%) |
 | silent drops (total) | 0 |
-| residual TODO items | 71 |
+| residual TODO items | 72 |
 | distinct TODO kinds | 29 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
@@ -47,6 +47,7 @@ TODO item per untranslated construct occurrence.
 | `openurl-dropped-with-server-logic` | 2 |
 | `The <iframe> element is removed from this page snippet by the sanitizer` | 2 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 2 |
+| `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
 | `Custom action (app identifier) is not migrated; its button is turned off.` | 1 |
 | `Embedded zc-component form (app identifier) has no generated view` | 1 |
 | `Field (app identifier) sets `annotation = true`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.` | 1 |
@@ -57,7 +58,6 @@ TODO item per untranslated construct occurrence.
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background, background, background, background, background` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): text-align, text-align` | 1 |
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
-| `Map report Today_Inspection_Map is shown as a list because Add_New_Inspection has no address field to plot.` | 1 |
 
 ## Top 0 silent-drop kinds
 
@@ -76,13 +76,14 @@ clears the app. The count is apps, not items.
 | `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 1 |
+| `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 | `ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 1 |
 
 ## Machine-readable
 
 ```json
 {
-  "deterministicApps": 40,
+  "deterministicApps": 39,
   "deterministicWithUiTodos": {
     "apps": 0,
     "uiTodos": 0
@@ -122,6 +123,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "The <script> element is removed from this page snippet by the sanitizer",
+      "count": 2
+    },
+    {
+      "construct": "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
       "count": 2
     },
     {
@@ -197,15 +202,11 @@ clears the app. The count is apps, not items.
       "count": 1
     },
     {
-      "construct": "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
-      "count": 1
-    },
-    {
       "construct": "ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand",
       "count": 1
     }
   ],
-  "noTodoApps": 40,
+  "noTodoApps": 39,
   "perAppConstructSets": [
     {
       "constructs": [
@@ -387,6 +388,12 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
+        "ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
         "ZML <text> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand"
       ],
       "items": 1
@@ -394,7 +401,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 71,
+  "todoTotal": 72,
   "totalApps": 67
 }
 ```
