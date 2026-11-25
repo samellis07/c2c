@@ -45,3 +45,10 @@ test('a function that trims a fetched record collection keeps the counted todo',
   const g = build('room_map = thisapp.Rooms.alias(input.Kind);\ninput.Room:ui.add(room_map.get("Rooms"));', [ALIAS]);
   assert.equal(todos(g).length, 1);
 });
+
+const AVAIL = fn('Rooms.hasKind', 'bool Rooms.hasKind(string kind)', 'rows = Rooms[Kind == kind];\nfor each r in rows.Name\n{\n\tif(r.Name == "Main")\n\t{\n\t\treturn true;\n\t}\n}\nreturn false;');
+
+test('a function that reads a field of a fetched row is read-only for a client condition', () => {
+  const g = build('if(thisapp.Rooms.hasKind(input.Kind))\n{\n\tinput.Room:ui.add({"A"});\n}', [AVAIL]);
+  assert.equal(todos(g).length, 0);
+});

@@ -2536,7 +2536,7 @@ const ELEMENT_SHIM_ALLOW: ReadonlyMap<string, ReadonlySet<string> | true> = new 
   ['subform', new Set(['currentRow'])],
   ['zoho', new Set(['adminUser', 'adminUserId', 'appName', 'appUri', 'currentDate', 'currentTime', 'ipAddress', 'loginUser', 'loginUserId'])],
 ]);
-const ELEMENT_SHIM_ALLOW_SINGLE = new Set(['each', 'ifnull', 'isBlank', 'isEmpty', 'isFile', 'isNull', 'isNumber', 'isText', 'list', 'map', 'startsWith']);
+const ELEMENT_SHIM_ALLOW_SINGLE = new Set(['each', 'get', 'ifnull', 'isBlank', 'isEmpty', 'isFile', 'isNull', 'isNumber', 'isText', 'list', 'map', 'startsWith']);
 const SHIM_CALL = /\bshim\.([A-Za-z]+)(?:\.([A-Za-z]+))?\s*\(/g;
 
 /** Every `shim.*(` call site in emitted code is an allowlisted read or pure helper. */
