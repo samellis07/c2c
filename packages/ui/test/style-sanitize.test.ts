@@ -18,6 +18,7 @@ import {
   replaceStyleCalls,
   sanitizeSnippet as buildSanitize,
   stripStyleComments,
+  styleBranchMarkers,
 } from '../src/pages.js';
 import {
   calcArgsSafe as printCalcArgsSafe,
@@ -1516,4 +1517,47 @@ test('a carried class rule matches the element the sanitized snippet keeps', asy
     assert.ok(page.querySelector('[data-page="Home"] .card'), html);
     assert.ok(page.querySelector('[data-page="Home"] .btn-primary.active'), html);
   }
+});
+
+// A `<style>` body whose Deluge tags are all statements choosing between
+// whole rule groups (`<% if (...) { %> .a { } <% } %>`): each group carries
+// under the marker the rendered snippet emits where that group's text would
+// have printed, so the rules apply exactly when the server took that branch.
+const BRANCHED = '<style>\n.base { color: red; }\n<%\nif (input.nav == "prev")\n{\n%>\n.row { animation: 1s fade; }\n<%\n}\nelse if (input.nav == "next")\n{\n%>\n.row { top: -80px; }\n<%\n}\n%>\n@keyframes fade { 0% { left: 0; } 100% { left: 5px; } }\n</style>';
+
+test('a rule group chosen by statement tags carries under its branch marker and is not counted', () => {
+  const carried = carriedStyleRules(BRANCHED, scope);
+  assert.deepEqual(carried.dropped, []);
+  assert.match(carried.css, /\[data-page="Home"\] \.base\{color: red\}/);
+  const [prev, next] = styleBranchMarkers(BRANCHED);
+  assert.equal(prev!.length, 12);
+  assert.notEqual(prev, next);
+  assert.match(carried.css, new RegExp(`\\[data-page="Home"\\]:where\\(:has\\(\\[title="c2c-css-${prev}"\\]\\)\\) \\.row\\{animation: 1s c2c-data-page-Home-fade\\}`));
+  assert.match(carried.css, new RegExp(`:has\\(\\[title="c2c-css-${next}"\\]\\)\\) \\.row\\{top: -80px\\}`));
+});
+
+test('a branch group keeps counting what the sanitizer drops inside it', () => {
+  const raw = '<style><% if (input.a == "x") { %>.hero { background: url(https://x.example/a.png); color: red; }<% } %></style>';
+  const carried = carriedStyleRules(raw, scope);
+  assert.deepEqual(carried.dropped, ['background declaration']);
+  assert.match(carried.css, /\.hero\{color: red\}/);
+  assert.doesNotMatch(carried.css, /url\(/);
+});
+
+test('a tag that builds part of a rule keeps the whole style body on the old counted path', () => {
+  for (const raw of [
+    '<style>.a { <% if (input.x == "1") { %> color: red; <% } %> }</style>',
+    '<style>@media (max-width: 600px) { <% if (input.x == "1") { %> .a { color: red; } <% } %> }</style>',
+    '<style><% if (input.x == "1") { %> .a { color: <%= input.c %>; } <% } %></style>',
+  ]) {
+    const carried = carriedStyleRules(raw, scope);
+    assert.ok(carried.dropped.includes('CSS built by a Deluge tag'), raw);
+    assert.doesNotMatch(carried.css, /:has\(/, raw);
+  }
+});
+
+test('a branch group needs the statement-only body: the marker id comes from the group text alone', () => {
+  assert.deepEqual(styleBranchMarkers('<style>.a{}<% if (x) { %>.b{color:red}<% } %></style>'), styleBranchMarkers('<style>.z{}<% if (y) { %>\n .b{color:red}\n<% } %></style>'));
+  assert.deepEqual(styleBranchMarkers('<style><%=x%>.b{color:red}</style>'), []);
+  assert.deepEqual(styleBranchMarkers('<style>.a { <% if (x) { %> color: red; <% } %> }</style>'), []);
 });

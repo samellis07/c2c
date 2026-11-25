@@ -166,6 +166,8 @@ canvas{border:1px solid var(--c2c-border);touch-action:none}
 .subform [data-add-row]{display:block;margin:0 auto;min-height:0;padding:0;border:0;border-radius:0;background:none;color:var(--c2c-accent);font-size:var(--c2c-font-size-s)}
 .report-tools{display:flex;gap:var(--c2c-space-2);align-items:flex-start;flex-wrap:wrap;margin-bottom:var(--c2c-space-3)}
 .report-tools [data-report-search]{width:100%;margin-bottom:var(--c2c-space-2)}
+/* A snippet prints one empty marker where a branch group of its style body ran; the page's carried CSS selects on it. */
+span[title^="c2c-css-"]{display:none}
 /* A report embedded with display flags (zc_AddRec=false ...) hides those controls only. */
 [data-embed-hide~="add"] [data-report-add],[data-embed-hide~="add"] [data-state] a.button-primary{display:none!important}
 [data-embed-hide~="edit"] [data-row-edit]{display:none!important}

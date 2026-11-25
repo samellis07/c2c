@@ -22,7 +22,7 @@ import { isFormAction } from '../src/htmlpage.js';
 import { renderedDocumentViolation, renderedHtmlElements } from '../../shims/src/rendered-guard.js';
 import { c2cUrlFunctionSource } from '../src/url-policy.js';
 import { uiSnippetFiles } from '../src/model.js';
-import { leaves, sanitizeSnippet } from '../src/pages.js';
+import { leaves, sanitizeSnippet, styleBranchMarkers } from '../src/pages.js';
 import { resolveOwnAppFetches } from '../../deluge/src/own-app-fetch.js';
 
 const ADMIN = { name: 'Administrator', type: 'Users_Permissions', properties: [], modules: [], span: { start: 0, end: 0 } };
@@ -4851,4 +4851,57 @@ test('attack: a markup value built to restart the tag scan at every angle bracke
     assert.ok(Date.now() - started < 5000, `${unit}: ${Date.now() - started} ms`);
     assert.deepEqual(renderedHtmlElements(html).map((el) => el.tag), ['div'], `${unit}: only the wrapper is an element`);
   }
+});
+
+test('a rule group chosen by statement tags in a style body prints its marker only when the render takes that branch', async () => {
+  const snippet = `htmlpage hp1()
+content
+<%{
+%>
+<style>
+.a { color: red; }
+<%
+  if (input.v == "x")
+  {
+    %>
+.b { color: blue; }
+<%
+  }
+  else if (input.v == "y")
+  {
+    %>
+.c { color: green; }
+<%
+  }
+  %>
+</style>
+<p id="t">Hello</p>
+<%}%>`;
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  assert.equal(uiSnippetFiles(model).length, 1);
+  const [b, c] = styleBranchMarkers(snippet);
+  assert.equal(b!.length, 12);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    const expectations: [string, string][] = [
+      ['x', `<span title="c2c-css-${b}"></span><p>Hello</p>`],
+      ['y', `<span title="c2c-css-${c}"></span><p>Hello</p>`],
+      ['z', '<p>Hello</p>'],
+      // A hostile value cannot add a marker: only the compiled text prints one.
+      ['<span title="c2c-css-' + b + '">', '<p>Hello</p>'],
+    ];
+    for (const [v, want] of expectations) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v } } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      assert.equal(String(out.body.html).replace(/\s+/g, ' ').replace(/> </g, '><').trim(), want, v);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a template that already writes a branch marker title is a counted snippet', () => {
+  const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', 'htmlpage hp1()\ncontent\n<%{ %><span title="c2c-css-abcdef012345"></span><p><%= input.v %></p><%}%>');
+  assert.equal(compiled.ok, false);
 });
