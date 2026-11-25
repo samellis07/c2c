@@ -111,7 +111,7 @@ export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new
   ['math', new Set(['round', 'sqrt'])],
   ['old', new Set(['get'])],
   ['record', new Set(['bind', 'get', 'set', 'system'])],
-  ['string', new Set(['getAlphaNumeric', 'getPrefix', 'getSuffix', 'removeAllAlpha', 'toUpperCase', 'trim'])],
+  ['string', new Set(['getAlphaNumeric', 'getPrefix', 'getSuffix', 'removeAllAlpha', 'replaceAll', 'toUpperCase', 'trim'])],
   ['subform', new Set(['currentRow'])],
   ['zoho', new Set(['adminUser', 'adminUserId', 'appName', 'appUri', 'currentDate', 'currentTime', 'loginUser', 'loginUserId', 'loginUserProfile'])],
 ]);

@@ -6003,6 +6003,10 @@ export function browserShimSurface(fetchImpl) {
       },
     }),
     string: withStubFallback({
+      replaceAll(value, find, replacement) {
+        if (value == null || String(value) === '' || replacement == null || String(replacement) === '') return null;
+        return javaReplaceAll(String(value), String(find ?? ''), String(replacement));
+      },
       // ASCII letters, the same set both runtimes use (text.ts).
       getAlphaNumeric(value) {
         return value == null ? null : clientEmptyToNull(String(value).replace(/[^A-Za-z0-9]/g, ''));
