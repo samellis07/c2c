@@ -582,7 +582,10 @@ function includeParams(query: string, target: readonly string[], own: ReadonlySe
  * than a bare forwarded `input.p`, path traversal, a non-`#Page:` target —
  * leaves the href untouched and the snippet stays the counted TODO.
  */
-const PAGE_HREF = /^(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>#Page:([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
+// Creator also emits same-app page links as a bare `#Page:` fragment (the
+// appuri island is optional in hand-authored markup). Both forms are scoped
+// to the generated app route below; no arbitrary URL is accepted here.
+const PAGE_HREF = /^(?:(?:https?:\/\/[^"'<>#?]*)?<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>)?#Page:([A-Za-z_]\w*)(?:\?([^"']*))?$/i;
 
 function rewritePageParamLinks(template: string, app: App, page: string, ownParams: ReadonlySet<string>): string {
   if (!/#Page:/i.test(template)) return template;
