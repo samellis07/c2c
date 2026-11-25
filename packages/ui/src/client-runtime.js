@@ -59,6 +59,9 @@ const ALLOWED_ATTRS = {
   '*': new Set(['class', 'title', 'data-style-dropped', 'data-zml']),
 };
 
+/** Ids the page shell owns: a snippet control may not take one (getElementById would find it first, or a label for it would click a shell button). */
+const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title']);
+
 /**
  * Classes a shell stylesheet lifts out of flow (fixed, absolute or z-indexed):
  * page or data markup may not borrow one to paint over the app. The generator and the React template keep
@@ -408,6 +411,7 @@ function cleanNode(node, doc, dropped) {
     const attr = attrs[i];
     const name = attr.name.toLowerCase();
     if (!allowedAttr(tag, name)) continue;
+    if ((name === 'id' || (tag === 'label' && name === 'for')) && SHELL_IDS.has(String(attr.value).trim().toLowerCase())) continue;
     if ((name === 'href' || name === 'src') && !(tag === 'img' && name === 'src' && DATA_IMAGE_SRC.test(attr.value)) && !safeUrl(attr.value)) continue;
     if (name === 'style') {
       const style = cleanStyle(attr.value);
