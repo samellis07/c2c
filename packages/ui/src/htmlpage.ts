@@ -800,7 +800,8 @@ interface ComponentParam {
 /** The field keys a parameterised embed may name: top-level fields of the form (or the report's form). */
 function embedFieldNames(app: App, kind: string, name: string): string[] {
   const form = kind === 'form' ? app.forms.find((item) => item.name === name) : app.forms.find((item) => item.name === app.reports.find((report) => report.name === name)?.form);
-  return (form?.fields ?? []).filter((field) => field.subfields.length === 0 && !/^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')).map((field) => field.name);
+  // A lookup column stores the target row's id, while a page value is display text: a filter or prefill by name would never match.
+  return (form?.fields ?? []).filter((field) => field.subfields.length === 0 && !field.lookup && !/^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')).map((field) => field.name);
 }
 
 /**

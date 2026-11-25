@@ -37,6 +37,11 @@ const FORM = `form Intake
   (
     type = text
   )
+  Parent
+  (
+    type = picklist
+    values = Intake.Name
+  )
 }`;
 const REPORT = `report All_Rows
 {
@@ -293,4 +298,12 @@ test('a marker hides only the controls it names, and an unknown name hides nothi
   assert.equal(slot2?.getAttribute('data-embed-hide'), 'add');
   const proto = await painted(snippet, `<div data-zml="component-report:All_Rows:hide-__proto__?Name=Ann"></div>`);
   assert.equal(proto.main.querySelector('section[data-report]'), null, 'a marker that does not parse is not drawn');
+});
+
+test('a lookup field is refused as an embed key: the value is display text, the column holds a row id', () => {
+  for (const tag of [FORM_TAG('Parent=<%=row.Name%>'), REPORT_TAG('Parent=<%=row.Name%>'), REPORT_TAG('Parent=open')]) {
+    const { model } = buildUi(appWith(embed(tag)));
+    assert.equal(snippetOf(model)?.components, undefined, tag);
+    assert.equal(snippetTodos(model).length, 1, tag);
+  }
 });
