@@ -166,6 +166,15 @@ canvas{border:1px solid var(--c2c-border);touch-action:none}
 .subform [data-add-row]{display:block;margin:0 auto;min-height:0;padding:0;border:0;border-radius:0;background:none;color:var(--c2c-accent);font-size:var(--c2c-font-size-s)}
 .report-tools{display:flex;gap:var(--c2c-space-2);align-items:flex-start;flex-wrap:wrap;margin-bottom:var(--c2c-space-3)}
 .report-tools [data-report-search]{width:100%;margin-bottom:var(--c2c-space-2)}
+/* A report embedded with display flags (zc_AddRec=false ...) hides those controls only. */
+[data-embed-hide~="add"] [data-report-add],[data-embed-hide~="add"] [data-state] a.button-primary{display:none!important}
+[data-embed-hide~="edit"] [data-row-edit]{display:none!important}
+[data-embed-hide~="delete"] [data-row-delete]{display:none!important}
+[data-embed-hide~="bulk"] [data-bulk-edit],[data-embed-hide~="bulk"] [data-bulk-count]{display:none!important}
+[data-embed-hide~="select"] [data-bulk-select-cell]{display:none!important}
+[data-embed-hide~="filter"] select[data-filter]{display:none!important}
+[data-embed-hide~="search"] [data-report-search]{display:none!important}
+[data-embed-hide~="pages"] [data-pages]{display:none!important}
 [data-chart-tools] button{background:var(--c2c-surface);color:var(--c2c-ink)}
 [data-chart]{color:var(--c2c-muted)}
 svg.chart{display:block;width:100%;max-width:40rem;height:auto}
