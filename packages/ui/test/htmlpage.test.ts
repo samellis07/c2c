@@ -4416,3 +4416,218 @@ test('a statement island inside a style body that writes or redirects stays a co
     assert.equal(compiled.ok, false, body);
   }
 });
+
+// A value that holds markup prints through `c2cMarkup` (markup-value.ts), never raw and never as escaped tags.
+
+async function renderPage(app: App, snippet: string, input: Record<string, unknown> = {}) {
+  const ui = generateUi(app);
+  const uiPaths = new Set(ui.files.map((f) => f.path));
+  const files = [...ui.files, ...generate(app).files.filter((f) => !uiPaths.has(f.path)).map((f) => ({ path: f.path, data: f.source }))];
+  const live = await liveStore(SEEDED);
+  try {
+    const mod = await loadTree(files, uiSnippetFiles(ui.model)[0].path);
+    const out = await invoke(mod.default as never, { ...USER, body: { input } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    return { html: String(out.body.html), notes: out.body.notes as string[], snippet };
+  } finally {
+    live.restore();
+  }
+}
+
+const wrapFn = { name: 'Util.wrap', signature: 'string Util.wrap(string s)', deluge: 'return "<div class=\'w\'>" + s + "</div>";' };
+
+test('a markup literal and a markup function value print as markup, not as escaped tags', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nnote = "<b>Hi</b> <i>there</i>";\nboxed = thisapp.Util.wrap(note);\n%>\n<p><%= note %></p><%= boxed %>`;
+  const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
+  const { html } = await renderPage(app, snippet);
+  assert.match(html, /<p><b>Hi<\/b><i>there<\/i><\/p>|<p><b>Hi<\/b> <i>there<\/i><\/p>/);
+  assert.match(html, /<div class="w"><b>Hi<\/b> <i>there<\/i><\/div>/);
+});
+
+test('a markup function called anywhere but as the whole right side of an assignment stays a snippet', () => {
+  for (const snippet of [
+    `htmlpage hp1()\ncontent\n<p><%= thisapp.Util.wrap("x") %></p>`,
+    `htmlpage hp1()\ncontent\n<%\nok = thisapp.Util.wrap("x");\nbad = thisapp.Util.wrap("y").length();\n%>\n<p><%= ok %></p>`,
+  ]) {
+    const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+    assert.equal(compileHtmlpage(app, 'Home', 'hp1', snippet).ok, false, snippet);
+  }
+});
+
+test('hostile text inside a markup value never reaches the page as script, a handler, a frame or a bad URL', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<%\nboxed = thisapp.Util.wrap(input.q);\n%>\n<%= boxed %>`;
+  const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const hostile = [
+    '<script>alert(1)</script>',
+    '<img src=x onerror=alert(1)>',
+    '<img src="https://evil.example/p.png">',
+    '<img src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=">',
+    '<img src="data:image/png;base64,AAAA" onload="alert(1)">',
+    '<a href="javascript:alert(1)">x</a>',
+    '<svg onload=alert(1)>',
+    '<iframe srcdoc="<script>alert(1)</script>"></iframe>',
+    '<div onclick="alert(1)">x</div>',
+    '<div style="position:fixed;top:0;left:0;width:100%;height:100%">x</div>',
+    '<div style="background:url(javascript:alert(1))">x</div>',
+    '<div style="width:expression(alert(1))">x</div>',
+    '<div class="a" class="b"><b>x</div>',
+    '<!-- <script>alert(1)</script> -->',
+    '<div class="a',
+    '<p/onclick=alert(1)>x',
+    '<b>x</b ><script >alert(1)</script >',
+    '<style>*{display:none}</style>',
+  ];
+  for (const q of hostile) {
+    const { html } = await renderPage(app, snippet, { q });
+    for (const el of renderedHtmlElements(html)) {
+      assert.ok(['div', 'b', 'i', 'img', 'p', 'br', 'span', 'em', 'strong', 'u', 'small'].includes(el.tag), `${q} -> ${html}`);
+      for (const attr of el.attributes) {
+        assert.ok(['class', 'style', 'src', 'alt', 'title', 'width', 'height'].includes(attr.name), `${q} -> ${html}`);
+        if (el.tag === 'img' && attr.name === 'src') assert.match(attr.value, /^data:image\/png;base64,/, `${q} -> ${html}`);
+      }
+    }
+    assert.doesNotMatch(html, /position\s*:|url\(|expression/i, `${q} -> ${html}`);
+  }
+});
+
+test('a markup value keeps an inline raster image and its allowed attributes, and rebuilds the rest', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const snippet = `htmlpage hp1()\ncontent\n<%\nimg = input.q;\nshown = "<div class='a' style='width:100%;color:red;float:left'>" + img + "</div>";\n%>\n<%= shown %>`;
+  const app = appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`);
+  const { html, notes } = await renderPage(app, snippet, { q: `<img style='width:50%;'src="data:image/png;base64,${png}" alt="a&b" border=0>` });
+  assert.equal(
+    html.trim(),
+    `<div class="a" style="width:100%;color:red;float:left"><img style="width:50%" alt="a&amp;b" src="data:image/png;base64,${png}"></div>`,
+  );
+  assert.deepEqual(notes, ['a markup value attribute the page does not keep was removed']);
+});
+
+test('the client sanitizer keeps an exact inline raster image src on an img and nothing else with a data URL', async () => {
+  const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
+    sanitizeSnippet(raw: string, doc: unknown): string;
+  };
+  const doc = new JSDOM('').window.document;
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  assert.equal(runtime.sanitizeSnippet(`<img src="${png}">`, doc), `<img src="${png}">`);
+  for (const src of [
+    'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+    'data:image/png;base64,AAAA&quot; onerror=&quot;alert(1)',
+    'data:image/png;base64, AAAA',
+    'DATA:image/png;base64,AAAA',
+    ' data:image/png;base64,AAAA',
+    'data:image/png,AAAA',
+    'data:text/html;base64,PHNjcmlwdD4=',
+  ]) {
+    assert.equal(runtime.sanitizeSnippet(`<img src="${src}">`, doc), '<img>', src);
+  }
+  assert.equal(runtime.sanitizeSnippet(`<a href="${png}">x</a>`, doc), '<a>x</a>');
+});
+
+// An image field's value is the `<img>` element Creator's Deluge sees: the endpoint signs the stored key, reads
+// the bytes and inlines a raster image, so the page's own string handling (an app function's `replaceFirst`) works on it.
+
+const ITEMS = `\tform Items
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tPhoto
+\t\t(
+\t\t\ttype = image
+\t\t)
+\t}`;
+const PHOTO_KEY = 'migrated/Items/Photo/1000/pic.png';
+const PNG_BYTES = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+const fitFn = {
+  name: 'Util.fit',
+  signature: 'string Util.fit(string src)',
+  deluge: 'out = src.replaceFirst("<img ","<img style=\'width:100%;\'");\nreturn out;',
+};
+const PHOTO_SNIPPET = `htmlpage hp1()\ncontent\n<%\nr = Items[ID == input.id.toLong()];\npic = thisapp.Util.fit(r.Photo);\n%>\n<p><%= r.Name %></p><%= pic %>`;
+
+async function renderPhoto(opts: {
+  photo?: string | null;
+  fetchBody?: Buffer;
+  fetchStatus?: number;
+  store?: boolean;
+  user?: typeof USER;
+  policy?: Record<string, Record<string, FieldGrant>>;
+}) {
+  const app = appWithFns([fitFn], `${ITEMS}\n${pageWithSnippet(PHOTO_SNIPPET)}`);
+  const ui = generateUi(app);
+  assert.equal(ui.model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 0, JSON.stringify(ui.model.todos));
+  const uiPaths = new Set(ui.files.map((f) => f.path));
+  const files = [...ui.files, ...generate(app).files.filter((f) => !uiPaths.has(f.path)).map((f) => ({ path: f.path, data: f.source }))];
+  if (opts.policy) rewritePolicy(files, opts.policy);
+  const signed: string[] = [];
+  const fetched: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    fetched.push(String(url));
+    return new Response(new Uint8Array(opts.fetchBody ?? PNG_BYTES), { status: opts.fetchStatus ?? 200 });
+  }) as typeof fetch;
+  const live = await liveStore({ Items: [{ Name: 'Widget', Photo: opts.photo === undefined ? PHOTO_KEY : opts.photo }] });
+  try {
+    const mod = await loadTree(files, uiSnippetFiles(ui.model)[0].path);
+    const filesMod = (await import(pathToFileURL(join(loadedDirs.at(-1)!, 'functions/c2c-files.mjs')).href)) as { setFileStore(store: unknown): void };
+    if (opts.store !== false) {
+      filesMod.setFileStore({
+        signedUrl: async (key: string, action: string) => {
+          signed.push(`${action} ${key}`);
+          return `https://stratus.test/${key}`;
+        },
+      });
+    }
+    try {
+      const out = await invoke(mod.default as never, { ...(opts.user ?? USER), body: { input: { id: FIRST_ID } } });
+      return { out, signed, fetched, html: String(out.body.html ?? ''), notes: (out.body.notes ?? []) as string[] };
+    } finally {
+      filesMod.setFileStore(null);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    live.restore();
+  }
+}
+
+test('an image field read renders as an inline img the page function can restyle', async () => {
+  const { out, signed, fetched, html, notes } = await renderPhoto({});
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.deepEqual(signed, [`GET ${PHOTO_KEY}`]);
+  assert.deepEqual(fetched, [`https://stratus.test/${PHOTO_KEY}`]);
+  assert.equal(html.trim(), `<p>Widget</p><img style="width:100%" src="data:image/png;base64,${PNG_BYTES.toString('base64')}">`);
+  assert.deepEqual(notes, []);
+});
+
+test('an image field renders nothing, signs nothing and says why when it cannot be shown', async () => {
+  const empty = await renderPhoto({ photo: '' });
+  assert.deepEqual(empty.signed, []);
+  assert.equal(empty.html.trim(), '<p>Widget</p>');
+  const foreign = await renderPhoto({ photo: 'migrated/Orders/Photo/1000/pic.png' });
+  assert.deepEqual(foreign.signed, [], 'a key of another form is never signed');
+  assert.equal(foreign.html.trim(), '<p>Widget</p>');
+  assert.deepEqual(foreign.notes, ['an image could not be read and is not shown']);
+  const html = await renderPhoto({ fetchBody: Buffer.from('<script>alert(1)</script>') });
+  assert.equal(html.html.trim(), '<p>Widget</p>');
+  assert.deepEqual(html.notes, ['an image field did not hold a PNG, JPEG, GIF or WebP image and is not shown']);
+  const svg = await renderPhoto({ fetchBody: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>') });
+  assert.equal(svg.html.trim(), '<p>Widget</p>');
+  const big = await renderPhoto({ fetchBody: Buffer.concat([PNG_BYTES, Buffer.alloc(2 * 1024 * 1024)]) });
+  assert.equal(big.html.trim(), '<p>Widget</p>');
+  assert.deepEqual(big.notes, ['an image is over the size the page inlines and is not shown']);
+  const failed = await renderPhoto({ fetchStatus: 403 });
+  assert.equal(failed.html.trim(), '<p>Widget</p>');
+  assert.deepEqual(failed.notes, ['an image could not be read and is not shown']);
+  const noStore = await renderPhoto({ store: false });
+  assert.equal(noStore.html.trim(), '<p>Widget</p>');
+});
+
+test('a caller whose profile may not read the image field is refused and nothing is signed', async () => {
+  const { out, signed, fetched } = await renderPhoto({ user: CLERK, policy: { Clerk: { Items: { fields: ['Name'] } } } });
+  assert.equal(out.status, 403, JSON.stringify(out.body));
+  assert.deepEqual(signed, []);
+  assert.deepEqual(fetched, []);
+});

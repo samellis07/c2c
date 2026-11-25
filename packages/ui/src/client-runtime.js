@@ -61,6 +61,13 @@ function flatUrl(value) {
   return String(value ?? '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
 }
 
+/**
+ * The one `data:` URL an `<img>` keeps: an inline raster image, exactly as the
+ * page endpoint's markup value writes it. Matched on the raw value, so case,
+ * whitespace and every other media type (SVG included) stay refused.
+ */
+const DATA_IMAGE_SRC = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
 function safeUrl(value) {
   let detected = String(value ?? '');
   for (let pass = 0; pass < 4; pass++) {
@@ -337,7 +344,7 @@ function cleanNode(node, doc, dropped) {
     const attr = attrs[i];
     const name = attr.name.toLowerCase();
     if (!allowedAttr(tag, name)) continue;
-    if ((name === 'href' || name === 'src') && !safeUrl(attr.value)) continue;
+    if ((name === 'href' || name === 'src') && !(tag === 'img' && name === 'src' && DATA_IMAGE_SRC.test(attr.value)) && !safeUrl(attr.value)) continue;
     if (name === 'style') {
       const style = cleanStyle(attr.value);
       if (style.style || !style.dropped.length) out.setAttribute('style', style.style);

@@ -30,6 +30,9 @@ function flat(value: string): string {
   return value.replace(/[\u0000- ]+/g, '').toLowerCase();
 }
 
+/** The one `data:` URL an `<img>` keeps: an inline raster image, matched on the raw value so case, whitespace and SVG stay refused. */
+const DATA_IMAGE_SRC = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
 export function safeUrl(value: string): boolean {
   const raw = String(value ?? '');
   if (!raw) return true;
@@ -82,7 +85,7 @@ function cleanNode(node: Node, doc: Document): Node | null {
   for (const attr of Array.from(element.attributes)) {
     const name = attr.name.toLowerCase();
     if (!allowedAttr(tag, name)) continue;
-    if ((name === 'href' || name === 'src') && !safeUrl(attr.value)) continue;
+    if ((name === 'href' || name === 'src') && !(tag === 'img' && name === 'src' && DATA_IMAGE_SRC.test(attr.value)) && !safeUrl(attr.value)) continue;
     if (name === 'style' && dangerousStyle(attr.value)) continue;
     out.setAttribute(name, attr.value);
   }
