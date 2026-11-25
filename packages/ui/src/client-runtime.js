@@ -2097,9 +2097,12 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
   }
 }
 
+/** An embed key: a field name, or `Lookup.Target` (a report's filter on a lookup field's display text). */
+const COMPONENT_KEY = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?$/;
+
 /** The declaration a compiled snippet makes for one embedded component: `kind:Name` or `kind:Name?Key1,Key2`. */
 function componentSpec(item) {
-  const keys = Array.isArray(item.params) ? item.params.filter((key) => typeof key === 'string' && /^[A-Za-z_]\w*$/.test(key)) : [];
+  const keys = Array.isArray(item.params) ? item.params.filter((key) => typeof key === 'string' && COMPONENT_KEY.test(key)) : [];
   return `${item.kind}:${item.name}${keys.length ? `?${keys.join(',')}` : ''}`;
 }
 
@@ -2119,7 +2122,7 @@ function componentQuery(text) {
     const eq = part.indexOf('=');
     if (eq <= 0) return null;
     const key = part.slice(0, eq);
-    if (!/^[A-Za-z_]\w*$/.test(key) || key === '__proto__' || key === 'constructor' || key === 'prototype' || keys.includes(key)) return null;
+    if (!COMPONENT_KEY.test(key) || /(?:^|\.)(?:__proto__|constructor|prototype)$/.test(key) || keys.includes(key)) return null;
     let value;
     try {
       value = decodeURIComponent(part.slice(eq + 1).replace(/\+/g, ' '));
