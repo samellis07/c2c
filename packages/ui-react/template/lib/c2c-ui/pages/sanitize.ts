@@ -34,6 +34,7 @@ const ALLOWED_ATTRS: Record<string, Set<string>> = {
 export const SHELL_OVERLAY_CLASSES = new Set([
   'c2c-modal-backdrop', 'c2c-sr-only', 'modal', 'modal-close', 'navitems', 'skip', 'skip-link', 'visually-hidden',
 ]);
+const SHELL_OVERLAY_MODULE_CLASS = /^_overlay_[A-Za-z0-9_-]+$/i;
 
 /** Longest class attribute and token the sanitizers scan, and the most tokens they keep. */
 const CLASS_TEXT_MAX = 4096;
@@ -52,7 +53,7 @@ function cleanClass(value: string): string {
   if (text.length > CLASS_TEXT_MAX) return '';
   const kept: string[] = [];
   for (const token of text.split(/\s+/)) {
-    if (kept.length < CLASS_TOKENS_MAX && CLASS_TOKEN.test(token) && !SHELL_OVERLAY_CLASSES.has(token.toLowerCase())) kept.push(token);
+    if (kept.length < CLASS_TOKENS_MAX && CLASS_TOKEN.test(token) && !SHELL_OVERLAY_CLASSES.has(token.toLowerCase()) && !SHELL_OVERLAY_MODULE_CLASS.test(token)) kept.push(token);
   }
   return kept.join(' ');
 }
