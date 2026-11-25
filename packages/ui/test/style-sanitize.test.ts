@@ -19,6 +19,7 @@ import {
   sanitizeSnippet as buildSanitize,
   stripStyleComments,
   styleBranchMarkers,
+  styleValues,
 } from '../src/pages.js';
 import {
   calcArgsSafe as printCalcArgsSafe,
@@ -923,6 +924,10 @@ test('sheet-only values still refuse fetches, script, escapes and unknown functi
     '.a { content: "\\" }',
     '.a { content: attr(title) url(//x.test/a) }',
     '.a { transform: rotate(var(--x)) }',
+    '.a { transform: rotate(var(--cssvalue-a, javascript:x)) }',
+    '.a { transform: rotate(var(--cssvalue-a) url(https://x.test/a.png)) }',
+    '.a { background: url(var(--cssvalue-a)) }',
+    '.a { transform: translate(var(--cssvalue-A)) }',
     '.a { font: 13px \'Bad\\Name\' }',
     '.a { behavior: linear-gradient(red, blue) }',
     '.a { background-image: url(..%2fsecret.png) }',
@@ -1437,12 +1442,12 @@ test('unsafe CSS from a constant style function is still dropped and named', () 
 });
 
 test('a declaration or selector a Deluge tag builds is counted once, as the tag', () => {
-  const raw = '<style>\n.dial { transform: rotate(<%=angle%>deg); -webkit-transform: rotate(<%=angle%>deg); color: red; }\ntable#t_<%=n%> { display: none; }\n.ok { padding: 1px; }\n</style>';
+  const raw = '<style>\n.dial { color: <%=c%>; -webkit-transform: rotate(<%=angle%>deg); color: red; }\ntable#t_<%=n%> { display: none; }\n.ok { padding: 1px; }\n</style>';
   const carried = carriedStyleRules(raw, scope);
-  assert.deepEqual(carried.dropped, ['CSS built by a Deluge tag', 'CSS built by a Deluge tag', 'CSS built by a Deluge tag']);
-  assert.match(carried.css, /\[data-page="Home"\] \.dial\{color: red\}/);
+  assert.deepEqual(carried.dropped, ['CSS built by a Deluge tag', 'CSS built by a Deluge tag']);
+  assert.match(carried.css, /\[data-page="Home"\] \.dial\{-webkit-transform: rotate\(var\(--cssvalue-a\)\);color: red\}/);
   assert.match(carried.css, /\[data-page="Home"\] \.ok\{padding: 1px\}/);
-  assert.doesNotMatch(carried.css, /transform|table#t_|/);
+  assert.doesNotMatch(carried.css, /table#t_|/);
   // An island between rules stays the only loss; the rule after it carries.
   const between = carriedStyleRules('<style><%=thisapp.style.dynamic(a)%>\nh1 { margin: 0; }</style>', scope);
   assert.deepEqual(between.dropped, ['CSS built by a Deluge tag']);
@@ -1632,4 +1637,42 @@ test('a page snippet with a YouTube player frame carries it and counts no remove
   const model = buildModel(app);
   assert.deepEqual(model.todos.filter((todo) => todo.area === 'zml'), []);
   assert.ok(JSON.stringify(model.pages[0]).includes('youtube-nocookie.com/embed/CPjUpwUpOK8'));
+});
+
+test('a number a Deluge tag computes inside a declaration value is carried as a custom property the render sets', () => {
+  const raw = '<style>\n.pie { background: #bbe491; -webkit-transform: rotate(<%=a%>deg); transform: rotate(<%=a%>deg); }\n.bar { width: <%=w%>px; height: <%=h + 1%>%; margin: 0 <%=gap%>em; color: rgb(<%=r%>, 0, 0); }\n</style>';
+  const carried = carriedStyleRules(raw, scope);
+  assert.deepEqual(carried.dropped, []);
+  assert.match(carried.css, /\.pie\{background: #bbe491;-webkit-transform: rotate\(var\(--cssvalue-a\)\);transform: rotate\(var\(--cssvalue-b\)\)\}/);
+  assert.match(carried.css, /\.bar\{width: var\(--cssvalue-c\);height: var\(--cssvalue-d\);margin: 0 var\(--cssvalue-e\);color: rgb\(var\(--cssvalue-f\), 0, 0\)\}/);
+  assert.deepEqual(styleValues(raw).map((v) => [v.name, v.expr, v.unit]), [
+    ['--cssvalue-a', 'a', 'deg'], ['--cssvalue-b', 'a', 'deg'], ['--cssvalue-c', 'w', 'px'], ['--cssvalue-d', 'h + 1', '%'], ['--cssvalue-e', 'gap', 'em'], ['--cssvalue-f', 'r', ''],
+  ]);
+  // Names run past z.
+  const many = '<style>.a { ' + Array.from({ length: 28 }, () => 'top: <%=n%>px;').join(' ') + ' }</style>';
+  assert.deepEqual(styleValues(many).slice(25).map((v) => v.name), ['--cssvalue-z', '--cssvalue-aa', '--cssvalue-ab']);
+});
+
+test('a Deluge tag that is not one whole number in a declaration value stays counted CSS', () => {
+  const cases = [
+    '.a { color: <%=c%>; }',
+    '.a { width: <%=w%>foo; }',
+    '.a { width: -<%=w%>px; }',
+    '.a { width: <%=w%>px<%=u%>; }',
+    '.a { width: 1<%=w%>px; }',
+    '.a<%=n%> { width: 1px; }',
+    '.a { <%=n%>: 1px; }',
+    '@media (min-width: <%=w%>px) { .a { width: 1px; } }',
+    '.a { content: "<%=w%>px"; }',
+    '.a { /* <%=w%>px */ }',
+    '.a { width: <%=%>px; }',
+    '.a { width: <%=w%>px; --cssvalue-a: 1px; }',
+    '.a { width: <%=w%>px; }\n<% if (x) { %>.b { top: 1px; }<% } %>',
+  ];
+  for (const css of cases) {
+    const carried = carriedStyleRules(`<style>${css}</style>`, scope);
+    assert.doesNotMatch(carried.css, /--cssvalue-[a-z]+\)/, css);
+    assert.ok(carried.dropped.length > 0 || /--cssvalue-a: 1px/.test(css) || css.includes('if (x)'), css);
+    assert.deepEqual(styleValues(`<style>${css}</style>`), [], css);
+  }
 });

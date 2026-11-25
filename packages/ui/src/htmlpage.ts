@@ -28,7 +28,7 @@ import type { SchemaPlan } from '../../schema/src/generator.js';
 import { withoutDecimalAudit } from '../../deluge/src/audit.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
-import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, styleBranchId, styleBranchMarkers } from './pages.js';
+import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet, STYLE_BRANCH_MARK_PREFIX, STYLE_VALUE_VAR_PREFIX, styleBranchId, styleBranchMarkers, styleValues, styleValueUnit } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { c2cImageFunctionSource, c2cMarkupFunctionSource } from './markup-value.js';
@@ -1575,6 +1575,7 @@ async function render(ctx${env ? ', c2c_env' : ''}) {
 ${indented}
   const c2c_parts = [];
   const c2c_notes = ${env ? 'c2c_env.notes' : '[]'};
+  const c2c_vars = [];
   // A URL attribute value may span several parts (static pieces and islands).
   // The scheme check runs on the whole joined value, so the pieces accumulate
   // until the next non-URL part; a dropped island inside the value does not
@@ -1609,6 +1610,11 @@ ${indented}
       const num = c2cCssNumber(piece);
       if (!num && piece.trim()) c2c_notes.push("a style island value was not a safe number and rendered empty");
       c2c_parts.push(num);
+    } else if (item.k === "S") {
+      const piece = c2cStr(item.v);
+      const num = c2cCssNumber(piece);
+      if (num) c2c_vars.push(item.n + ":" + num + item.u);
+      else if (piece.trim()) c2c_notes.push("a style island value was not a safe number and rendered empty");
     } else if (item.k === "C") {
       const piece = c2cStr(item.v);
       const css = c2cCss(piece);
@@ -1617,7 +1623,8 @@ ${indented}
     } else if (item.k === "N") c2c_notes.push(String(item.v == null ? "" : item.v));
   }
   c2c_urlFlush();
-  return { html: c2c_parts.join(""), notes: c2c_notes };
+  const c2c_html = c2c_parts.join("");
+  return { html: c2c_vars.length ? '<div style="display:contents;' + c2c_vars.join(";") + '">' + c2c_html + "</div>" : c2c_html, notes: c2c_notes };
 }
 
 function modeOverride() {
@@ -3201,7 +3208,7 @@ export function compileHtmlpage(
   }
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
     return fail('marker collision');
-  if (head.template.includes(STYLE_BRANCH_MARK_PREFIX)) return fail('marker collision');
+  if (head.template.includes(STYLE_BRANCH_MARK_PREFIX) || head.template.includes(STYLE_VALUE_VAR_PREFIX)) return fail('marker collision');
 
   // Context for every island, from the static markup that precedes it.
   {
@@ -3251,6 +3258,51 @@ export function compileHtmlpage(
     if (isl.kind === 'expr' || isl.context === 'text' || isl.context === 'comment') continue;
     if (isl.context === 'cssbody' && !/\bopenUrl\b/i.test(isl.text)) continue;
     return fail('island in an unsafe position');
+  }
+
+  // A computed number in a `<style>` body (`rotate(<%=angle%>deg)`) is carried as a custom property the
+  // rendered snippet sets on a wrapper; the page's carried CSS reads it with var(). The sites found here
+  // must be the ones the page model replaced, or the carried rule would read a property nothing sets.
+  const valueSites = new Map<number, { name: string; unit: string }>();
+  const modelValues = styleValues(head.template);
+  if (modelValues.length) {
+    const islandAt = new Map(islands.map((isl) => [isl.i, isl]));
+    const elementOf: number[] = [];
+    const withStatements = new Set<number>();
+    let element = -1;
+    chunks.forEach((chunk, n) => {
+      if (chunk.kind === 'static') {
+        const low = chunk.text.toLowerCase();
+        if (low.lastIndexOf('<style') > low.lastIndexOf('</style')) element++;
+      }
+      elementOf[n] = element;
+      const isl = islandAt.get(n);
+      if (isl && isl.context === 'cssbody' && (isl.kind === 'stmts' || isl.wasStmts)) withStatements.add(element);
+    });
+    const sites: { n: number; expr: string; unit: string }[] = [];
+    let body = '';
+    chunks.forEach((chunk, n) => {
+      if (chunk.kind === 'static') {
+        const low = chunk.text.toLowerCase();
+        const open = low.lastIndexOf('<style');
+        const close = low.lastIndexOf('</style');
+        if (open > close) body = chunk.text.slice(chunk.text.indexOf('>', open) + 1);
+        else if (close >= 0) body = '';
+        else body += chunk.text;
+        return;
+      }
+      const isl = islandAt.get(n)!;
+      if (isl.context === 'cssbody' && isl.kind === 'expr' && !isl.wasStmts && !withStatements.has(elementOf[n]!)) {
+        const next = chunks[n + 1];
+        const text = next?.kind === 'static' ? next.text : '';
+        const cut = text.search(/<\/style/i);
+        const unit = styleValueUnit(body, cut >= 0 ? text.slice(0, cut) : text + (chunks[n + 1] ? '<%' : ''));
+        if (unit !== undefined && isl.text.trim()) sites.push({ n, expr: isl.text.trim(), unit });
+      }
+      body += 'x';
+    });
+    if (sites.length !== modelValues.length || sites.some((site, k) => site.expr !== modelValues[k]!.expr || site.unit !== modelValues[k]!.unit)) return fail('style value mismatch');
+    sites.forEach((site, k) => valueSites.set(site.n, { name: modelValues[k]!.name, unit: site.unit }));
   }
 
   // Marker-sanitize-split: sanitize the whole document once, then read which
@@ -3343,6 +3395,9 @@ export function compileHtmlpage(
       const group = after?.kind === 'static' ? after.text.split(/<\/style/i)[0]! : '';
       const id = styleBranchId(group);
       if (branchIds.has(id)) scriptParts.push(`c2c_out.add({"k":"H","v":${JSON.stringify(`<span title="${STYLE_BRANCH_MARK_PREFIX}${id}"></span>`)}});`);
+    } else if (valueSites.has(isl.i)) {
+      const site = valueSites.get(isl.i)!;
+      scriptParts.push(`c2c_out.add({"k":"S","n":${JSON.stringify(site.name)},"u":${JSON.stringify(site.unit)},"v":(${isl.text.trim()})});`);
     } else if (isl.context === 'comment' || isl.context === 'sheet' || isl.context === 'cssbody') {
       // An island inside an HTML comment produces no output (drop it, with a note).
       scriptParts.push('c2c_out.add({"k":"D","v":0});');

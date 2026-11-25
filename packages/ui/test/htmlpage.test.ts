@@ -5093,6 +5093,39 @@ test('shape C: a sweep that rewrites the rows a server-side criteria selects run
   }
 });
 
+test('a number a style body computes is set as a custom property on a wrapper only when it is a safe number', async () => {
+  const snippet = `htmlpage hp1()
+content
+<%{
+%>
+<style>
+.pie { transform: rotate(<%=input.v%>deg); width: <%=input.w%>px; }
+</style>
+<p class="pie">Hello</p>
+<%}%>`;
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  assert.equal(uiSnippetFiles(model).length, 1);
+  assert.deepEqual(model.todos.map((todo) => [todo.name, todo.reason]), []);
+  assert.match(model.pages[0]?.scopedCss ?? '', /\.pie\{transform: rotate\(var\(--cssvalue-a\)\);width: var\(--cssvalue-b\)\}/);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    const expectations: [unknown, unknown, string][] = [
+      [90, 12.5, '<div style="display:contents;--cssvalue-a:90deg;--cssvalue-b:12.5px"><p class="pie">Hello</p></div>'],
+      [90, 'red', '<div style="display:contents;--cssvalue-a:90deg"><p class="pie">Hello</p></div>'],
+      ['90); background: url(https://x.example/i.png', '1e9', '<p class="pie">Hello</p>'],
+      ['-5', '', '<p class="pie">Hello</p>'],
+    ];
+    for (const [v, w, want] of expectations) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v, w } } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      assert.equal(String(out.body.html).replace(/\s+/g, ' ').replace(/> </g, '><').trim(), want, JSON.stringify([v, w]));
+    }
+  } finally {
+    live.restore();
+  }
+});
+
 test('shape C: a failing row write fails the sweep render without html', async () => {
   const snippet = `htmlpage hp1()\ncontent\n<p><%\nfor each o in Orders[Status == "closed"]\n{\n\to.Name = "Ended";\n}\n%>Done</p>`;
   const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
@@ -5130,4 +5163,9 @@ test('shape C negative: a sweep takes no request value, no other statement, and 
     assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], name);
     assert.equal(uiSnippetFiles(model).length, 0, name);
   }
+});
+
+test('a template that already writes the style value property name is a counted snippet', () => {
+  const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', 'htmlpage hp1()\ncontent\n<%{ %><p style="--cssvalue-a: 1px"><%= input.v %></p><%}%>');
+  assert.equal(compiled.ok, false);
 });

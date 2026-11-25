@@ -1106,6 +1106,13 @@ const DATA_IMAGE_ARG = /^\s*["']?data:image\/(?:png|gif|jpe?g|webp|avif|bmp|x-ic
  */
 const QUOTED_URL = /url\(\s*(["'])([^"'\s<>{}]*)\1\s*\)/gi;
 
+/**
+ * Custom property a snippet's wrapper sets for each computed number its `<style>` body prints
+ * (`transform: rotate(<%=angle%>deg)`). Letters and hyphens only: that is the inline-style property rule.
+ */
+export const STYLE_VALUE_VAR_PREFIX = '--cssvalue-';
+const STYLE_VALUE_VAR_ARG = /^\s*--cssvalue-[a-z]+\s*$/;
+
 function safeSheetValue(raw: string, prop: string): boolean {
   let text = String(raw ?? '').trim();
   if (!text || text.length > STYLE_TEXT_MAX) return false;
@@ -1116,7 +1123,7 @@ function safeSheetValue(raw: string, prop: string): boolean {
   text = text.replace(QUOTED_URL, (match, _quote: string, inner: string) => (safeUrl(inner, true) ? ' ' : match));
   if (/[;\\@<>'"{}]/.test(text) || text.includes('/*')) return false;
   const flat = flatCss(text);
-  if (flat.includes('expression') || flat.includes('javascript:') || flat.includes('vbscript:')) return false;
+  if (flat.includes('url(var(') || flat.includes('expression') || flat.includes('javascript:') || flat.includes('vbscript:')) return false;
   // Nested calls (a colour inside a gradient) resolve innermost first, one level per pass.
   for (let pass = 0; pass < 4 && text.includes('('); pass++) {
     const next = replaceStyleCalls(text, (name: string, args: string) => {
@@ -1128,6 +1135,8 @@ function safeSheetValue(raw: string, prop: string): boolean {
       // A var() only reads a custom property — and every custom property a
       // page sets passed these same checks — so it can never smuggle in a
       // remote fetch. Its fallback had any nested calls resolved first.
+      // A number a snippet computes stands as a number, so a function that takes only numbers keeps its argument.
+      if (fn === 'var' && STYLE_VALUE_VAR_ARG.test(args)) return '0';
       if (fn === 'var' && /^\s*--[-\w]+\s*(?:,[^(){};@'"\\<>]*)?$/.test(args)) return ' ';
       return '\u0000';
     });
@@ -1498,6 +1507,84 @@ export function droppedStyleRules(raw: string): number {
 
 const DYNAMIC_CSS = 'CSS built by a Deluge tag';
 
+const STYLE_VALUE_UNITS = new Set(['deg', 'rad', 'grad', 'turn', 'px', 'em', 'rem', 's', 'ms', 'vh', 'vw', 'vmin', 'vmax', 'pt', 'cm', 'mm', 'in', 'fr', '%']);
+
+/** One computed number in a `<style>` body: its expression, its unit, and the custom property that carries it. */
+export interface StyleValue { name: string; expr: string; unit: string }
+
+/** Letters only, in order: a, b, ... z, aa, ab, ... */
+function styleValueName(n: number): string {
+  let name = '';
+  for (let rest = n + 1; rest > 0; rest = Math.floor((rest - 1) / 26)) name = String.fromCharCode(97 + ((rest - 1) % 26)) + name;
+  return STYLE_VALUE_VAR_PREFIX + name;
+}
+
+/**
+ * The unit of a `<%= %>` island in a `<style>` body that stands for one whole number inside a declaration
+ * value ('' for a bare number, which only a function argument may be), or undefined when it sits anywhere else: a selector, an at-rule prelude, a
+ * comment or string, a longer word. `before` is the body text so far with each earlier island as `x`;
+ * `after` is the text following the island.
+ */
+export function styleValueUnit(before: string, after: string): string | undefined {
+  if (!/[(,\s:]$/.test(before)) return undefined;
+  let braces = 0, parens = 0, quote = '', comment = false, declaration = '';
+  for (let n = 0; n < before.length; n++) {
+    const ch = before[n]!;
+    if (comment) { if (ch === '*' && before[n + 1] === '/') { comment = false; n++; } continue; }
+    if (quote) { if (ch === '\\') n++; else if (ch === quote) quote = ''; declaration += ch; continue; }
+    if (ch === '/' && before[n + 1] === '*') { comment = true; n++; continue; }
+    if (ch === '"' || ch === "'") quote = ch;
+    if (ch === '{') { braces++; parens = 0; declaration = ''; continue; }
+    if (ch === '}') { if (braces > 0) braces--; parens = 0; declaration = ''; continue; }
+    if (ch === ';') { parens = 0; declaration = ''; continue; }
+    if (ch === '(') parens++; else if (ch === ')' && parens > 0) parens--;
+    declaration += ch;
+  }
+  if (comment || quote || braces < 1 || !declaration.includes(':')) return undefined;
+  const unit = /^(?:%|[A-Za-z]{1,5})?/.exec(after)![0]!.toLowerCase();
+  if (unit ? !STYLE_VALUE_UNITS.has(unit) : parens === 0) return undefined;
+  const next = after.charAt(unit.length);
+  return next && !/[)\s,;}/]/.test(next) ? undefined : unit;
+}
+
+/**
+ * Replace each computed number in a `<style>` body with a `var()` of its own custom property, appending it
+ * to `values`. A body with a statement tag, an unclosed tag, or a property of this name is left as it is.
+ */
+export function styleValueIslands(body: string, values: StyleValue[]): string {
+  if (body.includes(STYLE_VALUE_VAR_PREFIX)) return body;
+  const islands: { open: number; close: number }[] = [];
+  for (let open = body.indexOf('<%'); open >= 0; ) {
+    const close = body.indexOf('%>', open + 2);
+    if (close < 0 || !body.startsWith('<%=', open)) return body;
+    islands.push({ open, close });
+    open = body.indexOf('<%', close + 2);
+  }
+  let out = '', before = '', at = 0;
+  for (const { open, close } of islands) {
+    const text = body.slice(at, open);
+    before += text;
+    out += text;
+    const expr = body.slice(open + 3, close).trim();
+    const unit = expr ? styleValueUnit(before, body.slice(close + 2)) : undefined;
+    before += 'x';
+    at = close + 2;
+    if (unit === undefined) { out += body.slice(open, close + 2); continue; }
+    const name = styleValueName(values.length);
+    values.push({ name, expr, unit });
+    out += `var(${name})`;
+    at += unit.length;
+  }
+  return out + body.slice(at);
+}
+
+/** The computed numbers in the `<style>` bodies of `raw`, in order; a snippet compiled from `raw` sets each one's custom property. */
+export function styleValues(raw: string): StyleValue[] {
+  const values: StyleValue[] = [];
+  for (const sheet of styleSheets(raw)) styleValueIslands(decodeXmlEntities(sheet), values);
+  return values;
+}
+
 /**
  * Title of the empty span a rendered snippet prints where a branch group of its `<style>` body ran; see {@link styleBodyBranches}.
  * `title` is the one attribute every snippet sanitizer, build and runtime, keeps on any element.
@@ -1562,10 +1649,11 @@ export function carriedStyleRules(raw: string, scope: string): ScopedStyle {
   const branches: { id: string; css: string }[] = [];
   const templateCss: string[] = [];
   const templateWhere: string[] = [];
+  const values: StyleValue[] = [];
   const walk = (node: DomNode) => {
     if (node.nodeType !== 1) return;
     if ((node.tagName || '').toLowerCase() === 'style') {
-      const decoded = decodeXmlEntities(node.textContent ?? '');
+      const decoded = styleValueIslands(decodeXmlEntities(node.textContent ?? ''), values);
       const plan = styleBodyBranches(decoded);
       if (plan) {
         sheets.push(plan.main);
