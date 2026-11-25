@@ -139,6 +139,21 @@ export function markupFlow(
     }
   };
   for (const s of assigns) carried(s.value);
+  // A text island `<%= value %>` prints its value whole, so a call that is the whole value is carried the same way.
+  const printed: { kind: Span; value: Expr }[] = [];
+  for (const s of stmts) {
+    if (s.kind !== 'expr' || s.expr.kind !== 'call') continue;
+    const callee = s.expr.callee;
+    if (callee.kind !== 'member' || callee.property !== 'add' || callee.object.kind !== 'name' || callee.object.name !== 'c2c_out') continue;
+    const arg = s.expr.args[0];
+    if (!arg || arg.kind !== 'map') continue;
+    const kind = arg.entries.find((entry) => entry.key.kind === 'string' && entry.key.value === 'k')?.value;
+    const value = arg.entries.find((entry) => entry.key.kind === 'string' && entry.key.value === 'v')?.value;
+    if (kind && kind.kind === 'string' && kind.value === 'T' && value) {
+      carried(value);
+      printed.push({ kind: kind.span, value });
+    }
+  }
   const used = new Set<string>();
   const stray = new Set<string>();
   for (const call of calls(body)) {
@@ -148,16 +163,6 @@ export function markupFlow(
     (direct.has(call) ? used : stray).add(key);
   }
   const functions = new Set([...used].sort().filter((key) => !stray.has(key)));
-  const prints: Span[] = [];
-  for (const s of stmts) {
-    if (s.kind !== 'expr' || s.expr.kind !== 'call') continue;
-    const callee = s.expr.callee;
-    if (callee.kind !== 'member' || callee.property !== 'add' || callee.object.kind !== 'name' || callee.object.name !== 'c2c_out') continue;
-    const arg = s.expr.args[0];
-    if (!arg || arg.kind !== 'map') continue;
-    const kind = arg.entries.find((entry) => entry.key.kind === 'string' && entry.key.value === 'k')?.value;
-    const value = arg.entries.find((entry) => entry.key.kind === 'string' && entry.key.value === 'v')?.value;
-    if (kind && kind.kind === 'string' && kind.value === 'T' && value && markup(value)) prints.push(kind.span);
-  }
+  const prints = printed.filter((item) => markup(item.value)).map((item) => item.kind);
   return { functions, prints };
 }
