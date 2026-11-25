@@ -2658,6 +2658,14 @@ function firstArgument(code: string, at: number): string | null {
  * (`x.get(0).put(…)`) past such a local stays refused: the receiver there is
  * never a plain identifier, so it fails the check below regardless.
  */
+/**
+ * `shim.datastore.column(...)` maps the matched rows into a new top-level
+ * array of field values, so a local bound to it is as fresh as a literal for
+ * the top-level writes `removeAll`/`add`/`remove` make. It is not accepted for
+ * a parameter rebind (see freshParamRebind), where a copy is required.
+ */
+const FRESH_COLUMN_CALL = '(?:await\\s+)?shim\\.datastore\\.column\\s*\\(';
+
 const FRESH_COPY_CALL = '(?:await\\s+)?shim\\.list\\.(?:subList|duplicate)\\s*\\(';
 
 /**
@@ -2675,7 +2683,7 @@ export function mutatesOnlyFreshLocals(code: string, mutableParams: readonly str
   const plain = code.replace(/^\s*\/\/.*$/gm, '').replace(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, '""');
   const count = (re: string): number => plain.match(new RegExp(re, 'g'))?.length ?? 0;
   const freshBind = (esc: string): number =>
-    count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*(?:[\\[{]|${FRESH_COPY_CALL})`);
+    count(`(?:^|[^\\w$.])(?:var|let|const)\\s+${esc}\\s*=\\s*(?:[\\[{]|${FRESH_COPY_CALL}|${FRESH_COLUMN_CALL})`);
   // A mutableParam is never declared with var/let/const, so its one allowed
   // rebind has no such prefix; unlike an ordinary local's fresh binding, a
   // `[`/`{` literal there is refused (see the comment below), so only
