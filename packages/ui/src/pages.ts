@@ -1531,13 +1531,20 @@ function scanExpressionIslands(raw: string, visit: (inner: string, at: number) =
     open.lastIndex = i;
     const opened = open.exec(raw);
     if (!opened) return out + raw.slice(i);
-    const bodyStart = opened.index + opened[0].length;
-    close.lastIndex = bodyStart;
+    close.lastIndex = opened.index + opened[0].length;
     const closed = close.exec(raw);
     if (!closed) return out + raw.slice(i);
+    // An opener inside the span is the island that closes here: the earlier opener is plain text.
+    let island = opened;
+    for (;;) {
+      open.lastIndex = island.index + island[0].length;
+      const inner = open.exec(raw);
+      if (!inner || inner.index >= closed.index) break;
+      island = inner;
+    }
     const end = closed.index + closed[0].length;
-    const replaced = visit(raw.slice(bodyStart, closed.index), opened.index);
-    out += raw.slice(i, opened.index) + (replaced ?? raw.slice(opened.index, end));
+    const replaced = visit(raw.slice(island.index + island[0].length, closed.index), island.index);
+    out += raw.slice(i, island.index) + (replaced ?? raw.slice(island.index, end));
     i = end;
   }
 }
