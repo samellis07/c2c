@@ -4222,3 +4222,110 @@ test('a parameterised component embed of a caller with no record renders an empt
     live.restore();
   }
 });
+
+test('an expression island under a tag the sanitizer unwraps renders its escaped value in place', async () => {
+  const hostile = '<script>globalThis.__hit=1</script><img src=x onerror=1>&"\'';
+  for (const tag of ['center', 'time', 'section', 'label', 'nav', 'article']) {
+    const { files, model } = generateUi(
+      appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n<div><${tag} class="c">Hi <%= input.v %>!</${tag}></div>`)}`),
+    );
+    assert.deepEqual(model.todos, [], tag);
+    const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+    for (const [value, escaped] of [
+      ['Ada', 'Ada'],
+      [hostile, '&lt;script&gt;globalThis.__hit=1&lt;/script&gt;&lt;img src=x onerror=1&gt;&amp;&quot;&#39;'],
+    ]) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v: value } } });
+      assert.equal(out.status, 200, tag);
+      const html = String(out.body.html);
+      assert.ok(html.includes(`Hi ${escaped}!`), `${tag} ${html}`);
+      assert.ok(!/<script|<img/i.test(html), `${tag} ${html}`);
+      // The sanitizer unwraps the tag and keeps its text.
+      assert.ok(!html.includes(`<${tag}`), `${tag} ${html}`);
+    }
+  }
+});
+
+test('an island under a tag whose content the sanitizer removes stays a counted snippet', () => {
+  for (const wrapped of ['<svg><%= input.v %></svg>', '<iframe><%= input.v %></iframe>', '<title><%= input.v %></title>', '<math><%= input.v %></math>', '<noscript><%= input.v %></noscript>', '<center<%= input.v %>>x</center>', '<center class=<%= input.v %>>x</center>']) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${wrapped}`);
+    assert.equal(compiled.ok, false, wrapped);
+    assert.equal(compiled.reason, 'island in an unsafe position', wrapped);
+  }
+});
+
+const NUMBER_NOTE = 'a style island value was not a safe number and rendered empty';
+
+test('a numeric island in a CSS function argument renders a validated number', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<div style="background:rgb(<%= input.r %>,<%= input.r %>, <%= input.r %>);color:red" id="t">x</div>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({});
+  try {
+    for (const [value, rendered] of [
+      [216, '216'],
+      ['120', '120'],
+      [' 7 ', '7'],
+      ['0.5', '0.5'],
+      ['9999.999', '9999.999'],
+    ] as Array<[unknown, string]>) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { r: value } } });
+      assert.equal(out.status, 200, JSON.stringify(value));
+      const parsed = parsedStyle(String(out.body.html));
+      assert.equal(parsed.style, `background:rgb(${rendered},${rendered}, ${rendered});color:red`, JSON.stringify(value));
+      assert.deepEqual(out.body.notes, [], JSON.stringify(value));
+    }
+    for (const value of [
+      '1);background:url(//evil.test/x',
+      '1,2,3);background:url(data:text/html,x',
+      'red',
+      '-5',
+      '+5',
+      '1e3',
+      '12345',
+      '1.2345',
+      '0 0 0',
+      '1)',
+      'expression(1)',
+      'calc(1px)',
+      '0x10',
+      '"><img src=x onerror=1>',
+      '1\\',
+      '255}',
+    ]) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { r: value } } });
+      assert.equal(out.status, 200, JSON.stringify(value));
+      const html = String(out.body.html);
+      const parsed = parsedStyle(html);
+      assert.deepEqual(parsed.onAttrs, [], JSON.stringify(value));
+      assert.equal(parsed.style, 'background:rgb(,, );color:red', `${JSON.stringify(value)} ${html}`);
+      assert.deepEqual(out.body.notes, [NUMBER_NOTE, NUMBER_NOTE, NUMBER_NOTE], JSON.stringify(value));
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('an island that is not a whole number argument of a CSS function stays a counted snippet', () => {
+  for (const style of [
+    'background:rgb(1<%= input.r %>,2,3)',
+    'background:rgb(<%= input.r %>1,2,3)',
+    'background:rgb(<%= input.r %><%= input.r %>,2,3)',
+    'background:url(<%= input.r %>)',
+    'background:url(https://x.test/<%= input.r %>)',
+    'background:expression(<%= input.r %>)',
+    'background:image-set(<%= input.r %>)',
+    'background:var(--<%= input.r %>)',
+    'background:rgb(<%= input.r %>;color:red,2,3)',
+  ]) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n<div style="${style}">x</div>`);
+    assert.equal(compiled.ok, false, style);
+    assert.equal(compiled.reason, 'island in an unsafe position', style);
+  }
+  const statement = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', 'htmlpage hp1()\ncontent\n<div style="background:rgb(<% x = 1; %>,2,3)">x</div>');
+  assert.equal(statement.ok, false);
+});

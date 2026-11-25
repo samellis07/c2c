@@ -71,6 +71,14 @@ const C2C_CSS_WORDS = new Set(("auto none normal inherit initial unset revert so
 const C2C_CSS_VALUE =
   /^(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ex|ch|s|ms|deg|rad|grad|turn|fr|%)?|#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla)\(\s*[-+]?(?:\d+(?:\.\d+)?|\.\d+)%?\s*(?:,\s*[-+]?(?:\d+(?:\.\d+)?|\.\d+)%?\s*){2,3}\)|[A-Za-z][A-Za-z0-9-]*)(?:[\s,/]+(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ex|ch|s|ms|deg|rad|grad|turn|fr|%)?|#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla)\(\s*[-+]?(?:\d+(?:\.\d+)?|\.\d+)%?\s*(?:,\s*[-+]?(?:\d+(?:\.\d+)?|\.\d+)%?\s*){2,3}\)|[A-Za-z][A-Za-z0-9-]*))*$/i;
 
+// An island in a CSS function argument (rgb(<%=n%>,...)) renders one plain
+// number: digits with an optional short fraction, at most 9999.999. Signs,
+// exponents, units, words and every other character render empty.
+function c2cCssNumber(v) {
+  const text = String(v == null ? "" : v).trim();
+  return /^\d{1,4}(?:\.\d{1,3})?$/.test(text) ? text : "";
+}
+
 function c2cCss(v) {
   const text = String(v == null ? "" : v).trim();
   if (!text) return "";
@@ -220,7 +228,12 @@ async function render(ctx) {
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)));
-    else if (item.k === "C") {
+    else if (item.k === "Q") {
+      const piece = c2cStr(item.v);
+      const num = c2cCssNumber(piece);
+      if (!num && piece.trim()) c2c_notes.push("a style island value was not a safe number and rendered empty");
+      c2c_parts.push(num);
+    } else if (item.k === "C") {
       const piece = c2cStr(item.v);
       const css = c2cCss(piece);
       if (!css && piece.trim()) c2c_notes.push("a style island value was not a safe CSS value and rendered empty");
