@@ -886,7 +886,7 @@ function embeddedComponents(
     const hostile = attrKeys.some((key) => /^on/i.test(key)) || [...attrs.values()].sort().some(hostileUrlValue);
     const rawParams = attrs.get('params');
     // A token outside `params` is an island in another attribute: not an embed.
-    if (slots.length && [...attrs.entries()].some(([key, value]) => key !== 'params' && value.includes('\u0001'))) return null;
+    if (slots.length && attrKeys.some((key) => key !== 'params' && (attrs.get(key) ?? '').includes('\u0001'))) return null;
     const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own) : null;
     if (known && !hostile && params) {
       const keys = params.params.map((item) => item.key);
@@ -898,9 +898,9 @@ function embeddedComponents(
       if (!slots.length) return tag.replace(/>$/, ` data-zml="${marker}">`);
       // The tag is rebuilt from its parsed attributes: the island-carrying
       // `params` and the link attributes are replaced by the marker.
-      const kept = [...attrs.entries()]
-        .filter(([key]) => key !== 'params' && key !== 'elname' && !ZC_LINK.test(key))
-        .map(([key, value]) => ` ${key}="${value.replace(/"/g, '&quot;')}"`)
+      const kept = attrKeys
+        .filter((key) => key !== 'params' && key !== 'elname' && !ZC_LINK.test(key))
+        .map((key) => ` ${key}="${(attrs.get(key) ?? '').replace(/"/g, '&quot;')}"`)
         .join('');
       return `<div${kept} data-zml="${marker}">`;
     }
