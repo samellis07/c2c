@@ -47,6 +47,19 @@ test('declared parameters with literal and forwarded values become an include sp
   assert.deepEqual(folded.includes, ['Inner?dayVal=x']);
 });
 
+test('a Creator host written before the app address names this app, and any other host stays counted', () => {
+  for (const host of ['https://app.zohocreator.in', 'https://app.zohocreator.com', 'https://creator.zoho.eu', 'https://app.zohocreator.com.au']) {
+    const out = compileOuter(`${host}<%=zoho.appuri%>view-embed/Inner?dayVal=2024-01-05&&userMailID=<%=input.usermailid%>`);
+    assert.equal(out.ok, true, `${host}: ${out.reason ?? 'compile failed'}`);
+    assert.deepEqual(out.includes, ['Inner?dayVal=2024-01-05,userMailID=@usermailid'], host);
+    assert.doesNotMatch(out.file?.source ?? out.html ?? '', /zohocreator|creator\.zoho/, host);
+  }
+  for (const host of ['https://app.zohocreator.in.example.org', 'http://app.zohocreator.in', 'https://zohocreator.in', 'https://app.zohocreator.xx', 'https://example.org', 'https://evil.com/https://app.zohocreator.in']) {
+    const out = compileOuter(`${host}<%=zoho.appuri%>view-embed/Inner?dayVal=a`);
+    assert.ok(!out.ok || !(out.includes ?? []).length, `${host} must not become an include`);
+  }
+});
+
 test('attack: parameter injection stays counted', () => {
   const refused = [
     // A name the target page does not declare (could steer a filter it never exposed).
