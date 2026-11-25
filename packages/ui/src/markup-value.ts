@@ -15,7 +15,7 @@
  */
 
 /** Element tags a markup value keeps. */
-const MARKUP_TAGS = ['a', 'b', 'br', 'div', 'em', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'i', 'img', 'li', 'ol', 'p', 'small', 'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'u', 'ul'] as const;
+const MARKUP_TAGS = ['a', 'b', 'br', 'div', 'em', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'li', 'ol', 'p', 'small', 'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'u', 'ul'] as const;
 
 /** Style properties a markup value keeps; every value passes the endpoint's CSS value grammar. */
 const MARKUP_STYLE_PROPS = [
@@ -168,6 +168,7 @@ function c2cMarkup(value, notes, href) {
       if (attr === "class" && /^[A-Za-z0-9_ -]{1,200}$/.test(val)) html += ' class="' + val + '"';
       else if (attr === "style" && c2cMkStyle(val)) html += ' style="' + c2cEsc(c2cMkStyle(val)) + '"';
       else if (attr === "title" || (name === "img" && attr === "alt")) html += " " + attr + '="' + c2cEsc(val.slice(0, 200)) + '"';
+      else if (name === "font" && attr === "size" && /^[1-7]$/.test(val)) html += ' size="' + val + '"';
       else if (name === "img" && (attr === "width" || attr === "height") && /^[0-9]{1,4}%?$/.test(val)) html += " " + attr + '="' + val + '"';
       else if (name === "img" && attr === "src" && C2C_MK_IMAGE_SRC.test(val)) source = ' src="' + val + '"';
       else if (name === "font" && attr === "color" && c2cCss(val)) html += ' color="' + c2cEsc(c2cCss(val)) + '"';
@@ -187,7 +188,7 @@ function c2cMarkup(value, notes, href) {
       html += source;
     }
     out.push(html + ">");
-    if (name !== "br" && name !== "img") open.push(name);
+    if (name !== "br" && name !== "hr" && name !== "img") open.push(name);
   }
   while (open.length) out.push("</" + open.pop() + ">");
   return out.join("");
