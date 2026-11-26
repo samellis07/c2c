@@ -238,6 +238,16 @@ export interface DoctorStamp {
   c2c?: string;
 }
 
+/** doctor.json is hand-editable: every stored string copied into a report goes through singleLine. */
+const stampText = (value: string): string => (typeof value === 'string' ? singleLine(value) : value);
+function stampScope(scope: { dc?: string; org?: string; project?: string }): NonNullable<DoctorStamp['scope']> {
+  return {
+    ...(scope.dc !== undefined ? { dc: stampText(scope.dc) } : {}),
+    ...(scope.org !== undefined ? { org: stampText(scope.org) } : {}),
+    ...(scope.project !== undefined ? { project: stampText(scope.project) } : {}),
+  };
+}
+
 /**
  * The stamp: green only when the gate would pass, and it always carries the
  * file's `at`, scope and c2c version so a report shows which doctor it quotes.
@@ -255,17 +265,17 @@ export function doctorStamp(input: { workspace: string; version?: string; now?: 
     const scope = file.scope ?? {};
     return {
       status: 'green',
-      at: file.at,
-      scope: { ...(scope.dc !== undefined ? { dc: scope.dc } : {}), ...(scope.org !== undefined ? { org: scope.org } : {}), ...(scope.project !== undefined ? { project: scope.project } : {}) },
-      c2c: file.c2c,
+      at: stampText(file.at),
+      scope: stampScope(scope),
+      c2c: stampText(file.c2c),
     };
   }
   if (verdict.status === 'not-run' || verdict.status === 'invalid') return { status: 'not-run' };
   const scope = file?.scope ?? {};
   return {
     status: 'red',
-    ...(file ? { at: file.at, c2c: file.c2c } : {}),
-    scope: { ...(scope.dc !== undefined ? { dc: scope.dc } : {}), ...(scope.org !== undefined ? { org: scope.org } : {}), ...(scope.project !== undefined ? { project: scope.project } : {}) },
+    ...(file ? { at: stampText(file.at), c2c: stampText(file.c2c) } : {}),
+    scope: stampScope(scope),
   };
 }
 
