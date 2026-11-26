@@ -672,6 +672,60 @@ function varcharLengthBudget(tables: SchemaTable[], source?: readonly SourceTabl
   };
 }
 
+/** Rows the generated aggregate op reads before it stops (AGGREGATE_ROW_CAP in packages/ui/src/generate.ts). */
+const AGGREGATE_ROW_CAP = LIMITS.zcqlRowsPerQuery * 10;
+const NO_PRICE = 'no Catalyst price is recorded in the repo, so no cost is estimated';
+
+/**
+ * Runtime-calls estimate, printed before deploy: for every measured Data Store
+ * table, the Data Store reads one full list walk and one aggregate make
+ * (one ZCQL page of zcqlRowsPerQuery rows per call; aggregate stops at
+ * AGGREGATE_ROW_CAP rows). Aggregate lookup display/scope resolution reads
+ * are included too: one bounded page walk per lookup column, using the same
+ * 300-id/ZCQL page chunking as the generated handler.
+ * Only documented limits are used: the repo records no price and no per-call
+ * latency, so cost and time stay unknown. Warns when an aggregate would be
+ * truncated. Without --source-* counts it says unknown.
+ */
+function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTableData[]): PlanBudget {
+  const timeout = `function.timeout_seconds ${limitValue('function.timeout_seconds')}s, unverified`;
+  if (!source) {
+    return {
+      id: 'runtime-calls',
+      status: 'pass',
+      detail: `unknown: no source row counts, so list and aggregate page requests are not estimated; ${NO_PRICE}; per-request cap ${timeout}`,
+      fix: 're-run c2c plan with --source-backup, --source-csv or --source-json to estimate runtime list and aggregate calls per table',
+    };
+  }
+  const { rowsOf } = moverSourceModel(tables, source);
+  const page = LIMITS.zcqlRowsPerQuery;
+  const parts: string[] = [];
+  const truncated: string[] = [];
+  for (const table of tables) {
+    if (table.nosql || table.role === 'system') continue;
+    const rows = rowsOf(table);
+    if (rows === undefined || rows === 0) continue;
+    const pages = Math.ceil(rows / page);
+    const scanned = Math.min(pages, Math.ceil(AGGREGATE_ROW_CAP / page));
+    const lookups = table.columns.filter((column) => column.relation).length;
+    const lookupReads = lookups * scanned;
+    const aggregateCalls = scanned + lookupReads;
+    parts.push(`${table.name} ${pages} list page request${pages === 1 ? '' : 's'} (${rows} rows), aggregate reads ${scanned} page${scanned === 1 ? '' : 's'} + ${lookupReads} lookup-resolution read${lookupReads === 1 ? '' : 's'} = ${aggregateCalls} aggregate call${aggregateCalls === 1 ? '' : 's'} (same ${page}-row/${page}-id chunk cap)`);
+    if (rows > AGGREGATE_ROW_CAP) truncated.push(table.name);
+  }
+  const body = parts.length ? parts.join('; ') : 'no measured rows';
+  const base = `${body}; each page is one Data Store call of up to ${page} rows; ${NO_PRICE}; per-request cap ${timeout}, latency per call unknown`;
+  if (truncated.length) {
+    return {
+      id: 'runtime-calls',
+      status: 'warn',
+      detail: `${base}; aggregate stops at ${AGGREGATE_ROW_CAP} rows for ${truncated.join(', ')} and marks the result truncated`,
+      fix: 'page the report or filter before aggregating; raise AGGREGATE_ROW_CAP only after measuring the request against the time cap',
+    };
+  }
+  return { id: 'runtime-calls', status: 'pass', detail: base };
+}
+
 export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]): { budgets: PlanBudget[]; ok: boolean } {
   const budgets: PlanBudget[] = [];
   for (const table of tables) {

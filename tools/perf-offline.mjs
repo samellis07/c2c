@@ -78,10 +78,12 @@ for (const { name, run, estimate, calls } of runs) {
   }
   md.push('', `### Seed warnings (${run.warnings.length})`, '');
   for (const w of run.warnings) md.push(`- ${w}`);
-  md.push('', '### Reports (offline ms)', '', '| Report | Rows | First page p95 | Paged load p50 / p95 | Search broad p95 | Search selective p95 | Search none p95 | Max store calls |', '|---|---|---|---|---|---|---|---|');
+  md.push('', '### Reports (offline ms; cold = first request, warm = repeated samples)', '', '| Report | Rows | Cold first-page p95 | Warm paged-load p50 / p95 | Warm search broad p95 | Warm search selective p95 | Warm search none p95 | Warm sort p50 / p95 | Warm filter p50 / p95 | Warm aggregate p50 / p95 | Warm detail p50 / p95 | Max store calls |', '|---|---|---|---|---|---|---|---|---|---|---|---|');
+  const p95 = (t) => (t && t.n >= 20 ? t.p95Ms : t ? `n=${t.n}, not a p95` : 'n/a');
+  const pp = (t) => (t ? `${t.p50Ms} / ${p95(t)}` : 'n/a');
   for (const r of run.reports) {
     const callsMax = Math.max(r.pagedLoad.maxStoreCalls, r.searchBroad.maxStoreCalls, r.searchSelective.maxStoreCalls, r.searchNone.maxStoreCalls);
-    md.push(`| ${r.report} | ${r.rows} | ${r.firstPage.p95Ms} | ${r.pagedLoad.p50Ms} / ${r.pagedLoad.p95Ms} | ${r.searchBroad.p95Ms} | ${r.searchSelective.p95Ms} | ${r.searchNone.p95Ms} | ${callsMax} |`);
+    md.push(`| ${r.report} | ${r.rows} | ${p95(r.firstPage)} | ${r.pagedLoad.p50Ms} / ${p95(r.pagedLoad)} | ${p95(r.searchBroad)} | ${p95(r.searchSelective)} | ${p95(r.searchNone)} | ${pp(r.sort)} | ${pp(r.filter)} | ${pp(r.aggregate)} | ${pp(r.detail)} | ${callsMax} |`);
   }
   md.push('', '### Function timeout risk', '', '| Report | Probe | Store calls | Status |', '|---|---|---|---|');
   for (const t of run.timeoutRisk) md.push(`| ${t.report} | ${t.probe} | ${t.storeCalls} | ${t.status} |`);
