@@ -549,6 +549,98 @@ function composeDisplay(row, terms, parts, readable) {
 }
 
 /**
+ * The display text a lookup column shows in place of the stored parent ROWID,
+ * shared by the report read and a report's record detail. Needs
+ * `parentParts`, readScoped, composeDisplay and lookupDisplayScope in scope.
+ */
+function lookupDisplaysSource(): string {
+  return `// A lookup column stores the parent ROWID (a multi lookup a list of them); the
+// report shows the parent display value instead. ROWID IN queries per lookup
+// column (chunked at ZCQL's row cap), through the same authorizeRead scope as the lookup endpoint: the
+// caller's record filter is ANDed into the parent query and the display field
+// must be readable. A display format over several fields is composed from the
+// parent row, and every field it reads must be readable too. A parent the
+// caller cannot read, a hidden parent form or display field, or a field
+// allowlist without the display shows an empty cell: neither the hidden value
+// nor the ROWID reaches the report.
+async function resolveLookupDisplays(datastore, rows, columns, principal) {
+  // A composite display field (name, address) reads as an object; the cell
+  // text joins its non-empty scalar parts with a space.
+  const displayText = (value) => {
+    if (value == null) return "";
+    if (typeof value !== "object") return String(value);
+    const parts = [];
+    for (const key of Object.keys(value)) {
+      const part = value[key];
+      if (part == null || part === "" || typeof part === "object") continue;
+      parts.push(String(part));
+    }
+    return parts.join(" ");
+  };
+  const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
+  // A subcolumn's source is the parent lookup's cell, and the parent's display
+  // write replaces the ROWID there. Snapshot every source cell before the first
+  // write so each column resolves against the original ids.
+  const originals = (Array.isArray(rows) ? rows : []).map((row) => {
+    const snap = {};
+    for (const column of columns || []) {
+      const key = column && typeof column.column === "string" ? column.source || column.column : null;
+      if (key && !Object.prototype.hasOwnProperty.call(snap, key)) {
+        snap[key] = row && typeof row === "object" ? row[key] : undefined;
+      }
+    }
+    return snap;
+  });
+  for (const column of columns || []) {
+    if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
+    const source = column.source || column.column;
+    const seen = {};
+    const ids = [];
+    for (const snap of originals) {
+      const value = snap[source];
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (!isId(item) || seen[item]) continue;
+        seen[item] = true;
+        ids.push(item);
+      }
+    }
+    if (!ids.length) continue;
+    const display = column.field;
+    const terms = Array.isArray(column.format) ? column.format : null;
+    const parts = Object.prototype.hasOwnProperty.call(parentParts, column.form) ? parentParts[column.form] : {};
+    const names = {};
+    const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
+    let parents = [];
+    if (scoped) {
+      // One read returns at most ZCQL's row cap, so read the ids in chunks.
+      const chunk = ${LIMITS.zcqlRowsPerQuery};
+      try {
+        for (let at = 0; at < ids.length; at += chunk) {
+          const part = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids.slice(at, at + chunk) });
+          parents = parents.concat(await readScoped(datastore, column.form, part.criteria, 0, chunk));
+        }
+      } catch (err) {
+        parents = [];
+      }
+    }
+    for (const parent of Array.isArray(parents) ? parents : []) {
+      if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
+      const text = terms ? composeDisplay(parent, terms, parts, scoped.fields) : displayText(parent[display]);
+      names[String(parent.ROWID)] = text === undefined ? "" : text;
+    }
+    const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
+    for (let index = 0; index < originals.length; index += 1) {
+      const row = rows[index];
+      const value = originals[index][source];
+      if (Array.isArray(value)) row[column.column] = value.map((item) => (isId(item) ? shown(item) : item));
+      else if (isId(value)) row[column.column] = shown(value);
+    }
+  }
+}
+`;
+}
+
+/**
  * The criteria resolution every scoped read of a report-gated view needs:
  * readableField, lookupDisplayScope, neverRows/alwaysRows and the lookup-path
  * resolver (record query values plus `Field.Column` parent rewrites). Needs
@@ -2625,90 +2717,7 @@ ${aggregateHelpers}
 ${scopedReadSource()}
 ${composeDisplaySource()}
 ${lookupCriteriaSource()}
-${filtersByDisplay ? lookupDisplayFilterSource() : ''}// A lookup column stores the parent ROWID (a multi lookup a list of them); the
-// report shows the parent display value instead. ROWID IN queries per lookup
-// column (chunked at ZCQL's row cap), through the same authorizeRead scope as the lookup endpoint: the
-// caller's record filter is ANDed into the parent query and the display field
-// must be readable. A display format over several fields is composed from the
-// parent row, and every field it reads must be readable too. A parent the
-// caller cannot read, a hidden parent form or display field, or a field
-// allowlist without the display shows an empty cell: neither the hidden value
-// nor the ROWID reaches the report.
-async function resolveLookupDisplays(datastore, rows, columns, principal) {
-  // A composite display field (name, address) reads as an object; the cell
-  // text joins its non-empty scalar parts with a space.
-  const displayText = (value) => {
-    if (value == null) return "";
-    if (typeof value !== "object") return String(value);
-    const parts = [];
-    for (const key of Object.keys(value)) {
-      const part = value[key];
-      if (part == null || part === "" || typeof part === "object") continue;
-      parts.push(String(part));
-    }
-    return parts.join(" ");
-  };
-  const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
-  // A subcolumn's source is the parent lookup's cell, and the parent's display
-  // write replaces the ROWID there. Snapshot every source cell before the first
-  // write so each column resolves against the original ids.
-  const originals = (Array.isArray(rows) ? rows : []).map((row) => {
-    const snap = {};
-    for (const column of columns || []) {
-      const key = column && typeof column.column === "string" ? column.source || column.column : null;
-      if (key && !Object.prototype.hasOwnProperty.call(snap, key)) {
-        snap[key] = row && typeof row === "object" ? row[key] : undefined;
-      }
-    }
-    return snap;
-  });
-  for (const column of columns || []) {
-    if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
-    const source = column.source || column.column;
-    const seen = {};
-    const ids = [];
-    for (const snap of originals) {
-      const value = snap[source];
-      for (const item of Array.isArray(value) ? value : [value]) {
-        if (!isId(item) || seen[item]) continue;
-        seen[item] = true;
-        ids.push(item);
-      }
-    }
-    if (!ids.length) continue;
-    const display = column.field;
-    const terms = Array.isArray(column.format) ? column.format : null;
-    const parts = Object.prototype.hasOwnProperty.call(parentParts, column.form) ? parentParts[column.form] : {};
-    const names = {};
-    const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
-    let parents = [];
-    if (scoped) {
-      // One read returns at most ZCQL's row cap, so read the ids in chunks.
-      const chunk = ${LIMITS.zcqlRowsPerQuery};
-      try {
-        for (let at = 0; at < ids.length; at += chunk) {
-          const part = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids.slice(at, at + chunk) });
-          parents = parents.concat(await readScoped(datastore, column.form, part.criteria, 0, chunk));
-        }
-      } catch (err) {
-        parents = [];
-      }
-    }
-    for (const parent of Array.isArray(parents) ? parents : []) {
-      if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
-      const text = terms ? composeDisplay(parent, terms, parts, scoped.fields) : displayText(parent[display]);
-      names[String(parent.ROWID)] = text === undefined ? "" : text;
-    }
-    const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
-    for (let index = 0; index < originals.length; index += 1) {
-      const row = rows[index];
-      const value = originals[index][source];
-      if (Array.isArray(value)) row[column.column] = value.map((item) => (isId(item) ? shown(item) : item));
-      else if (isId(value)) row[column.column] = shown(value);
-    }
-  }
-}
-
+${filtersByDisplay ? lookupDisplayFilterSource() : ''}${lookupDisplaysSource()}
 // An aggregate groups (or measures) a lookup field by its stored parent ROWID.
 // A parent row the caller cannot read (recordFilter, owner scope, hidden form)
 // must not surface its ROWID as a bucket key or measure value: blank it, the
@@ -3710,7 +3719,7 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
   // record reply must carry: each relatedField reads as the parent rows array,
   // each `F.X` as the joined parent values. The block fields of the record's
   // own form join the projected field list.
-  const detailByReport = new Map<string, { own: string[]; reads: { field: string; form: string; rows?: string[]; dots?: string[] }[] }>();
+  const detailByReport = new Map<string, { own: string[]; lookups: { column: string; form: string; field: string; format?: DisplayTerm[] }[]; reads: { field: string; form: string; rows?: string[]; dots?: string[] }[] }>();
   for (const report of app.reports.filter((item) => item.form === form.name)) {
     const views = report.views.filter((view) => view.kind === 'detailview');
     const view = views.find((item) => item.device === 'web') ?? views.find((item) => !item.device) ?? views[0];
@@ -3729,7 +3738,9 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
     };
     for (const block of view.blocks) {
       if (block.relatedField) {
-        const entry = readFor(block.relatedField.split('.')[0]!);
+        const head = block.relatedField.split('.')[0]!;
+        if (subformFields.has(head)) own.push(head);
+        const entry = readFor(head);
         if (entry) for (const field of block.fields) if (field.field) entry.rows.add(field.field);
         continue;
       }
@@ -3744,13 +3755,25 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
         if (entry) entry.dots.add(field.field.slice(dot + 1));
       }
     }
+    // An own lookup field of the detail reads as its parent's display text,
+    // never the stored ROWID (the same text the report list shows).
+    const formFields = app.forms.find((item) => item.name === form.name)?.fields ?? [];
+    const shownLookups = [...new Set([...own, ...report.columns.map((column) => column.field)])]
+      .filter((name) => !name.includes('.') && !reads.has(name) && !subformFields.has(name))
+      .sort(compareEnUs)
+      .flatMap((name) => {
+        const target = formFields.find((item) => item.name === name)?.lookup;
+        if (!target?.form) return [];
+        const choice = displayChoice(target);
+        return [{ column: name, form: target.form, field: choice.field, ...(choice.displayFormat ? { format: choice.displayFormat } : {}) }];
+      });
     const list = [...reads.entries()].sort(([a], [b]) => compareEnUs(a, b)).map(([field, entry]) => ({
       field,
       form: entry.form,
       ...(entry.rows.size ? { rows: [...entry.rows].sort() } : {}),
       ...(entry.dots.size ? { dots: [...entry.dots].sort() } : {}),
     }));
-    detailByReport.set(report.name, { own, reads: list });
+    detailByReport.set(report.name, { own, lookups: shownLookups, reads: list });
   }
   const anyReads = [...detailByReport.values()].some((detail) => detail.reads.length > 0); // determinism-allow: .some() short-circuits on the first match regardless of iteration order
   const shimNames = ['bindRelativeCriteria', 'criteriaHasRelative', 'criteriaHasTodo', 'matchRow', ...(anyReads ? ['fetchBound'] : []), ...(subformLinks.length ? ['attachSubforms'] : [])];
@@ -3800,13 +3823,13 @@ function boundCriteria(criteria) {
     ).map((profile) => profile.name);
     const detail = detailByReport.get(report.name);
     const fields = [...new Set([...report.columns.map((column) => column.field), ...(detail?.own ?? []), ...(detail?.reads ?? []).map((read) => read.field)])].sort();
-    return [[report.name, { criteria: scopeCriteria, fields, profiles, ...(detail?.reads.length ? { reads: detail.reads } : {}) }]];
+    return [[report.name, { criteria: scopeCriteria, fields, profiles, ...(detail?.reads.length ? { reads: detail.reads } : {}), ...(detail?.lookups.length ? { lookups: detail.lookups } : {}) }]];
   }));
   // A report scope whose criteria has a lookup-path leaf or a dependent record
   // query needs the served resolver (the same one report stubs emit) before
   // compileCriteria: `Account.Status` is not a column on this table.
   // determinism-allow: .some() only yields a boolean; scope order never reaches generated bytes
-  const needsResolve = Object.values(reportScopes).some((scope) => criteriaNeedsResolve(scope.criteria));
+  const needsResolve = Object.values(reportScopes).some((scope) => criteriaNeedsResolve(scope.criteria) || (('lookups' in scope && scope.lookups?.length) || 0) > 0);
   const parents = needsResolve ? allLookupParents : {};
   // determinism-allow: the deduplicated parent forms are sorted on the same line
   const parentForms = [...new Set(Object.values(parents))].sort();
@@ -3816,8 +3839,9 @@ function boundCriteria(criteria) {
   const resolveConst = needsResolve
     ? `/** Parent form of each lookup field on this form; a report-scope leaf on a lookup display path resolves against it. */\nconst lookupParents = ${JSON.stringify(parents)};\n/** Stored column of each field kept under another name because its own name is reserved. */\nconst columnRenames = ${JSON.stringify(columnRenamesOf(schemaOf(app))[form.name] ?? {})};\n/** Stored part column of each lookup parent's composite parts. */\nconst parentParts = ${JSON.stringify(compositePartsOfParents(app, parents, schemaOf(app)))};\nconst parentDecimals = ${JSON.stringify(parentDecimals)};\n/** Lookup field map of every form: a record-query \`Form[..].Lookup.ID\` path resolves only through a lookup hop. */\nconst lookupParentsByForm = ${JSON.stringify(lookupParentsByFormOf(app))};\n`
     : '';
+  const anyDisplay = Object.values(reportScopes).some((scope) => (('lookups' in scope && scope.lookups?.length) || 0) > 0); // determinism-allow: .some() only yields a boolean
   const resolveSource = needsResolve
-    ? `\n// ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.\nfunction zcqlPredicate(where) {\n  const text = typeof where === "string" ? where.trim() : "";\n  return text === "true" ? "" : text;\n}\n\n${scopedReadSource()}\n${lookupCriteriaSource()}`
+    ? `\n// ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.\nfunction zcqlPredicate(where) {\n  const text = typeof where === "string" ? where.trim() : "";\n  return text === "true" ? "" : text;\n}\n\n${scopedReadSource()}\n${anyDisplay ? composeDisplaySource() : ''}${lookupCriteriaSource()}${anyDisplay ? `\n${lookupDisplaysSource()}` : ''}`
     : '';
   const queryName = subformLinks.length ? 'queried' : 'rows';
   const attachRows = subformLinks.length ? `if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried, {
@@ -3960,7 +3984,7 @@ ${requirePrincipal()}
       send(res, 404, { dryRun: false, error: "no such row" });
       return;
     }
-${relatedSource}    for (const [field, declared] of Object.entries(${childFields})) {
+${relatedSource}${anyDisplay ? `    if (reportScope && Array.isArray(reportScope.lookups)) await resolveLookupDisplays(datastore, [row], reportScope.lookups.filter((column) => Object.hasOwn(row, column.column)), principal);\n` : ''}    for (const [field, declared] of Object.entries(${childFields})) {
       const grant = access.profiles && access.profiles[principal.profile] && access.profiles[principal.profile][formName];
       const nestedGrant = Array.isArray(grant && grant.fields) ? grant.fields.filter((name) => name.startsWith(field + ".")) : [];
       const allowed = nestedGrant.length ? declared.filter((name) => nestedGrant.includes(field + "." + name)) : declared;
