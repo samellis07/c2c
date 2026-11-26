@@ -4378,10 +4378,16 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           // Creator's built-in namespaces (thisapp.permissions.assignUserInProfile,
           // thisapp.portal.*) manage Creator users and portals; they are not app
           // functions, and Catalyst users and roles are managed in Authentication.
-          const builtin = path.length > 1 && THISAPP_BUILTINS.has(path[0]!.toLowerCase());
-          const error = builtin
-            ? `thisapp.${name}: Creator built-in not run by c2c; manage the user's role in Catalyst Authentication`
-            : `thisapp.${name}: no such function`;
+          // The call is a recorded manual step, never a silent drop and never a
+          // failure: it answers null so the rest of the script (an on-success
+          // after the row is saved) still runs, as it does in Creator.
+          if (path.length > 1 && THISAPP_BUILTINS.has(path[0]!.toLowerCase())) {
+            const manualStep = `thisapp.${name}: Creator built-in not run by c2c; manage the user's role in Catalyst Authentication`;
+            note({ op: 'thisapp', path, args, performed: false, dryRun, manualStep });
+            if (!dryRun) console.error(JSON.stringify({ level: 'warn', component: 'c2c-thisapp', event: 'builtin-not-run', call: `thisapp.${name}` }));
+            return null;
+          }
+          const error = `thisapp.${name}: no such function`;
           note({ op: 'thisapp', path, args, performed: false, dryRun, error });
           throw new DelugeRuntimeError(error);
         }
