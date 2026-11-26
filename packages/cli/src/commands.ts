@@ -1,7 +1,7 @@
 /** Commands handled by c2c.ts. Help snapshots use this table as their coverage source. */
 export const DISPATCH_COMMANDS = [
   'doctor', 'deploy', 'edit', 'plan', 'provision', 'users', 'smoke', 'sync-delta',
-  'rollback-export', 'verify', 'verify-behavior', 'status', 'support-bundle', 'cutover-checklist', 'proof', 'fill-todos', 'fetch-assets',
+  'rollback-export', 'upgrade', 'verify', 'verify-behavior', 'status', 'support-bundle', 'cutover-checklist', 'proof', 'fill-todos', 'fetch-assets',
   'migrate-data', 'analyze', 'precheck', 'report', 'migration-report', 'parse', 'corpus',
   'features', 'schema', 'iac-drift', 'schema-corpus', 'seed', 'deluge', 'ui',
   'score-ui', 'ui-react', 'auth', 'ui-corpus', '--verify-vendor', '--version', '-V',

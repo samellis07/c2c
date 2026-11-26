@@ -129,6 +129,8 @@
  *                                   and phone, out of 10 (packages/ui-score/rubric.json). --ui reads what
  *                                   `c2c ui --out <dir>` wrote; without it the bundle is built in memory.
  *                                   Renders offline in jsdom (a dev dependency). Exit 0 both >= 8, 1 below, 2 usage.
+ *   c2c upgrade <file|dir> [--plan <plan-dir>] [--ui <react-dir>] [--apply] [--force] [--allow-destructive --backup <dir>] [--json] [--out <file>]
+ *                                   Compare a generated plan folder / React app with this version's output; --apply writes it.
  *   c2c ui-react <file|dir> --out <dir> [--api-base <url>] [--no-auth] [--upgrade-platform] [--force]
  *                                   React + Vite app for Slate (docs/react-target.md). Into an existing app it
  *                                   rewrites src/generated only and keeps src/custom; stops on a hand-edited generated file
@@ -199,6 +201,7 @@ import { DISPATCH_COMMANDS } from './commands.js';
 
 import { CLI_EXIT, PRECHECK_EXIT } from './exit-codes.js';
 import { supportBundleCli } from './support-bundle.js';
+import { upgradeCli } from './upgrade.js';
 import { analyzeQuality, qualityAsText } from './analyze-quality.js';
 import { migrationReportAsJson, migrationReportAsText, migrationReportForDir } from './migration-report.js';
 import { businessReportCli } from './business-report.js';
@@ -236,6 +239,8 @@ const USAGE =
       '       c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>] [--previous <deployed.ds> [--rename Form.Old=New]...]\n' +
       '              (--previous refuses a rename, drop or alter today and changes nothing: those are plan-only; --allow-destructive and --backup are plan flags)\n' +
       '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
+      '       c2c upgrade <file|dir> [--plan <plan-dir>] [--ui <react-dir>] [--dc <dc>] [--config <c2c-deploy.json>] [--project <id>] [--mail] [--production] [--api-base <url>] [--no-auth] [--force] [--allow-destructive --backup <rollback-export dir>] [--apply] [--json] [--out <file>]\n' +
+      '              (offline: compares a generated plan folder or React app with this version\'s output and keeps data and customisations; writes only with --apply)\n' +
       '       c2c plan <file|dir> [--out <dir>] [--dc <dc>] [--mail] [--project <id>] [--production] [--allow-budget-fail] [--previous <deployed.ds> [--rename Form.Old=New]... [--allow-destructive --backup <rollback-export dir>]]\n' +
       '              (--previous writes schema-change/delta.md and refuses a rename, drop or alter unless --allow-destructive names a verified --backup)\n' +
       '       c2c provision [--out <dir>] [--status|--next|--confirm --run <id>|--record <id> [--result <file>] [--applied]]\n' +
@@ -594,6 +599,9 @@ function main(argv: string[]): number {
       },
     );
     return 0;
+  }
+  if (cmd === 'upgrade') {
+    return upgradeCli(restAll, { stdout: (text) => process.stdout.write(text), stderr: (text) => process.stderr.write(terminalSafe(text)) });
   }
   if (cmd === 'sync-delta' || cmd === 'rollback-export') {
     // --confirm writes to the live project, so it is gated like deploy and migrate-data.

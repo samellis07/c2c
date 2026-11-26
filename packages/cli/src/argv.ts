@@ -323,6 +323,25 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--source-json': 'value',
     },
   },
+  upgrade: {
+    positional: 'required',
+    flags: {
+      '--allow-destructive': 'bool',
+      '--apply': 'bool',
+      '--api-base': 'value',
+      '--backup': 'value',
+      '--dc': 'value',
+      '--force': 'bool',
+      '--json': 'bool',
+      '--mail': 'bool',
+      '--no-auth': 'bool',
+      '--out': 'value',
+      '--plan': 'value',
+      '--production': 'bool',
+      '--project': 'value',
+      '--ui': 'value',
+    },
+  },
   'rollback-export': {
     positional: 'none',
     flags: {

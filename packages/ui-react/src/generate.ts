@@ -604,6 +604,44 @@ export class HandEditedError extends Error {
   }
 }
 
+/** What `writeReactApp` would do with `files` in `out`, without touching the disk. */
+export interface WritePlan {
+  /** Files that do not exist in `out` yet. */
+  added: string[];
+  /** Files rewritten with different bytes (generated files, and platform files when `upgradePlatform`). */
+  replaced: string[];
+  /** Files already identical to the new output. */
+  unchanged: string[];
+  /** Existing custom files, and platform files without `upgradePlatform`: never overwritten. */
+  kept: string[];
+  /** Generated files the app no longer has. */
+  removed: string[];
+  /** Generated files whose bytes no longer match the recorded hash; a write stops on these unless `force`. */
+  edited: string[];
+}
+
+export function planReactWrite(out: string, files: readonly ReactFile[], opts: { upgradePlatform?: boolean } = {}): WritePlan {
+  const plan: WritePlan = { added: [], replaced: [], unchanged: [], kept: [], removed: [], edited: [] };
+  const manifestPath = join(out, GENERATED_MANIFEST);
+  const previous: Record<string, string> = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> }).files : {};
+  plan.edited = Object.entries(previous)
+    .filter(([path, hash]) => existsSync(join(out, path)) && sha256(readFileSync(join(out, path))) !== hash)
+    .map(([path]) => path)
+    .sort();
+  const next = new Set(files.map((f) => f.path));
+  plan.removed = Object.keys(previous)
+    .filter((path) => !next.has(path) && existsSync(join(out, path)))
+    .sort();
+  for (const file of files) {
+    const dest = join(out, file.path);
+    if (!existsSync(dest)) plan.added.push(file.path);
+    else if (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform)) plan.kept.push(file.path);
+    else if (Buffer.compare(readFileSync(dest), Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data)) === 0) plan.unchanged.push(file.path);
+    else plan.replaced.push(file.path);
+  }
+  return plan;
+}
+
 /**
  * Write the app into `out`. A first generation writes every file. Into an
  * existing app it rewrites the generated files only, removes generated files
