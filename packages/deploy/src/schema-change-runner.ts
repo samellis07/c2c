@@ -304,12 +304,16 @@ export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<
     // A field named only by its declaration and report columns first; else any
     // text field, renamed everywhere in the script code as Creator does.
     const text = textFields.find((f) => onlyBareReferences(ds, f.name, false));
-    // The same name in other forms is renamed with it (every declaration and reference), as Creator does.
-    const anyText = textFields[0] ?? form.fields.find((f) => RENAMEABLE_TYPES.has(type(f)) && !/[^A-Za-z0-9_]/.test(f.name) && held(form.name, f.name) !== undefined);
     const picklist = form.fields.find((f) => (closedChoices(f)?.length ?? 0) >= 2 && held(form.name, f.name) !== undefined);
     const deletable = [...form.fields]
       .reverse()
       .find((f) => f !== text && f !== picklist && SCALAR_TYPES.has(type(f)) && !f.required && !f.unique && unique(f) && held(form.name, f.name) !== undefined && onlyBareReferences(ds, f.name, true));
+    // The same name in other forms is renamed with it (every declaration and
+    // reference), as Creator does: only when each declaration is a plain
+    // text-like field (a composite of the same name is several columns).
+    const plain = (f: Field) => RENAMEABLE_TYPES.has(type(f)) && !f.subfields.length && !/[^A-Za-z0-9_]/.test(f.name);
+    const everywherePlain = (f: Field) => app.forms.every((o) => o.fields.every((g) => g.name !== f.name || plain(g)));
+    const anyText = textFields.find((f) => f !== deletable) ?? form.fields.find((f) => f !== deletable && plain(f) && everywherePlain(f) && held(form.name, f.name) !== undefined);
     const score = Number(!!text) + Number(!!picklist) + Number(!!deletable);
     if (!best || score > best.score) best = { form, text, anyText, picklist, deletable, score };
   }
@@ -821,7 +825,14 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
         if (!cond) ok = false;
       };
       const before = snapshot(harness.tables());
-      const nextText = change.apply(prevText);
+      let nextText: string;
+      try {
+        nextText = change.apply(prevText);
+      } catch (err) {
+        check(false, `the change could not be applied to the export: ${err instanceof Error ? err.message : String(err)}`);
+        scenarios.push({ id: change.id, title: change.title, kind: change.kind, status: 'FAIL', evidence, lost: [], rows: { before: counts(before), after: counts(before) } });
+        continue;
+      }
       const nextPath = join(dir, 'app.ds');
       writeFileSync(nextPath, nextText);
       const next = loadApp(nextPath);

@@ -12,11 +12,12 @@ import { fileURLToPath } from 'node:url';
 import { deployedModelPath, loadApp, recordDeployedModel, type Io } from '../src/cli.js';
 import { planCli } from '../src/offline-plan.js';
 import { applySchemaDelta, DeltaRefused, planDelta, reviewSchemaChange, type ModelPlan, type StoreDriver } from '../src/delta.js';
-import { deriveScenarios } from '../src/schema-change-runner.js';
+import { deriveScenarios, runSchemaChangeScenarios } from '../src/schema-change-runner.js';
 import type { SchemaColumn, SchemaPlan, SchemaTable } from '../../schema/src/generator.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const LIBRARY = join(root, 'fixtures/redistributable/library-application-system/library_application.ds');
+const SDK = join(root, 'tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs');
 
 function scratch(t: { after(fn: () => void): void }): string {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-schema-safety-'));
@@ -165,4 +166,11 @@ test('the deployed model is recorded beside the deploy and --previous accepts th
 test('a project folder target is not recorded: nothing is written', (t) => {
   const dir = scratch(t);
   assert.equal(recordDeployedModel(join(dir, 'deploy'), dir), undefined);
+});
+
+test('a change that cannot be applied to the export is a failed scenario, not a crash', async (t) => {
+  const broken = { id: 'add-field', title: 'broken', kind: 'additive' as const, apply: () => { throw new Error('schema change anchor not found: Book.Gone'); } };
+  const report = await runSchemaChangeScenarios({ ds: LIBRARY, workDir: scratch(t), sdkPath: SDK, changes: [broken] });
+  assert.equal(report.summary.fail, 1);
+  assert.match(report.scenarios[0]!.evidence[0]!, /^FAIL: the change could not be applied to the export: schema change anchor not found/);
 });
