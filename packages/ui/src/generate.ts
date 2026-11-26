@@ -498,8 +498,12 @@ async function readScoped(datastore, form, criteria, offset, limit, sort) {
 function sortOrderOf(sort) {
   return sort && typeof sort.orderBy === "string" && /^ORDER BY [A-Za-z_][A-Za-z0-9_]* (ASC|DESC), ROWID$/.test(sort.orderBy) ? sort.orderBy : "ORDER BY ROWID";
 }
+`;
+}
 
-// The scoped parent rows behind a set of lookup ids: one ROWID IN read per
+/** readParents: needs lookupDisplayScope (lookupCriteriaSource) and readScoped (scopedReadSource) in scope. */
+function readParentsSource(): string {
+  return `// The scoped parent rows behind a set of lookup ids: one ROWID IN read per
 // chunk of at most ZCQL's row cap, the same authorizeRead scope as a lookup
 // display. A request-scoped cache (form + display field) keeps each parent
 // read once, so columns that share a parent form, and the lookup path,
@@ -591,7 +595,8 @@ function composeDisplay(row, terms, parts, readable) {
  * `parentParts`, readScoped, composeDisplay and lookupDisplayScope in scope.
  */
 function lookupDisplaysSource(): string {
-  return `// A lookup column stores the parent ROWID (a multi lookup a list of them); the
+  return `${readParentsSource()}
+// A lookup column stores the parent ROWID (a multi lookup a list of them); the
 // report shows the parent display value instead. One ROWID IN query per lookup
 // column, through the same authorizeRead scope as the lookup endpoint: the
 // caller's record filter is ANDed into the parent query and the display field

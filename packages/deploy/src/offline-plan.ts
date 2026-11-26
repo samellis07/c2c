@@ -684,10 +684,13 @@ const NO_PRICE = 'no Catalyst price is recorded in the repo, so no cost is estim
  * AGGREGATE_ROW_CAP rows). Aggregate lookup display/scope resolution reads
  * are included too: the generated handler (packages/ui/src/generate.ts, op
  * "aggregate") reads only lookup columns used as the group or a measure. A
- * plain group + count has no lookup reads. A grouped/measured lookup adds one
- * read per distinct parent form per scanned page, multiplied by that form's
- * staged-read count; ids are chunked and displays cached per request. This is
- * a measured count, not an upper bound: dotted lookup paths may add reads.
+ * plain group + count has no lookup reads. The report's group-by lookup forms
+ * are counted as one staged parent read per distinct parent form per scanned
+ * page, which assumes a page of distinct parent ids: the runtime reads
+ * ceil(distinct ids / zcqlRowsPerQuery) once per request through the cache, so
+ * shared parents cost fewer calls. A lookup used as a measure or a group the
+ * client chooses is not in the report definition and is not counted, nor are
+ * dotted lookup paths: this is not an upper bound.
  * Only documented limits are used: the repo records no price and no per-call
  * latency, so cost and time stay unknown. Warns when an aggregate would be
  * truncated. Without --source-* counts it says unknown.
@@ -724,7 +727,7 @@ function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTable
     const stages = parentForms.reduce((sum, parent) => sum + stagesOf(tables.find((item) => item.name === parent)), 0);
     const own = stagesOf(table);
     const aggregateCalls = (own + stages) * scanned;
-    const formula = `(${own} + ${stages}${stages ? ` [${parentForms.length} grouped/measured lookup form${parentForms.length === 1 ? '' : 's'} of ${lookup.report}]` : ''}) x ${scanned}`;
+    const formula = `(${own} + ${stages}${stages ? ` [${parentForms.length} group-by lookup form${parentForms.length === 1 ? '' : 's'} of ${lookup.report}]` : ''}) x ${scanned}`;
     parts.push(`${table.name} ${pages} list page request${pages === 1 ? '' : 's'} (${rows} rows), aggregate calls = (row selects + lookup selects) x scanned pages = ${formula} = ${aggregateCalls} (${page}-row/${page}-id chunks)`);
     if (rows > AGGREGATE_ROW_CAP) truncated.push(table.name);
   }
