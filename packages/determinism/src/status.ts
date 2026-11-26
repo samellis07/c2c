@@ -134,7 +134,8 @@ const MAP_REPORT_PREFIX = 'Map report ';
 /** `Map report <report> is shown as a list because <form> has no address field to plot.` names two unquoted identifiers. */
 const MAP_AS_LIST = new RegExp(`^Map report (${NAME_TOKEN}) is shown as a list because (${NAME_TOKEN}) has no address field to plot\\.$`, 'u');
 
-const BOUNDARY = '[\\p{L}\\p{N}_-]';
+/** A token edge. The hyphen is not part of a token: `blueprint-stage-block-Name` holds the identifier `Name`. */
+const BOUNDARY = '[\\p{L}\\p{N}_]';
 
 /** A name equal to a public sentence word, a keyword or a catalogue builtin is left to the slot rules (see public-words.ts). */
 function collidesWithPublicWord(name: string): boolean {
@@ -163,7 +164,12 @@ const escapeRe = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * `${...}` slots of `packages/ui/src`; the status test re-derives them from model.ts and fails on a new one).
  */
 export const IDENTIFIER_INTRODUCERS = ['field', 'fields', 'report', 'form', 'filter', 'filters', 'for', 'of', 'column', 'because', 'neither', 'nor', 'page', 'on', 'from', 'by', 'under', '='];
-const INTRODUCED = `(?<=(?:^|\\s)(?:${IDENTIFIER_INTRODUCERS.map(escapeRe).join('|')})\\s)`;
+/**
+ * An identifier also stands in a list position after the first (`under A, B in`, `(a, B)`): after `, `. The first element of a
+ * list and a backticked block name are not treated as slots: the real gallery declares `css`, `template` and `customlayouts`,
+ * which are the template's own words there (`(CSS built by...)`, `settings block (template X)`), so the status doc would change.
+ */
+const INTRODUCED = `(?:(?<=(?:^|\\s)(?:${IDENTIFIER_INTRODUCERS.map(escapeRe).join('|')})\\s)|(?<=,\\s))`;
 
 /** Creator's own record columns (`Added_Location`, `Record_Status`): reserved, public, never a user's choice. */
 const isSystemColumn = (name: string) => name.includes('_') && PUBLIC_WORDS.has(name.toLowerCase());
@@ -206,9 +212,34 @@ function redactIdentifiers(text: string, identifiers: Iterable<string> | undefin
   }
   if (collidingLower.size) {
     const alternation = [...collidingLower].sort(byLength).map(escapeRe).join('|');
-    text = text.replace(new RegExp(`${INTRODUCED}(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'giu'), APP_ID);
+    text = text.replace(new RegExp(`${INTRODUCED}(?!app identifier\\))(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'giu'), APP_ID);
   }
   return text;
+}
+
+/** `blueprint-stage-block-<name>` / `blueprint-phase-property-<key>`: the suffix is a free-text slot behind a hyphen. */
+const BLUEPRINT_SUFFIX = /^(blueprint-[a-z]+-(?:block|property)-)([\s\S]+)$/u;
+/** The `(key = value, ...)` list of a report `options` setting or settings block sentence (model.ts). */
+const REPORT_SETTINGS = /(has an `options` setting|settings block) \(([^)]*)\)(?= that Catalyst)/u;
+const SETTING_KEY = /^[a-z][a-z ]*$/u;
+const PUBLIC_VALUE = /^(?:true|false|\d+(?:\.\d+)?)$/u;
+
+/**
+ * The setting NAME is public Creator vocabulary; the value is free text (a dangling `display field = Nowhere` is by
+ * definition no declared identifier), so every `key = value` keeps the key and buckets the value.
+ */
+function redactSettingValues(text: string): string {
+  return text.replace(REPORT_SETTINGS, (_whole, head: string, list: string) => {
+    const parts = list.split(/, (?=[^,=]+ = )/u).map((part) => {
+      const at = part.indexOf(' = ');
+      if (at < 0) return part;
+      const key = part.slice(0, at);
+      const value = part.slice(at + 3);
+      if (!SETTING_KEY.test(key)) return APP_ID;
+      return `${key} = ${PUBLIC_VALUE.test(value.trim()) ? value : APP_ID}`;
+    });
+    return `${head} (${parts.join(', ')})`;
+  });
 }
 
 /**
@@ -240,6 +271,14 @@ export function publicConstruct(construct: string, identifiers?: Iterable<string
     // \b is ASCII-only: use Unicode letter/digit lookarounds so `Ünï_Rep` and `9lives` match whole.
     text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'gu'), (match, offset: number) => (offset === 0 ? match : '(app identifier)'));
   }
+  const blueprint = BLUEPRINT_SUFFIX.exec(text);
+  if (blueprint) {
+    // Structural slot, no template to tell a name from a word: keep the suffix only if it is public vocabulary the app does not declare.
+    const suffix = blueprint[2]!;
+    const declared = new Set([...(identifiers ?? [])].map((name) => name.toLowerCase()));
+    return `${blueprint[1]}${declared.has(suffix.toLowerCase()) || !collidesWithPublicWord(suffix) ? APP_ID : suffix}`;
+  }
+  text = redactSettingValues(text);
   // Name-aware layer: every identifier the analysed app declares is redacted wherever it appears, whatever the sentence
   // shape, quoted or not. The shape rules above are the second layer, for names the IR does not list.
   text = redactIdentifiers(text, identifiers);

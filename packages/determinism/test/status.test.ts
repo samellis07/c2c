@@ -130,7 +130,7 @@ test('publicConstruct redacts an unquoted field or report name naming model.ts b
   );
   assert.equal(
     publicConstruct('Report All_Book_Transactions has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.'),
-    'Report (app identifier) has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.',
+    'Report (app identifier) has an `options` setting (icon = (app identifier)) that Catalyst does not carry into the generated list report.',
   );
   // The field's own name can repeat later in the same sentence (the bidirectional-lookup
   // reason names it twice); every occurrence of that name is redacted, not just the first.
@@ -1082,4 +1082,80 @@ test('statusFromReport: a form, report or field named like a template word never
       }
     }
   }
+});
+
+// v3c: list joins, blueprint-* constructs and free-text setting values (claude review of v3b, F1-F3).
+const tokenLeaks = (construct: string, name: string): boolean =>
+  new RegExp(`(?<![\\p{L}\\p{N}_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'u').test(construct);
+const allConstructs = (rep: MigrationReport): string[] => {
+  const status = statusFromReport(rep);
+  return [...status.kinds.map((k) => k.construct), ...status.perAppConstructSets.flatMap((s) => s.constructs)];
+};
+
+test('statusFromReport F1: every option-group label of a real radio field is redacted, not only the first', () => {
+  const source = (l1: string, l2: string, l3: string) =>
+    `application "X"\n{\n\tforms\n\t{\n\t\tform Zq_F\n\t\t{\n\t\t\tPick\n\t\t\t(\n\t\t\t\ttype = radiobuttons\n\t\t\t\tvalues = {"${l1}" : {"a1","a2"}, "${l2}" : {"b1"}, "${l3}" : {"c1"}}\n\t\t\t)\n\t\t}\n\t}\n}\n`;
+  const expected = 'Field (app identifier) groups its options under (app identifier), (app identifier), (app identifier) in `values`; the generated radio control has no grouping element, so every option lists flat.';
+  for (const name of ['if', 'criteria', 'target', 'value', 'record', 'status', 'payments', 'report', 'field', 'form', 'other', 'options', 'first', 'Payments', 'Report', 'Acme_Secret', 'Ünï_Lbl']) {
+    for (const [l1, l2, l3] of [['Zq_L1', name, 'Zq_L3'], [name, 'Zq_L2', 'Zq_L3'], ['Zq_L1', 'Zq_L2', name]]) {
+      const rep = buildMigrationReport([{ name: 'a', ir: deriveIr(parse(source(l1!, l2!, l3!))) }], 'x');
+      const got = allConstructs(rep).filter((c) => c.includes('groups its options'));
+      assert.ok(got.length, `the groups sentence must be produced for ${name}`);
+      for (const c of got) assert.equal(c.replace(/Field [^ ]+ groups/, 'Field (app identifier) groups'), expected, `${name} in ${l1}/${l2}/${l3}`);
+    }
+  }
+});
+
+const PUBLIC_KEYS = new Set(['status', 'if', 'target']);
+test('statusFromReport F2: blueprint stage/start/phase block and property names never reach the status', () => {
+  const source = (blk: string, prop: string, phase: string) =>
+    `application "B"\n{\n\tforms { form Item { Title ( type = text ) } }\n\tworkflow { form { Flow as "Flow" { type = blueprint\n\t\tform = Item\n\t\tstart { start stage = Draft\n\t\t\t${prop} = dark\n\t\t\t${blk} { x = 1 } }\n\t\tstages { Draft { displayname = "Draft"\n\t\t\t${blk} { y = 2 } }\n\t\t\tReview { displayname = "Review" } }\n\t\ttransitions { Send { from stage = Draft\n\t\t\tto stage = Review\n\t\t\tduring { ${phase} = left } } }\n\t} } }\n}\n`;
+  for (const [blk, prop, phase] of [['Acme_Secret', 'acme_theme', 'acme_port'], ['value', 'target', 'status'], ['Report', 'Contacts', 'if'], ['Ünï_Blk', 'ünï_key', 'zq9']] as const) {
+    const rep = buildMigrationReport([{ name: 'a', ir: deriveIr(parse(source(blk, prop, phase))) }], 'x');
+    const got = allConstructs(rep).filter((c) => c.startsWith('blueprint-'));
+    assert.ok(got.some((c) => c.startsWith('blueprint-stage-block-') || c.startsWith('blueprint-start-block-')), 'the blueprint block sentence must be produced');
+    // A property key that is itself a public word and undeclared is vocabulary, not a name; block names are always checked.
+    for (const c of got) for (const name of [blk, ...[prop, phase].filter((key) => !PUBLIC_KEYS.has(key))]) assert.equal(tokenLeaks(c, name), false, `${name} survived: ${c}`);
+  }
+});
+
+test('statusFromReport F2: public blueprint suffixes stay in their stable buckets', () => {
+  assert.equal(publicConstruct('blueprint-transition-block-chart data', ['Acme_Secret']), 'blueprint-transition-block-chart data');
+  assert.equal(publicConstruct('blueprint-transition-property-Acme_Secret', ['Acme_Secret']), 'blueprint-transition-property-(app identifier)');
+  assert.equal(publicConstruct('blueprint-phase-property-acme_port'), 'blueprint-phase-property-(app identifier)');
+  assert.equal(publicConstruct('blueprint-stage-block-Ünï_Blk', []), 'blueprint-stage-block-(app identifier)');
+  assert.equal(publicConstruct('blueprint-start-block-value', ['value']), 'blueprint-start-block-(app identifier)');
+});
+
+test('statusFromReport F3: the value side of every report option setting is redacted, only the setting name survives', () => {
+  const source = (dang: string) =>
+    `application "X"\n{\n\tforms\n\t{\n\t\tform Zq_F\n\t\t{\n\t\t\tZq_Fd\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t}\n\treports\n\t{\n\t\tlist Zq_R\n\t\t{\n\t\t\tshow all rows from Zq_F\n\t\t\t(\n\t\t\t\tZq_Fd\n\t\t\t)\n\t\t\toptions\n\t\t\t(\n\t\t\t\tdisplay field = ${dang}\n\t\t\t)\n\t\t}\n\t}\n}\n`;
+  for (const dang of ['Zq_Dang', 'Nowhere', 'Payments', 'target', 'value', 'Ünï_Dang', 'Acme_Secret']) {
+    const rep = buildMigrationReport([{ name: 'a', ir: deriveIr(parse(source(dang))) }], 'x');
+    const got = allConstructs(rep).filter((c) => c.includes('`options` setting'));
+    assert.ok(got.length, `the options sentence must be produced for ${dang}`);
+    for (const c of got) {
+      assert.equal(tokenLeaks(c, dang), false, `${dang} survived: ${c}`);
+      assert.match(c, /\(display field = \(app identifier\)\)/);
+    }
+  }
+});
+
+test('publicConstruct F1/F4: lowercase colliders in list joins and backticked block names are redacted', () => {
+  const ids = ['target', 'value', 'status'];
+  assert.equal(
+    publicConstruct('Field Zq groups its options under Zq_L1, value, target in `values`; no grouping.', [...ids, 'Zq', 'Zq_L1']),
+    'Field (app identifier) groups its options under (app identifier), (app identifier), (app identifier) in `values`; no grouping.',
+  );
+  assert.equal(
+    publicConstruct('Report "R" has a `Block` settings block (template Zq, target block, value block) that Catalyst generates no equivalent for.', [...ids, 'template', 'Zq']),
+    'Report (app identifier) has a `Block` settings block (template (app identifier), (app identifier) block, (app identifier) block) that Catalyst generates no equivalent for.',
+  );
+  assert.equal(
+    publicConstruct('Report "R" has a `customlayouts` settings block (template Zq) that Catalyst generates no equivalent for.', ['customlayouts', 'template', 'Zq']),
+    'Report (app identifier) has a `customlayouts` settings block (template (app identifier)) that Catalyst generates no equivalent for.',
+  );
+  assert.equal(publicConstruct('Static <style> CSS drops 7 rules (CSS built by a tag x7)', ['css']), 'Static <style> CSS drops 7 rules (CSS built by a tag x7)');
+  // Template words elsewhere stay.
+  assert.equal(publicConstruct('Static <style> CSS not carried over: the page sanitizer drops 1 static style rule', ['style']), 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
 });
