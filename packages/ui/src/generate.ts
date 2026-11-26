@@ -3385,6 +3385,19 @@ function capturedPosition(req) {
   // text. The validate set follows the record event: `on add` and unscoped
   // when inserting, `on edit` and unscoped when the request's ROWID marks an
   // update.
+  // A script reading `input.Lookup.Field` reads the linked record's field.
+  // The submitted lookup is an id, so the linked rows are read before the
+  // scripts run: unresolved, the read is undefined and a script that stores
+  // it writes the text "undefined".
+  const lookupLinks: Record<string, string> = {};
+  for (const f of form.fields) {
+    if (!f.lookup || Object.hasOwn(multiLookupMap[form.name] ?? {}, f.name)) continue;
+    const target = app.forms.find((item) => item.name.toLowerCase() === f.lookup!.form.toLowerCase());
+    if (target) lookupLinks[f.name] = target.name;
+  }
+  const lookupHydrate = Object.keys(lookupLinks).length && validate.add.length + validate.edit.length + success.add.length + success.edit.length + presuccess.add.length + presuccess.edit.length
+    ? `    await ctx.shim.input.hydrate(ctx, ${JSON.stringify(lookupLinks)});\n`
+    : '';
   const validateRun = validate.add.length + validate.edit.length
     ? `    try {
       for (const spec of eventSpecs(validateAdd, validateEdit, ctx.rowId)) {
@@ -3606,7 +3619,7 @@ ${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so th
 ${editLoad}${stageCheck}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.
     if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);
-${presuccessRun}${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
+${lookupHydrate}${presuccessRun}${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
     // The row is committed from here on. A failure after it (history row,
     // on-success script, mail) is a warning on a 200, never a failed submit:
     // a failure reply would invite a retry that inserts a second row.
@@ -3636,6 +3649,12 @@ ${hasPresuccess ? '    // A refused or failed write drops the effects a presucce
     if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;
     if (err && err.code === "C2C_STALE_WRITE") {
       send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });
+      return;
+    }
+    // A file reference the form and field do not own is the caller's input,
+    // never a server fault (the message names the field only).
+    if (err && err.code === "FILE_REFERENCE_INVALID") {
+      send(res, 400, { dryRun: !live, wrote: false, code: err.code, error: err.message });
       return;
     }
     fail(res, err, live);

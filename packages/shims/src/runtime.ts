@@ -473,6 +473,12 @@ export interface ShimContext {
    * A prefetch response for any other nonce is stale.
    */
   formNonce?: string;
+  /**
+   * The linked row of each single lookup of the submitted record, by field,
+   * read by `input.hydrate` before the scripts run. `input.get` walks it for
+   * `input.Lookup.Field`, which Creator reads as the linked record's field.
+   */
+  linked?: Record<string, Record<string, unknown>>;
   /** Prefetch endpoint path the client handler loaded, set by the first prefetch call. */
   prefetchPath?: string;
   /**
@@ -789,6 +795,12 @@ export interface Shim {
     root(ctx: ShimContext): Record<string, unknown>;
     get(ctx: ShimContext, ...path: string[]): unknown;
     set(ctx: ShimContext, path: string[], value: unknown): unknown;
+    /**
+     * Reads the row each single lookup of the record points at (`links`: field
+     * -> the form it links to) so `input.Lookup.Field` reads the linked row.
+     * A field the caller may not read, or with no row, reads as no linked row.
+     */
+    hydrate(ctx: ShimContext, links: Record<string, string>): Promise<void>;
     /**
      * `input.<subform>.insert(rows)` appends rows to the field list: one row
      * per element of a collection argument, else the single row.
@@ -3369,6 +3381,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       get(ctx, ...path) {
         const value = getPath(ctx.record, path);
+        if (value === undefined && path.length > 1 && ctx.linked && Object.hasOwn(ctx.linked, path[0]!)) {
+          return getPath(ctx.linked[path[0]!], path.slice(1));
+        }
         if (value === undefined && ctx.rowInput && ctx.row && path.length) {
           const field = shim.record.get(ctx.row, path[0]!);
           return path.length === 1 ? field : getPath(field, path.slice(1));
@@ -3377,6 +3392,18 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         // record carries no id of its own.
         if (value === undefined && path.length === 1 && path[0] === 'ID') return ctx.rowId;
         return value;
+      },
+      async hydrate(ctx, links) {
+        for (const [field, form] of Object.entries(links)) {
+          const cell = getPath(ctx.record, [field]);
+          if ((typeof cell !== 'string' && typeof cell !== 'number') || String(cell) === '') continue;
+          try {
+            const rows = await shim.datastore.plainRows(ctx, shim.datastore.query(ctx, form, { op: '==', field: 'ROWID', value: String(cell) }));
+            if (rows[0]) (ctx.linked ??= {})[field] = rows[0];
+          } catch (err) {
+            if (!(err instanceof RecordAccessError)) throw err;
+          }
+        }
       },
       set(ctx, path, value) {
         note({ op: 'input.set', path, value });
