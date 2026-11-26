@@ -97,6 +97,16 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   }
 });
 
+test('vanilla confirms a destructive row action in a dialog, rolls back a failed delete and guards a double submit', async () => {
+  const verdicts = await run();
+  for (const state of ['confirm-open', 'row-rollback', 'submitting', 'disabled']) {
+    const v = byState(verdicts, state);
+    assert.ok(v, `no verdict for ${state}`);
+    assert.notEqual(v.status, 'fail', `${state}: ${v.evidence}`);
+  }
+  assert.equal(byState(verdicts, 'confirm-open')!.status, 'pass');
+});
+
 test('every xfail owner is a real issue id — a phantom name fails', () => {
   // Only the six listed issues may own a row, so a made-up OWNER value
   // breaks this test.
