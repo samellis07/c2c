@@ -551,7 +551,7 @@ Sweep over a corpus of 67 sample Creator apps (not included), skeleton
 | `tsc --noEmit` | 67 / 67 |
 | `vite build`, and two builds byte-identical | 67 / 67 |
 | bundle budget | 67 / 67 (JS 131-144 KiB gzip, CSS under 9 KiB) |
-| UI score ≥ 8 on desktop and phone | 67 / 67; mean 9.43 desktop, 9.44 phone; lowest 9.1 |
+| UI score ≥ 8 on desktop and phone | 67 / 67 (bar 8 on desktop and phone); mean 9.599 desktop, 9.701 phone; lowest 8.6 desktop, 8.9 phone (sweep at cf333359) |
 
 What the remaining points were, by scorer check kind: field controls the
 generator did not draw yet (lookups, users, rich text), the `.todo`
