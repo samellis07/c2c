@@ -1892,6 +1892,10 @@ function aggregatePath(raw, readable, principal) {
   const field = Object.prototype.hasOwnProperty.call(parts, rest) ? parts[rest] : rest;
   const columns = Object.prototype.hasOwnProperty.call(parentColumns, parent) ? parentColumns[parent] : null;
   if (!Array.isArray(columns) || !columns.includes(field)) return null;
+  // A leaf that is itself a lookup field stores a grandparent ROWID: its display grant is not known here, and the plain read
+  // blanks it for a caller who cannot read that display, so the path is refused rather than shown as a bucket key.
+  const leafLookups = Object.prototype.hasOwnProperty.call(lookupParentsByForm, parent) ? lookupParentsByForm[parent] : {};
+  if (Object.prototype.hasOwnProperty.call(leafLookups, field)) return null;
   if (!lookupDisplayScope(principal, parent, field, { op: "true" })) return null;
   return { key: head + "." + rest, head, form: parent, field, rest };
 }
