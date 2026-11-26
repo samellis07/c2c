@@ -5950,3 +5950,338 @@ test('a text remove of a written literal over a string shim text is a read-only 
   assert.equal(islandReadOnly('var p = shim.string.trim(input);\nvar r = shim.string.toUpperCase(p);\nvar q = shim.list.removeText(r, "x");'), true, 'a chain of string shims over the input');
   assert.equal(islandReadOnly('var q = shim.list.removeText("a-b", "-");'), false, 'a written text');
 });
+
+// A support-style profile page: closed link names and params, a computed own route, a prefill from an id function.
+const PROFILE_APP = `\tform Add_Account
+\t{
+\t\tCompany_Name
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tEmail
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tform Callers
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tEmail
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tAssociated_Account
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = Add_Account.ID
+\t\t\tdisplayformat = [Company_Name]
+\t\t)
+\t}
+\tform Add_Case
+\t{
+\t\tTitle
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tAccount
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = Add_Account.ID
+\t\t\tdisplayformat = [Company_Name]
+\t\t)
+\t}
+\tform Search_Form
+\t{
+\t\tGo_to_Account
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = Add_Account.ID
+\t\t\tdisplayformat = [Company_Name]
+\t\t)
+\t}
+\tlist My_Cases_Customers
+\t{
+\t\tshow all rows from Add_Case
+\t\t(
+\t\t\tTitle
+\t\t)
+\t}
+\tlist Customer_Cases
+\t{
+\t\tshow all rows from Add_Case
+\t\t(
+\t\t\tTitle
+\t\t\tAccount
+\t\t)
+\t}
+\tlist My_Callers
+\t{
+\t\tshow all rows from Callers
+\t\t(
+\t\t\tName
+\t\t)
+\t}
+\tlist All_Callers
+\t{
+\t\tshow all rows from Callers
+\t\t(
+\t\t\tName
+\t\t\tAssociated_Account
+\t\t)
+\t}
+\tlist All_Accounts
+\t{
+\t\tshow all rows from Add_Account
+\t\t(
+\t\t\tCompany_Name
+\t\t)
+\t}
+\tlist My_Profile_Customers
+\t{
+\t\tshow all rows from Add_Account
+\t\t(
+\t\t\tCompany_Name
+\t\t)
+\t}`;
+
+const PROFILE_FNS = [
+  {
+    name: 'user.isCustomer',
+    signature: 'bool user.isCustomer()',
+    deluge: 'return Callers[Email == zoho.loginuserid].count() > 0 || Add_Account[Email == zoho.loginuserid].count() > 0;',
+  },
+  {
+    name: 'user.getAccFromEmail',
+    signature: 'int user.getAccFromEmail(string email)',
+    deluge: `accID = 0;
+if(input.email != null && input.email != "")
+{
+	if(Add_Account[Email == input.email].count() > 0)
+	{
+		accID = Add_Account[Email == input.email].ID;
+	}
+	else if(Callers[Email == input.email && Associated_Account is not null].count() > 0)
+	{
+		accID = Callers[Email == input.email && Associated_Account is not null].Associated_Account;
+	}
+}
+return accID;`,
+  },
+];
+
+const profilePage = (extra = '') => `htmlpage prof()
+content
+<%{
+	if(input.email == null || input.email == "")
+	{
+		input.email = zoho.loginuserid;
+	}
+	accID = thisapp.user.getAccFromEmail(input.email);
+	if(!thisapp.user.isCustomer())
+	{
+		%>
+<div align="center" class="enroll" elName='zc-component' formLinkName='Search_Form' params='zc_Header=false&zc_SecHeader=false&Go_to_Account=<%=accID%>'>Loading Accounts...</div>
+<%
+	}
+	if(accID > 0)
+	{
+		acc = Add_Account[ID == accID];
+		caseView = "My_Cases_Customers";
+		profileUrl = "#View:My_Profile_Customers";
+		caseParams = "";
+		callerView = "My_Callers";
+		callParams = "";
+		if(!thisapp.user.isCustomer())
+		{
+			caseView = "Customer_Cases";
+			profileUrl = "#View:All_Accounts?Company_Name=" + encodeUrl(acc.Company_Name);
+			caseParams = "&Account=" + acc.Company_Name;
+			callerView = "All_Callers";
+			callParams = "&Associated_Account=" + acc.Company_Name;
+		}
+		%>
+<a class="zc-formbutton" href=<%=profileUrl%>><b>Profile</b></a>
+<a class="zc-formbutton" href="#View:<%=caseView%>"><span>View All</span></a>
+<div class="box-content" elName='zc-component' viewLinkName='<%=caseView%>' params='zc_Header=false&zc_SecHeader=false<%=caseParams%>'>Loading My Cases...</div>
+<div class="box-content" elName='zc-component' viewLinkName='<%=callerView%>' params='zc_Header=false&zc_SecHeader=false<%=callParams%>'>Loading Callers...</div>
+<%
+	}
+}%>${extra}`;
+
+const HOSTILE_COMPANY = 'Acme & Co <b>"x"</b> javascript:alert(1)';
+const PROFILE_ROWS = {
+  Add_Account: [{ Company_Name: HOSTILE_COMPANY, Email: 'boss@acme.example.com' }],
+  Callers: [{ Name: 'Cy', Email: 'cy@acme.example.com', Associated_Account: FIRST_ID }],
+};
+
+async function renderProfile(
+  snippet: string,
+  user: { user: { profile: string; loginUser: string; userId: string } },
+  input: Record<string, unknown>,
+  policy?: Record<string, Record<string, FieldGrant>>,
+) {
+  const app = appWithFns(PROFILE_FNS, `${PROFILE_APP}\n${pageWithSnippet(snippet)}`);
+  const { files, model } = generateUi(app);
+  const compiled = uiSnippetFiles(model);
+  assert.equal(compiled.length, 1, `${compileHtmlpage(app, 'Home', 'hp1', snippet).reason} ${JSON.stringify(model.todos)}`);
+  if (policy) rewritePolicy(files, policy);
+  const mod = await loadTree(files, compiled[0]!.path);
+  const live = await liveStore(PROFILE_ROWS);
+  try {
+    return await invoke(mod.default as never, { ...user, body: { input } });
+  } finally {
+    live.restore();
+  }
+}
+
+const ADMIN_LOGIN = { user: { profile: 'Administrator', loginUser: 'ada', userId: 'ada@example.com' } };
+const CUSTOMER_LOGIN = { user: { profile: 'Administrator', loginUser: 'cy', userId: 'cy@acme.example.com' } };
+const STAFF = { user: { profile: 'Staff', loginUser: 'sam', userId: 'sam@example.com' } };
+
+test('a closed link name, closed params and a computed own route render the branch taken, encoded, for staff and a customer', async () => {
+  const staff = await renderProfile(profilePage(), ADMIN_LOGIN, { email: 'boss@acme.example.com' });
+  assert.equal(staff.status, 200, JSON.stringify(staff.body));
+  const html = String(staff.body.html);
+  assert.match(html, /data-zml="component-report:Customer_Cases[^"]*"/);
+  assert.match(html, /data-zml="component-report:All_Callers[^"]*"/);
+  assert.match(html, /component-form:Search_Form/);
+  assert.doesNotMatch(html, /component-report:(?:My_Cases_Customers|My_Callers)/);
+  // The company name reaches the filter and the route only encoded.
+  const encoded = new URLSearchParams({ k: HOSTILE_COMPANY }).toString().slice(2);
+  assert.ok(html.includes(`href="#View:All_Accounts?Company_Name=${encoded}"`), html);
+  assert.ok(html.includes(`component-report:Customer_Cases:untitled?Account.Company_Name=${encoded}`), html);
+  assert.match(html, /href="#View:Customer_Cases"/);
+  assert.doesNotMatch(html, /<b>"x"<\/b>/);
+  assert.doesNotMatch(html, /href=["']?javascript/i);
+
+  const customer = await renderProfile(profilePage(), CUSTOMER_LOGIN, {});
+  assert.equal(customer.status, 200, JSON.stringify(customer.body));
+  const own = String(customer.body.html);
+  assert.match(own, /data-zml="component-report:My_Cases_Customers:untitled"/);
+  assert.match(own, /data-zml="component-report:My_Callers:untitled"/);
+  assert.match(own, /href="#View:My_Profile_Customers"/);
+  assert.doesNotMatch(own, /component-form:Search_Form|Customer_Cases|All_Callers|Company_Name=/);
+});
+
+test('the profile page with closed links is refused to a profile with no read of its forms, and shows no account data to one with a partial field list', async () => {
+  for (const policy of [{ Staff: {} }, { Staff: { Add_Account: { fields: ['Email'] } } }] as Record<string, Record<string, FieldGrant>>[]) {
+    const out = await renderProfile(profilePage(), STAFF, { email: 'boss@acme.example.com' }, policy);
+    assert.equal(out.status, 403, JSON.stringify(out.body));
+    assert.equal(out.body.html, undefined);
+    assert.equal(JSON.stringify(out.body).includes('Acme'), false);
+  }
+});
+
+function profileCompiles(snippet: string, fns = PROFILE_FNS): boolean {
+  const { model } = generateUi(appWithFns(fns, `${PROFILE_APP}\n${pageWithSnippet(snippet)}`));
+  return uiSnippetFiles(model).length === 1;
+}
+
+test('a link name, a params value or a route a name can hold outside the closed set keeps the profile page a snippet', () => {
+  assert.equal(profileCompiles(profilePage()), true);
+  const base = profilePage();
+  const swap = (from: string, to: string) => {
+    assert.ok(base.includes(from), from);
+    return base.replace(from, to);
+  };
+  const variants: [string, string][] = [
+    ['link name from input', swap('caseView = "Customer_Cases";', 'caseView = input.view;')],
+    ['link name compound', swap('caseView = "Customer_Cases";', 'caseView = "Customer_Cases";\n\t\t\tcaseView += "x";')],
+    ['params read of the page input', swap('"&Account=" + acc.Company_Name', '"&Account=" + input.account')],
+    ['params from a call', swap('"&Account=" + acc.Company_Name', '"&Account=" + acc.Company_Name.toUpperCase()')],
+    ['two prefixes', swap('callParams = "";', 'callParams = "&Other=" + acc.Email;')],
+    ['record assigned twice', swap('acc = Add_Account[ID == accID];', 'acc = Add_Account[ID == accID];\n\t\tacc = Add_Account[ID > 0];')],
+    ['params in a loop page', swap('accID = thisapp.user', 'for each r in Add_Account[ID > 0]\n\t{\n\t}\n\taccID = thisapp.user')],
+    ['route to another host', swap('profileUrl = "#View:My_Profile_Customers";', 'profileUrl = "https://evil.example/x";')],
+    ['route with a script scheme', swap('profileUrl = "#View:My_Profile_Customers";', 'profileUrl = "javascript:alert(1)";')],
+    ['route to a report the app lacks', swap('profileUrl = "#View:My_Profile_Customers";', 'profileUrl = "#View:No_Such_Report";')],
+    ['route with a space', swap('profileUrl = "#View:My_Profile_Customers";', 'profileUrl = "#View:My_Profile_Customers?a=b c";')],
+    ['route from input', swap('profileUrl = "#View:My_Profile_Customers";', 'profileUrl = input.go;')],
+    ['route with an unencoded read', swap('encodeUrl(acc.Company_Name)', 'acc.Company_Name')],
+    ['route with a read of a page input', swap('encodeUrl(acc.Company_Name)', 'encodeUrl(input.name)')],
+    ['route with a quote in the key', swap('"#View:All_Accounts?Company_Name="', '"#View:All_Accounts?a\\"onmouseover=x="')],
+  ];
+  for (const [label, snippet] of variants) assert.equal(profileCompiles(snippet), false, label);
+});
+
+test('a prefill carries a function result only when the function returns row ids of the lookup target form', () => {
+  const idFn = (body: string) => [PROFILE_FNS[0]!, { name: 'user.getAccFromEmail', signature: 'int user.getAccFromEmail(string email)', deluge: body }];
+  assert.equal(profileCompiles(profilePage(), idFn('accID = 0;\nif(Add_Account[Email == input.email].count() > 0)\n{\n\taccID = Add_Account[Email == input.email].ID;\n}\nreturn accID;')), true);
+  for (const [label, body] of [
+    ['a text field', 'accID = 0;\naccID = Add_Account[Email == input.email].Company_Name;\nreturn accID;'],
+    ['a page input', 'accID = input.email;\nreturn accID;'],
+    ['a text literal', 'accID = "1";\nreturn accID;'],
+    ['a row of another form', 'accID = 0;\naccID = Add_Case[Title == input.email].ID;\nreturn accID;'],
+    ['two names', 'accID = 0;\nother = 1;\nif(input.email == "x")\n{\n\treturn other;\n}\nreturn accID;'],
+    ['a compound assignment', 'accID = 0;\naccID += Add_Account[Email == input.email].ID;\nreturn accID;'],
+  ] as [string, string][]) {
+    assert.equal(profileCompiles(profilePage(), idFn(body)), false, label);
+  }
+});
+
+test('a report embed written from the app host and its two names is the own report, and no other address is', () => {
+  const app = appWithFns(PROFILE_FNS, `${PROFILE_APP}\n${pageWithSnippet('htmlpage hp1()\ncontent\n<p>x</p>')}`);
+  const frame = (src: string) => `htmlpage hp1()\ncontent\n<p><%= zoho.loginuserid %></p><iframe width='100%' height="500px" src='${src}' style="padding:0"></iframe>`;
+  const A = '<%=zoho.adminuser%>';
+  const P = '<%=zoho.appname%>';
+  for (const host of ['https://creator.zoho.in', 'https://creator.zoho.com', 'https://app.zohocreator.eu']) {
+    const compiled = compileHtmlpage(app, 'Home', 'hp1', frame(`${host}/${A}/${P}/report-embed/All_Accounts?zc_Header=false`));
+    assert.equal(compiled.ok, true, compiled.reason ?? host);
+    assert.match(compiled.html ?? '', /<a href="#\/report\/All_Accounts"[^>]*>All_Accounts<\/a>/);
+    assert.doesNotMatch(compiled.html ?? '', /<iframe|zoho\.in|creator\.zoho/);
+  }
+  for (const src of [
+    `https://creator.zoho.in/${P}/${A}/report-embed/All_Accounts`,
+    `https://evil.example/${A}/${P}/report-embed/All_Accounts`,
+    `https://creator.zoho.in.evil.example/${A}/${P}/report-embed/All_Accounts`,
+    `https://creator.zoho.in${'@'}evil.example/${A}/${P}/report-embed/All_Accounts`,
+    `http://creator.zoho.in/${A}/${P}/report-embed/All_Accounts`,
+    `https://creator.zoho.in/x/${A}/${P}/report-embed/All_Accounts`,
+    `https://creator.zoho.in/${A}/<%=input.app%>/report-embed/All_Accounts`,
+    `https://creator.zoho.in/${A}/${P}/report-embed/<%=input.report%>`,
+    `https://creator.zoho.in/${A}/${P}/report-embed/No_Such_Report`,
+    `https://creator.zoho.in/${A}/${P}/report-embed/All_Accounts?a=<%=input.q%>`,
+    `https://creator.zoho.in/${A}/${P}report-embed/All_Accounts`,
+    `x/https://creator.zoho.in/${A}/${P}/report-embed/All_Accounts`,
+  ]) {
+    assert.equal(compileHtmlpage(app, 'Home', 'hp1', frame(src)).ok, false, src);
+  }
+});
+
+test('the link rewrites read a thousand adversarial templates in linear time', () => {
+  const app = appWithFns(PROFILE_FNS, `${PROFILE_APP}\n${pageWithSnippet('htmlpage hp1()\ncontent\n<p>x</p>')}`);
+  const n = 1000;
+  const hostile = [
+    `<%{ u = "#View:All_Accounts"; %>${'<a href='.repeat(n)}<%=u%>`,
+    `<%{ u = "#View:All_Accounts"; %>${'<a class="a" '.repeat(n)}href=<%=u%> ${'\t'.repeat(n)}>x</a>`,
+    `<%{ x = "a"; %>${"<div elName='zc-component' viewLinkName='<%=x%>' params='".repeat(n)}`,
+    `<%{ x = "a"; %><div elName='zc-component' params='${'<%=x%>&'.repeat(n)}`,
+    `<%{ x = "a"; %><div elName='zc-component' params='${'a'.repeat(n * 20)}<%=x%>'>${' '.repeat(n * 20)}`,
+    `${'https://creator.zoho.in/<%=zoho.adminuser%>/<%=zoho.appname%>'.repeat(n)}`,
+    `${'https://creator.zoho.in/<%=zoho.adminuser%>/<%='.repeat(n)}`,
+    `${'<%=zoho . '.repeat(n)}`,
+  ];
+  for (const body of hostile) {
+    const start = process.hrtime.bigint();
+    compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.ok(ms < 3000, `${body.slice(0, 40)} took ${ms}ms`);
+  }
+});
+
+test('a profile with read of the forms the closed-link page reads sees it; one without a form it reads is refused', async () => {
+  const grants = { Add_Account: { fields: ['Company_Name', 'Email'] }, Callers: { fields: ['Email', 'Associated_Account'] } } as Record<string, FieldGrant>;
+  const allowed = await renderProfile(profilePage(), STAFF, { email: 'boss@acme.example.com' }, { Staff: grants });
+  assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+  assert.match(String(allowed.body.html), /component-report:Customer_Cases/);
+  for (const drop of ['Add_Account', 'Callers']) {
+    const kept = Object.fromEntries(Object.entries(grants).filter(([form]) => form !== drop)) as Record<string, FieldGrant>;
+    const denied = await renderProfile(profilePage(), STAFF, { email: 'boss@acme.example.com' }, { Staff: kept });
+    assert.equal(denied.status, 403, drop);
+    assert.equal(denied.body.html, undefined);
+    assert.equal(JSON.stringify(denied.body).includes('Acme'), false);
+  }
+});
