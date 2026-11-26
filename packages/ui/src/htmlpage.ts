@@ -2343,6 +2343,23 @@ function c2cWithoutWrites(shim, notes) {
   };
   return { ...shim, datastore: { ...shim.datastore, insert: skip, update: skip, setField: skip } };
 }
+
+// The adapter a caller who may not write is given: reads pass, and every other method
+// (insert, update, delete, and any later write path) is a skipped no-op. Deny by default,
+// so no write route that reaches the adapter (record.set and flush included) can be missed.
+function c2cReadOnlyStore(store, notes) {
+  return new Proxy(store, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target);
+      if (key === "query" || typeof value !== "function") return value;
+      return async () => {
+        const note = "a setup write was skipped because the caller may not run it";
+        if (notes.indexOf(note) < 0) notes.push(note);
+        return null;
+      };
+    },
+  });
+}
 ` : ''}${opts.routes ? `\n${routeSource(opts.routes)}\n` : ''}${opts.markup ? `\n${c2cMarkupFunctionSource()}\n` : ''}${opts.images ? `\n${c2cImageFunctionSource()}\n` : ''}
 ${renderAuditSource({ dataImages: opts.markup })}
 
@@ -2512,8 +2529,7 @@ ${opts.hasWrites ? `  // The page renders for any caller the read policy admits;
   }
   const deploy = deployConfig();
   const live = deploy.mode === "live";
-  const datastore = live ? await liveDatastore() : null;
-  const appTimeZone = process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined;
+${opts.hasWrites ? '  const c2c_notes = [];\n  const store = live ? await liveDatastore() : null;\n  const datastore = store && !mayWrite ? c2cReadOnlyStore(store, c2c_notes) : store;\n' : '  const datastore = live ? await liveDatastore() : null;\n'}  const appTimeZone = process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined;
   const body = req && typeof req.body === "object" && req.body && !Array.isArray(req.body) ? req.body : {};
   const input = body && typeof body.input === "object" && body.input && !Array.isArray(body.input) ? body.input : {};
   try {
@@ -2524,7 +2540,7 @@ ${opts.hasWrites ? `  // The page renders for any caller the read policy admits;
 ${opts.hasWrites ? '      adminUserId: mayWrite ? principal.userId || "" : ownerId,\n' : ''}${opts.appCalls ? '      functions,\n' : ''}${opts.composites ? `      composites: ${JSON.stringify(opts.composites)},\n` : ''}${opts.lookupForms ? `      lookupForms: ${JSON.stringify(opts.lookupForms)},\n` : ''}${opts.lookupReads ? `      lookupReads: ${JSON.stringify(opts.lookupReads)},\n` : ''}${opts.multiLookups && Object.keys(opts.multiLookups).length ? `      multiLookups: ${JSON.stringify(opts.multiLookups)},\n` : ''}      ...(datastore ? { datastore } : {}),
     });
     const ctx = runtime.context({ record: input, old: {}, principal, appTimeZone });
-    const rendered = await render(ctx${env ? `, { ${[opts.images ? 'files: live ? await liveFileStore(req) : null, bytes: 0' : '', opts.hasWrites ? 'mayWrite' : '', 'notes: []'].filter(Boolean).join(', ')} }` : ''});
+    const rendered = await render(ctx${env ? `, { ${[opts.images ? 'files: live ? await liveFileStore(req) : null, bytes: 0' : '', opts.hasWrites ? 'mayWrite' : '', opts.hasWrites ? 'notes: c2c_notes' : 'notes: []'].filter(Boolean).join(', ')} }` : ''});
     let violation = "";
     try {
       violation = c2cAuditViolation(rendered.html);

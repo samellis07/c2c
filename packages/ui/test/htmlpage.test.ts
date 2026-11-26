@@ -6288,3 +6288,77 @@ test('a profile with read of the forms the closed-link page reads sees it; one w
     assert.equal(JSON.stringify(denied.body).includes('Acme'), false);
   }
 });
+
+const GATE_NOTE = 'a setup write was skipped because the caller may not run it';
+const GATE_PATHS: Record<string, { forms: string; table: string; rows: Record<string, unknown>[]; code: string }> = {
+  'record.set + datastore.flush (sweep)': {
+    forms: ORDERS,
+    table: 'Orders',
+    rows: [{ Name: 'a', Status: 'closed', Amount: 1 }, { Name: 'b', Status: 'open', Amount: 2 }],
+    code: `for each o in Orders[Status == "closed" && Name != "Ended"]\n{\n\to.Name = "Ended";\n}`,
+  },
+  'insert': {
+    forms: CODED_ACCOUNTS,
+    table: 'Accounts',
+    rows: [],
+    code: `if (Accounts[Email == zoho.adminuserid].count() <= 0)\n{\n\tinsert into Accounts [ Email = zoho.adminuserid Role = "Admin" ];\n}`,
+  },
+  'setField': {
+    forms: CODED_ACCOUNTS,
+    table: 'Accounts',
+    rows: [],
+    code: PROVISIONED_CODE.replace(/^htmlpage hp1\(\)\ncontent\n<p><%\n/, '').replace(/%>Ready<\/p>$/, ''),
+  },
+};
+
+async function gateRun(path: { forms: string; table: string; rows: Record<string, unknown>[]; code: string }, who: typeof CLERK) {
+  const snippet = `htmlpage hp1()\ncontent\n<p><%\n${path.code}\n%>Ready</p>`;
+  const ui = generateUi(appOf(`${path.forms}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(ui.model.todos, []);
+  const files = [...ui.files];
+  rewritePolicy(files, { Clerk: { [path.table]: { read: true, write: true } } });
+  const mod = await loadTree(files, uiSnippetFiles(ui.model)[0]!.path);
+  const live = await liveStore({ [path.table]: path.rows });
+  try {
+    const res = await invoke(mod.default as never, { ...who, body: { input: {} } });
+    return { res, rows: JSON.stringify(live.tables.get(path.table) ?? []) };
+  } finally { live.restore(); }
+}
+
+for (const [name, path] of Object.entries(GATE_PATHS)) {
+  test(`write gate: a non-administrator with a write grant cannot run the ${name} write; the administrator can`, async () => {
+    const clerk = await gateRun(path, CLERK);
+    assert.equal(clerk.res.status, 200, JSON.stringify(clerk.res.body));
+    assert.deepEqual(clerk.res.body.notes, [GATE_NOTE]);
+    const untouched = await gateRun({ ...path, code: 'x = 1;' }, USER);
+    assert.equal(clerk.rows, untouched.rows);
+    const admin = await gateRun(path, USER);
+    assert.equal(admin.res.status, 200, JSON.stringify(admin.res.body));
+    assert.notEqual(admin.rows, untouched.rows);
+  });
+}
+
+test('write gate: the read-only adapter refuses every method of the real adapter except query', async () => {
+  const path = GATE_PATHS.insert!;
+  const ui = generateUi(appOf(`${path.forms}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n<p><%\n${path.code}\n%>x</p>`)}`));
+  const source = String(ui.files.find((f) => f.path === uiSnippetFiles(ui.model)[0]!.path)!.data);
+  const fn = /function c2cReadOnlyStore\(store, notes\) \{[\s\S]*?\n\}\n/.exec(source);
+  assert.ok(fn, 'generated handler has the read-only adapter');
+  const make = new Function(`${fn![0]}\nreturn c2cReadOnlyStore;`)() as (s: object, n: string[]) => Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const { datastore, tables } = mockDatastore({});
+  await datastore.insert('Orders', [{ Name: 'a' }]);
+  const snapshot = JSON.stringify([...tables]);
+  const notes: string[] = [];
+  const guarded = make(datastore, notes);
+  const methods = new Set<string>();
+  for (let o: object | null = datastore; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+    for (const key of Object.getOwnPropertyNames(o)) if (typeof (datastore as Record<string, unknown>)[key] === 'function') methods.add(key);
+  }
+  assert.ok(methods.has('insert') && methods.has('update') && methods.has('delete') && methods.has('query'));
+  for (const key of methods) {
+    if (key === 'query') { assert.equal(guarded.query, (datastore as Record<string, unknown>).query); continue; }
+    await guarded[key]!('Orders', [{ ROWID: '1000', Name: 'z' }]);
+    assert.equal(JSON.stringify([...tables]), snapshot, key);
+  }
+  assert.deepEqual(notes, [GATE_NOTE]);
+});
