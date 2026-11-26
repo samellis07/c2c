@@ -701,7 +701,8 @@ test('annotation: a captured photo opens the editor and the marked-up file is st
   assert.equal(picked(0), undefined, 'nothing is stored before the markup step ends');
   dom.flushSync(() => buttonLabelled(doc, 'Use marked-up photo')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
   await until(() => picked(0) !== undefined, 'marked-up file stored');
-  assert.equal(picked(0)!.name, 'photo-marked.jpg');
+  assert.equal(picked(0)!.name, 'photo-marked.png');
+  assert.equal(picked(0)!.type, 'image/png');
   assert.equal(doc.querySelector('.c2c-media-canvas'), null, 'the editor closed');
 });
 

@@ -234,12 +234,12 @@ export function loadCanvas(win: Window, file: File): Promise<HTMLCanvasElement |
   });
 }
 
-/** The marked-up canvas as a File named after the original (png and webp stay, anything else is jpeg). */
+/** The marked-up canvas as a PNG File named after the original: the stored annotation is always image/png, whatever the original type was. */
 export function canvasToFile(win: Window, canvas: HTMLCanvasElement, original: File): Promise<File | null> {
-  const type = original.type === 'image/png' || original.type === 'image/webp' ? original.type : 'image/jpeg';
-  const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
+  const type = 'image/png';
+  const ext = 'png';
   const base = String(original.name || 'photo').replace(/\.[^.]*$/, '') || 'photo';
   return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob ? new (win as unknown as typeof globalThis).File([blob], `${base}-marked.${ext}`, { type }) : null), type, 0.92);
+    canvas.toBlob((blob) => resolve(blob ? new (win as unknown as typeof globalThis).File([blob], `${base}-marked.${ext}`, { type }) : null), type);
   });
 }

@@ -7670,7 +7670,7 @@ function startMediaTools(blockEl, spec) {
         };
         cancel.addEventListener('click', finish);
         done.addEventListener('click', () => {
-          const type = file.type === 'image/png' || file.type === 'image/webp' ? file.type : 'image/jpeg';
+          const type = 'image/png';
           canvas.toBlob((blob) => {
             finish();
             if (!blob) {
@@ -7678,8 +7678,8 @@ function startMediaTools(blockEl, spec) {
               return;
             }
             const base = String(file.name || 'photo').replace(/\.[^.]*$/, '') || 'photo';
-            place(new win.File([blob], `${base}-marked.${type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg'}`, { type }));
-          }, type, 0.92);
+            place(new win.File([blob], `${base}-marked.png`, { type }));
+          }, type);
         });
         editor.append(canvas, tools);
       };

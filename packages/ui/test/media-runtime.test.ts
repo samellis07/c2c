@@ -170,6 +170,23 @@ test('annotation: a chosen photo opens the editor and the marked-up file replace
   assert.equal(doc.querySelector('.media-canvas'), null, 'editor closed; no loop');
 });
 
+test('annotation: the marked-up file is always a png, whatever the original type was', async () => {
+  for (const [name, type] of [['pic.jpg', 'image/jpeg'], ['pic.webp', 'image/webp'], ['pic.gif', 'image/gif']] as const) {
+    const m = model('image', '\t\t\tannotation = true\n');
+    const w = world('');
+    const win = w.win;
+    win.Image = class { naturalWidth = 40; naturalHeight = 20; onload: Any; onerror: Any; set src(_v: string) { setTimeout(() => this.onload?.(), 0); } };
+    const doc = await mount(m, w);
+    const input = doc.querySelector('input[type="file"]');
+    input.files = [new win.File(['x'], name, { type })];
+    input.dispatchEvent(new win.Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    doc.querySelector('.media-done').click();
+    assert.equal(input.files[0].name, 'pic-marked.png', `${type}: renamed .png`);
+    assert.equal(input.files[0].type, 'image/png', `${type}: stored as image/png`);
+  }
+});
+
 test('annotation: Keep original leaves the chosen file untouched', async () => {
   const m = model('image', '\t\t\tannotation = true\n');
   const w = world('');
