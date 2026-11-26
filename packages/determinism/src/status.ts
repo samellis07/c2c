@@ -36,6 +36,7 @@ import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:p
 import { isDirectoryPath } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { PUBLIC_WORDS } from './public-words.js';
+import { APP_ID, PUBLIC_VALUE, redactSettingItem, redactSlots } from './slot-redaction.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { analyze } from '../../cli/src/analyze.js';
 import {
@@ -157,7 +158,6 @@ const SENTENCE_INITIAL_WORDS = new Set([
   'Report', 'Same', 'Show', 'Sort', 'Static', 'The', 'There', 'Toolbar', 'Wire', 'ZML',
 ]);
 const LOWERCASE_WORD = /^[a-z]+$/;
-const APP_ID = '(app identifier)';
 const escapeRe = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * The word (or `=`) that immediately precedes an interpolated identifier in every reason template (grepped from the
@@ -222,7 +222,6 @@ const BLUEPRINT_SUFFIX = /^(blueprint-[a-z]+-(?:block|property)-)([\s\S]+)$/u;
 /** The `(key = value, ...)` list of a report `options` setting or settings block sentence (model.ts). */
 const REPORT_SETTINGS = /(has an `options` setting|settings block) \(([^)]*)\)(?= that Catalyst)/u;
 const SETTING_KEY = /^[a-z][a-z ]*$/u;
-const PUBLIC_VALUE = /^(?:true|false|\d+(?:\.\d+)?)$/u;
 
 /**
  * The setting NAME is public Creator vocabulary; the value is free text (a dangling `display field = Nowhere` is by
@@ -232,7 +231,7 @@ function redactSettingValues(text: string): string {
   return text.replace(REPORT_SETTINGS, (_whole, head: string, list: string) => {
     const parts = list.split(/, (?=[^,=]+ = )/u).map((part) => {
       const at = part.indexOf(' = ');
-      if (at < 0) return part;
+      if (at < 0) return part.split(', ').map(redactSettingItem).join(', ');
       const key = part.slice(0, at);
       const value = part.slice(at + 3);
       if (!SETTING_KEY.test(key)) return APP_ID;
@@ -265,7 +264,7 @@ export function publicConstruct(construct: string, identifiers?: Iterable<string
   // Fail closed: a map-report sentence that is not exactly the known shape still names app identifiers.
   if (text.startsWith(MAP_REPORT_PREFIX) && !text.includes('(app identifier)')) return `${MAP_REPORT_PREFIX}(app identifier)`;
   const named = UNQUOTED_FIELD_OR_REPORT_NAME.exec(text);
-  if (named && named[2] !== '(app') {
+  if (named && named[2] !== '(app' && !(named[1] === 'Report' && named[2] === 'type')) {
     const name = named[2]!.replace(/[.,;:)]+$/u, '');
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // \b is ASCII-only: use Unicode letter/digit lookarounds so `Ünï_Rep` and `9lives` match whole.
@@ -282,6 +281,7 @@ export function publicConstruct(construct: string, identifiers?: Iterable<string
   // Name-aware layer: every identifier the analysed app declares is redacted wherever it appears, whatever the sentence
   // shape, quoted or not. The shape rules above are the second layer, for names the IR does not list.
   text = redactIdentifiers(text, identifiers);
+  text = redactSlots(text);
   const at = text.indexOf(':');
   if (at < 0) return text;
   const prefix = text.slice(0, at);

@@ -1149,7 +1149,7 @@ test('publicConstruct F1/F4: lowercase colliders in list joins and backticked bl
   );
   assert.equal(
     publicConstruct('Report "R" has a `Block` settings block (template Zq, target block, value block) that Catalyst generates no equivalent for.', [...ids, 'template', 'Zq']),
-    'Report (app identifier) has a `Block` settings block (template (app identifier), (app identifier) block, (app identifier) block) that Catalyst generates no equivalent for.',
+    'Report (app identifier) has a `(app identifier)` settings block (template (app identifier), (app identifier) block, (app identifier) block) that Catalyst generates no equivalent for.',
   );
   assert.equal(
     publicConstruct('Report "R" has a `customlayouts` settings block (template Zq) that Catalyst generates no equivalent for.', ['customlayouts', 'template', 'Zq']),
