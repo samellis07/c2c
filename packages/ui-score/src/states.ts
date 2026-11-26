@@ -280,6 +280,8 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
   }
   const allRows = [...sample.values()];
   const tableReports = exp.reports.filter((r) => !r.chart);
+  // Reports drawn as a grid of rows: a board, calendar, timeline or map has no page controls and no table cells.
+  const gridReports = tableReports.filter((r) => !['kanban', 'calendar', 'timeline', 'map', 'gantt', 'summary'].includes(r.type));
   const loaded = loadRuntime(bundle);
   const both = (s: Session, el: Element | null | undefined): boolean => !!el && VIEWPORTS.every((vp) => s.shown(el, vp));
 
@@ -323,7 +325,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
 
       // empty-filtered: search to no match → a clear control restores rows.
       if (run.wants('empty-filtered')) {
-        const report = await firstQueryingReport(s, api, tableReports.filter((r) => r.columns.length > 0));
+        const report = await firstQueryingReport(s, api, gridReports.filter((r) => r.columns.length > 0));
         if (!report) run.skip('empty-filtered', 'app', 'no report that queries to filter');
         else {
           const main = await driveReport(s, report);
@@ -770,7 +772,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
     };
     const s = await openSession(bundle, loaded, paged, sample, widthCss);
     try {
-      const report = await firstQueryingReport(s, base, tableReports);
+      const report = await firstQueryingReport(s, base, gridReports);
       if (!report) {
         if (run.wants('pagination')) run.skip('pagination', 'app', 'no report that queries');
         if (run.wants('disabled')) run.skip('disabled', 'app', 'no report that queries');
@@ -780,8 +782,8 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         const control = (re: RegExp): HTMLElement | null =>
           (Array.from(mainOf(s.doc).querySelectorAll('button, a[role="button"], a[href]')).find((b) => !b.closest('th, [role="columnheader"]') && !/^sort\b/i.test(b.getAttribute('aria-label') ?? '') && re.test(`${b.getAttribute('aria-label') ?? ''} ${text(b)}`)) as HTMLElement | undefined) ?? null;
         const stopped = (el: HTMLElement | null): boolean => !!el && (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true');
-        const next1 = control(/\bnext\b/i);
-        const prev1 = control(/\b(prev|previous)\b/i);
+        const next1 = control(/^\s*next\b/i);
+        const prev1 = control(/^\s*(prev|previous)\b/i);
         const prev1Stopped = stopped(prev1);
         const firstSize = queries.at(-1)?.size ?? 25;
         const q0 = queries.length;
@@ -792,16 +794,16 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
           click(s.win, next1);
           await settle(s.win);
           advanced = queries.length > q0 && queries.at(-1)!.page === 1;
-          const prev2 = control(/\b(prev|previous)\b/i);
-          const next2 = control(/\bnext\b/i);
+          const prev2 = control(/^\s*(prev|previous)\b/i);
+          const next2 = control(/^\s*next\b/i);
           if (next2 && !stopped(next2)) {
             click(s.win, next2);
             await settle(s.win);
           }
           const lastRows = mainOf(s.doc).querySelectorAll('tbody tr, [data-row], [data-row-link]').length;
-          const next3 = control(/\bnext\b/i);
+          const next3 = control(/^\s*next\b/i);
           lastStop = queries.at(-1)?.page === 2 && (!next3 || stopped(next3)) && lastRows > 0 && lastRows < firstSize;
-          const back = control(/\b(prev|previous)\b/i);
+          const back = control(/^\s*(prev|previous)\b/i);
           if (prev2 && back && !stopped(back)) {
             click(s.win, back);
             await settle(s.win);
@@ -826,9 +828,10 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
   // ---- session I: long text — a very long cell must wrap or scroll, never push the page wider
   if (run.wants('long-text')) {
     const long = 'LongValue' + 'x'.repeat(240) + ' ' + 'word '.repeat(60).trim();
-    const fields = tableReports.flatMap((r) => r.columns.map((c) => ({ r, c }))).find(({ r }) => r.columns.length > 0);
+    const fields = gridReports.flatMap((r) => r.columns.map((c) => ({ r, c }))).find(({ r }) => r.columns.length > 0);
     const wide = new Map(sample);
-    if (fields) wide.set(fields.r.name, { ...(sample.get(fields.r.name) ?? { ROWID: '1001' }), [fields.c.field]: long });
+    // Every column holds the long value: a lookup or subform column draws its own words, a plain one draws this.
+    if (fields) wide.set(fields.r.name, { ...(sample.get(fields.r.name) ?? { ROWID: '1001' }), ...Object.fromEntries(fields.r.columns.map((c) => [c.field, long])) });
     const api = createFakeApi(wide, [...wide.values()]);
     const s = await openSession(bundle, loaded, api.fetch, wide, widthCss);
     try {

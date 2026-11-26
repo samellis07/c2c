@@ -68,7 +68,7 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   // responses, so the table survives the error and the retry re-queries.
   // invalid also shipped: a field error is the control's description, marks
   // it aria-invalid, and an invalid submit moves focus to the first one.
-  for (const state of ['loading', 'empty', 'error', 'invalid']) {
+  for (const state of ['loading', 'empty', 'error', 'invalid', 'not-found']) {
     const v = byState(verdicts, state)!;
     assert.equal(v.status, 'pass', `${state}: ${v.evidence}`);
   }
@@ -78,7 +78,6 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   for (const [state, issue] of Object.entries({
     toast: 'ux-toasts-field-errors',
     'server-field-error': 'ux-toasts-field-errors',
-    'not-found': 'ux-loading-empty-not-found',
     'route-focus': 'ux-focus-motion',
   })) {
     const v = byState(verdicts, state);

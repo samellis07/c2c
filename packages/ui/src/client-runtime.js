@@ -1319,6 +1319,9 @@ export function reportStateHtml(state, opts) {
     const action = options.formHref
       ? `<a class="button-primary" href="${escapeHtml(options.formHref)}">Add a record</a>`
       : '';
+    if (options.filtered) {
+      return `<div data-state="empty"><div class="state-empty"><p>No records match.</p><button type="button" data-clear-search>Clear search</button></div></div>`;
+    }
     return `<div data-state="empty"><div class="state-empty"><p>No records yet</p>${action}</div></div>`;
   }
   if (state === 'error') {
@@ -3225,7 +3228,7 @@ export function renderRoute(appModel, route, doc) {
   if (route.name === 'home') return renderHome(appModel);
   if (route.name === 'form') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
-    return form ? renderForm(form) : `<p class="todo">Unknown form.</p>`;
+    return form ? renderForm(form) : notFoundHtml('form');
   }
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
@@ -3233,7 +3236,7 @@ export function renderRoute(appModel, route, doc) {
       const form = (appModel.forms || []).find((item) => item.name === report.form);
       return form ? `${renderReport(report)}<section class="record-summary" data-record-summary="${escapeHtml(form.name)}" data-record-report="${escapeHtml(report.name)}" data-record-id="${escapeHtml(route.row)}"><p>Loading record…</p></section>` : `<p class="todo">Unknown report form.</p>`;
     }
-    return report ? renderReport(report) : `<p class="todo">Unknown report.</p>`;
+    return report ? renderReport(report) : notFoundHtml('report');
   }
   if (route.name === 'record') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
@@ -3241,10 +3244,15 @@ export function renderRoute(appModel, route, doc) {
   }
   if (route.name === 'page') {
     const page = (appModel.pages || []).find((item) => item.name === route.id);
-    return page ? renderPage(page, doc, appModel) : `<p class="todo">Unknown page.</p>`;
+    return page ? renderPage(page, doc, appModel) : notFoundHtml('page');
   }
   if (route.name === 'smoke') return renderSmokeShell();
-  return `<p class="todo">That page is not in this app.</p>`;
+  return notFoundHtml('page');
+}
+
+/** The screen an unknown route shows: a heading focus can land on, and the way back to the first screen. */
+function notFoundHtml(kind) {
+  return `<section class="card" data-state="not-found"><h1 tabindex="-1">Not found</h1><p>This ${kind} is not part of the app. Choose a screen from the menu.</p><p><a class="button-primary" href="#/">Go to home</a></p></section>`;
 }
 
 /** Creator's banner after a successful submit when the success handler sets no `success message`. */
@@ -8827,6 +8835,9 @@ export function boot(appModel, doc) {
     for (const modal of documentRef.querySelectorAll('[data-modal-form]')) modal.remove();
     main.innerHTML = renderRoute(appModel, route, documentRef);
     markCurrent();
+    // An unknown screen announces itself: focus lands on its heading.
+    const lost = main.querySelector('[data-state="not-found"] h1');
+    if (lost && typeof lost.focus === 'function') lost.focus();
     if (route.name === 'form') {
       const form = (appModel.forms || []).find((item) => item.name === route.id);
       const formEl = main.querySelector('form');
@@ -8851,7 +8862,7 @@ export function boot(appModel, doc) {
         const section = tbody.closest ? tbody.closest('section[data-report]') : null;
         const loadLive = (page) => {
           const live = reportRowsSlot(section);
-          loadRows(report, live || tbody, view, page);
+          loadRows(report, live || tbody, view, page, section);
         };
         const search = section && section.querySelector('[data-report-search]');
         if (search) {
@@ -8861,6 +8872,17 @@ export function boot(appModel, doc) {
           });
         }
         const filter = section && section.querySelector('select[data-filter]');
+        if (section) {
+          section.addEventListener('click', (event) => {
+            const clear = event.target && event.target.closest ? event.target.closest('[data-clear-search]') : null;
+            if (!clear) return;
+            const box = section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+            if (box) box.value = '';
+            const pick = section.querySelector('select[data-filter]');
+            if (pick) pick.value = '';
+            loadLive(0);
+          });
+        }
         if (filter) filter.addEventListener('change', () => loadLive(0));
       }
     }
@@ -9230,10 +9252,11 @@ export function boot(appModel, doc) {
     }
   }
 
-  function loadRows(report, tbody, viewRef, page) {
+  function loadRows(report, tbody, viewRef, page, sectionHint) {
     const call = (viewRef && viewRef.fetch) || globalThis.fetch;
     if (!report.queryEndpoint || typeof call !== 'function') return Promise.resolve();
-    const section = tbody.closest ? tbody.closest('section[data-report]') : null;
+    // An empty answer removes the grid's tbody; the section still owns the repaint.
+    const section = (tbody.closest ? tbody.closest('section[data-report]') : null) || sectionHint || null;
     const current = typeof page === 'number' && page >= 0 ? page : 0;
     if (section && section.dataset) section.dataset.page = String(current);
     const stateEl = section && section.querySelector('[data-state]');
@@ -9244,6 +9267,12 @@ export function boot(appModel, doc) {
     const paintEmpty = () => {
       if (stateEl) stateEl.innerHTML = reportStateHtml('empty', emptyOpts);
     };
+    const narrowed = (() => {
+      const box = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+      const pick = section && section.querySelector('select[data-filter]');
+      return !!((box && box.value) || (pick && pick.value));
+    })();
+    const rowsEmptyOpts = narrowed ? { filtered: true } : emptyOpts;
     if (stateEl) stateEl.innerHTML = reportStateHtml('loading');
     const qInput = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
     const filterEl = section && section.querySelector('select[data-filter]');
@@ -9311,7 +9340,7 @@ export function boot(appModel, doc) {
         if (bulkButton) bulkButton.disabled = selectedCount === 0;
         setReportChrome(section, rows.length > 0);
         if (stateEl) {
-          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', emptyOpts);
+          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', rowsEmptyOpts);
         }
         updatePages(section, current, rows, pageSize);
         const text = body && typeof body.notice === 'string' ? body.notice : '';

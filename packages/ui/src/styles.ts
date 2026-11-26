@@ -123,7 +123,7 @@ button[type="button"]:not([data-action]):not([data-prev]):not([data-next]):not([
 .table-wrap{overflow-x:auto;margin:0 calc(var(--c2c-space-5) * -1);padding:0 var(--c2c-space-5)}
 table{border-collapse:collapse;width:100%}
 thead th{position:sticky;top:0;background:var(--c2c-tint);text-align:left;z-index:1}
-td,th{border:1px solid var(--c2c-border);padding:var(--c2c-space-2) var(--c2c-space-3);text-align:left}
+td,th{overflow-wrap:anywhere;border:1px solid var(--c2c-border);padding:var(--c2c-space-2) var(--c2c-space-3);text-align:left}
 tbody tr:nth-child(even){background:var(--c2c-stripe)}
 tbody tr:hover{background:var(--c2c-tint)}
 [data-numeric="true"]{text-align:right;font-variant-numeric:tabular-nums}
