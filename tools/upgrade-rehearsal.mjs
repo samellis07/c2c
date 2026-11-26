@@ -10,9 +10,9 @@
  *
  * Writes <out>/upgrade-rehearsal.json. Exit 1 when a check fails, 2 on usage errors.
  */
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { buildOfflinePlan, loadApp, writePlanTree } from '../dist/deploy/src/index.js';
 import { generateReactApp, writeReactApp } from '../dist/ui-react/src/index.js';
 import { applyUpgrade, planUpgrade } from '../dist/cli/src/upgrade.js';
@@ -31,7 +31,16 @@ if (!out || !ds) {
   process.exit(2);
 }
 const root = resolve(out);
-rmSync(root, { recursive: true, force: true });
+const cwd = resolve(process.cwd());
+const source = resolve(ds);
+const rel = (a, b) => relative(a, b);
+if (existsSync(root)) {
+  const entries = readdirSync(root);
+  const nested = (base, target) => { const r = rel(base, target); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
+  if (entries.length || nested(root, cwd) || nested(root, source) || nested(cwd, root) || nested(source, root)) {
+    throw new Error('--out must be a new or empty directory outside cwd and source');
+  }
+}
 const planDir = join(root, 'plan');
 const uiDir = join(root, 'ui');
 const app = loadApp(resolve(ds));

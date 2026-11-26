@@ -15,7 +15,7 @@
  * network, sorted file lists.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
@@ -623,6 +623,25 @@ export interface WritePlan {
 function safeGeneratedPath(out: string, path: string): string {
   if (!path || isAbsolute(path) || /[\\\u0000-\u001f\u007f]/.test(path) || path.split('/').some((p) => !p || p === '.' || p === '..')) throw new Error('React app manifest names an unsafe path');
   const dest = join(out, ...path.split('/'));
+  // Neither the output root nor any existing ancestor may redirect writes.
+  let probe = out;
+  while (true) {
+    try { if (lstatSync(probe).isSymbolicLink()) throw new Error('React app output path must not contain a symbolic link'); }
+    catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+    const parent = dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+    if (!existsSync(probe)) continue;
+  }
+  for (const part of path.split('/').slice(0, -1)) {
+    probe = join(probe === out ? out : out, part);
+  }
+  let ancestor = dirname(dest);
+  while (ancestor !== out && ancestor.startsWith(out)) {
+    try { if (lstatSync(ancestor).isSymbolicLink()) throw new Error('React app manifest names a path through a symbolic link'); }
+    catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+    const parent = dirname(ancestor); if (parent === ancestor) break; ancestor = parent;
+  }
   const rel = relative(out, dest);
   if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('React app manifest names a path outside the app');
   return dest;
@@ -675,7 +694,6 @@ export function writeReactApp(out: string, files: readonly ReactFile[], opts: { 
   }
   for (const file of files) {
     const dest = safeGeneratedPath(out, file.path);
-    if (file.path === 'package.json' && existsSync(dest) && file.owner === 'platform') throw new HandEditedError([file.path]);
     mkdirSync(dirname(dest), { recursive: true });
     if (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform)) {
       // Create-only: a file present here must have existed when this write

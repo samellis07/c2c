@@ -215,6 +215,9 @@ function planTreeChanges(dir: string, files: readonly PlanFile[]): PlanTreeChang
     else if (recorded[file.path] === digest) changes.unchanged.push(file.path);
     else changes.regenerated.push(file.path);
   }
+  for (const path of changes.added) {
+    if (existsSync(insidePlanDir(dir, path))) changes.handEdited.push(path);
+  }
   for (const path of Object.keys(recorded)) if (!next.has(path) && path !== 'c2c-manifest.json') changes.removed.push(path);
   for (const list of [changes.regenerated, changes.unchanged, changes.added, changes.removed, changes.handEdited, changes.preserved]) list.sort();
   return changes;
@@ -265,6 +268,7 @@ export function planUpgrade(input: UpgradeInput): { report: UpgradeReport; planF
     report.ui = { dir: input.uiDir, changes: planReactWrite(input.uiDir, files, { upgradePlatform: true }) };
   }
   if (report.direction === 'downgrade') report.blocked.push(`the folder was made by c2c ${report.from}, which is newer than this c2c ${to}: install the newer c2c, never downgrade a generated app`);
+  if (report.direction === 'unknown' && report.from !== undefined) report.blocked.push(`the folder has an unknown c2c version ${report.from}; refuse to apply it`);
   const edited = [...(report.plan?.handEdited ?? []), ...(report.ui?.changes.edited ?? [])];
   if (edited.length > 0 && !input.force) report.blocked.push(`generated files were edited by hand: ${edited.join(', ')}. Move the change to a customisation (the edits file, src/custom/) or pass --force to discard it`);
   if (report.schemaChange && report.schemaChange.breaking.length > 0 && !input.allowDestructive) {
