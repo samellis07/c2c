@@ -170,11 +170,11 @@ const ATTACK_CASES: Array<{ label: string; html: string; row: Record<string, unk
     assertSafe: (sheet) => {
       // `text` elements go through the page's own snippet sanitizer
       // (pages/sanitize.ts), the same one ZML page snippets use: a style
-      // attribute with any dangerous token is dropped whole, not declaration
-      // by declaration (that finer-grained allowlist is for the native
-      // field/lookup/image/spacer/columns styles — see printStyle below).
+      // attribute is cleaned declaration by declaration, and the declaration
+      // that calls url() is the one refused (named in data-style-dropped).
       const div = sheet.querySelector('[data-print-text] div');
-      assert.equal(div?.getAttribute('style'), null);
+      assert.doesNotMatch(div?.getAttribute('style') ?? '', /url\(|background/i);
+      assert.match(div?.getAttribute('data-style-dropped') ?? '', /color|background/);
     },
   },
   {

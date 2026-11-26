@@ -19,7 +19,7 @@
     "./auth": "./dist/auth/src/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-runtime-assets.mjs",
+    "build": "node scripts/sanitizer-core.mjs && tsc -p tsconfig.json && node scripts/copy-runtime-assets.mjs",
     "test": "npm run build && node scripts/ensure-ui-react-template.mjs && node scripts/run-tests.mjs --list scripts/test-files.txt && npm run check:hygiene",
     "check": "npm test && bash tools/determinism-gate.sh",
     "check:hygiene": "node scripts/check-hygiene.mjs",

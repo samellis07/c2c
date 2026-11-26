@@ -4705,7 +4705,7 @@ export function compileHtmlpage(
   for (const chunk of chunks) combined += chunk.kind === 'static' ? chunk.text : marker(islandOrdinal(chunks, chunk), chunk.context === 'style-fn');
   const nIslands = islands.length;
   const droppedTags: string[] = [];
-  const sanitized = sanitizeSnippet(combined, undefined, droppedTags, appHasNoScriptHook(app));
+  const sanitized = sanitizeSnippet(combined, undefined, droppedTags, appHasNoScriptHook(app), true);
   MARK_SPLIT.lastIndex = 0;
   MARK_MATCH.lastIndex = 0;
   const pieces = sanitized.split(MARK_SPLIT);

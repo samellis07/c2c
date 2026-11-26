@@ -10,7 +10,7 @@ import { SHELL_OVERLAY_CLASSES, dangerousStyle, safeUrl, sanitizeSnippet } from 
 
 test('the three sanitizer copies reserve the same shell ids, and every id the runtime looks up is reserved', () => {
   const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
-  const copies = ['packages/ui/src/pages.ts', 'packages/ui/src/client-runtime.js', 'packages/ui-react/template/lib/c2c-ui/pages/sanitize.ts'].map((path) => {
+  const copies = ['packages/ui/src/sanitizer-core.ts', 'packages/ui/src/client-runtime.js', 'packages/ui-react/template/lib/c2c-ui/pages/sanitize.ts'].map((path) => {
     const body = /SHELL_IDS = new Set\(\[([^\]]*)\]\)/.exec(read(path))?.[1] ?? '';
     return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]!).sort();
   });
