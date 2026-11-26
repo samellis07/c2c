@@ -149,6 +149,8 @@ const MAP_AS_LIST = new RegExp(`^Map report (${NAME_TOKEN}) is shown as a list b
 export function publicConstruct(construct: string): string {
   let text = construct.replace(QUOTED_NAME, '(app identifier)');
   text = text.replace(MAP_AS_LIST, 'Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.');
+  // Fail closed: the filter reason names its report; model.ts quotes it, but an unquoted name is an identifier too.
+  text = text.replace(new RegExp(`^(Filter not migrated on report )${NAME_TOKEN}(?=:)`, 'u'), '$1(app identifier)');
   // Fail closed: a map-report sentence that is not exactly the known shape still names app identifiers.
   if (text.startsWith(MAP_REPORT_PREFIX) && !text.includes('(app identifier)')) return `${MAP_REPORT_PREFIX}(app identifier)`;
   const named = UNQUOTED_FIELD_OR_REPORT_NAME.exec(text);
