@@ -184,3 +184,15 @@ test('the invalid row reads a fresh form even when earlier rows left the same ro
   const v = byState(verdicts, 'invalid')!;
   assert.equal(v.status, 'pass', `invalid: ${v.evidence}`);
 });
+
+test('checkUiStates observes unhandled rejections for the length of the run only, and leaves no listener behind', async () => {
+  const before = process.listenerCount('unhandledRejection');
+  const seen: number[] = [];
+  const probe = (): void => void seen.push(process.listenerCount('unhandledRejection'));
+  const bundle = bundleFromFiles(buildUi(app()).files);
+  const running = checkUiStates(app(), bundle, { ui: 'vanilla' });
+  probe();
+  await running;
+  assert.equal(seen[0], before + 1, 'an observer is installed while the gate runs, so a stray app rejection cannot end the process');
+  assert.equal(process.listenerCount('unhandledRejection'), before, 'and removed when it is done');
+});
