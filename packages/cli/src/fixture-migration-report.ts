@@ -13,6 +13,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { listDsFiles, parseFileWithSidecars, widgetManualItems } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { decode } from '../../core/src/source.js';
+import { singleLine, terminalSafe } from '../../doctor/src/sanitize.js';
 import { CUSTOMER_STEPS } from '../../deploy/src/customer-steps.js';
 import { connectionSecretItem } from '../../deploy/src/human-steps.js';
 import { planCli } from '../../deploy/src/index.js';
@@ -191,12 +192,12 @@ export function reviewChecklist(analysis: Pick<AnalyzeReport, 'deluge' | 'residu
   const todos = analysis.deluge.todoLocations.map(
     (item): ReviewItem => ({
       kind: 'todo',
-      where: item.location,
-      reason: item.construct,
-      step: item.manualStep ?? `Finish this by hand in the generated app: ${item.construct}`,
+      where: singleLine(item.location),
+      reason: singleLine(item.construct),
+      step: singleLine(item.manualStep ?? `Finish this by hand in the generated app: ${item.construct}`),
     }),
   );
-  const dropped = (analysis.residuals ?? []).map((item): ReviewItem => ({ kind: 'not-converted', where: item.id, reason: item.reason, step: item.step }));
+  const dropped = (analysis.residuals ?? []).map((item): ReviewItem => ({ kind: 'not-converted', where: singleLine(item.id), reason: singleLine(item.reason), step: singleLine(item.step) }));
   return [...todos, ...dropped];
 }
 
@@ -321,7 +322,7 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
   const todoSteps = report.todoSteps?.length
     ? report.todoSteps.flatMap((item) => [`- \`${item.location}\` — ${item.construct}`, `  - Step: ${item.step}`])
     : ['- none'];
-  return [
+  return terminalSafe([
     `# Migration report: ${report.fixture}`,
     '',
     `App: ${report.app ?? '(none)'}`,
@@ -372,7 +373,7 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
     '',
     ...residuals,
     '',
-  ].join('\n');
+  ].join('\n'));
 }
 
 function relFiles(dir: string, prefix: string, out: string[]): void {

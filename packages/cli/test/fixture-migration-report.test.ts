@@ -10,6 +10,7 @@ import {
   buildFixtureMigrationReport,
   fixtureMigrationReportAsJson,
   fixtureMigrationReportAsMarkdown,
+  reviewChecklist,
   listInRepoFixtures,
   migrationReportGoldenDir,
   privateMigrationReportGoldenDir,
@@ -338,4 +339,19 @@ test('gallery goldens are written to and read from the private fixtures director
   assert.equal(inputs.golden.json, inputs.reportJson);
   assert.equal(checkApp(inputs).criteria.find((item) => item.id === 'report-golden-current')?.status, 'PASS');
   assert.equal(existsSync(join(migrationReportGoldenDir(root), 'gallery')), false, 'nothing written into the repo');
+});
+
+test('hostile locations, constructs and steps never reach the review checklist or its markdown with terminal or bidi controls', () => {
+  const hostile = `evil${String.fromCharCode(0x1b)}[31mAPP${String.fromCharCode(0x1b)}[0m${String.fromCharCode(0x202e)}${String.fromCharCode(0x0d)}${String.fromCharCode(0x2060)}.txt`;
+  const checklist = reviewChecklist({
+    deluge: { todoLocations: [{ location: hostile, construct: hostile, manualStep: hostile }] },
+    residuals: [{ id: hostile, reason: hostile, step: hostile }],
+  } as unknown as Parameters<typeof reviewChecklist>[0]);
+  const markdown = fixtureMigrationReportAsMarkdown({ fixture: hostile, app: hostile, scope: [], converted: [], todoKinds: [], fieldGaps: [], manualSteps: [], hiddenParts: [], humanSteps: [], residuals: [{ id: hostile, reason: hostile, step: hostile }], reviewChecklist: checklist, todoSteps: [{ location: hostile, construct: hostile, step: hostile }] } as unknown as FixtureMigrationReport);
+  const texts = [JSON.stringify(checklist), markdown];
+  for (const code of [0x1b, 0x202e, 0x0d, 0x2060]) {
+    for (const text of texts) assert.ok(!text.includes(String.fromCharCode(code)), `U+${code.toString(16)} must not appear`);
+  }
+  assert.ok(checklist.every((item) => !/[\u0000-\u001f]/.test(item.where + item.reason + item.step)), 'checklist fields are single lines');
+  assert.ok(markdown.includes('APP'), 'the readable part is kept');
 });
