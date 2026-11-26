@@ -8,6 +8,20 @@ import { SHELL_OVERLAY_CLASSES as BUILD_OVERLAY_CLASSES, sanitizeSnippet as buil
 import { BASE_CSS } from '../../ui/src/styles.js';
 import { SHELL_OVERLAY_CLASSES, dangerousStyle, safeUrl, sanitizeSnippet } from '../template/lib/c2c-ui/pages/sanitize.js';
 
+test('the three sanitizer copies reserve the same shell ids, and every id the runtime looks up is reserved', () => {
+  const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
+  const copies = ['packages/ui/src/pages.ts', 'packages/ui/src/client-runtime.js', 'packages/ui-react/template/lib/c2c-ui/pages/sanitize.ts'].map((path) => {
+    const body = /SHELL_IDS = new Set\(\[([^\]]*)\]\)/.exec(read(path))?.[1] ?? '';
+    return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]!).sort();
+  });
+  assert.ok(copies[0]!.length >= 20);
+  assert.deepEqual(copies[1], copies[0]);
+  assert.deepEqual(copies[2], copies[0]);
+  // The runtime's own lookups: a snippet id that spells one would shadow it.
+  const looked = new Set([...read('packages/ui/src/client-runtime.js').matchAll(/getElementById\('([A-Za-z0-9_-]+)'\)/g)].map((m) => m[1]!));
+  for (const id of looked) assert.ok(copies[0]!.includes(id), `runtime looks up #${id} but it is not a reserved shell id`);
+});
+
 test('template sanitizer URL policy keeps navigation URLs and rejects dangerous variants', () => {
   // Non-ASCII hostnames are accepted: browsers normalize them to IDN/punycode,
   // and HTTPS remains an allowed navigation scheme under this policy.
