@@ -411,7 +411,8 @@ export function isMultiChoiceField(field: Field): boolean {
   return !field.lookup && isMulti(field);
 }
 
-function isMulti(field: Field): boolean {
+/** A multi select, checkbox list or multi lookup: the field takes a list of values. */
+export function isMulti(field: Field): boolean {
   const token = creatorTypeOf(field);
   if (MULTI_TOKENS.has(token)) return true;
   if (token === 'checkbox' && ((field.choices?.length ?? 0) > 0 || field.lookup)) return true;
