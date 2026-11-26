@@ -98,6 +98,9 @@ const SEED_TAG = 'c2c-schema-change';
 /** Field types whose seeded cell is one scalar the store keeps as written. */
 const SCALAR_TYPES = new Set(['text', 'textarea', 'email', 'number', 'decimal', 'currency', 'percent', 'url', 'phonenumber', 'date']);
 
+/** Text-like field types a rename scenario may rename. */
+const RENAMEABLE_TYPES = new Set(['text', 'textarea', 'email', 'url', 'phonenumber']);
+
 /** Field types the offline seed posts no cell for: no Stratus objects and no user list offline. */
 const UNSEEDED_TYPES = new Set(['upload file', 'image', 'audio', 'video', 'signature', 'users']);
 
@@ -301,7 +304,8 @@ export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<
     // A field named only by its declaration and report columns first; else any
     // text field, renamed everywhere in the script code as Creator does.
     const text = textFields.find((f) => onlyBareReferences(ds, f.name, false));
-    const anyText = textFields[0];
+    // The same name in other forms is renamed with it (every declaration and reference), as Creator does.
+    const anyText = textFields[0] ?? form.fields.find((f) => RENAMEABLE_TYPES.has(type(f)) && !/[^A-Za-z0-9_]/.test(f.name) && held(form.name, f.name) !== undefined);
     const picklist = form.fields.find((f) => (closedChoices(f)?.length ?? 0) >= 2 && held(form.name, f.name) !== undefined);
     const deletable = [...form.fields]
       .reverse()
