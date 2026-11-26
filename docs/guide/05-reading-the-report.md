@@ -35,6 +35,24 @@ did not, the field-level gaps with their reasons. Each manual step
 carries the workaround to use in the meantime, and the same
 human-checklist items the run will ask of you appear in it too.
 
+## Your steps in the report: at most four
+
+The report's **Human steps** section never asks for more than four steps:
+
+1. **Connect Catalyst** — one step. It tells you to run `c2c doctor`, which
+   checks your login, scope and plugin install and says what to fix. Anything
+   that needs a visit to the Catalyst console (turning on a service, verifying
+   the mail sender, entering connection secrets) is named inside this step, not
+   listed as a separate step.
+2. **Accept invite and sign in once.**
+3. **Run the in-app check and paste its code.**
+4. **Review N counted items** — only when N is above zero.
+
+The fourth step points at the **Review checklist** section of the same report.
+It has one line for every counted item: each TODO the converter left, and each
+construct it does not carry over, with its location, the reason, and the manual
+step. Nothing is left out; N is the number of lines in that checklist.
+
 For report-backed screens, the served record keeps the report's
 criteria, and date and date-time cells use the app's configured
 format and clock. Embedded forms and reports retain their display

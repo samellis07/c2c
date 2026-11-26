@@ -30,6 +30,7 @@
     "determinism:gallery": "npm run build && node dist/determinism/src/gallery.js",
     "determinism:status": "npm run build && node dist/determinism/src/status.js",
     "migration-reports:update": "npm run build && node packages/cli/scripts/update-fixture-migration-reports.mjs",
+    "migration-reports:update-gallery": "npm run build && node packages/cli/scripts/update-gallery-migration-reports.mjs",
     "determinism:update": "npm run build && node dist/determinism/src/manifests.js --update",
     "determinism:check": "npm run build && node dist/determinism/src/manifests.js --check",
     "merge-driver:install": "bash tools/install-merge-driver.sh",

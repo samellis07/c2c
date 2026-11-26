@@ -13,10 +13,11 @@ import { dirname, join, relative, sep } from 'node:path';
 import { listDsFiles, parseFileWithSidecars, widgetManualItems } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { decode } from '../../core/src/source.js';
-import { CUSTOMER_STEPS, planCustomerSteps } from '../../deploy/src/customer-steps.js';
+import { CUSTOMER_STEPS } from '../../deploy/src/customer-steps.js';
+import { connectionSecretItem } from '../../deploy/src/human-steps.js';
 import { planCli } from '../../deploy/src/index.js';
 import type { FieldGap } from '../../schema/src/index.js';
-import { analyze, guidedTodoSteps, type GuidedTodoStep } from './analyze.js';
+import { analyze, guidedTodoSteps, type AnalyzeReport, type GuidedTodoStep } from './analyze.js';
 import type { GuidedResidual } from './guided-residual.js';
 import { precheck, type Severity } from './precheck.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
@@ -59,6 +60,8 @@ export interface FixtureMigrationReport {
   /** Parts the generated app does not show to end users, with the reason each is hidden. */
   hiddenParts: { location: string; reason: string }[];
   humanSteps: string[];
+  /** Each counted TODO and not-converted construct with its reason and manual step; the "Review N counted items" step points here. */
+  reviewChecklist?: ReviewItem[];
   /** Residual TODO holes that carry a guided step: where the Creator code is and the manual step. Still counted in `todoCount`. */
   todoSteps?: GuidedTodoStep[];
   /** Constructs the converter drops (still counted as silent drops), each with its reason and guided step. */
@@ -77,6 +80,16 @@ export function fixturesDir(repoRoot: string): string {
 
 export function migrationReportGoldenDir(repoRoot: string): string {
   return join(repoRoot, 'packages/cli/test/golden/migration-reports');
+}
+
+/**
+ * Where the goldens for the private gallery corpus live: `<C2C_FIXTURES_DIR>/golden/migration-reports`,
+ * the same private-fixtures location as the other local goldens. They name apps, so they are never
+ * committed to this repo. Null when C2C_FIXTURES_DIR is unset.
+ */
+export function privateMigrationReportGoldenDir(env: NodeJS.ProcessEnv = process.env): string | null {
+  const dir = env.C2C_FIXTURES_DIR;
+  return dir ? join(dir, 'golden/migration-reports') : null;
 }
 
 /** Every `.ds` export committed under fixtures/, in en-US path order. */
@@ -140,13 +153,51 @@ export async function runOfflinePlan(file: string): Promise<PlanRun> {
 /** Console plan steps that are the same visit as a checklist item ("Sign in once", "Verify mail sender"), so they count once. */
 const SAME_VISIT_AS_CUSTOMER_STEP = new Set(['sign-in-check', 'mail-sender']);
 
-/** The customer's guided steps for a plan: the checklist items, then console steps that are a separate visit. */
-export function humanSteps(plan: Pick<PlanRun, 'steps' | 'connectionSecretKeys'>): string[] {
-  const checklist = planCustomerSteps(plan.steps, { connectionSecretKeys: plan.connectionSecretKeys });
-  const consoleSteps = plan.steps
+/**
+ * The customer's guided steps for a plan, folded to at most four: ONE "Connect Catalyst" step
+ * (the console gates, the mail sender and the connection secrets are all visits to Catalyst, so
+ * they are named inside it), ONE "Accept invite and sign in once" step, the in-app check, and
+ * ONE "Review N counted items" step when N > 0. Nothing is dropped: every folded visit is named
+ * in the step text and every counted item is in the report's review checklist. `c2c doctor` does
+ * the rest of the connecting (login, scope and plugin install checks).
+ */
+export function humanSteps(plan: Pick<PlanRun, 'steps' | 'connectionSecretKeys'>, counted = 0): string[] {
+  const check = CUSTOMER_STEPS[2]!;
+  const visits = plan.steps
     .filter((step) => step.via === 'console' && !SAME_VISIT_AS_CUSTOMER_STEP.has(step.id))
-    .map((step) => `console: ${step.id}`);
-  return [...checklist, ...consoleSteps];
+    .map((step) => `console: ${step.id}${step.command ? ` — ${step.command}` : ''}`);
+  if (plan.steps.some((step) => step.id === 'mail-sender')) visits.push(CUSTOMER_STEPS[3]!.replace(/^Verify mail sender: /, 'verify mail sender: '));
+  if (plan.connectionSecretKeys?.length) visits.push(connectionSecretItem(plan.connectionSecretKeys));
+  const connect =
+    'Connect Catalyst: run `c2c doctor` (it checks your login, scope and plugin install and says what to fix)' +
+    (visits.length ? `, then open the Catalyst console for: ${visits.join('; ')}` : '');
+  const steps = [connect, 'Accept invite and sign in once: accept the app invite mail, then sign in to the deployed app once', check];
+  if (counted > 0) {
+    steps.push(`Review ${counted} counted item${counted === 1 ? '' : 's'}: work through the review checklist in this report, one line per item with its reason and manual step`);
+  }
+  return steps;
+}
+
+/** One counted item the customer reviews: a residual TODO, or a construct the converter does not carry over. */
+export interface ReviewItem {
+  kind: 'todo' | 'not-converted';
+  where: string;
+  reason: string;
+  step: string;
+}
+
+/** Every counted residual TODO and every silent drop, each with its reason and manual step. Nothing is left out. */
+export function reviewChecklist(analysis: Pick<AnalyzeReport, 'deluge' | 'residuals'>): ReviewItem[] {
+  const todos = analysis.deluge.todoLocations.map(
+    (item): ReviewItem => ({
+      kind: 'todo',
+      where: item.location,
+      reason: item.construct,
+      step: item.manualStep ?? `Finish this by hand in the generated app: ${item.construct}`,
+    }),
+  );
+  const dropped = (analysis.residuals ?? []).map((item): ReviewItem => ({ kind: 'not-converted', where: item.id, reason: item.reason, step: item.step }));
+  return [...todos, ...dropped];
 }
 
 function manualStepsOf(ir: ReturnType<typeof parseFileWithSidecars>['ir'], source: string): ManualStep[] {
@@ -166,23 +217,14 @@ function manualStepsOf(ir: ReturnType<typeof parseFileWithSidecars>['ir'], sourc
   return [...rows.values()].sort((a, b) => (a.severity === b.severity ? compareEnUs(a.check, b.check) : a.severity === 'blocker' ? -1 : 1));
 }
 
-/** The customer's human steps for the report: checklist items, then console provision steps with the console text. */
-function reportHumanSteps(plan: PlanRun): string[] {
-  const commands = new Map(plan.steps.map((step) => [step.id, step.command ?? '']));
-  return humanSteps(plan).map((step) => {
-    if (!step.startsWith('console: ')) return step;
-    const command = commands.get(step.slice('console: '.length));
-    return command ? `${step} — ${command}` : step;
-  });
-}
-
 export async function buildFixtureMigrationReport(fixture: InRepoFixture): Promise<FixtureMigrationReport> {
   const ir = parseFileWithSidecars(fixture.file).ir;
   const source = decode(readFileSync(fixture.file)).text;
   const analysis = analyze(ir);
   const isEmpty = ir.forms.length === 0 && ir.reports.length === 0 && ir.pages.length === 0 && ir.functions.length === 0;
   const plan = isEmpty ? null : await runOfflinePlan(fixture.file);
-  const steps = plan?.code === 0 ? reportHumanSteps(plan) : [...CUSTOMER_STEPS];
+  const review = reviewChecklist(analysis);
+  const steps = plan?.code === 0 ? humanSteps(plan, review.length) : [...CUSTOMER_STEPS];
   return {
     schema: 'c2c-fixture-migration-report/1',
     fixture: fixture.id,
@@ -209,6 +251,7 @@ export async function buildFixtureMigrationReport(fixture: InRepoFixture): Promi
     hiddenParts: analysis.hiddenParts.map((part) => ({ location: part.location, reason: part.reason })),
     todoSteps: guidedTodoSteps(analysis),
     humanSteps: isEmpty ? [] : steps,
+    reviewChecklist: review,
     silentDrops: analysis.determinism.silentDrops,
     residuals: analysis.residuals,
   };
@@ -272,6 +315,9 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
   const residuals = report.residuals?.length
     ? report.residuals.flatMap((item) => [`- \`${item.id}\` — not converted. ${item.reason}`, `  - Step: ${item.step}`])
     : ['- none'];
+  const reviewLines = report.reviewChecklist?.length
+    ? report.reviewChecklist.flatMap((item, i) => [`${i + 1}. [ ] \`${item.where}\` — ${item.reason}`, `   - Step: ${item.step}`])
+    : ['- none'];
   const todoSteps = report.todoSteps?.length
     ? report.todoSteps.flatMap((item) => [`- \`${item.location}\` — ${item.construct}`, `  - Step: ${item.step}`])
     : ['- none'];
@@ -315,6 +361,10 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
     '## Human steps',
     '',
     ...human,
+    '',
+    '## Review checklist',
+    '',
+    ...reviewLines,
     '',
     '## Not converted',
     '',
@@ -360,4 +410,26 @@ export async function writeFixtureMigrationReports(repoRoot: string): Promise<st
     rmSync(join(outDir, rel));
   }
   return fixtures.map((fixture) => fixture.id);
+}
+
+/** The `.ds` file of each app folder under a gallery directory, as `gallery/<app>` fixtures in en-US order. */
+export function listGalleryFixtures(galleryDir: string): InRepoFixture[] {
+  return listDsFiles(galleryDir)
+    .map((file) => ({ id: `gallery/${relative(galleryDir, file).split(sep)[0]}`, file }))
+    .filter((fixture, i, all) => all.findIndex((other) => other.id === fixture.id) === i)
+    .sort((a, b) => compareEnUs(a.id, b.id));
+}
+
+/** Rewrite the private goldens for every gallery app under `galleryDir`. Returns the ids written. */
+export async function writeGalleryMigrationReports(galleryDir: string, outDir: string): Promise<string[]> {
+  const ids: string[] = [];
+  for (const fixture of listGalleryFixtures(galleryDir)) {
+    const report = await buildFixtureMigrationReport(fixture);
+    const base = join(outDir, fixture.id);
+    mkdirSync(dirname(base), { recursive: true });
+    writeFileSync(`${base}.json`, fixtureMigrationReportAsJson(report));
+    writeFileSync(`${base}.md`, fixtureMigrationReportAsMarkdown(report));
+    ids.push(fixture.id);
+  }
+  return ids;
 }

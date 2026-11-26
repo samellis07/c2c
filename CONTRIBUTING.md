@@ -60,6 +60,7 @@ derived file. Regenerate instead.
 | `docs/determinism-status.md` | `C2C_FIXTURES_DIR=<fixtures> npm run determinism:status` |
 | `docs/decimal-audit.md` | `node dist/determinism/src/decimal-audit.js <fixtures>/gallery > docs/decimal-audit.md` |
 | `docs/quality-gate.md` | `C2C_FIXTURES_DIR=<fixtures> npm run smoke:gallery -- --markdown`, paste the block between the markers |
+| `<fixtures>/golden/migration-reports/gallery/*` (private; names apps, so never committed) | `C2C_FIXTURES_DIR=<fixtures> npm run migration-reports:update-gallery` |
 | `docs/coverage-gate.md` | no in-repo generator; union-merge it and say so in the pull request |
 
 A merge driver automates this. Run once per clone (`git config` cannot be

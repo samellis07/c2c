@@ -57,10 +57,17 @@ App: Archive_Intake_Gaps
 
 ## Human steps
 
-- Accept invite: accept the app invite mail
-- Sign in once: sign in to the deployed app once
+- Connect Catalyst: run `c2c doctor` (it checks your login, scope and plugin install and says what to fix), then open the Catalyst console for: console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
+- Accept invite and sign in once: accept the app invite mail, then sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
-- console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
+- Review 2 counted items: work through the review checklist in this report, one line per item with its reason and manual step
+
+## Review checklist
+
+1. [ ] `field Artifact_Intake.Forecast` — Needs a trained Zia model. No column is generated. Not-yet-tried as a generated field.
+   - Step: Finish this by hand in the generated app: Needs a trained Zia model. No column is generated. Not-yet-tried as a generated field.
+2. [ ] `field Artifact_Intake.Site_Location` — Not a Creator field type. Latitude and longitude exist only inside Address (and Added/Modified Location). No geo column is invented for this token. If a source still says geolocation, it is reported unsupported.
+   - Step: Finish this by hand in the generated app: Not a Creator field type. Latitude and longitude exist only inside Address (and Added/Modified Location). No geo column is invented for this token. If a source still says geolocation, it is reported unsupported.
 
 ## Not converted
 
