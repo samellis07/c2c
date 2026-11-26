@@ -25,7 +25,7 @@
  *
  * Offline and deterministic: no network, no clock, no randomness.
  */
-import { readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { openKind, readRegularFileIfPresent, type App, type Field as IrField, type Property } from '../../core/src/index.js';
 import { phoneColumns, reportColumnLabel } from '../../core/src/phone-columns.js';
@@ -96,7 +96,17 @@ export function bundleFromDir(dir: string): UiBundle {
       if (module) throw new Error(`ui bundle: "${rel}" resolves outside the bundle`);
       return undefined;
     }
-    return readRegularFileIfPresent(join(slate, rel));
+    const path = join(slate, rel);
+    // A hardlink has no useful bundle boundary: its bytes may be shared with
+    // an otherwise unrelated path outside the bundle. Refuse it just like an
+    // escaping symlink, using lstat so we inspect the directory entry itself.
+    try {
+      const stat = lstatSync(path);
+      if (stat.isFile() && stat.nlink > 1) return undefined;
+    } catch {
+      return undefined;
+    }
+    return readRegularFileIfPresent(path);
   };
   const listJs = (): string[] => {
     const out: string[] = [];

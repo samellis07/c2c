@@ -4,7 +4,7 @@
  * file outside the bundle's real root.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -44,6 +44,15 @@ test('a stylesheet through a symlinked directory that stays inside the bundle is
   writeFileSync(join(slate, 'index.html'), page(['alias/y.css']));
   writeFileSync(join(slate, 'index.js'), 'export function boot() {}');
   assert.ok(bundleFromDir(bundle).css.includes('alias-marker'));
+});
+
+test('a stylesheet hardlink to outside the bundle is refused', (t) => {
+  const { root, bundle, slate } = fixture(t);
+  linkSync(join(root, 'outside.css'), join(slate, 'linked.css'));
+  writeFileSync(join(slate, 'index.html'), page(['linked.css']));
+  writeFileSync(join(slate, 'index.js'), 'export function boot() {}');
+  const result = bundleFromDir(bundle);
+  assert.ok(!result.css.includes('outside-marker'));
 });
 
 test('absolute, encoded and backslash stylesheet hrefs outside the bundle are not read', (t) => {
