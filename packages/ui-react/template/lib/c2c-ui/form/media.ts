@@ -69,7 +69,7 @@ export function createMedia(
     const live = recorder;
     recorder = null;
     if (live) {
-      live.discard = live.discard !== false;
+      live.discard = true;
       try {
         if (live.state !== 'inactive') live.stop();
       } catch {
@@ -174,7 +174,10 @@ export function createMedia(
     rec.onstop = () => {
       const discarded = rec.discard === true;
       const mime = String(rec.mimeType || supported || '').split(';')[0] || (kind === 'video' ? 'video/webm' : 'audio/webm');
-      if (recorder === rec) release();
+      if (recorder === rec) {
+        recorder = null;
+        release();
+      }
       if (discarded) return;
       if (!chunks.length) {
         hooks.say('Nothing was recorded. Choose a file instead.');

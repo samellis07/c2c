@@ -106,6 +106,31 @@ test('video duration: Record opens the camera and the recording stops by itself 
   assert.equal(w.fakes.stopped, 1, 'camera tracks released');
 });
 
+test('video duration: Close while recording discards the recording and releases the camera', async () => {
+  const m = model('video', '\t\t\tduration=30\n');
+  const w = world('');
+  const doc = await mount(m, w);
+  doc.querySelector('.media-open').click();
+  await flush();
+  assert.equal(w.fakes.recorders.length, 1);
+  doc.querySelector('.media-close').click();
+  const input = doc.querySelector('input[type="file"]');
+  assert.equal(input.files.length, 0, 'a cancelled recording is not attached');
+  assert.equal(w.fakes.stopped, 1, 'camera tracks released');
+});
+
+test('audio duration: leaving the page while recording discards the recording', async () => {
+  const m = model('audio', '\t\t\tduration=10\n');
+  const w = world('');
+  const doc = await mount(m, w);
+  doc.querySelector('.media-open').click();
+  await flush();
+  w.win.dispatchEvent(new w.win.Event('pagehide'));
+  const input = doc.querySelector('input[type="file"]');
+  assert.equal(input.files.length, 0, 'a recording abandoned by leaving the page is not attached');
+  assert.equal(w.fakes.stopped, 1, 'microphone tracks released');
+});
+
 test('audio duration: Record audio asks for the microphone only', async () => {
   const m = model('audio', '\t\t\tduration=10\n');
   const w = world('');
