@@ -10,10 +10,10 @@ const INVISIBLE = '\\u00ad\\u061c\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\
 /** Terminal controls that no output legitimately carries: NUL..BS, VT..US (carriage return, escape), DEL, C1. Tab and newline are separate. */
 const CONTROLS = '\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f';
 
-/** Characters that render as nothing or as another character, so a hostile name could pass for a blank or a different value: combining grapheme joiner, Hangul fillers, braille blank, variation selectors (a lone one; see `escapeLookalikes`). They stay recognisable as `\\u{2800}`. */
-const LOOKALIKE = '\\u034f\\u115f\\u1160\\u2800\\u3164\\uffa0\\ufe00-\\ufe0f\\u{e0100}-\\u{e01ef}';
+/** Characters that render as nothing or as another character, so a hostile name could pass for a blank or a different value: combining grapheme joiner, Hangul fillers, every other Default_Ignorable_Code_Point and format (Cf) character (Mongolian and Khmer invisibles, musical, Egyptian and shorthand format controls), braille blank, variation selectors (a lone one; see `escapeLookalikes`). They stay recognisable as `\\u{2800}`. */
+const LOOKALIKE = '\\u034f\\u115f\\u1160\\u2800\\u3164\\uffa0\\ufe00-\\ufe0f\\u{e0100}-\\u{e01ef}\\p{Default_Ignorable_Code_Point}\\p{Cf}';
 /** No-break and other unusual spaces: NBSP, en/em/thin/hair spaces, narrow no-break, medium mathematical, ideographic. They become a plain space. */
-const ODD_SPACE = '\\u00a0\\u2000-\\u200a\\u202f\\u205f\\u3000';
+const ODD_SPACE = '\\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000';
 
 const MULTI_LINE = new RegExp(`[${CONTROLS}${INVISIBLE}]`, 'gu');
 const ONE_LINE = new RegExp(`[${CONTROLS}\\t\\n${INVISIBLE}]`, 'gu');
