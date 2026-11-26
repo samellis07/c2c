@@ -82,7 +82,7 @@ export function bundleFromFiles(files: BundleFile[]): UiBundle {
     const file = files.find((f) => f.path === `slate/${rel}`);
     return file ? (typeof file.data === 'string' ? file.data : Buffer.from(file.data).toString('utf8')) : undefined;
   };
-  const listJs = (): string[] => files.filter((f) => f.path.startsWith('slate/') && f.path.endsWith('.js')).map((f) => f.path.slice(6));
+  const listJs = (): string[] => files.filter((f) => f.path.startsWith('slate/') && /\.(js|css)$/.test(f.path)).map((f) => f.path.slice(6));
   return resolveBundle(text, listJs);
 }
 
@@ -97,7 +97,7 @@ export function bundleFromDir(dir: string): UiBundle {
       for (const name of readdirSync(join(slate, rel), { withFileTypes: true })) {
         const child = rel ? `${rel}/${name.name}` : name.name;
         if (name.isDirectory()) walk(child);
-        else if (name.isFile() && name.name.endsWith('.js')) out.push(child);
+        else if (name.isFile() && /\.(js|css)$/.test(name.name)) out.push(child);
       }
     };
     walk('');
@@ -109,14 +109,25 @@ export function bundleFromDir(dir: string): UiBundle {
 function resolveBundle(text: (rel: string) => string | undefined, listJs: () => string[]): UiBundle {
   const html = text('index.html');
   if (html === undefined) throw new Error('ui bundle: slate/index.html not found');
-  const cssRel = linked(html, /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/) ?? linked(html, /<link[^>]+href="([^"]+\.css)"/);
+  // Every stylesheet the page links, in document order, then the ones a
+  // code-split screen loads on demand: the page ends up with all of them.
+  const linkedCss = [...html.matchAll(/<link\b[^>]*>/g)]
+    .map((m) => m[0])
+    .filter((tag) => /rel="stylesheet"/.test(tag) || /href="[^"]+\.css"/.test(tag))
+    .map((tag) => /href="([^"]+)"/.exec(tag)?.[1]?.replace(/^\.?\//, ''))
+    .filter((rel): rel is string => !!rel);
   const entry = (linked(html, /<script[^>]+type="module"[^>]+src="([^"]+)"/) ?? '').replace(/^\//, '');
-  const css = (cssRel && text(cssRel)) ?? '';
   const modules: Record<string, string> = {};
+  const lazyCss: string[] = [];
   for (const rel of listJs()) {
+    if (rel.endsWith('.css')) {
+      if (!linkedCss.includes(rel)) lazyCss.push(rel);
+      continue;
+    }
     const source = text(rel);
     if (source !== undefined) modules[rel] = source;
   }
+  const css = [...linkedCss, ...lazyCss.sort()].map((rel) => text(rel) ?? '').join('\n');
   const runtime = modules[entry] ?? '';
   const modelRel = /from\s+["']\.\/(model\.[^"']+\.js)["']/.exec(runtime)?.[1];
   const model = (modelRel && text(join(dirname(entry), modelRel))) ?? '';
@@ -580,6 +591,7 @@ export interface Win {
   KeyboardEvent: typeof KeyboardEvent;
   MouseEvent: typeof MouseEvent;
   Event: typeof Event;
+  MutationObserver: typeof MutationObserver;
   matchMedia?: (query: string) => unknown;
   sessionStorage?: Storage;
   dispatchEvent(event: Event): boolean;
@@ -904,8 +916,40 @@ export function createFakeApi(sample: Map<string, Record<string, string>>, rows:
   return api;
 }
 
+/** A route still showing its on-demand loading fallback (a lazy screen's Suspense). */
+const LOADING = '[data-route-loading]';
+/** The longest settle waits, in real milliseconds, for a lazy chunk to resolve and mount. */
+const LAZY_WAIT_MS = 5000;
+/** Consecutive idle ticks with no DOM change that count as a screen having settled. */
+const QUIET_TICKS = 12;
+/** DOM mutations seen per window since it opened, counted by `watchDom`. */
+const mutations = new WeakMap<object, number>();
+
 export async function settle(win: Win, rounds = 6): Promise<void> {
-  for (let i = 0; i < rounds; i++) await new Promise((resolve) => win.setTimeout(resolve, 0));
+  const tick = (): Promise<void> => new Promise((resolve) => win.setTimeout(resolve, 0));
+  const before = mutations.get(win) ?? 0;
+  for (let i = 0; i < rounds; i++) await tick();
+  // A code-split screen (and the lazy parts inside it) mounts some ticks after
+  // the route changes, and how many depends on the host: keep yielding while
+  // its fallback is on screen or the DOM is still changing, bounded so a screen
+  // that never resolves is still scored as it is.
+  const until = Date.now() + LAZY_WAIT_MS;
+  let seen = mutations.get(win) ?? 0;
+  // A screen that did not change during the plain rounds has nothing pending.
+  let quiet = seen === before ? QUIET_TICKS : 0;
+  while (Date.now() < until && (win.document.querySelector(LOADING) || quiet < QUIET_TICKS)) {
+    await tick();
+    const now = mutations.get(win) ?? 0;
+    quiet = now === seen ? quiet + 1 : 0;
+    seen = now;
+  }
+}
+
+/** Counts a window's DOM mutations so `settle` can tell when a screen stops changing. */
+function watchDom(win: Win): void {
+  new win.MutationObserver((records) => {
+    mutations.set(win, (mutations.get(win) ?? 0) + records.length);
+  }).observe(win.document, { childList: true, subtree: true, attributes: true, characterData: true });
 }
 
 export interface Session {
@@ -941,6 +985,15 @@ export async function openSession(
   const probe = win.document.createElement('style');
   probe.textContent = widthCss.desktop;
   (win.document.head ?? win.document.documentElement).appendChild(probe);
+  // jsdom never fetches a stylesheet link, so none fires `load`; a code-split
+  // screen's preload (Vite awaits that event before it mounts the chunk) would
+  // wait forever. The scorer has the bundle's CSS already, so it answers the load.
+  new win.MutationObserver((records) => {
+    for (const rec of records)
+      for (const node of Array.from(rec.addedNodes))
+        if (node.nodeName === 'LINK' && (node as Element).getAttribute('rel') === 'stylesheet') win.setTimeout(() => node.dispatchEvent(new win.Event('load')), 0);
+  }).observe(win.document, { childList: true, subtree: true });
+  watchDom(win);
   setup?.(win);
   try {
     win.eval(page.source);
