@@ -76,7 +76,7 @@ export interface DoctorContext {
 }
 
 /** Bidi controls, zero-width and invisible format characters: never echoed from an environment or file value (they reorder or hide text in a terminal). */
-const INVISIBLE_CHARS = /[\u00ad\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
+const INVISIBLE_CHARS = /[\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
 /** Terminal control characters (NUL..US including tab, newline and carriage return, DEL, C1): a check detail or fix is one line, so a value can never forge a second line. */
 const TERMINAL_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
 /** Applied to every check detail and fix: a value interpolated from the environment, a path, a file or a child process can never carry a terminal escape, carriage return or bidi control to the output, whichever check echoes it. */
@@ -342,7 +342,7 @@ function semverGte(a: string, b: string): boolean {
 }
 
 /** Control characters, C1, line/paragraph separators and the invisible/bidi set: never echoed from an environment-supplied path, file value or error. */
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
 const clean = (text: string): string => text.replace(CONTROL_CHARS, '?');
 
 function checkA(ctx: DoctorContext): CheckResult[] {

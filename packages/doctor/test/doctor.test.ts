@@ -2470,14 +2470,15 @@ test('doctor: every check detail and fix neutralises terminal controls whichever
 test('doctor CLI: values echoed in usage and error lines (unknown flag, evidence path) never reach the terminal raw', () => {
   const { dir, env } = greenWorkspace();
   const entry = join(process.cwd(), 'dist', 'cli', 'src', 'c2c.js');
-  const hostile = `x${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x0d)}${String.fromCharCode(0x202e)}${String.fromCharCode(0x200b)}y`;
+  const hostile = `x${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x0d)}${String.fromCharCode(0x202e)}${String.fromCharCode(0x200b)}${String.fromCharCode(0x2060)}${String.fromCharCode(0x061c)}${String.fromCharCode(0x180e)}${String.fromCodePoint(0xe0041)}y`;
   const lockDir = mkdtempSync(join(tmpdir(), 'c2c-doctor-cli-lock-'));
   try {
     for (const args of [['doctor', `--${hostile}`], ['doctor', '--record-mcp', join(dir, hostile)]]) {
       const run = spawnSync(process.execPath, [entry, ...args], { cwd: dir, env: { ...env, C2C_CLI_LOCK_DIR: lockDir }, encoding: 'utf8', timeout: 60000 });
       const out = `${run.stdout}${run.stderr}`;
       assert.ok(out.length > 0, `doctor printed something for ${args.join(' ').length} chars of args`);
-      for (const code of [0x1b, 0x0d, 0x202e, 0x200b]) assert.ok(!out.includes(String.fromCharCode(code)), `U+${code.toString(16)} must not reach the terminal`);
+      for (const code of [0x1b, 0x0d, 0x202e, 0x200b, 0x2060, 0x061c, 0x180e]) assert.ok(!out.includes(String.fromCharCode(code)), `U+${code.toString(16)} must not reach the terminal`);
+      assert.ok(!out.includes(String.fromCodePoint(0xe0041)), 'a tag character must not reach the terminal');
     }
   } finally {
     rmSync(lockDir, { recursive: true, force: true });

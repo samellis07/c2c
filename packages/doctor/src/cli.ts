@@ -114,7 +114,7 @@ export function doctorSpawn(command: string, args: string[], opts: { cwd: string
  * terminal. Newline and tab stay (the table and usage text are multi-line); the rest of the control set becomes '?'.
  */
 export function terminalSafe(text: string): string {
-  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '?');
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu, '?');
 }
 
 export function defaultDoctorIo(): DoctorIo {
