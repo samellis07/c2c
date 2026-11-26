@@ -10,6 +10,8 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - The toolbar setting is not carried; fields marked private or personal data get no generated privacy control; report `permission` blocks have no generated equivalent (`docs/determinism-status.md`).
 - This release's documentation does not record a run of the generated output against a deployed Catalyst project or live Zoho; test the deployment before relying on it.
 - Creator placement relative to On Validate and other items marked `[UNVERIFIED]` in the source documentation remain unverified (`docs/ui.md`).
+- A report grouped or measured by a lookup field blanks the id of a parent row the caller cannot read, in batches of 300 parent ids per read. The display text a plain report shows for a lookup is still resolved in one read per field, so a report whose rows reference more than 300 distinct parent rows can show empty display cells for the rest.
+- A lookup that holds several values is handled when it is stored as a list. A multi-value lookup stored as one comma-separated text value is not resolved or checked as a lookup.
 
 ## Manual steps that come from broken references in the source app
 
