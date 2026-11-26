@@ -7,7 +7,7 @@ import { repoRoot } from '../../core/src/toolchain.js';
 import { buildMigrationReport, type MigrationReport } from '../../cli/src/migration-report.js';
 import { ALLOWED_TAGS, DROPPED_TAGS } from '../../ui/src/pages.js';
 import { publicConstruct, statusFromReport } from '../src/status.js';
-import { BACKTICK_LITERALS, FIELD_PROPERTY_KEYS, KNOWN_TAGS } from '../src/slot-redaction.js';
+import { BACKTICK_LITERALS, FIELD_PROPERTY_KEYS, KNOWN_TAGS, PUBLIC_VALUE, redactSlots } from '../src/slot-redaction.js';
 
 // N1 v3d: the fallback is slot-general. Hostile values are UNDECLARED free text in a real generated app, run through the real
 // emitters, buildMigrationReport and statusFromReport (claude review of v3c, L1-L4).
@@ -159,4 +159,14 @@ test('slot vocabulary covers every emitter slot in packages/ui/src', () => {
   for (const tag of [...ALLOWED_TAGS, ...DROPPED_TAGS]) assert.ok(KNOWN_TAGS.has(tag), `tag ${tag}`);
   const pages = readFileSync(join(repoRoot(), 'packages/ui/src/pages.ts'), 'utf8');
   for (const m of pages.matchAll(/^const NAMED[^{]*\{([^}]*)\}/gm)) for (const key of m[1]!.matchAll(/^\s*([a-z]+):/gm)) assert.ok(KNOWN_TAGS.has(key[1]!), `NAMED ${key[1]}`);
+});
+
+test('slot-general: a long number is an identifier, only short counts and ratios print', () => {
+  for (const kept of ['0', '30', '150', '1920', '16:9', '1.5', 'true']) assert.ok(PUBLIC_VALUE.test(kept), `${kept} is a count or flag`);
+  for (const hidden of ['20230415', '14155551212', '123456789012', '1:2:3:4', '12345', '4111.1111.1111.1111']) assert.ok(!PUBLIC_VALUE.test(hidden), `${hidden} must not print`);
+  for (const hostile of ['20230415', '14155551212']) {
+    for (const text of [`Field F sets \`duration = ${hostile}\`; x`, `Field F sets \`target = ${hostile}\`; x`]) {
+      assert.ok(!redactSlots(text).includes(hostile), `${hostile} survived in: ${redactSlots(text)}`);
+    }
+  }
 });

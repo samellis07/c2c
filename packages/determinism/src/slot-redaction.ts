@@ -10,7 +10,7 @@
 export const APP_ID = '(app identifier)';
 
 /** Numbers and booleans are counts and flags, not names (`duration = 30`, `show onload = true`). A ratio such as `16:9` is a number pair. */
-export const PUBLIC_VALUE = /^(?:true|false|\d+(?:[.:]\d+)*)$/u;
+export const PUBLIC_VALUE = /^(?:true|false|\d{1,4}(?:[.:]\d{1,4}){0,2})$/u;
 /** Property values the Creator export defines (window targets, scanner lenses, the time pattern). */
 export const PUBLIC_ENUM = new Set(['_blank', '_self', '_parent', '_top', 'primary', 'secondary', 'HH:mm', 'HH:mm:ss', 'hh:mm', 'hh:mm:ss']);
 /** The `key` of every backticked `key = value` in a field reason (model.ts). */
