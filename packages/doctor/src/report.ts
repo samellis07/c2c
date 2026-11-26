@@ -5,6 +5,7 @@
  * no URL paths.
  */
 import { readFileSync } from 'node:fs';
+import { singleLine } from './sanitize.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DoctorFile } from './types.js';
@@ -100,7 +101,7 @@ export function staleScopeNotice(previous: DoctorFile | undefined, next: DoctorF
 export function writeDoctorFile(workspace: string, file: DoctorFile): string {
   const path = doctorJsonPath(workspace);
   const merged = mergeDoctorFile(readDoctorFile(workspace), file);
-  writeSafeState(path, `${JSON.stringify(merged, null, 2)}\n`);
+  writeSafeState(path, `${JSON.stringify(merged, (_key, value: unknown) => (typeof value === 'string' ? singleLine(value) : value), 2)}\n`);
   return path;
 }
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2483,4 +2484,23 @@ test('doctor CLI: values echoed in usage and error lines (unknown flag, evidence
   } finally {
     rmSync(lockDir, { recursive: true, force: true });
   }
+});
+
+test('doctor: every write to the terminal or to doctor.json goes through the one sanitiser module', () => {
+  const src = join(process.cwd(), 'packages', 'doctor', 'src');
+  const files = readdirSync(src).filter((name) => name.endsWith('.ts'));
+  const raw = /process\.std(?:out|err)\.write\(|console\.(?:log|error|warn|info)\(/;
+  const offenders: string[] = [];
+  for (const name of files) {
+    if (name === 'sanitize.ts') continue;
+    readFileSync(join(src, name), 'utf8').split('\n').forEach((line, index) => {
+      if (!raw.test(line)) return;
+      // The only allowed direct writes: the sanitising sink in cli.ts and the child-process script in scope.ts (its stdout is read by the parent, never shown).
+      const allowed = (name === 'cli.ts' && /terminalSafe\(/.test(line)) || (name === 'scope.ts' && /process\.stdout\.write\((?:value|String\(value\))\)/.test(line));
+      if (!allowed) offenders.push(`${name}:${index + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [], `a doctor write bypasses the sanitiser: ${offenders.join(' | ')}`);
+  const report = readFileSync(join(src, 'report.ts'), 'utf8');
+  assert.match(report, /singleLine\(value\)/, 'doctor.json strings are sanitised when written');
 });
