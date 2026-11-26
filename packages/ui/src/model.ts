@@ -3002,9 +3002,10 @@ function storedBuiltinColumn(app: App, form: Form | undefined, name: string): bo
  * Applicable / Yet to get Approved / Approved / Rejected); when an approval
  * or blueprint machine governs the report's form the column reads the
  * machine's status column instead (`recordStatusColumn`), so only a form no
- * machine governs stays counted here. The geo stamps (`Added_Location`,
- * `Modified_Location`) have no stored column either, so a report column
- * naming one is counted rather than drawn blank.
+ * machine governs is stored as its own column (`builtinRecordColumns`). The
+ * geo stamps (`Added_Location`, `Modified_Location`) are stored as latitude /
+ * longitude columns the same way. What stays counted here is a report that
+ * names no form, so there is no table to store the column on.
  */
 const UNSUPPORTED_RECORD_COLUMNS = new Set(['Record_Status', ...GEO_RECORD_COLUMNS]);
 

@@ -3904,21 +3904,20 @@ const RECORD_STATUS_REPORT = `
 	}
 `;
 
-test('a report column naming the record-status system field is listed through a dedicated UI todo', () => {
+test('a report column naming the record-status system field is a generated column, not a todo', () => {
   const source = dsApp(RECORD_STATUS_REPORT);
   const out = collectOutputs(source);
   assert.equal(rowStatus(source, out, 'Orders_List column Title'), 'emitted');
-  assert.equal(rowStatus(source, out, 'Orders_List column Record_Status'), 'counted');
-  const todo = out.model.todos.find((t) => t.name === 'Orders_List column Record_Status');
-  assert.ok(todo, 'a UI todo names the record-status column');
-  assert.ok(todo.manualStep, 'the todo names a manual step');
+  assert.equal(rowStatus(source, out, 'Orders_List column Record_Status'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name === 'Orders_List column Record_Status'), false);
+  assert.deepEqual(auditApp(source, out), []);
 
-  // Without the note, the same column is a silent drop.
-  const unlisted = collectOutputs(source);
-  unlisted.model = { ...unlisted.model, todos: unlisted.model.todos.filter((t) => t.name !== 'Orders_List column Record_Status') };
-  const drops = auditApp(source, unlisted);
+  // Mutation: with the column gone from the generated view it is a silent drop.
+  const mutated = cloneOutputs(out);
+  mutated.model.reports[0]!.columns = mutated.model.reports[0]!.columns.filter((column) => column.field !== 'Record_Status');
+  mutated.model.reports[0]!.phoneColumns = mutated.model.reports[0]!.phoneColumns?.filter((column) => column.field !== 'Record_Status');
   assert.deepEqual(
-    drops.map((d) => d.name),
+    auditApp(source, mutated).map((d) => d.name),
     ['Orders_List column Record_Status'],
   );
 });
@@ -4050,7 +4049,7 @@ test('a quickview that omits declared columns does not drop them', () => {
   }
 });
 
-test('a quickview field that is a counted built-in record column is not a drop', () => {
+test('a quickview field that is a generated built-in record column is not a drop', () => {
   const source = dsApp(`
 	form Appointment_Booking
 	{
@@ -4092,14 +4091,14 @@ test('a quickview field that is a counted built-in record column is not a drop',
 	}
 `);
   const out = collectOutputs(source);
-  assert.equal(rowStatus(source, out, 'All_Appointments column Added_Location'), 'counted');
-  assert.equal(rowStatus(source, out, 'All_Appointments quickview web'), 'counted');
+  assert.equal(rowStatus(source, out, 'All_Appointments column Added_Location'), 'emitted');
+  assert.equal(rowStatus(source, out, 'All_Appointments quickview web'), 'emitted');
   assert.deepEqual(auditApp(source, out), []);
-  // Mutation: with the column's manual item gone the quickview is a drop again.
+  // Mutation: with the column gone from the generated view it is a drop again.
   const mutated = cloneOutputs(out);
-  mutated.model.todos = mutated.model.todos.filter((t) => !(t.area === 'report' && t.name.includes('Added_Location')));
+  mutated.model.reports[0]!.columns = mutated.model.reports[0]!.columns.filter((column) => column.field !== 'Added_Location');
+  mutated.model.reports[0]!.phoneColumns = mutated.model.reports[0]!.phoneColumns?.filter((column) => column.field !== 'Added_Location');
   assert.equal(rowStatus(source, mutated, 'All_Appointments column Added_Location'), 'dropped');
-  assert.equal(rowStatus(source, mutated, 'All_Appointments quickview web'), 'dropped');
 });
 
 test('a report column is proved only by the generated view (mutation)', () => {
