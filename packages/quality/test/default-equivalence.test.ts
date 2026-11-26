@@ -44,7 +44,8 @@ for (const row of DEFAULT_EQUIVALENCE) {
 }
 
 test('a non-default value of a listed property stays a drop', () => {
-  assert.equal(status(dsApp('image', ['camera = secondary']), 'camera'), 'dropped');
+  // camera = secondary is generated now (the front lens), so it is no longer a drop.
+  assert.equal(status(dsApp('image', ['camera = secondary']), 'camera'), 'emitted');
   assert.equal(status(dsApp('image', ['switch camera = false']), 'switch camera'), 'dropped');
   assert.equal(status(dsApp('image', ['show gallery = false']), 'show gallery'), 'dropped');
   assert.equal(status(dsApp('upload file', ['browse = unknown_cloud']), 'browse'), 'dropped');

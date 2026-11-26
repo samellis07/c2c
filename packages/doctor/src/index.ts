@@ -50,3 +50,4 @@ export { writeDoctorFile, doctorJsonPath, c2cVersion, detectHost, workspaceDir }
 export { verifyVendorDir, MANIFEST_NAME, type VendorVerdict } from './vendor.js';
 export { runDoctorChecks, f5TableBudgets, checkMailSender, projectListIds, maskEmail, DEFERRED_CHECKS, type DoctorContext, type DoctorRun } from './checks.js';
 export type { CheckResult, DoctorFile, DoctorIo, SpawnFn, SpawnResult } from './types.js';
+export { singleLine } from './sanitize.js';

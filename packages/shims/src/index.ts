@@ -168,6 +168,7 @@ export {
   SUBFORM_READ_PAGE,
   SUBFORM_WRITE_BATCH,
   SubformWriteError,
+  assertSubformsPresent,
   attachSubforms,
   authorizeSubformWrites,
   childRowIds,

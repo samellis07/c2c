@@ -293,12 +293,11 @@ test('a fractional preview duration carries through as-is', () => {
   assert.equal(todo, undefined, 'a valid fractional value needs no manual item');
 });
 
-test('video and audio duration settings remain manual items', () => {
+test('video and audio duration settings are generated as a recording limit, not a todo or a preview timer', () => {
   for (const type of ['video', 'audio']) {
     const model = buildUi(appOf(`\tform Profile\n\t{\n\t\tClip\n\t\t(\n\t\t\ttype = ${type}\n\t\t\tduration = 30\n\t\t)\n\t}\n`)).model;
-    const todo = model.todos.find((t) => t.name === 'Profile.Clip property duration');
-    assert.ok(todo, `${type} duration is a counted manual item`);
-    assert.ok(todo!.reason.includes('duration = 30'));
+    assert.equal(model.todos.some((t) => t.name === 'Profile.Clip property duration'), false, `${type} duration is not a todo`);
+    assert.equal(model.forms[0]!.fields[0]!.media?.recordSeconds, 30);
     assert.equal(model.forms[0]!.fields[0]!.previewDuration, undefined, `${type} duration does not become a preview timer`);
   }
 });

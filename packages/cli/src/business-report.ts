@@ -255,7 +255,7 @@ function appSpecificSteps(app: App, ui: UiModel, plan: OfflinePlan): AttentionIt
         area: 'schedule',
         name: workflow.name,
         detail: `The schedule runs relative to each record's ${relative.field ?? 'date field'}${relative.form ? ` on ${relative.form}` : ''} in Creator; Catalyst has no per-record schedule, so it was not created.`,
-        workaround: `Build this as a function that checks due records on a recurring cron: runs relative to each record's ${relative.field ?? 'date field'}${relative.form ? ` on ${relative.form}` : ''}; scheduling per record is not generated yet.`,
+        workaround: `Ask a developer to build a recurring job in Job Scheduling that finds the records whose ${relative.field ?? 'date field'}${relative.form ? ` on ${relative.form}` : ''} is due and acts on them; this per-record schedule is not generated.`,
       });
       continue;
     }

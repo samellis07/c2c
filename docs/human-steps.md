@@ -81,4 +81,4 @@ Set each listed property, including export, drill-down, and underlying-data acce
 
 ## <a id="manual-kind-page-click-parameters"></a>Button or text click parameters
 
-Wire each named parameter to the generated click handler input; exercise the control and confirm the target receives it.
+Ask a developer to pass each named parameter when the control is clicked; click the control in the generated app and confirm the target receives them.

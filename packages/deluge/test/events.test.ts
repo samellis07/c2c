@@ -514,3 +514,31 @@ test('the sweeper resolves a replayable marker, re-arms a failing one, and disca
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('dry run: a failing handler returns a stable code, not the raw error text', async () => {
+  const g = generate(deferrableApp(), { asyncOnSuccess: true });
+  const { root, load } = await materialize(g);
+  try {
+    const listener = await load('functions/events/after-commit.mjs');
+    const secret = 'ZCQL SELECT secret FROM Orders';
+    const orig = console.error;
+    const logged: string[] = [];
+    console.error = (...a: unknown[]) => void logged.push(a.join(' '));
+    let out: Record<string, unknown>;
+    try {
+      // A failure after the handler ran: the dry-run reply is returned to the caller.
+      out = (await listener.default!(recordEvent('Jobs', 'insert', { ROWID: '7' }), {
+        closeWithSuccess: () => { throw new Error(secret); },
+        closeWithFailure: () => undefined,
+      })) as Record<string, unknown>;
+    } finally {
+      console.error = orig;
+    }
+    assert.equal(out.dryRun, true);
+    assert.equal(out.errorCode, 'EVENT_HANDLER_FAILED');
+    assert.doesNotMatch(JSON.stringify(out), /ZCQL|secret/);
+    assert.match(logged.join('\n'), /ZCQL SELECT/, 'the detail is logged server-side');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

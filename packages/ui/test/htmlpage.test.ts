@@ -203,7 +203,7 @@ if (input.show == "yes") {
   try {
     const shown = await invoke(handler, { ...USER, body: { input: { name: 'Ada', show: 'yes' } } });
     assert.equal(shown.status, 200, JSON.stringify(shown.body));
-    assert.match(String(shown.body.html), /<p>Hello Ada, \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}, ada@example\.com, #<\/p>/);
+    assert.match(String(shown.body.html), /<p>Hello Ada, \d{2}-[A-Z][a-z]{2}-\d{4}, ada@example\.com, #<\/p>/);
     assert.match(String(shown.body.html), /<b>shown<\/b>/);
     assert.doesNotMatch(String(shown.body.html), /hidden/);
 
@@ -3427,19 +3427,17 @@ test('the same read-only island without the write still compiles, so the effect 
   assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
 });
 
-test('a text remove whose operands mix a date-to-text and a datetime-to-text stays the counted TODO', () => {
-  // Creator renders both operands in the app date format, so `str.remove(dt)`
-  // leaves the time. The shims render String(datetime) and date text in other
-  // formats, so a translation would not match Creator: the snippet stays counted.
+test('a text remove whose operands are a datetime-to-text and its own date-to-text compiles', () => {
+  // `Added_Time.toString()` is rendered in Creator's date-time format and `dte.toString()` in its date format, both by the
+  // date shims, so `str.remove(dt)` leaves the time of day as it does in Creator. A field text or any other operand
+  // keeps the snippet counted (snippet-date-text-remove.test.ts).
   const island = 'for each re in Orders[Status == "open"]\n{\n\tstr = re.Added_Time.toString();\n\tdte = re.Added_Time.toDate();\n\tdt = dte.toString();\n\ttym = str.remove(dt);\n}';
   const template = `htmlpage hp1()\ncontent\n<%{\n${island}\n%}\n<p><%= Orders[Status == "open"].count() %></p>`;
   const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', template);
-  assert.equal(compiled.ok, false, 'remove over mixed date texts must not compile');
-  assert.equal(compiled.file, undefined);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
   const { model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(template)}`));
-  assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO]);
-  assert.ok(model.todos[0]?.manualStep, 'the counted TODO carries a manual step');
-  assert.deepEqual(uiSnippetFiles(model), []);
+  assert.deepEqual(model.todos, []);
+  assert.equal(uiSnippetFiles(model).length, 1);
 });
 
 

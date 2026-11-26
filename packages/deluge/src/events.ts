@@ -562,7 +562,11 @@ export default async function listener(event, context) {
       }
     }
     if (context && typeof context.closeWithFailure === "function") context.closeWithFailure();
-    if (!live) return { dryRun: true, event: env, marker, error: err && err.message ? err.message : String(err), transcript: runtime.transcript };
+    if (!live) {
+      // The raw text (store, query, ids) stays in the function log; the reply carries a stable code.
+      try { console.error(JSON.stringify({ level: "error", component: "c2c-event", code: "EVENT_HANDLER_FAILED", message: String(err && err.message ? err.message : err).slice(0, 2000).replace(/[\\u0000-\\u001f\\u007f]/g, " ") })); } catch (logErr) { /* best effort */ }
+      return { dryRun: true, event: env, marker, errorCode: "EVENT_HANDLER_FAILED", error: "The event handler failed. See the function log for the detail.", transcript: runtime.transcript };
+    }
     throw err;
   }
 }

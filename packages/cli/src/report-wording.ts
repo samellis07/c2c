@@ -49,6 +49,9 @@ export const BANNED_TERMS: readonly string[] = [
   '<style',
   '<link',
   'JSON',
+  'cron',
+  'click handler',
+  'enrichment',
 ];
 
 const SCRUB: readonly [RegExp, string][] = [
@@ -91,7 +94,7 @@ export function scrubBusiness(text: string): string {
   return out.replace(/\s{2,}/g, ' ').trim();
 }
 
-const AI_STEP = 'Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live.';
+const AI_STEP = 'Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand.';
 const CONNECTION_STEP = 'Ask the person who owns the external account to authorize the matching connection during migration; otherwise keep the value as text and complete the lookup after launch.';
 
 /**
@@ -251,7 +254,7 @@ export function fieldGapWording(matrixId: string, label: string): BusinessWordin
   if (!known) {
     return {
       notice: 'This field works differently after migration and needs a manual check.',
-      workaround: `Open ${label} in the generated app, check the stored value against the original, and keep the original behaviour as the fallback until it is verified.`,
+      workaround: `Open a record with ${label} filled in, in both Creator and the generated app, and compare how the value looks and saves. Keep using the Creator app until they match.`,
     };
   }
   return { notice: known.notice, workaround: known.workaround };
@@ -356,6 +359,9 @@ export function uiReasonNotice(area: string, name: string, reason: string): stri
   if (/named filter/i.test(reason)) {
     return `A saved filter on the report ${name} is not migrated; choosing it would show no rows.`;
   }
+  if (/click parameters/i.test(reason)) {
+    return `A button or text on the page ${name} opens without the values it passed on in Creator.`;
+  }
   if (area === 'zml' || /(^ZML|no generated component|<style|Static <style>)/i.test(reason)) {
     return `A part of the page ${name} could not be drawn automatically.`;
   }
@@ -394,7 +400,7 @@ export function hiddenReportWording(name: string, reason: string): BusinessWordi
   if (/view is not drawn/.test(reason)) {
     return {
       notice: `The report ${name} uses a view the converter does not draw.`,
-      workaround: `Rebuild ${name} as a supported view (list, chart or map) before relying on it.`,
+      workaround: `In the generated app, recreate ${name} as a list, chart or map report with the same fields before relying on it.`,
     };
   }
   return {

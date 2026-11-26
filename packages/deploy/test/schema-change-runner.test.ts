@@ -79,19 +79,18 @@ test('the library sequence keeps every row and value, and each destructive step 
   }
   assert.deepEqual(
     report.gaps.map((g) => g.id),
-    ['no-picklist-add', 'no-picklist-remove', 'live-rename-field', 'live-delete-field', 'deployed-model-not-recorded', 'creator-rename-undetectable'],
+    ['no-picklist-add', 'no-picklist-remove', 'live-rename-field', 'live-delete-field'],
   );
   assert.equal(report.summary.fail, 0);
   assert.equal(report.summary.gaps, report.gaps.length);
 });
 
 test('a redeploy whose store rename loses the values fails the runner', async (t) => {
+  // A copy that reports success but writes nothing (the store has no in-place rename).
   const lossyRename = (driver: StoreDriver): StoreDriver => ({
     ...driver,
-    renameColumn: async (table, from, to) => {
-      await driver.dropColumn(table, from);
-      await driver.addColumn(table, { name: to } as Parameters<StoreDriver['addColumn']>[1]);
-    },
+    copyColumn: async () => {},
+    valueCount: async (table, column) => driver.valueCount(table, column.replace(/_Renamed$/, '')),
   });
   const report = await runSchemaChangeScenarios({ ds: LIBRARY, workDir: scratch(t), sdkPath: SDK, changes: [change('rename-field')], wrapDriver: lossyRename });
   const [s] = report.scenarios;
@@ -151,18 +150,21 @@ test('the delete-field store step without the backup set is refused while the co
   assert.equal(rows.length, 0);
 });
 
-test('c2c plan --previous: a Creator rename without --rename reads as drop plus add and the refusal names --rename', async (t) => {
+test('c2c plan --previous: a Creator rename without --rename is detected, and --no-detect-renames reads it as drop plus add naming --rename', async (t) => {
   const dir = scratch(t);
   const next = join(dir, 'next.ds');
   writeFileSync(next, change('rename-field').apply(readFileSync(LIBRARY, 'utf8')));
   const run = io();
   assert.equal(await planCli([next, '--out', join(dir, 'plan'), '--dc', 'in', '--previous', LIBRARY, '--allow-budget-fail'], run), 1);
   const err = run.err.join('');
-  assert.match(err, /- drop column Book\.Author/);
+  assert.match(err, /detected rename Book\.Author -> Author_Renamed/);
   assert.match(err, /needs --allow-destructive with a verified --backup; nothing was planned/);
-  assert.match(err, /add --rename Form\.Old=New/);
+  const plain = io();
+  assert.equal(await planCli([next, '--out', join(dir, 'plan'), '--dc', 'in', '--previous', LIBRARY, '--no-detect-renames', '--allow-budget-fail'], plain), 1);
+  assert.match(plain.err.join(''), /- drop column Book\.Author/);
+  assert.match(plain.err.join(''), /Book\.Author: every stored value is deleted/);
+  assert.match(plain.err.join(''), /add --rename Form\.Old=New/);
   assert.match(err, /c2c rollback-export --ds /);
-  assert.ok(readFileSync(join(dir, 'plan/schema-change/delta.md'), 'utf8').includes('drop column Book.Author'));
   const paired = io();
   assert.equal(await planCli([next, '--out', join(dir, 'plan'), '--dc', 'in', '--previous', LIBRARY, '--rename', 'Book.Author=Author_Renamed', '--allow-budget-fail'], paired), 1);
   assert.match(paired.err.join(''), /- rename column Book\.Author -> Author_Renamed/);
@@ -255,7 +257,7 @@ const NO_SUITABLE = `application "Synthetic_Counter"
 }
 `;
 
-test('an app with no picklist, no renameable text field and no deletable field: those scenarios are gaps with the reason, never a pass', async (t) => {
+test('an app with no picklist and no deletable field: those scenarios are gaps with the reason, never a pass; Label is renamed everywhere in the script code', async (t) => {
   const dir = scratch(t);
   const ds = join(dir, 'counter.ds');
   writeFileSync(ds, NO_SUITABLE);
@@ -266,13 +268,13 @@ test('an app with no picklist, no renameable text field and no deletable field: 
     [
       ['add-field', 'PASS'],
       ['add-form', 'PASS'],
+      ['rename-field', 'PASS'],
     ],
     formatSchemaChangeReport(report),
   );
   const gaps = new Map(report.gaps.map((g) => [g.id, g.detail]));
-  for (const id of ['picklist-add', 'picklist-remove', 'rename-field', 'delete-field']) assert.match(gaps.get(`no-${id}`) ?? '', /^form Item has no /, id);
-  // Label is named by the report criteria, Count is required.
-  assert.equal(report.target?.text, undefined);
+  for (const id of ['picklist-add', 'picklist-remove', 'delete-field']) assert.match(gaps.get(`no-${id}`) ?? '', /^form Item has no /, id);
+  assert.equal(report.target?.text, 'Label');
   assert.equal(report.target?.deletable, undefined);
   assert.equal(report.summary.fail, 0);
   assert.equal(report.summary.gaps, report.gaps.length);
@@ -287,18 +289,27 @@ test('the same app without the criteria: Label becomes the rename target', () =>
   assert.ok(derived.changes.some((c) => c.id === 'rename-field'));
 });
 
-test('an app with no form the seed can fill: every scenario is a gap', async (t) => {
+test('an app whose only form the API cannot seed (a required image) is seeded straight into the store and still runs', async (t) => {
   const dir = scratch(t);
   const ds = join(dir, 'pictures.ds');
   writeFileSync(ds, NO_SUITABLE.replace('must have Count\n\t\t\t(\n\t\t\t\ttype = number', 'must have Count\n\t\t\t(\n\t\t\t\ttype = image'));
   const report = await runSchemaChangeScenarios({ ds, workDir: join(dir, 'work'), sdkPath: SDK });
-  assert.equal(report.target, undefined);
-  assert.deepEqual(report.scenarios, []);
+  assert.equal(report.target?.form, 'Item');
+  assert.match(report.seedDirect?.[0] ?? '', /^Item: .*required image field Count has no offline seed value/);
   assert.deepEqual(
-    report.gaps.filter((g) => g.id.startsWith('no-')).map((g) => g.scenario),
-    [...SCENARIO_IDS],
+    report.scenarios.map((s) => s.id),
+    ['add-field', 'add-form', 'rename-field'],
   );
-  assert.match(report.gaps[0]!.detail, /Item: required image field Count has no offline seed value/);
-  assert.equal(report.summary.pass, 0);
-  assert.equal(report.summary.fail, 0);
+  assert.equal(report.summary.fail, 0, formatSchemaChangeReport(report));
+  assert.equal(report.summary.pass, 3);
+});
+
+const KITCHEN_SINK = join(root, 'fixtures/synthetic/kitchen-sink/kitchen_sink.ds');
+
+test('dropping a decimal field also drops its numeric shadow column: the verified backup holds the value, so nothing counts as lost', async (t) => {
+  const report = await runSchemaChangeScenarios({ ds: KITCHEN_SINK, workDir: scratch(t), sdkPath: SDK });
+  const drop = report.scenarios.find((s) => s.id === 'delete-field');
+  assert.ok(drop, 'the delete-field scenario ran');
+  assert.deepEqual(drop.lost, [], formatSchemaChangeReport(report));
+  assert.equal(drop.status, 'PASS', formatSchemaChangeReport(report));
 });

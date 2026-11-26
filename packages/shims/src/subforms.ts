@@ -12,6 +12,8 @@
  * table name is passed where a form name goes.
  */
 
+import { WriteRuleError } from './write-rules.js';
+
 /** One inline subform of a form, as the schema plan stores it. */
 export interface SubformTable {
   /** Subform field link name on the parent form. */
@@ -57,6 +59,22 @@ export interface AttachSubformsOptions {
 export const SUBFORM_WRITE_BATCH = 200;
 /** ZCQL returns at most 300 rows per query; IN lists use the same cap. */
 export const SUBFORM_READ_PAGE = 300;
+
+/**
+ * A Creator `must have` grid needs at least one row on an insert: the record
+ * carries no list, an empty list, or null. Refused as `mandatory-missing`
+ * (422) before the parent row is written, like any other mandatory field.
+ * An update that does not carry the grid leaves its rows alone, so it never
+ * calls this.
+ */
+export function assertSubformsPresent(form: string, record: Record<string, unknown>, required: readonly string[] | undefined): void {
+  for (const field of required ?? []) {
+    const value = record[field];
+    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+      throw new WriteRuleError(form, [{ column: field, rule: 'mandatory-missing' }]);
+    }
+  }
+}
 
 export class SubformWriteError extends Error {
   readonly code = 'SUBFORM_WRITE_FAILED';

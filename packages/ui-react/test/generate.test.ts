@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { serviceWorker } from '../../ui/src/generate.js';
@@ -458,4 +458,21 @@ test('a picklist with others option carries the flag into the React field spec',
   const kind = spec.forms.New_Contact!.fields.find((f) => f.name === 'Kind')!;
   assert.equal(kind.othersOption, true);
   assert.deepEqual(kind.choices, ['Friend', 'Work']);
+});
+
+test('an output folder spelled ./out or out// is walked like out: a symlinked subfolder never redirects a write', () => {
+  const base = mkdtempSync(join(tmpdir(), 'c2c-ui-react-spell-'));
+  try {
+    const out = join(base, 'ui5');
+    writeReactApp(out, generateReactApp(appOf()));
+    const outside = join(base, 'outside');
+    mkdirSync(outside);
+    renameSync(join(out, 'src'), join(base, 'src-moved'));
+    symlinkSync(outside, join(out, 'src'), 'dir');
+    const rel = relative(process.cwd(), out);
+    for (const spelled of [rel, `./${rel}`, `${rel}//`, out]) {
+      assert.throws(() => writeReactApp(spelled, generateReactApp(appOf())), /symbolic link/, spelled);
+    }
+    assert.deepEqual(readdirSync(outside), [], 'nothing was written through the symlink');
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });

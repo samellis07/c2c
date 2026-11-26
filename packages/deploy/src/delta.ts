@@ -29,8 +29,8 @@ export interface ModelPlan {
 }
 
 export type ColumnChange =
-  | { op: 'add'; table: string; column: string; dataType: string }
-  | { op: 'rename'; table: string; from: string; to: string }
+  | { op: 'add'; table: string; column: string; dataType: string; /** A mandatory column with no default: existing rows would hold no value for it. */ needsDefault?: true }
+  | { op: 'rename'; table: string; from: string; to: string; /** Paired by the change detector, not by an edit or --rename. */ detected?: true }
   | { op: 'alter'; table: string; column: string; changes: string[] }
   | { op: 'drop'; table: string; column: string };
 
@@ -55,7 +55,7 @@ export interface PlanDelta {
   columns: ColumnChange[];
   roles: { op: 'add' | 'remove'; role: string; parent?: string }[];
   files: FileChange[];
-  /** True when the delta drops a table or column: applying it needs --confirm. */
+  /** True when the delta drops a table or column, or narrows one (a type change, a shorter length): applying it needs --confirm. */
   needsConfirm: boolean;
 }
 
@@ -106,7 +106,51 @@ function alterations(before: SchemaColumn, after: SchemaColumn): string[] {
   return out;
 }
 
-function tableColumns(before: SchemaTable, after: SchemaTable, renames: readonly FieldRename[]): ColumnChange[] {
+/**
+ * A re-export carries no field id and no rename record: the link name is the
+ * only identity, and a rename changes it. A removed column and an added one are
+ * read as one rename only when nothing else could explain them: they sit in the
+ * same slot (the same nearest unchanged column before them), have the same
+ * stored shape (type, length, mandatory, unique, default, relation), and are
+ * the only such pair in that slot. Anything less certain stays a drop plus an add.
+ */
+function detectColumnRenames(before: SchemaTable, after: SchemaTable, pairedOld: ReadonlySet<string>, pairedNew: ReadonlySet<string>): [string, string][] {
+  const inOld = new Set(before.columns.map((c) => c.name));
+  const inNew = new Set(after.columns.map((c) => c.name));
+  const slots = (columns: readonly SchemaColumn[], other: ReadonlySet<string>, skip: ReadonlySet<string>): Map<string, SchemaColumn[]> => {
+    const out = new Map<string, SchemaColumn[]>();
+    let anchor = '';
+    for (const column of columns) {
+      if (other.has(column.name)) {
+        anchor = column.name;
+        continue;
+      }
+      if (skip.has(column.name)) continue;
+      const key = `${anchor}\u0000${columnShape(column)}`;
+      out.set(key, [...(out.get(key) ?? []), column]);
+    }
+    return out;
+  };
+  const removed = slots(before.columns, inNew, pairedOld);
+  const added = slots(after.columns, inOld, pairedNew);
+  const pairs: [string, string][] = [];
+  for (const [key, olds] of removed) {
+    const news = added.get(key);
+    if (olds.length === 1 && news?.length === 1) pairs.push([olds[0]!.name, news[0]!.name]);
+  }
+  return pairs;
+}
+
+/** True when the alteration can cut or refuse stored values: a type change or a shorter length. */
+function narrows(changes: readonly string[]): boolean {
+  return changes.some((c) => {
+    if (c.startsWith('type ')) return true;
+    const m = /^length (\d+) -> (\d+)$/.exec(c);
+    return m !== null && Number(m[2]) < Number(m[1]);
+  });
+}
+
+function tableColumns(before: SchemaTable, after: SchemaTable, renames: readonly FieldRename[], detect = false): ColumnChange[] {
   const out: ColumnChange[] = [];
   const oldByName = new Map(before.columns.map((c) => [c.name, c]));
   const newByName = new Map(after.columns.map((c) => [c.name, c]));
@@ -140,11 +184,18 @@ function tableColumns(before: SchemaTable, after: SchemaTable, renames: readonly
       pairedNew.add(next.name);
     }
   }
+  if (detect) {
+    for (const [from, to] of detectColumnRenames(before, after, pairedOld, pairedNew)) {
+      out.push({ op: 'rename', table: before.name, from, to, detected: true });
+      pairedOld.add(from);
+      pairedNew.add(to);
+    }
+  }
   for (const column of after.columns) {
     if (pairedNew.has(column.name)) continue;
     const old = oldByName.get(column.name);
     if (!old || pairedOld.has(column.name)) {
-      out.push({ op: 'add', table: after.name, column: column.name, dataType: column.dataType });
+      out.push({ op: 'add', table: after.name, column: column.name, dataType: column.dataType, ...(column.mandatory && column.defaultValue === undefined ? { needsDefault: true as const } : {}) });
       continue;
     }
     const changes = alterations(old, column);
@@ -158,7 +209,7 @@ function tableColumns(before: SchemaTable, after: SchemaTable, renames: readonly
 }
 
 /** Compare two model plans. `renames` comes from the edits, so a renamed field pairs with its old column. */
-export function planDelta(before: ModelPlan, after: ModelPlan, opts: { app: string; edits: readonly EditOp[]; renames: readonly FieldRename[] }): PlanDelta {
+export function planDelta(before: ModelPlan, after: ModelPlan, opts: { app: string; edits: readonly EditOp[]; renames: readonly FieldRename[]; /** Pair a removed and an added column in the same slot and shape as a rename: a .ds re-export has no rename record. */ detect?: boolean }): PlanDelta {
   const renamesByForm = new Map<string, FieldRename[]>();
   for (const r of opts.renames) renamesByForm.set(r.form, [...(renamesByForm.get(r.form) ?? []), r]);
   const oldTables = new Map(before.schema.tables.map((t) => [t.name, t]));
@@ -171,7 +222,7 @@ export function planDelta(before: ModelPlan, after: ModelPlan, opts: { app: stri
       tables.push({ op: 'add', table: table.name, form: table.form });
       continue;
     }
-    columns.push(...tableColumns(old, table, table.role === 'junction' ? [] : (renamesByForm.get(table.form) ?? [])));
+    columns.push(...tableColumns(old, table, table.role === 'junction' ? [] : (renamesByForm.get(table.form) ?? []), opts.detect === true));
   }
   for (const table of before.schema.tables) {
     if (!newTables.has(table.name)) tables.push({ op: 'drop', table: table.name, form: table.form });
@@ -202,7 +253,7 @@ export function planDelta(before: ModelPlan, after: ModelPlan, opts: { app: stri
     columns,
     roles,
     files,
-    needsConfirm: tables.some((t) => t.op === 'drop') || columns.some((c) => c.op === 'drop'),
+    needsConfirm: tables.some((t) => t.op === 'drop') || columns.some((c) => c.op === 'drop' || (c.op === 'alter' && narrows(c.changes)) || (c.op === 'add' && c.needsDefault === true)),
   };
 }
 
@@ -268,6 +319,14 @@ export interface StoreDriver {
   createTable(table: SchemaTable): Promise<void>;
   addColumn(table: string, column: SchemaColumn): Promise<void>;
   renameColumn(table: string, from: string, to: string): Promise<void>;
+  /**
+   * False when the store cannot rename a column in place (the live Data Store
+   * cannot): a rename then adds the new column, copies the values with
+   * `copyColumn` and keeps the old column until the drop is confirmed.
+   */
+  nativeRename?: boolean;
+  /** Copy every value of `from` into `to`, row by row. Needed when `nativeRename` is false. */
+  copyColumn?(table: string, from: string, to: string): Promise<void>;
   alterColumn(table: string, column: SchemaColumn): Promise<void>;
   dropColumn(table: string, column: string): Promise<void>;
   dropTable(table: string): Promise<void>;
@@ -286,9 +345,9 @@ export class DeltaRefused extends Error {
  * drops. `renames` comes from the edits so a renamed column pairs with its old
  * name instead of reading as a drop plus an add.
  */
-export function unsupportedSchemaOps(before: SchemaPlan, after: SchemaPlan, renames: readonly FieldRename[]): string[] {
+export function unsupportedSchemaOps(before: SchemaPlan, after: SchemaPlan, renames: readonly FieldRename[], detect = false): string[] {
   const empty = { files: new Map<string, DeployFile>(), roles: [] };
-  const delta = planDelta({ schema: before, ...empty }, { schema: after, ...empty }, { app: '', edits: [], renames });
+  const delta = planDelta({ schema: before, ...empty }, { schema: after, ...empty }, { app: '', edits: [], renames, detect });
   const out: string[] = [];
   for (const table of delta.tables) {
     if (table.op === 'drop') out.push(`drop table ${table.table}: dropping a table is not yet supported on the live store`);
@@ -311,6 +370,10 @@ export interface SchemaChangeReview {
   delta: PlanDelta;
   /** Changes that drop, move, or reshape stored values: they need --allow-destructive and a verified --backup. */
   destructive: string[];
+  /** What each destructive change would lose, one line each: the column and the values it takes with it. */
+  losses: string[];
+  /** Renames paired by the change detector (same type, shape and slot), not named by --rename. */
+  detectedRenames: string[];
   /** Choices removed from a choice field. Rows that hold one keep the stored value. */
   removedChoices: string[];
 }
@@ -328,16 +391,34 @@ function choiceFields(app: App): Map<string, string[]> {
 }
 
 /** Review a re-exported model against the deployed one before a redeploy. Deterministic for the same inputs. */
-export function reviewSchemaChange(before: App, after: App, dc: string, renames: readonly FieldRename[] = []): SchemaChangeReview {
-  const delta = planDelta(modelPlan(before, dc), modelPlan(after, dc), { app: after.name || 'app', edits: [], renames });
+export function reviewSchemaChange(before: App, after: App, dc: string, renames: readonly FieldRename[] = [], opts: { detect?: boolean } = {}): SchemaChangeReview {
+  const delta = planDelta(modelPlan(before, dc), modelPlan(after, dc), { app: after.name || 'app', edits: [], renames, detect: opts.detect !== false });
   const destructive: string[] = [];
+  const losses: string[] = [];
+  const detectedRenames: string[] = [];
   for (const table of delta.tables) {
-    if (table.op === 'drop') destructive.push(`drop table ${table.table} (form ${table.form})`);
+    if (table.op !== 'drop') continue;
+    destructive.push(`drop table ${table.table} (form ${table.form})`);
+    losses.push(`${table.table}: every row of form ${table.form} is deleted`);
   }
   for (const column of delta.columns) {
-    if (column.op === 'drop') destructive.push(`drop column ${column.table}.${column.column}`);
-    else if (column.op === 'rename') destructive.push(`rename column ${column.table}.${column.from} -> ${column.to}`);
-    else if (column.op === 'alter') destructive.push(`alter column ${column.table}.${column.column}: ${column.changes.join(', ')}`);
+    if (column.op === 'drop') {
+      destructive.push(`drop column ${column.table}.${column.column}`);
+      losses.push(`${column.table}.${column.column}: every stored value is deleted`);
+    } else if (column.op === 'rename' && column.detected) {
+      const line = `detected rename ${column.table}.${column.from} -> ${column.to} (same type, constraints and position; values move to the new name)`;
+      destructive.push(line);
+      detectedRenames.push(line);
+    } else if (column.op === 'rename') {
+      destructive.push(`rename column ${column.table}.${column.from} -> ${column.to}`);
+    } else if (column.op === 'alter') {
+      destructive.push(`alter column ${column.table}.${column.column}: ${column.changes.join(', ')}`);
+      for (const change of column.changes) {
+        const length = /^length (\d+) -> (\d+)$/.exec(change);
+        if (change.startsWith('type ')) losses.push(`${column.table}.${column.column}: ${change}; a stored value that does not convert is lost or refused`);
+        else if (length && Number(length[2]) < Number(length[1])) losses.push(`${column.table}.${column.column}: ${change}; a stored value longer than ${length[2]} characters is cut or refused`);
+      }
+    }
   }
   const removedChoices: string[] = [];
   const next = choiceFields(after);
@@ -347,7 +428,7 @@ export function reviewSchemaChange(before: App, after: App, dc: string, renames:
     const gone = choices.filter((choice) => !kept.includes(choice));
     if (gone.length) removedChoices.push(`${field}: ${gone.map((choice) => JSON.stringify(choice)).join(', ')} removed; rows that hold a removed choice keep it`);
   }
-  return { delta, destructive, removedChoices };
+  return { delta, destructive, losses, detectedRenames, removedChoices };
 }
 
 /** Parse repeated `--rename Form.Old=New` flags. */
@@ -370,6 +451,8 @@ export function destructiveRefusal(review: SchemaChangeReview, opts: { target: s
   const lines = [
     `the re-export changes stored data and ${opts.reason}; nothing was planned`,
     ...review.destructive.map((line) => `- ${line}`),
+    ...(review.losses.length ? ['would lose:', ...review.losses.map((line) => `  - ${line}`)] : []),
+    ...(review.detectedRenames.length ? ['a detected rename moves its values to the new name; if the field was really deleted and another added, re-run with --no-detect-renames (that is a drop: see above)'] : []),
     'next steps:',
     `  1. export the deployed rows: c2c rollback-export --ds ${opts.previous} --out <backup-dir> --confirm`,
     ...(pairs ? ['  2. if a field was renamed in Creator, add --rename Form.Old=New so the column keeps its rows instead of a drop plus an add'] : []),
@@ -387,6 +470,8 @@ export interface DeltaApplyResult {
    * data the op assumed, so the skip is reported instead of silent.
    */
   skipped: string[];
+  /** Old columns kept with their values after a copy-style rename, until the drop is confirmed. */
+  retained?: string[];
 }
 
 /**
@@ -414,6 +499,29 @@ export async function applySchemaDelta(
     const what = drops.map((d) => (d.column !== undefined ? `${d.table}.${d.column}` : `table ${d.table}`)).join(', ');
     throw new DeltaRefused(`the delta drops ${what}; pass --confirm to drop`);
   }
+  // A mandatory column with no default added to a table that already has rows leaves those rows without a value: refused without --confirm.
+  for (const change of delta.columns) {
+    if (change.op !== 'add' || change.needsDefault !== true) continue;
+    const present = await driver.columns(change.table);
+    if (!present) continue;
+    const rows = await driver.rowCount(change.table);
+    if (rows > 0 && !opts.confirm) throw new DeltaRefused(`add of ${change.table}.${change.column} refused: the column is mandatory with no default and ${rows} row(s) exist; pass --confirm to add it`);
+  }
+  // A narrowing alter (a type change, a shorter length) can cut or refuse stored
+  // values: refused up front, like a drop, while the column holds any.
+  for (const change of delta.columns) {
+    if (change.op !== 'alter' || !narrows(change.changes)) continue;
+    const present = await driver.columns(change.table);
+    if (!present?.includes(change.column)) continue;
+    const n = await driver.valueCount(change.table, change.column);
+    // A type change or a shorter length is never applied silently, even on a column that holds no value today: the primitive enforces the same confirm the plan announces.
+    if (n === 0) {
+      if (!opts.confirm) throw new DeltaRefused(`alter of ${change.table}.${change.column} (${change.changes.join('; ')}) refused: it narrows the column; pass --confirm to apply`);
+      continue;
+    }
+    if (!opts.confirm) throw new DeltaRefused(`alter of ${change.table}.${change.column} (${change.changes.join('; ')}) refused: ${n} row(s) hold a value that could be cut or lost; pass --confirm after exporting them`);
+    if (!opts.backedUp?.has(change.table)) throw new DeltaRefused(`alter of ${change.table}.${change.column} refused: ${n} row(s) hold a value; export or clear them first`);
+  }
   for (const d of drops) {
     const present = await driver.columns(d.table);
     if (!present) continue;
@@ -429,6 +537,7 @@ export async function applySchemaDelta(
   const tableOf = new Map(after.tables.map((t) => [t.name, t]));
   const applied: string[] = [];
   const skipped: string[] = [];
+  const retained: string[] = [];
   for (const change of delta.tables) {
     if (change.op !== 'add') continue;
     if (await driver.columns(change.table)) continue;
@@ -442,6 +551,29 @@ export async function applySchemaDelta(
       if (present.includes(change.column)) continue;
       await driver.addColumn(change.table, spec(change.column)!);
       applied.push(`add column ${change.table}.${change.column}`);
+    } else if (change.op === 'rename' && driver.nativeRename === false) {
+      // The live store cannot rename in place: add the new column, copy the
+      // values, check the copy, and keep the old column unless the drop is confirmed.
+      if (!present.includes(change.from)) {
+        if (!present.includes(change.to)) skipped.push(`rename column ${change.table}.${change.from} -> ${change.to}: neither column is in the store`);
+        continue;
+      }
+      if (!driver.copyColumn) throw new DeltaRefused(`rename ${change.table}.${change.from} -> ${change.to} refused: the store cannot rename in place and has no copy step`);
+      if (!present.includes(change.to)) {
+        await driver.addColumn(change.table, spec(change.to)!);
+        applied.push(`add column ${change.table}.${change.to}`);
+      }
+      const n = await driver.valueCount(change.table, change.from);
+      await driver.copyColumn(change.table, change.from, change.to);
+      const copied = await driver.valueCount(change.table, change.to);
+      if (copied < n) throw new DeltaRefused(`rename ${change.table}.${change.from} -> ${change.to} refused: only ${copied} of ${n} value(s) were copied; ${change.from} was kept`);
+      applied.push(`copy values ${change.table}.${change.from} -> ${change.table}.${change.to} (${n} value(s))`);
+      if (opts.confirm) {
+        await driver.dropColumn(change.table, change.from);
+        applied.push(`drop column ${change.table}.${change.from}`);
+      } else {
+        retained.push(`${change.table}.${change.from} kept with its ${n} value(s); drop it with --confirm once the copy is checked`);
+      }
     } else if (change.op === 'rename') {
       if (!present.includes(change.from) && present.includes(change.to)) continue;
       if (!present.includes(change.from)) {
@@ -476,5 +608,5 @@ export async function applySchemaDelta(
     await driver.dropTable(change.table);
     applied.push(`drop table ${change.table}`);
   }
-  return { applied, skipped };
+  return { applied, skipped, ...(retained.length ? { retained } : {}) };
 }

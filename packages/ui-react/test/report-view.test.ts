@@ -166,11 +166,13 @@ interface Mounted {
 }
 
 /** Mount <ReportView> against a fake endpoint that applies the posted sort like the report endpoint. */
+let actionAnswer: { ok: boolean; status: number; body?: unknown } | undefined;
+
 async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, forms: Record<string, FormSpec> = {}, rowId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; body?: unknown }>, appSettings: Partial<AppSpec> = {}): Promise<Mounted> {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
   const view = dom.window as unknown as Record<string, unknown> & Window;
-  const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'CustomEvent', 'DocumentFragment', 'SVGElement', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLTableElement', 'getComputedStyle', 'CSS', 'self'];
+  const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'CustomEvent', 'DocumentFragment', 'SVGElement', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLTableElement', 'MutationObserver', 'NodeFilter', 'getComputedStyle', 'CSS', 'self'];
   for (const key of globals) {
     try {
       (globalThis as Record<string, unknown>)[key] = view[key as keyof typeof view];
@@ -222,7 +224,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
       calls.push(body);
       posted.push({ endpoint, body });
       if (endpoint.endsWith('/record')) return recordReply ? recordReply() : { ok: true, status: 200, body: { record: { ROWID: String(body.ROWID), Memo: 'Read me', Lines: [{ ROWID: '2', Material: 'Bolt', Quantity: 3 }] } } };
-      if (endpoint.includes('/actions/')) return { ok: true, status: 200, body: { dryRun: true } };
+      if (endpoint.includes('/actions/')) return actionAnswer ?? { ok: true, status: 200, body: { dryRun: true } };
       const ordered = order(rows, (body.sort ?? []) as { field: string; order?: string }[]);
       const page = typeof body.page === 'number' ? body.page : 0;
       const pageSize = typeof body.pageSize === 'number' && body.pageSize > 0 ? body.pageSize : ordered.length || 1;
@@ -529,6 +531,22 @@ test('record detail draws configured sections and related rows from the authoriz
   assert.deepEqual([...view.container.querySelectorAll('[data-detail-block="Items"] tbody td')].map((el) => el.textContent), ['Bolt', '3']);
 });
 
+test('record detail draws the lookup display text from the record reply, never the ROWID, and no undeclared or hidden field', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'record-detail-lookup');
+  const base = reactAppSpec(appOf()).reports.Orders!;
+  const report = {
+    ...base,
+    detail: true,
+    recordEndpoint: '/forms/Order/record',
+    detailBlocks: [{ title: 'Overview', fields: [{ field: 'Product', label: 'Product' }, { field: 'Secret', label: 'Secret' }] }],
+  };
+  const reply = async () => ({ ok: true, status: 200, body: { record: { ROWID: '1', Product: 'Widget', Serial_Number: 'SN-undeclared' } } });
+  const view = await mount(out, report, [], new Set(), {}, '1', reply);
+  const text = view.container.querySelector('[data-detail-block="Overview"]')?.textContent ?? '';
+  assert.match(text, /Widget/);
+  assert.doesNotMatch(text, /[0-9]{12,}|SN-undeclared|hush/);
+});
+
 test('record detail gives a clear error for denied and missing records', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'record-errors');
   const base = reactAppSpec(appOf()).reports.Orders!;
@@ -678,30 +696,39 @@ test('non-list reports keep their visible pending-view stub', { skip: SKIP }, as
   assert.equal(board.container.querySelector('table'), null, 'pending views are not silently rendered as lists');
 });
 
-test('a row Delete asks first and Cancel sends nothing', { skip: SKIP }, async (t) => {
+test('a row Delete opens an alert dialog and Cancel sends nothing', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'delete-confirm');
   const spec = reactAppSpec(appOf());
   const report = { ...spec.reports.Orders!, deleteEndpoint: '/forms/Order/delete' };
-  const view = await mount(out, report, ROWS, new Set(['Total']));
-  const asked: string[] = [];
-  let answer = false;
-  view.win.confirm = (text: string) => {
-    asked.push(text);
-    return answer;
-  };
+  const view = await mount(out, report, ROWS, new Set(['Total']), spec.forms);
   const deletes = () => view.posted.filter((p) => p.endpoint === '/forms/Order/delete');
+  const dialog = () => view.container.ownerDocument.querySelector('[role="alertdialog"]');
   const button = view.container.querySelector('button[data-row-delete]');
   assert.ok(button, 'the report draws a row Delete');
+  assert.equal(dialog(), null, 'no dialog before Delete');
   await view.click(button);
-  assert.deepEqual(asked, ['Are you sure you want to delete this record?'], 'Delete asks with the confirm text');
+  assert.ok(dialog(), 'Delete opens an alert dialog');
+  assert.match(dialog()!.textContent ?? '', /Are you sure you want to delete this record\?/, 'the dialog asks with the confirm text');
+  assert.equal(deletes().length, 0, 'opening the dialog sends no delete');
+  const cancel = Array.from(dialog()!.querySelectorAll('button')).find((b) => /cancel/i.test(b.textContent ?? ''));
+  await view.click(cancel ?? null);
   assert.equal(deletes().length, 0, 'Cancel sends no delete');
   assert.equal(view.textOf('Title').length, ROWS.length, 'Cancel keeps the row');
 
-  answer = true;
   await view.click(view.container.querySelector('button[data-row-delete]'));
-  assert.equal(asked.length, 2);
-  assert.equal(deletes().length, 1, 'OK posts the delete once');
+  const confirm = dialog()!.querySelector('[data-confirm-delete]');
+  await view.click(confirm);
+  assert.equal(deletes().length, 1, 'Delete posts once');
   assert.ok(ROWS.some((r) => r.ROWID === deletes()[0]!.body.ROWID), 'the delete names a drawn row');
+});
+
+test('a report that is loading shows a busy skeleton, and an empty one offers a way to add', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'states-empty');
+  const spec = reactAppSpec(appOf());
+  const empty = await mount(out, spec.reports.Orders!, [], new Set(['Total']), spec.forms);
+  const state = empty.container.querySelector('[data-state="empty"]');
+  assert.ok(state, 'an empty report shows the empty state');
+  assert.ok(state!.querySelector('a[href^="#/form/"]'), 'the empty state links to the form that adds a record');
 });
 
 test('a custom action whose endpoint is a dry-run stub is turned off and named, never run', { skip: SKIP }, async (t) => {
@@ -922,4 +949,231 @@ test('the React conditional format matcher numerically coerces a row-vs-row comp
   for (const [label, row, criteria] of cases) {
     assert.equal(reactMatch(row, criteria), plainMatch(row, criteria), label);
   }
+});
+
+const TIMELINE_SOURCE = `application "Rooms"
+{
+date format = "dd-MMM-yyyy"
+form Booking
+{
+Room
+(
+type = text
+)
+Starts
+(
+type = datetime
+)
+Ends
+(
+type = datetime
+)
+Notes
+(
+type = text
+)
+}
+timeline Schedule
+{
+displayName = "Schedule"
+show all rows from Booking
+(
+Room
+Starts as "From"
+Ends as "To"
+Notes
+)
+options
+(
+week start day = monday
+display field = Room
+start date = Starts
+end date = Ends
+)
+}
+timeline Daily
+{
+displayName = "Daily"
+show all rows from Booking
+(
+Room
+Starts
+)
+options
+(
+start date = Starts
+)
+}
+}`;
+
+const TIMELINE_ROWS: Row[] = [
+  { ROWID: '1', Room: 'Atlas', Starts: '2026-10-14 09:00:00', Ends: '2026-10-14 10:00:00', Notes: 'Kickoff' },
+  { ROWID: '2', Room: 'Birch', Starts: '2026-10-15 11:00:00', Ends: '2026-10-15 12:00:00', Notes: 'Review' },
+  { ROWID: '3', Room: 'Cedar', Starts: '2026-10-21 08:00:00', Ends: '2026-10-21 09:00:00', Notes: 'Retro' },
+];
+
+test('a timeline report spec carries its start, end and week start', () => {
+  const spec = reactAppSpec(appOf(TIMELINE_SOURCE));
+  const schedule = spec.reports.Schedule!;
+  assert.equal(schedule.view, 'timeline');
+  assert.equal(schedule.startField, 'Starts');
+  assert.equal(schedule.endField, 'Ends');
+  assert.equal(schedule.weekStartDay, 'monday');
+  assert.equal(spec.reports.Daily!.weekStartDay, undefined);
+});
+
+test('a timeline report draws every column in lanes keyed by the start date', { skip: SKIP }, async (t) => {
+  const spec = reactAppSpec(appOf(TIMELINE_SOURCE));
+  const out = await compileOnly(t, 'timeline');
+  const week = await mount(out, spec.reports.Schedule!, TIMELINE_ROWS, new Set(), {}, undefined, undefined, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
+  assert.equal(week.container.querySelector('[data-view-stub]'), null, 'a timeline is drawn, not stubbed');
+  assert.deepEqual([...week.container.querySelectorAll('th')].map((th) => th.textContent?.trim()).filter((x, i) => i < 4), ['Room', 'From', 'To', 'Notes'], 'each report column heads the lane table');
+  assert.deepEqual([...week.container.querySelectorAll('[data-group]')].map((g) => g.getAttribute('data-group')), ['12-Oct-2026', '19-Oct-2026'], 'week lanes are keyed by the Monday');
+  assert.deepEqual(week.textOf('Room'), ['Atlas', 'Birch', 'Cedar']);
+  assert.deepEqual(week.textOf('Notes'), ['Kickoff', 'Review', 'Retro']);
+  assert.deepEqual(week.textOf('To'), ['14-Oct-2026 10:00:00', '15-Oct-2026 12:00:00', '21-Oct-2026 09:00:00']);
+
+  const day = await mount(out, spec.reports.Daily!, TIMELINE_ROWS, new Set(), {}, undefined, undefined, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
+  assert.deepEqual([...day.container.querySelectorAll('[data-group]')].map((g) => g.getAttribute('data-group')), ['14-Oct-2026', '15-Oct-2026', '21-Oct-2026'], 'without a week start the lane is the day');
+});
+
+test('timelineLaneKey: an impossible calendar day is no lane, with or without a week start', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'lanekey');
+  const { timelineLaneKey } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/report/ReportView.js')).href)) as {
+    timelineLaneKey: (value: unknown, weekStartDay?: 'monday' | 'sunday') => string;
+  };
+  for (const bad of ['2026-02-30', '2026-13-01', '2026-00-00', '2026-04-31 09:00:00', '2025-02-29', '31-Feb-2026', '5-Foo-2026']) {
+    assert.equal(timelineLaneKey(bad), '', `${bad} without a week start`);
+    assert.equal(timelineLaneKey(bad, 'monday'), '', `${bad} with a week start`);
+  }
+  assert.equal(timelineLaneKey('2026-10-14 09:00:00'), '2026-10-14');
+  assert.equal(timelineLaneKey('2024-02-29'), '2024-02-29', 'a real leap day stays');
+  assert.equal(timelineLaneKey('14-Oct-2026', 'monday'), '2026-10-12');
+});
+function captureDownloads(win: Record<string, unknown>): { files: { name: string; mime: string; parts: unknown[] }[]; printed: number } {
+  const seen = { files: [] as { name: string; mime: string; parts: unknown[] }[], printed: 0 };
+  const blobs = new Map<string, { mime: string; parts: unknown[] }>();
+  win.Blob = class {
+    constructor(public parts: unknown[], init?: { type?: string }) {
+      this.mime = init?.type ?? '';
+    }
+    mime: string;
+  };
+  win.URL = {
+    createObjectURL: (blob: { mime: string; parts: unknown[] }) => {
+      const url = `blob:test/${blobs.size}`;
+      blobs.set(url, blob);
+      return url;
+    },
+    revokeObjectURL: () => undefined,
+  };
+  win.print = () => {
+    seen.printed += 1;
+  };
+  (win.document as Document).addEventListener(
+    'click',
+    (event) => {
+      const link = (event.target as Element).closest?.('a[download]') as HTMLAnchorElement | null;
+      if (!link) return;
+      event.preventDefault();
+      const blob = blobs.get(link.getAttribute('href') ?? '');
+      seen.files.push({ name: link.download, mime: blob?.mime ?? '', parts: blob?.parts ?? [] });
+    },
+    true,
+  );
+  return seen;
+}
+
+test('Export CSV carries the on-screen columns, rows, order and filter, with formulas neutralised', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-csv');
+  const spec = reactAppSpec(appOf());
+  const rows: Row[] = [
+    { ROWID: '1', Title: '=HYPERLINK("http://x")', Total: '10.5' },
+    { ROWID: '2', Title: 'Alpha, Inc', Total: '10.25' },
+    { ROWID: '3', Title: '@cmd', Total: '-3' },
+  ];
+  const view = await mount(out, spec.reports.Orders!, rows, new Set(['Total']));
+  const seen = captureDownloads(view.win);
+  await view.click(view.headerButton('Title'));
+  const button = view.container.querySelector('[data-export="csv"]');
+  assert.ok(button, 'the toolbar offers Export CSV');
+  await view.click(button);
+  assert.equal(seen.files.length, 1);
+  assert.equal(seen.files[0]!.name, 'Orders.csv');
+  const csv = String(seen.files[0]!.parts[0]);
+  const header = csv.replace(/^﻿/, '').split('\r\n')[0];
+  assert.equal(header, 'Title,Total', 'data columns only: no action column');
+  const onScreen = view.textOf('Title');
+  const body = csv.split('\r\n').slice(1, -1);
+  assert.equal(body.length, onScreen.length, 'same row count as the screen');
+  body.forEach((line, i) => assert.ok(line.replace(/^"/, '').replace(/^'/, '').startsWith(onScreen[i]!.slice(0, 5)), `row ${i} follows the screen order`));
+  assert.ok(body.every((line) => !/^[=+@]/.test(line)), 'no line starts with a formula character');
+  assert.ok(body.some((line) => line.startsWith('"\'=HYPERLINK')));
+  assert.ok(body.some((line) => line.startsWith('"Alpha, Inc"')));
+  assert.ok(view.container.querySelector('.c2c-notice')?.textContent?.includes('Orders.csv'), 'the export says what it wrote');
+});
+
+test('Export XLSX downloads a workbook and Print opens the print dialog', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-xlsx');
+  const spec = reactAppSpec(appOf());
+  const view = await mount(out, spec.reports.Orders!, ROWS, new Set(['Total']));
+  const seen = captureDownloads(view.win);
+  await view.click(view.container.querySelector('[data-export="xlsx"]'));
+  assert.equal(seen.files[0]?.name, 'Orders.xlsx');
+  assert.match(seen.files[0]!.mime, /spreadsheetml\.sheet$/);
+  const zip = seen.files[0]!.parts[0] as Uint8Array;
+  assert.equal(zip[0], 0x50);
+  assert.equal(zip[1], 0x4b);
+  await view.click(view.container.querySelector('[data-print]'));
+  assert.ok(view.container.querySelector('[data-print-view]'), 'Print opens the print view');
+  await view.click(view.container.querySelector('[data-print-now]'));
+  assert.equal(seen.printed, 1);
+  await view.click(view.container.querySelector('[data-print-close]'));
+  assert.equal(view.container.querySelector('[data-print-view]'), null, 'Close leaves the print view');
+});
+
+test('an empty report offers no export', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-empty');
+  const spec = reactAppSpec(appOf());
+  const view = await mount(out, spec.reports.Orders!, [], new Set(['Total']));
+  assert.equal(view.container.querySelector('[data-export]'), null);
+});
+
+test('the print stylesheet hides the chrome, shows the whole table and no longer blanks the app', () => {
+  const css = readFileSync(join(TEMPLATE_DIR, 'lib', 'c2c-ui', 'report', 'print.css'), 'utf8');
+  const print = css.slice(css.indexOf('@media print'));
+  assert.doesNotMatch(print, /body\s*>\s*\*:not\(\[data-print-sheet\]\)/, 'the sheet lives inside #root, so hiding every body child prints nothing');
+  for (const chrome of ['.c2c-topbar', '#nav', '#tabbar', '.c2c-report-tools', '.c2c-pages', 'td[data-key="__actions"]', 'td[data-key="__bulkSelect"]']) assert.ok(print.includes(chrome), `${chrome} is hidden in print`);
+  assert.match(print, /\.table-wrap\s*\{[^}]*overflow:\s*visible/);
+});
+
+test('show export = false draws no export buttons but keeps Print', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-hidden');
+  const spec = reactAppSpec(appOf());
+  const view = await mount(out, { ...spec.reports.Orders!, showExport: false }, ROWS, new Set(['Total']));
+  assert.equal(view.container.querySelector('[data-export]'), null);
+  assert.ok(view.container.querySelector('[data-print]'));
+});
+
+test('an action result is announced by kind: a failure as an alert, a success as a status; server text is cleaned', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'toast-roles');
+  const spec = reactAppSpec(appOf());
+  const report = { ...spec.reports.Orders!, customActions: [{ name: 'Print Invoice', endpoint: '/reports/Orders/actions/print-invoice' }] };
+  const toast = (view: Mounted) => view.container.querySelector('[data-toast]');
+  try {
+    actionAnswer = { ok: false, status: 400, body: { error: 'nope' } };
+    const failed = await mount(out, report, ROWS, new Set(['Total']), spec.forms);
+    await failed.click(failed.byRole('button', 'Print Invoice'));
+    assert.equal(toast(failed)?.getAttribute('role'), 'alert', 'a failure interrupts');
+    actionAnswer = undefined;
+    const ok = await mount(out, report, ROWS, new Set(['Total']), spec.forms);
+    await ok.click(ok.byRole('button', 'Print Invoice'));
+    assert.equal(toast(ok)?.getAttribute('role'), 'status', 'a success waits its turn');
+  } finally {
+    actionAnswer = undefined;
+  }
+  const { cleanServerText } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/runtime/StatusScreens.js')).href)) as { cleanServerText: (value: unknown) => string };
+  const cleaned = cleanServerText(`<b>x</b>\u0007\u202Eevil${'y'.repeat(2000)}`);
+  assert.ok(!/[\u0000-\u0008\u000B-\u001F\u007F\u202A-\u202E\u2066-\u2069]/.test(cleaned), 'no control or direction characters');
+  assert.ok(cleaned.length <= 300 && cleaned.startsWith('<b>x</b>'), 'plain text, capped');
 });

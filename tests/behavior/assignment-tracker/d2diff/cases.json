@@ -1,0 +1,721 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Assignment Tracker",
+  "cases": [
+    {
+      "id": "assignment-issued-after-due-cancel-submit",
+      "notes": [
+        "on validate: Issued_Date > Due_Date -> cancel submit"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Essay"
+          },
+          "setup": true,
+          "bind": {
+            "t": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Class A"
+          },
+          "setup": true,
+          "bind": {
+            "cl": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S1",
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Lee"
+            },
+            "Email": "s1@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "setup": true,
+          "bind": {
+            "stu": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Math",
+            "Code": "M1",
+            "Type": "Theory"
+          },
+          "setup": true,
+          "bind": {
+            "sub": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "T1",
+            "Name": {
+              "first_name": "Bo",
+              "last_name": "Kay"
+            },
+            "Email": "t1@example.test",
+            "Phone_Number": "+15550101"
+          },
+          "setup": true,
+          "bind": {
+            "tch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Essay one",
+            "Subject_field": "<ref:sub>",
+            "Assignment_Type": "<ref:t>",
+            "Class": "<ref:cl>",
+            "Issued_Date": "2026-10-20",
+            "Due_Date": "2026-10-16",
+            "Faculty": "<ref:tch>",
+            "Allocated_To": [
+              "<ref:stu>"
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Create_Assignment": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "assignment-issued-equal-or-before-due-saved",
+      "notes": [
+        "Issued_Date == Due_Date is not > so it passes; a month-boundary pair crosses a month and still compares as dates"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Essay"
+          },
+          "setup": true,
+          "bind": {
+            "t": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Class A"
+          },
+          "setup": true,
+          "bind": {
+            "cl": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S1",
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Lee"
+            },
+            "Email": "s1@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "setup": true,
+          "bind": {
+            "stu": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Math",
+            "Code": "M1",
+            "Type": "Theory"
+          },
+          "setup": true,
+          "bind": {
+            "sub": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "T1",
+            "Name": {
+              "first_name": "Bo",
+              "last_name": "Kay"
+            },
+            "Email": "t1@example.test",
+            "Phone_Number": "+15550101"
+          },
+          "setup": true,
+          "bind": {
+            "tch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Essay one",
+            "Subject_field": "<ref:sub>",
+            "Assignment_Type": "<ref:t>",
+            "Class": "<ref:cl>",
+            "Issued_Date": "2026-10-16",
+            "Due_Date": "2026-10-16",
+            "Faculty": "<ref:tch>",
+            "Allocated_To": [
+              "<ref:stu>"
+            ]
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Essay two",
+            "Subject_field": "<ref:sub>",
+            "Assignment_Type": "<ref:t>",
+            "Class": "<ref:cl>",
+            "Issued_Date": "2026-09-30",
+            "Due_Date": "2026-10-01",
+            "Faculty": "<ref:tch>",
+            "Allocated_To": [
+              "<ref:stu>"
+            ]
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Assignment": [
+            {
+              "Title": "Essay one"
+            },
+            {
+              "Title": "Essay two"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "assignment-date-text-form-compares-as-date",
+      "notes": [
+        "Creator date text dd-MMM-yyyy: 9-Oct-2026 sorts before 10-Oct-2026 as a date (a string compare would reverse them), so Issued 09-Oct / Due 10-Oct saves"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Essay"
+          },
+          "setup": true,
+          "bind": {
+            "t": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Class A"
+          },
+          "setup": true,
+          "bind": {
+            "cl": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S1",
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Lee"
+            },
+            "Email": "s1@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "setup": true,
+          "bind": {
+            "stu": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Math",
+            "Code": "M1",
+            "Type": "Theory"
+          },
+          "setup": true,
+          "bind": {
+            "sub": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "T1",
+            "Name": {
+              "first_name": "Bo",
+              "last_name": "Kay"
+            },
+            "Email": "t1@example.test",
+            "Phone_Number": "+15550101"
+          },
+          "setup": true,
+          "bind": {
+            "tch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Essay one",
+            "Subject_field": "<ref:sub>",
+            "Assignment_Type": "<ref:t>",
+            "Class": "<ref:cl>",
+            "Issued_Date": "09-Oct-2026",
+            "Due_Date": "10-Oct-2026",
+            "Faculty": "<ref:tch>",
+            "Allocated_To": [
+              "<ref:stu>"
+            ]
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Assignment": [
+            {
+              "Title": "Essay one"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "assignment-priority-and-status-initial-values",
+      "notes": [
+        "initial value Priority = Medium, Status = Active"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Essay"
+          },
+          "setup": true,
+          "bind": {
+            "t": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Class A"
+          },
+          "setup": true,
+          "bind": {
+            "cl": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S1",
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Lee"
+            },
+            "Email": "s1@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "setup": true,
+          "bind": {
+            "stu": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Math",
+            "Code": "M1",
+            "Type": "Theory"
+          },
+          "setup": true,
+          "bind": {
+            "sub": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "T1",
+            "Name": {
+              "first_name": "Bo",
+              "last_name": "Kay"
+            },
+            "Email": "t1@example.test",
+            "Phone_Number": "+15550101"
+          },
+          "setup": true,
+          "bind": {
+            "tch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Essay one",
+            "Subject_field": "<ref:sub>",
+            "Assignment_Type": "<ref:t>",
+            "Class": "<ref:cl>",
+            "Issued_Date": "2026-10-10",
+            "Due_Date": "2026-10-16",
+            "Faculty": "<ref:tch>",
+            "Allocated_To": [
+              "<ref:stu>"
+            ]
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Assignment": [
+            {
+              "Title": "Essay one",
+              "Priority": "Medium",
+              "Status": "Active"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "subject-type-initial-theory-and-code-unique",
+      "notes": [
+        "Add_Subject Type initial value Theory; must have unique Code"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Math",
+            "Code": "M1"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Algebra",
+            "Code": "M1"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Subject": [
+            {
+              "Name": "Math",
+              "Code": "M1",
+              "Type": "Theory"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "student-id-and-email-unique",
+      "notes": [
+        "Add_Student: must have unique Student_ID and unique Email"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Class A"
+          },
+          "setup": true,
+          "bind": {
+            "cl": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S1",
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Lee"
+            },
+            "Email": "s1@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S1",
+            "Name": {
+              "first_name": "Bea",
+              "last_name": "Lee"
+            },
+            "Email": "s2@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S2",
+            "Name": {
+              "first_name": "Bea",
+              "last_name": "Lee"
+            },
+            "Email": "s1@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Student_ID": "S1",
+              "Email": "s1@example.test"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "submission-status-initial-and-student-email-on-success",
+      "notes": [
+        "Status initial Submitted; On Success sets input.Submitted_By = student Email (derived from the .ds script). [UNVERIFIED] whether Creator persists an on-success input assignment is assumed from the script, not documented"
+      ],
+      "tags": [
+        "d2diff",
+        "UNVERIFIED"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Essay"
+          },
+          "setup": true,
+          "bind": {
+            "t": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Class A"
+          },
+          "setup": true,
+          "bind": {
+            "cl": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "S1",
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Lee"
+            },
+            "Email": "s1@example.test",
+            "Phone_Number": "+15550100",
+            "Class": "<ref:cl>"
+          },
+          "setup": true,
+          "bind": {
+            "stu": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Math",
+            "Code": "M1",
+            "Type": "Theory"
+          },
+          "setup": true,
+          "bind": {
+            "sub": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "T1",
+            "Name": {
+              "first_name": "Bo",
+              "last_name": "Kay"
+            },
+            "Email": "t1@example.test",
+            "Phone_Number": "+15550101"
+          },
+          "setup": true,
+          "bind": {
+            "tch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Essay one",
+            "Subject_field": "<ref:sub>",
+            "Assignment_Type": "<ref:t>",
+            "Class": "<ref:cl>",
+            "Issued_Date": "2026-10-10",
+            "Due_Date": "2026-10-16",
+            "Faculty": "<ref:tch>",
+            "Allocated_To": [
+              "<ref:stu>"
+            ]
+          },
+          "bind": {
+            "a": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Submit_Assignment",
+          "record": {
+            "Student": "<ref:stu>",
+            "Assignment": "<ref:a>",
+            "Submission_On": "2026-10-12 09:00:00",
+            "Description": "done"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Submit_Assignment": [
+            {
+              "Student": "<ref:stu>",
+              "Status": "Submitted",
+              "Submitted_By": "s1@example.test"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

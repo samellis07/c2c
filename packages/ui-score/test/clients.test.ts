@@ -82,11 +82,11 @@ test('library: each criterion reports what the current bundle does', async () =>
   assert.deepEqual(statuses(r), {
     'browser-matrix': 'GAP',
     'mobile-web': 'PASS',
-    'offline-message': 'FAIL',
-    accessibility: 'FAIL',
+    'offline-message': 'PASS',
+    accessibility: 'GAP',
     'locale-formats': 'PASS',
   });
-  assert.equal(r.status, 'FAIL');
+  assert.equal(r.status, 'GAP');
   for (const c of r.criteria) for (const k of c.checks) assert.ok(k.evidence.length > 20, `${c.id}/${k.id} has no evidence`);
   const all = r.criteria.flatMap((c) => c.checks);
   // Dates paint in the app format and the shipped time format is measured.
@@ -95,8 +95,8 @@ test('library: each criterion reports what the current bundle does', async () =>
   assert.equal(byId(all, 'time-format').status, 'PASS');
   assert.equal(byId(all, 'time-zone').status, 'PASS');
   assert.equal(byId(all, 'date-format').status, 'PASS');
-  // States-gate rows carry the issue that owns them.
-  assert.match(byId(all, 'offline-state').evidence, /tracked: ux-offline-session/);
+  // The offline row now passes on the vanilla bundle.
+  assert.match(byId(all, 'offline-state').evidence, /back-online re-fetched once/);
   assert.equal(byId(all, 'offline-banner-markup').status, 'PASS');
   assert.equal(byId(all, 'phone-keyboards').status, 'PASS');
 });

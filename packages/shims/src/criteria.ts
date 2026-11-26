@@ -464,6 +464,8 @@ function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: Deci
       // `IN (…, null, …)` never matches a NULL row; a null item is an IS NULL disjunct.
       const items = Array.isArray(c.value) ? c.value : [c.value];
       const values = items.filter((v) => v != null);
+      // An empty list matches nothing; only an explicit null item is a NULL test.
+      if (!items.length) return NEVER;
       if (!values.length) return `${c.field} IS NULL`;
       const list = `${c.field} IN (${values.map((v) => lit(v)).join(', ')})`;
       return values.length === items.length ? list : `(${list} OR ${c.field} IS NULL)`;

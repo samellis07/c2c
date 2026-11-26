@@ -9,6 +9,14 @@
 import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from './criteria.js';
 import { WriteRuleError, normalizeDate, normalizeDateTime, weekdayOf } from './write-rules.js';
 
+/**
+ * A 403 for an authenticated caller. Some messages name the caller's own
+ * profile, role or the form/field refused (documented by design, not leaks:
+ * the caller already holds that profile; the generated 403s are pinned by
+ * tests): runtime.ts "profile X cannot write Form.field", generate.ts "profile
+ * X cannot list users", access.ts "unknown role X". None echo another user's
+ * data or store text.
+ */
 export class RecordAccessError extends Error {
   readonly code = 'RECORD_ACCESS_DENIED';
   constructor(message: string) {
@@ -211,7 +219,7 @@ export interface WriteField {
    * submit handler to fields absent from the request on insert.
    * Absent when the field has no initial value or a dynamic one.
    */
-  defaultValue?: string;
+  defaultValue?: string | boolean;
   /**
    * Creator `alloweddays` on a date or datetime leaf: the weekdays (0 =
    * Sunday … 6 = Saturday) a value may fall on. A posted date on another

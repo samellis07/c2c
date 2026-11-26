@@ -23,7 +23,7 @@ import type { Expr, Script, Stmt } from './ast.js';
 import type { AccessPolicy, FieldRuleDenial, FormGrant, WriteField, WriteOp, WriteScalar } from '../../shims/src/access.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria, type DecimalColumn, type DecimalColumns } from '../../shims/src/criteria.js';
 import { integrityColumns, type IntegrityColumn } from '../../data/src/integrity.js';
-import { flowHistoryTable, generateSchema, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
+import { flowHistoryTable, generateSchema, isMulti, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
 import { LIMITS, jobPoolName } from '../../shims/src/index.js';
 import { scriptNavInstruction } from '../../shims/src/runtime.js';
@@ -5226,7 +5226,26 @@ export function writeRulesOption(app: App, schema?: SchemaPlan): string {
 
 /** Schema-derived createRuntime fields: decimals, app-unique columns, write rules, and split layouts. */
 export function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
-  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${countersOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+}
+
+/** form → autonumber field → start index, for the runtime's claim-table counters (shims/src/counters.ts). */
+export function autonumbersOf(app: App, schema?: SchemaPlan): Record<string, Record<string, { start?: number }>> {
+  const map: Record<string, Record<string, { start?: number }>> = {};
+  for (const table of (schema ?? schemaOf(app)).tables) {
+    if (table.role !== 'form') continue;
+    for (const column of table.columns) {
+      if (column.matrixId !== 'auto-number') continue;
+      const start = Number(/start index (\d+)/.exec(column.note ?? '')?.[1]);
+      (map[table.form] ??= {})[column.field ?? column.name] = Number.isSafeInteger(start) && start >= 0 ? { start } : {};
+    }
+  }
+  return map;
+}
+
+function countersOption(app: App, schema?: SchemaPlan): string {
+  const autonumber = autonumbersOf(app, schema);
+  return Object.keys(autonumber).length ? `, counters: ${JSON.stringify({ autonumber })}` : '';
 }
 
 export interface MultiLookupSpec {
@@ -6391,6 +6410,8 @@ function writeField(field: Field, app?: App): WriteField {
   }
   if (field.lookup) {
     node.kind = 'lookup';
+    // A list of ids is the multi lookup's shape; a single lookup refuses one.
+    if (isMulti(field)) node.multi = true;
     return node;
   }
   if (row && (row.id === 'file-upload' || row.id === 'image' || row.id === 'audio' || row.id === 'video' || row.id === 'signature')) {
@@ -6411,12 +6432,15 @@ function writeField(field: Field, app?: App): WriteField {
   }
   const scalar = writeScalar(row?.id);
   if (scalar) node.scalar = scalar;
+  // A multi select or checkbox list is the plain leaf that takes a JSON array.
+  if (isMultiChoiceField(field)) node.multi = true;
   const allowedDays = fieldAllowedDays(field);
   if (allowedDays) node.allowedDays = allowedDays;
   const choices = closedChoices(field);
   if (choices) node.choices = choices;
   const initial = isMultiChoiceField(field) ? multiValueDefault(field.initialValue) : staticDefault(field.initialValue);
-  if (initial !== undefined) node.defaultValue = initial;
+  // A decision box default is the boolean a validate script compares with `== false`, not its text.
+  if (initial !== undefined) node.defaultValue = row?.id === 'decision-box' && (initial === 'true' || initial === 'false') ? initial === 'true' : initial;
   return node;
 }
 
@@ -6768,7 +6792,7 @@ ${opts.systemWrite ? `  let loadedStore = null;
       return;
     }
     accepted = ${writeCall}.values;
-  } catch (err) {
+  } catch (err) {${opts.systemWrite ? '\n    // A value the form refuses (a radio outside its list) is a 4xx, as on /submit.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;' : ''}
     const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
     send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed" });
     return;

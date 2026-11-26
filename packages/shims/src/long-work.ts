@@ -53,7 +53,10 @@ export interface WorkStatus {
   cursor?: string;
   progress?: { done: number; total?: number };
   result?: unknown;
+  /** Plain, caller-safe text; the detailed error is only in the function log. */
   error?: string;
+  /** Stable code for `error`: WORK_FAILED, WORK_NOT_QUEUED or WORK_INCOMPLETE. */
+  errorCode?: 'WORK_FAILED' | 'WORK_NOT_QUEUED' | 'WORK_INCOMPLETE';
   /** Jobs submitted for this work so far. */
   jobs: number;
   /** When the work was last queued for a Job (ms epoch); a stale queued row is resubmitted. */
@@ -74,6 +77,63 @@ export interface Reply {
   status: 200 | 202 | 404;
   headers?: Record<string, string>;
   body: unknown;
+}
+
+/**
+ * Mark the status failed with a stable code and plain text. The thrown error
+ * (store text, query fragments, ids) is logged for diagnosis and never stored,
+ * because the status row is served to any poller.
+ */
+/** Most characters of the thrown message kept in the log line. */
+const LOG_DETAIL_MAX = 2000;
+
+/** Read through a getter that may throw; the fallback stands in for any failure. */
+function safely<T>(read: () => T, fallback: T): T {
+  try {
+    return read();
+  } catch {
+    return fallback;
+  }
+}
+
+/** Bound and defang a thrown value's text: control characters become \\xNN escapes. */
+function logSafe(text: string): string {
+  const bounded = text.length > LOG_DETAIL_MAX ? `${text.slice(0, LOG_DETAIL_MAX)}...[truncated]` : text;
+  return bounded.replace(/[\u0000-\u001f\u007f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}
+
+function describeError(err: unknown): { name: string; message: string } {
+  const name = safely(() => {
+    const n = (err as { name?: unknown } | null | undefined)?.name;
+    return typeof n === 'string' ? n : 'Error';
+  }, 'Error');
+  const message = safely(() => {
+    const m = err instanceof Error ? err.message : String(err);
+    return typeof m === 'string' ? m : String(m);
+  }, '(unreadable error)');
+  return { name: logSafe(name), message: logSafe(message) };
+}
+
+/**
+ * Mark the status failed with a stable code and plain text. The thrown error
+ * (store text, query fragments, ids) is logged for diagnosis and never stored,
+ * because the status row is served to any poller. Total: a hostile thrown
+ * value (throwing getters, null prototype) can neither skip the status write
+ * nor throw out of here, so the work is never left running.
+ */
+function fail(status: WorkStatus, workId: string, code: NonNullable<WorkStatus['errorCode']>, err: unknown): void {
+  status.state = 'failed';
+  status.errorCode = code;
+  status.error =
+    code === 'WORK_NOT_QUEUED'
+      ? 'The work could not be queued. Try again shortly.'
+      : 'The work failed. Try again, and contact the app owner if it keeps failing.';
+  try {
+    const { name, message } = describeError(err);
+    console.error(JSON.stringify({ level: 'error', component: 'c2c-long-work', workId: logSafe(String(workId)), code, name, message }));
+  } catch {
+    // Logging is best effort; the failed status above is what matters.
+  }
 }
 
 export function pollPath(workId: string): string {
@@ -122,8 +182,7 @@ export async function runOrDefer(opts: {
   } catch (err) {
     // A failed submit must not leave the work queued: mark it failed so the
     // next request resubmits instead of answering 202 for a dead work id.
-    status.state = 'failed';
-    status.error = `the Job could not be submitted: ${err instanceof Error ? err.message : String(err)}`;
+    fail(status, opts.workId, 'WORK_NOT_QUEUED', err);
     await opts.statuses.put(opts.workId, status);
     throw err;
   }
@@ -185,13 +244,13 @@ export async function runWorkSlice(opts: {
       await opts.statuses.put(opts.workId, status);
     }
   } catch (err) {
-    status.state = 'failed';
-    status.error = err instanceof Error ? err.message : String(err);
+    fail(status, opts.workId, 'WORK_FAILED', err);
     await opts.statuses.put(opts.workId, status);
     return status;
   }
   if (status.jobs >= (opts.maxJobs ?? 50)) {
     status.state = 'failed';
+    status.errorCode = 'WORK_INCOMPLETE';
     status.error = `work did not finish in ${status.jobs} job(s)`;
     await opts.statuses.put(opts.workId, status);
     return status;
@@ -203,8 +262,7 @@ export async function runWorkSlice(opts: {
   try {
     await opts.jobs.submit({ name: opts.jobName, params: { ...opts.params, work_id: opts.workId } });
   } catch (err) {
-    status.state = 'failed';
-    status.error = `the follow-up Job could not be submitted: ${err instanceof Error ? err.message : String(err)}`;
+    fail(status, opts.workId, 'WORK_NOT_QUEUED', err);
     await opts.statuses.put(opts.workId, status);
   }
   return status;

@@ -6,14 +6,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import Module, { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { deriveIr, parse, parseProject, type App } from '../../core/src/index.js';
-import { generateUi } from '../../ui/src/generate.js';
+import { generateUi, slateConfigSource } from '../../ui/src/generate.js';
+import { SHELL_CONTENT_SECURITY_POLICY } from '../../ui/src/csp.js';
 import { decimal } from '../../shims/src/decimal.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../src/guards.js';
@@ -21,7 +22,7 @@ import type { ProjectRegistry } from '../src/registry.js';
 import { deployFiles, writeDeployTree, type DeployFile } from '../src/plan.js';
 import { appOrigins, FUNCTION_DEPENDENCIES, computeShimModules, functionDir, injectSelectColumnCap, rewriteShimsImport, routeTable, vendoredShims } from '../src/function-dir.js';
 import { CATALYST_LIMITS, limitValue } from '../../schema/src/limits.js';
-import { bundleDigest, DEPLOY_REPORT, deployCli, functionBaseFrom, STATE_FILE, type Io, type SpawnResult } from '../src/cli.js';
+import { bundleDigest, DEPLOY_REPORT, deployCli, docPickerFor, functionBaseFrom, rewriteDeployShells, STATE_FILE, type Io, type SpawnResult } from '../src/cli.js';
 
 const root = repoRoot();
 const fnAssets = join(root, 'packages/deploy/fn');
@@ -1708,4 +1709,51 @@ test('the generated c2c-deploy.json stamps allowedOrigins only when origins are 
   assert.deepEqual(config.allowedOrigins, ['https://c2c-app-4f3a.onslate.in', 'https://c2c-test-1001.development.catalystserverless.in']);
   const without = functionDir([deployJson], { mode: 'live' });
   assert.equal('allowedOrigins' in (JSON.parse(text(without, 'functions/c2c_api/c2c-deploy.json')) as object), false);
+});
+
+test('the Google Drive picker is opt-in at deploy: the CSP origins and the key appear only with both settings and a google_docs browse field', () => {
+  const PICKER_KEY = 'AIzaSyTestKeyTestKeyTestKeyTestKey123456';
+  const PICKER_CLIENT = '123456789012-abcdefghijklmnop.apps.googleusercontent.com';
+  const withBrowse = deriveIr(parse('application "A"\n{\n\tform Docs\n\t{\n\t\tDoc\n\t\t(\n\t\t\ttype = file\n\t\t\tbrowse = local_drive, google_docs\n\t\t)\n\t}\n}\n'));
+  const localOnly = deriveIr(parse('application "A"\n{\n\tform Docs\n\t{\n\t\tDoc\n\t\t(\n\t\t\ttype = file\n\t\t\tbrowse = local_drive\n\t\t)\n\t}\n}\n'));
+  let said = '';
+  const io = { stdout: (t: string) => (said += t) } as unknown as Io;
+  const both = { C2C_GOOGLE_PICKER_API_KEY: PICKER_KEY, C2C_GOOGLE_PICKER_CLIENT_ID: PICKER_CLIENT };
+  assert.deepEqual(docPickerFor(withBrowse, {}, io), {});
+  assert.deepEqual(docPickerFor(withBrowse, both, io), { config: { apiKey: PICKER_KEY, clientId: PICKER_CLIENT } });
+  assert.ok(said.includes('Google Drive picker enabled') && !said.includes(PICKER_KEY) && !said.includes(PICKER_CLIENT));
+  said = '';
+  assert.deepEqual(docPickerFor(localOnly, both, io), {});
+  assert.match(said, /not enabled/);
+  assert.ok(!said.includes(PICKER_KEY));
+  const half = docPickerFor(withBrowse, { C2C_GOOGLE_PICKER_API_KEY: PICKER_KEY }, io);
+  assert.match(half.error ?? '', /C2C_GOOGLE_PICKER_CLIENT_ID/);
+  assert.ok(!(half.error ?? '').includes(PICKER_KEY));
+
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-picker-shell-'));
+  try {
+    mkdirSync(join(dir, 'slate'), { recursive: true });
+    const file = join(dir, 'slate', 'index.html');
+    const base = `<meta http-equiv="Content-Security-Policy" content="${SHELL_CONTENT_SECURITY_POLICY}">`;
+    const apiBase = 'https://c2c-sample-app-1.development.catalystserverless.in/server/c2c_api';
+    writeFileSync(file, base);
+    rewriteDeployShells(dir, 'vanilla', apiBase, false);
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /google/);
+    rewriteDeployShells(dir, 'vanilla', apiBase, true);
+    const on = readFileSync(file, 'utf8');
+    assert.match(on, /script-src 'self' https:\/\/static\.zohocdn\.com https:\/\/apis\.google\.com https:\/\/accounts\.google\.com;/);
+    assert.match(on, /connect-src 'self' https:\/\/c2c-sample-app-1\.development\.catalystserverless\.in https:\/\/www\.googleapis\.com;/);
+    // A redeploy without the key takes the origins out again, with or without an API base.
+    rewriteDeployShells(dir, 'vanilla', undefined, false);
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /google/);
+    // No key, no API base, no picker: the file is not touched.
+    writeFileSync(file, base);
+    rewriteDeployShells(dir, 'vanilla', undefined, false);
+    assert.equal(readFileSync(file, 'utf8'), base);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // The runtime config carries the key only when the picker is on.
+  assert.doesNotMatch(slateConfigSource({}), /PICKER/);
+  assert.match(slateConfigSource({ docPicker: { apiKey: PICKER_KEY, clientId: PICKER_CLIENT } }), /C2C_DOC_PICKER/);
 });

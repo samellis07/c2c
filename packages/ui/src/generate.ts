@@ -8,7 +8,8 @@
  * mode is "live" and a datastore adapter is installed.
  */
 
-import { closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
+import { LOCATION_RECORD_COLUMNS, RECORD_STATUS_NOT_APPLICABLE, builtinRecordColumns, closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
+import type { DocPickerConfig } from './doc-picker.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
@@ -23,6 +24,7 @@ import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/s
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
+import { assetPublicPath } from '../../core/src/remote-assets.js';
 import { displayChoice, displayTerms, lookupFormats, lookupSorts, type DisplayTerm, type SortDir } from './decorations/lookups.js';
 import { actionDispatchTarget, buildModel, relatedSortKeys, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
 import type { UiElement } from './pages.js';
@@ -142,6 +144,11 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     }),
   );
   const sendsPush = deluge.files.some((file) => file.source.includes('shim.notification.send('));
+  // Fetched remote backgrounds ship as their own content-named files, never inline.
+  for (const path of model.backgroundAssets ?? []) {
+    const asset = backgroundBytes(app, path);
+    if (asset) files.push({ path: `slate/${path}`, data: asset });
+  }
   files.push({ path: 'slate/c2c-config.js', data: slateConfigSource({ appTimeZone: appTimeZone(app), ...(sendsPush ? { sendsPush: true } : {}) }) });
   files.push({ path: 'functions/access-policy.json', data: JSON.stringify(accessPolicyFor(app), null, 2) + '\n' });
   for (const file of authApplyFiles(authPlan(app), { ...(opts.dc !== undefined ? { dc: opts.dc } : {}) })) files.push(file);
@@ -197,6 +204,11 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
   if (manualSteps.length) files.push({ path: 'ui-manual-steps.json', data: JSON.stringify({ manualSteps }, null, 2) + '\n' });
   files.push({ path: 'c2c-build.txt', data: toolchainHeader() });
   return { model, summary, files };
+}
+
+/** The verified bytes behind a `bg/<sha256>.<ext>` public path, or undefined. */
+export function backgroundBytes(app: App, publicPath: string): Buffer | undefined {
+  return app.remoteAssets?.find((asset) => asset.status === 'fetched' && asset.bytes && asset.sha256 && asset.ext && assetPublicPath(asset.sha256, asset.ext) === publicPath)?.bytes;
 }
 
 export function buildUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
@@ -537,6 +549,98 @@ function composeDisplay(row, terms, parts, readable) {
 }
 
 /**
+ * The display text a lookup column shows in place of the stored parent ROWID,
+ * shared by the report read and a report's record detail. Needs
+ * `parentParts`, readScoped, composeDisplay and lookupDisplayScope in scope.
+ */
+function lookupDisplaysSource(): string {
+  return `// A lookup column stores the parent ROWID (a multi lookup a list of them); the
+// report shows the parent display value instead. ROWID IN queries per lookup
+// column (chunked at ZCQL's row cap), through the same authorizeRead scope as the lookup endpoint: the
+// caller's record filter is ANDed into the parent query and the display field
+// must be readable. A display format over several fields is composed from the
+// parent row, and every field it reads must be readable too. A parent the
+// caller cannot read, a hidden parent form or display field, or a field
+// allowlist without the display shows an empty cell: neither the hidden value
+// nor the ROWID reaches the report.
+async function resolveLookupDisplays(datastore, rows, columns, principal) {
+  // A composite display field (name, address) reads as an object; the cell
+  // text joins its non-empty scalar parts with a space.
+  const displayText = (value) => {
+    if (value == null) return "";
+    if (typeof value !== "object") return String(value);
+    const parts = [];
+    for (const key of Object.keys(value)) {
+      const part = value[key];
+      if (part == null || part === "" || typeof part === "object") continue;
+      parts.push(String(part));
+    }
+    return parts.join(" ");
+  };
+  const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
+  // A subcolumn's source is the parent lookup's cell, and the parent's display
+  // write replaces the ROWID there. Snapshot every source cell before the first
+  // write so each column resolves against the original ids.
+  const originals = (Array.isArray(rows) ? rows : []).map((row) => {
+    const snap = {};
+    for (const column of columns || []) {
+      const key = column && typeof column.column === "string" ? column.source || column.column : null;
+      if (key && !Object.prototype.hasOwnProperty.call(snap, key)) {
+        snap[key] = row && typeof row === "object" ? row[key] : undefined;
+      }
+    }
+    return snap;
+  });
+  for (const column of columns || []) {
+    if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
+    const source = column.source || column.column;
+    const seen = {};
+    const ids = [];
+    for (const snap of originals) {
+      const value = snap[source];
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (!isId(item) || seen[item]) continue;
+        seen[item] = true;
+        ids.push(item);
+      }
+    }
+    if (!ids.length) continue;
+    const display = column.field;
+    const terms = Array.isArray(column.format) ? column.format : null;
+    const parts = Object.prototype.hasOwnProperty.call(parentParts, column.form) ? parentParts[column.form] : {};
+    const names = {};
+    const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
+    let parents = [];
+    if (scoped) {
+      // One read returns at most ZCQL's row cap, so read the ids in chunks.
+      const chunk = ${LIMITS.zcqlRowsPerQuery};
+      try {
+        for (let at = 0; at < ids.length; at += chunk) {
+          const part = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids.slice(at, at + chunk) });
+          parents = parents.concat(await readScoped(datastore, column.form, part.criteria, 0, chunk));
+        }
+      } catch (err) {
+        parents = [];
+      }
+    }
+    for (const parent of Array.isArray(parents) ? parents : []) {
+      if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
+      const text = terms ? composeDisplay(parent, terms, parts, scoped.fields) : displayText(parent[display]);
+      names[String(parent.ROWID)] = text === undefined ? "" : text;
+    }
+    const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
+    for (let index = 0; index < originals.length; index += 1) {
+      const row = rows[index];
+      const value = originals[index][source];
+      if (Array.isArray(value)) row[column.column] = value.map((item) => (isId(item) ? shown(item) : item));
+      else if (isId(value)) row[column.column] = shown(value);
+    }
+  }
+}
+`;
+}
+
+/**
  * The criteria resolution every scoped read of a report-gated view needs:
  * readableField, lookupDisplayScope, neverRows/alwaysRows and the lookup-path
  * resolver (record query values plus `Field.Column` parent rewrites). Needs
@@ -692,7 +796,12 @@ async function lookupParentIds(datastore, form, field, leaf, principal) {
 // the positive ops, NOT (Call_Owner IN (ids)) for !=. A leaf on a parent
 // composite part (Owner.Name.first_name) reads its stored column through
 // parentParts. A path the maps do not know, or a parent read that is refused,
-// fails closed to neverRows.
+// fails closed to neverRows. A field stored under a reserved-name column
+// (From -> From_col) compares on that column, plain leaf or lookup head.
+function storeColumn(field) {
+  return Object.prototype.hasOwnProperty.call(columnRenames, field) ? columnRenames[field] : field;
+}
+
 async function resolveLookupCriteria(datastore, criteria, principal) {
   if (!criteria || typeof criteria !== "object") return criteria;
   if (criteria.op === "and" || criteria.op === "or") {
@@ -713,8 +822,12 @@ async function resolveLookupCriteria(datastore, criteria, principal) {
   }
   const field = typeof criteria.field === "string" ? criteria.field : "";
   const dot = field.indexOf(".");
-  if (dot <= 0 || dot === field.length - 1) return criteria;
+  if (dot <= 0 || dot === field.length - 1) {
+    const column = storeColumn(field);
+    return column === field ? criteria : { ...criteria, field: column };
+  }
   const head = field.slice(0, dot);
+  const headColumn = storeColumn(head);
   let rest = field.slice(dot + 1);
   const parent = Object.prototype.hasOwnProperty.call(lookupParents, head) ? lookupParents[head] : "";
   if (!parent) return neverRows();
@@ -726,12 +839,12 @@ async function resolveLookupCriteria(datastore, criteria, principal) {
   if (criteria.op === "!=") {
     const excluded = await lookupParentIds(datastore, parent, rest, { op: "==", field: rest, value: criteria.value }, principal);
     if (excluded === null) return neverRows();
-    return excluded.length ? { op: "not", arg: { op: "in", field: head, value: excluded } } : alwaysRows();
+    return excluded.length ? { op: "not", arg: { op: "in", field: headColumn, value: excluded } } : alwaysRows();
   }
   if (!LOOKUP_POSITIVE_OPS.has(criteria.op)) return neverRows();
   const ids = await lookupParentIds(datastore, parent, rest, { op: criteria.op, field: rest, value: criteria.value }, principal);
   if (ids === null) return neverRows();
-  return ids.length ? { op: "in", field: head, value: ids } : neverRows();
+  return ids.length ? { op: "in", field: headColumn, value: ids } : neverRows();
 }
 `;
 }
@@ -2200,6 +2313,26 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const statusColumn = columns.includes('Record_Status')
     ? recordStatusColumn(app, app.forms.find((item) => item.name === report.form))
     : undefined;
+  // Built-in record columns the schema stores (location stamps, a plain
+  // Record_Status): the cell is filled from the stored parts after projection.
+  const ownBuiltin = builtinRecordColumns(app, app.forms.find((item) => item.name === report.form));
+  const geoColumns = LOCATION_RECORD_COLUMNS.filter((name) => ownBuiltin.location && columns.includes(name));
+  const plainStatus = ownBuiltin.status && columns.includes('Record_Status');
+  const builtinFill = `${plainStatus ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row.Record_Status ?? ${JSON.stringify(RECORD_STATUS_NOT_APPLICABLE)};` : ''}${geoColumns
+    .map((name) => ` if (row && typeof row === "object") projected.${name} = geoCell(row, ${JSON.stringify(name)});`)
+    .join('')}`;
+  const builtinHelper = geoColumns.length
+    ? `// A location stamp is two stored Double parts; the cell is Creator's object shape, null until a position was captured.
+function geoCell(row, stamp) {
+  const lat = row[stamp + "_latitude"];
+  const lng = row[stamp + "_longitude"];
+  if (lat === null || lat === undefined || lat === "" || lng === null || lng === undefined || lng === "") return null;
+  const latitude = String(lat);
+  const longitude = String(lng);
+  return { latitude, longitude, display_value: latitude + ", " + longitude };
+}
+`
+    : '';
   // Charts and metrics send Creator field names; the projection names store
   // columns, so a renamed column (Priority -> Priority_col) is allowed under
   // both names.
@@ -2284,7 +2417,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const relatedPlan = relatedSortPlan(app, report, projection);
   const sortKeys = relatedPlan && 'keys' in relatedPlan ? relatedPlan.keys : undefined;
   const sortPathConst = sortKeys ? `const sortKeys = ${JSON.stringify(sortKeys)};\n${relatedSortHelper}` : '';
-  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\nconst navPaths = ${JSON.stringify(navPaths)};\n${sortPathConst}`;
+  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\n${builtinHelper}const navPaths = ${JSON.stringify(navPaths)};\n${sortPathConst}`;
   const attachRows = subformLinks.length ? `\n      if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried);` : '';
   // The related sort replaces the paged read only when the caller did not
   // pick a sort and may read the lookup column; the scan is bounded (see
@@ -2498,6 +2631,8 @@ export const columnFields = ${JSON.stringify(columns)};
 export const lookupColumns = ${JSON.stringify(lookups)};
 ${filtersByDisplay ? `/** Lookup field -> the parent field it reads and the terms its text is composed from: a \`display\` filter leaf compares a value with that text. */\nconst lookupDisplays = ${JSON.stringify(displaySpecs)};\n` : ''}/** Parent form of each lookup field on this form. A criteria leaf on a lookup display path resolves against it, and a staged display is checked against it. */
 export const lookupParents = ${JSON.stringify(parents)};
+/** Stored column of each field kept under another name because its own name is reserved. */
+const columnRenames = ${JSON.stringify(renames)};
 /** Stored part column of each lookup parent's composite parts: "Name.first_name" -> "Name_first_name". */
 export const parentParts = ${JSON.stringify(parentParts)};
 /** Lookup field map of every form: a record-query Form[..].Lookup.ID path resolves only through a lookup hop. */
@@ -2582,85 +2717,7 @@ ${aggregateHelpers}
 ${scopedReadSource()}
 ${composeDisplaySource()}
 ${lookupCriteriaSource()}
-${filtersByDisplay ? lookupDisplayFilterSource() : ''}// A lookup column stores the parent ROWID (a multi lookup a list of them); the
-// report shows the parent display value instead. One ROWID IN query per lookup
-// column, through the same authorizeRead scope as the lookup endpoint: the
-// caller's record filter is ANDed into the parent query and the display field
-// must be readable. A display format over several fields is composed from the
-// parent row, and every field it reads must be readable too. A parent the
-// caller cannot read, a hidden parent form or display field, or a field
-// allowlist without the display shows an empty cell: neither the hidden value
-// nor the ROWID reaches the report.
-async function resolveLookupDisplays(datastore, rows, columns, principal) {
-  // A composite display field (name, address) reads as an object; the cell
-  // text joins its non-empty scalar parts with a space.
-  const displayText = (value) => {
-    if (value == null) return "";
-    if (typeof value !== "object") return String(value);
-    const parts = [];
-    for (const key of Object.keys(value)) {
-      const part = value[key];
-      if (part == null || part === "" || typeof part === "object") continue;
-      parts.push(String(part));
-    }
-    return parts.join(" ");
-  };
-  const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
-  // A subcolumn's source is the parent lookup's cell, and the parent's display
-  // write replaces the ROWID there. Snapshot every source cell before the first
-  // write so each column resolves against the original ids.
-  const originals = (Array.isArray(rows) ? rows : []).map((row) => {
-    const snap = {};
-    for (const column of columns || []) {
-      const key = column && typeof column.column === "string" ? column.source || column.column : null;
-      if (key && !Object.prototype.hasOwnProperty.call(snap, key)) {
-        snap[key] = row && typeof row === "object" ? row[key] : undefined;
-      }
-    }
-    return snap;
-  });
-  for (const column of columns || []) {
-    if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
-    const source = column.source || column.column;
-    const seen = {};
-    const ids = [];
-    for (const snap of originals) {
-      const value = snap[source];
-      for (const item of Array.isArray(value) ? value : [value]) {
-        if (!isId(item) || seen[item]) continue;
-        seen[item] = true;
-        ids.push(item);
-      }
-    }
-    if (!ids.length) continue;
-    const display = column.field;
-    const terms = Array.isArray(column.format) ? column.format : null;
-    const parts = Object.prototype.hasOwnProperty.call(parentParts, column.form) ? parentParts[column.form] : {};
-    const names = {};
-    const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
-    let parents = [];
-    if (scoped) {
-      try {
-        parents = await readScoped(datastore, column.form, scoped.criteria, 0, ids.length);
-      } catch (err) {
-        parents = [];
-      }
-    }
-    for (const parent of Array.isArray(parents) ? parents : []) {
-      if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
-      const text = terms ? composeDisplay(parent, terms, parts, scoped.fields) : displayText(parent[display]);
-      names[String(parent.ROWID)] = text === undefined ? "" : text;
-    }
-    const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
-    for (let index = 0; index < originals.length; index += 1) {
-      const row = rows[index];
-      const value = originals[index][source];
-      if (Array.isArray(value)) row[column.column] = value.map((item) => (isId(item) ? shown(item) : item));
-      else if (isId(value)) row[column.column] = shown(value);
-    }
-  }
-}
-
+${filtersByDisplay ? lookupDisplayFilterSource() : ''}${lookupDisplaysSource()}
 // An aggregate groups (or measures) a lookup field by its stored parent ROWID.
 // A parent row the caller cannot read (recordFilter, owner scope, hidden form)
 // must not surface its ROWID as a bucket key or measure value: blank it, the
@@ -2804,7 +2861,7 @@ ${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => match
       ${liveQuery}${attachRows}
 ${stageLoad('      ')}      ${rowWord} = (Array.isArray(queried) ? queried : []).map((row) => {
         ${stageApply ? 'let' : 'const'} projected = projectFields(row && typeof row === "object" ? row : {}, scoped.fields);${stageApply ? `\n        ${stageApply}` : ''}
-        if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}
+        if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}${builtinFill}
         return projected;
       });
 ${wantsRelative ? '      if (relative) rows = rows.filter((row) => matchRow(row, resolved, decimalColumns));\n' : ''}      await resolveLookupPaths(datastore, rows, navPaths, principal);
@@ -2841,7 +2898,7 @@ ${dryBind}    const where = zcqlPredicate(compileCriteria(${criteriaRef}${exact 
       : "not emitted: the form name is not a bare ZCQL identifier";
 ${stageLoad('    ')}    ${rowWord} = suppliedRows(req).map((row) => {
       ${stageApply ? 'let' : 'const'} projected = projectFields(row && typeof row === "object" ? row : {}, scoped.fields);${stageApply ? `\n      ${stageApply}` : ''}
-      if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}
+      if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}${builtinFill}
       return projected;
     });
 ${wantsRelative ? '    if (relative) rows = rows.filter((row) => matchRow(row, applied, decimalColumns));\n' : ''}    if (body.op === "aggregate") {
@@ -3229,13 +3286,39 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
     }
     // A multi select initial value is already the stored JSON list text (model.ts).
     const initial = field.widget === 'multiselect' ? field.initialValue : staticDisplayDefault(field.initialValue);
-    if (initial !== undefined) node.defaultValue = initial;
+    // A decision box default is the boolean a validate script compares with `== false`, not its text.
+    if (initial !== undefined) node.defaultValue = input === 'boolean' && (initial === 'true' || initial === 'false') ? initial === 'true' : initial;
   }
   return node;
 }
 
 function submitStub(app: App, form: UiModel['forms'][number], path: string, delugeFiles: GeneratedFile[], schema?: SchemaPlan, deferSuccess = false): string {
   const fields = fieldNamesOf(form.fields, closedChoicesOf(app, form.name));
+  // Built-in record columns the schema stores for this form. The endpoint
+  // stamps them from the request's validated position and its own constants;
+  // a client copy under the record is refused like any unknown field.
+  const builtin = builtinRecordColumns(app, app.forms.find((item) => item.name === form.name));
+  const stampParts = [
+    builtin.location ? 'location: capturedPosition(req)' : '',
+    builtin.status ? `recordStatus: ${JSON.stringify(RECORD_STATUS_NOT_APPLICABLE)}` : '',
+  ].filter(Boolean);
+  const stampsLine = stampParts.length ? `\n      stamps: { form: formName, ${stampParts.join(', ')} },` : '';
+  const positionHelper = builtin.location
+    ? `// The position the browser captured on submit (navigator.geolocation).
+// It rides beside the record, never in it; anything but two finite numbers in
+// range is treated as no position (the columns stay null), never an error.
+function capturedPosition(req) {
+  const geo = req && req.body && req.body.geo;
+  if (!geo || typeof geo !== "object" || Array.isArray(geo)) return undefined;
+  const { latitude, longitude } = geo;
+  if (typeof latitude !== "number" || typeof longitude !== "number") return undefined;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return undefined;
+  return { latitude: Math.round(latitude * 1e6) / 1e6, longitude: Math.round(longitude * 1e6) / 1e6 };
+}
+
+`
+    : '';
   const ruleDenied = fieldRuleDenials(app, form.name);
   const zone = appTimeZone(app);
   const validate = siblingSpecs(delugeFiles, form.name, 'validate');
@@ -3311,6 +3394,28 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
   // text. The validate set follows the record event: `on add` and unscoped
   // when inserting, `on edit` and unscoped when the request's ROWID marks an
   // update.
+  // A script reading `input.Lookup.Field` reads the linked record's field.
+  // The submitted lookup is an id, so the linked rows are read before the
+  // scripts run: unresolved, the read is undefined and a script that stores
+  // it writes the text "undefined".
+  const lookupLinks: Record<string, string> = {};
+  for (const f of form.fields) {
+    if (!f.lookup || Object.hasOwn(multiLookupMap[form.name] ?? {}, f.name)) continue;
+    const target = app.forms.find((item) => item.name.toLowerCase() === f.lookup!.form.toLowerCase());
+    if (target) lookupLinks[f.name] = target.name;
+  }
+  // The lookups of each linked form, so `input.A.B.Field` follows the chain.
+  const lookupGraph: Record<string, Record<string, string>> = {};
+  for (const f2 of app.forms) {
+    for (const g of f2.fields) {
+      if (!g.lookup || Object.hasOwn(multiLookupMap[f2.name] ?? {}, g.name)) continue;
+      const to = app.forms.find((item) => item.name.toLowerCase() === g.lookup!.form.toLowerCase());
+      if (to) (lookupGraph[f2.name] ??= {})[g.name] = to.name;
+    }
+  }
+  const lookupHydrate = Object.keys(lookupLinks).length && validate.add.length + validate.edit.length + success.add.length + success.edit.length + presuccess.add.length + presuccess.edit.length
+    ? `    await ctx.shim.input.hydrate(ctx, ${JSON.stringify(lookupLinks)}, ${JSON.stringify(lookupGraph)});\n`
+    : '';
   const validateRun = validate.add.length + validate.edit.length
     ? `    try {
       for (const spec of eventSpecs(validateAdd, validateEdit, ctx.rowId)) {
@@ -3484,7 +3589,7 @@ function mergeInserted(record, result) {
 
 ${writeLiveSource(form.name, storeShape)}
 
-export default async function handler(req, res) {
+${positionHelper}export default async function handler(req, res) {
   const deploy = deployConfig();
   const live = deploy.mode === "live";
   if (isHidden(formName)) {
@@ -3527,12 +3632,12 @@ ${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so th
       old: { __c2c: "dry-run-old", loaded: false },
       principal,
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,
-      rowId: requestRowId(req),
+      rowId: requestRowId(req),${stampsLine}
     });
 ${editLoad}${stageCheck}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.
     if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);
-${presuccessRun}${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
+${lookupHydrate}${presuccessRun}${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
     // The row is committed from here on. A failure after it (history row,
     // on-success script, mail) is a warning on a 200, never a failed submit:
     // a failure reply would invite a retry that inserts a second row.
@@ -3562,6 +3667,12 @@ ${hasPresuccess ? '    // A refused or failed write drops the effects a presucce
     if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;
     if (err && err.code === "C2C_STALE_WRITE") {
       send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });
+      return;
+    }
+    // A file reference the form and field do not own is the caller's input,
+    // never a server fault. The reply is fixed text: no key or path.
+    if (err && err.code === "FILE_REFERENCE_INVALID") {
+      send(res, 400, { dryRun: !live, wrote: false, code: "FILE_REFERENCE_INVALID", error: "A file reference in the submitted record is not valid." });
       return;
     }
     fail(res, err, live);
@@ -3608,7 +3719,7 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
   // record reply must carry: each relatedField reads as the parent rows array,
   // each `F.X` as the joined parent values. The block fields of the record's
   // own form join the projected field list.
-  const detailByReport = new Map<string, { own: string[]; reads: { field: string; form: string; rows?: string[]; dots?: string[] }[] }>();
+  const detailByReport = new Map<string, { own: string[]; lookups: { column: string; form: string; field: string; format?: DisplayTerm[] }[]; reads: { field: string; form: string; rows?: string[]; dots?: string[] }[] }>();
   for (const report of app.reports.filter((item) => item.form === form.name)) {
     const views = report.views.filter((view) => view.kind === 'detailview');
     const view = views.find((item) => item.device === 'web') ?? views.find((item) => !item.device) ?? views[0];
@@ -3627,7 +3738,9 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
     };
     for (const block of view.blocks) {
       if (block.relatedField) {
-        const entry = readFor(block.relatedField.split('.')[0]!);
+        const head = block.relatedField.split('.')[0]!;
+        if (subformFields.has(head)) own.push(head);
+        const entry = readFor(head);
         if (entry) for (const field of block.fields) if (field.field) entry.rows.add(field.field);
         continue;
       }
@@ -3642,13 +3755,25 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
         if (entry) entry.dots.add(field.field.slice(dot + 1));
       }
     }
+    // An own lookup field of the detail reads as its parent's display text,
+    // never the stored ROWID (the same text the report list shows).
+    const formFields = app.forms.find((item) => item.name === form.name)?.fields ?? [];
+    const shownLookups = [...new Set([...own, ...report.columns.map((column) => column.field)])]
+      .filter((name) => !name.includes('.') && !reads.has(name) && !subformFields.has(name))
+      .sort(compareEnUs)
+      .flatMap((name) => {
+        const target = formFields.find((item) => item.name === name)?.lookup;
+        if (!target?.form) return [];
+        const choice = displayChoice(target);
+        return [{ column: name, form: target.form, field: choice.field, ...(choice.displayFormat ? { format: choice.displayFormat } : {}) }];
+      });
     const list = [...reads.entries()].sort(([a], [b]) => compareEnUs(a, b)).map(([field, entry]) => ({
       field,
       form: entry.form,
       ...(entry.rows.size ? { rows: [...entry.rows].sort() } : {}),
       ...(entry.dots.size ? { dots: [...entry.dots].sort() } : {}),
     }));
-    detailByReport.set(report.name, { own, reads: list });
+    detailByReport.set(report.name, { own, lookups: shownLookups, reads: list });
   }
   const anyReads = [...detailByReport.values()].some((detail) => detail.reads.length > 0); // determinism-allow: .some() short-circuits on the first match regardless of iteration order
   const shimNames = ['bindRelativeCriteria', 'criteriaHasRelative', 'criteriaHasTodo', 'matchRow', ...(anyReads ? ['fetchBound'] : []), ...(subformLinks.length ? ['attachSubforms'] : [])];
@@ -3698,13 +3823,13 @@ function boundCriteria(criteria) {
     ).map((profile) => profile.name);
     const detail = detailByReport.get(report.name);
     const fields = [...new Set([...report.columns.map((column) => column.field), ...(detail?.own ?? []), ...(detail?.reads ?? []).map((read) => read.field)])].sort();
-    return [[report.name, { criteria: scopeCriteria, fields, profiles, ...(detail?.reads.length ? { reads: detail.reads } : {}) }]];
+    return [[report.name, { criteria: scopeCriteria, fields, profiles, ...(detail?.reads.length ? { reads: detail.reads } : {}), ...(detail?.lookups.length ? { lookups: detail.lookups } : {}) }]];
   }));
   // A report scope whose criteria has a lookup-path leaf or a dependent record
   // query needs the served resolver (the same one report stubs emit) before
   // compileCriteria: `Account.Status` is not a column on this table.
   // determinism-allow: .some() only yields a boolean; scope order never reaches generated bytes
-  const needsResolve = Object.values(reportScopes).some((scope) => criteriaNeedsResolve(scope.criteria));
+  const needsResolve = Object.values(reportScopes).some((scope) => criteriaNeedsResolve(scope.criteria) || (('lookups' in scope && scope.lookups?.length) || 0) > 0);
   const parents = needsResolve ? allLookupParents : {};
   // determinism-allow: the deduplicated parent forms are sorted on the same line
   const parentForms = [...new Set(Object.values(parents))].sort();
@@ -3712,10 +3837,11 @@ function boundCriteria(criteria) {
   const parentDecimals = Object.fromEntries(parentForms.flatMap((form) => (Object.hasOwn(appDecimals, form) ? [[form, appDecimals[form]!]] : [])));
   const resolveImport = needsResolve ? SCOPED_READ_IMPORT : '';
   const resolveConst = needsResolve
-    ? `/** Parent form of each lookup field on this form; a report-scope leaf on a lookup display path resolves against it. */\nconst lookupParents = ${JSON.stringify(parents)};\n/** Stored part column of each lookup parent's composite parts. */\nconst parentParts = ${JSON.stringify(compositePartsOfParents(app, parents, schemaOf(app)))};\nconst parentDecimals = ${JSON.stringify(parentDecimals)};\n/** Lookup field map of every form: a record-query \`Form[..].Lookup.ID\` path resolves only through a lookup hop. */\nconst lookupParentsByForm = ${JSON.stringify(lookupParentsByFormOf(app))};\n`
+    ? `/** Parent form of each lookup field on this form; a report-scope leaf on a lookup display path resolves against it. */\nconst lookupParents = ${JSON.stringify(parents)};\n/** Stored column of each field kept under another name because its own name is reserved. */\nconst columnRenames = ${JSON.stringify(columnRenamesOf(schemaOf(app))[form.name] ?? {})};\n/** Stored part column of each lookup parent's composite parts. */\nconst parentParts = ${JSON.stringify(compositePartsOfParents(app, parents, schemaOf(app)))};\nconst parentDecimals = ${JSON.stringify(parentDecimals)};\n/** Lookup field map of every form: a record-query \`Form[..].Lookup.ID\` path resolves only through a lookup hop. */\nconst lookupParentsByForm = ${JSON.stringify(lookupParentsByFormOf(app))};\n`
     : '';
+  const anyDisplay = Object.values(reportScopes).some((scope) => (('lookups' in scope && scope.lookups?.length) || 0) > 0); // determinism-allow: .some() only yields a boolean
   const resolveSource = needsResolve
-    ? `\n// ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.\nfunction zcqlPredicate(where) {\n  const text = typeof where === "string" ? where.trim() : "";\n  return text === "true" ? "" : text;\n}\n\n${scopedReadSource()}\n${lookupCriteriaSource()}`
+    ? `\n// ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.\nfunction zcqlPredicate(where) {\n  const text = typeof where === "string" ? where.trim() : "";\n  return text === "true" ? "" : text;\n}\n\n${scopedReadSource()}\n${anyDisplay ? composeDisplaySource() : ''}${lookupCriteriaSource()}${anyDisplay ? `\n${lookupDisplaysSource()}` : ''}`
     : '';
   const queryName = subformLinks.length ? 'queried' : 'rows';
   const attachRows = subformLinks.length ? `if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried, {
@@ -3858,7 +3984,7 @@ ${requirePrincipal()}
       send(res, 404, { dryRun: false, error: "no such row" });
       return;
     }
-${relatedSource}    for (const [field, declared] of Object.entries(${childFields})) {
+${relatedSource}${anyDisplay ? `    if (reportScope && Array.isArray(reportScope.lookups)) await resolveLookupDisplays(datastore, [row], reportScope.lookups.filter((column) => Object.hasOwn(row, column.column)), principal);\n` : ''}    for (const [field, declared] of Object.entries(${childFields})) {
       const grant = access.profiles && access.profiles[principal.profile] && access.profiles[principal.profile][formName];
       const nestedGrant = Array.isArray(grant && grant.fields) ? grant.fields.filter((name) => name.startsWith(field + ".")) : [];
       const allowed = nestedGrant.length ? declared.filter((name) => nestedGrant.includes(field + "." + name)) : declared;
@@ -4181,7 +4307,8 @@ function indexHtml(model: UiModel, apiBase?: string): string {
 <button id="nav-drawer-open" type="button" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="drawer">Menu</button>
 <nav id="drawer" hidden role="dialog" aria-modal="true" aria-label="Menu"></nav>
 <div id="toasts" aria-live="polite"></div>
-<p id="offline" hidden>Offline: data unavailable. Reports and forms load again when the network is back.</p>
+<div class="visually-hidden" data-route-announcer aria-live="polite"></div>
+<div role="status"><p id="offline" hidden>Offline: data unavailable. Reports and forms load again when the network is back.</p></div>
 <!-- c2c-config.js keeps a stable URL. c2c deploy rewrites it with the function base URL and the Catalyst Web SDK. -->
 <script src="./c2c-config.js"></script>
 <script type="module" src="@@asset:slate/assets/runtime.js@@"></script>
@@ -4218,13 +4345,16 @@ export const CATALYST_WEB_SDK = 'https://static.zohocdn.com/catalyst/sdk/js/4.6.
  * appTimeZone: the Creator app `time zone` setting, so a client `zoho.currentdate`
  * is the app-zone day, not the browser's. Absent when the app sets none.
  */
-export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; authBridge?: string; appTimeZone?: string; smokePlan?: readonly unknown[]; smokeProject?: string; sendsPush?: boolean }): string {
+export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; authBridge?: string; appTimeZone?: string; smokePlan?: readonly unknown[]; smokeProject?: string; sendsPush?: boolean; docPicker?: DocPickerConfig }): string {
   const lines = [
     '// c2c runtime config. Stable URL (not content-hashed). c2c deploy rewrites this file.',
     `globalThis.C2C_API_BASE = ${JSON.stringify(opts.apiBase ?? DEFAULT_API_BASE)};`,
   ];
   if (opts.appTimeZone) lines.push(`globalThis.C2C_APP_TIMEZONE = ${JSON.stringify(opts.appTimeZone)};`);
   if (opts.sendsPush) lines.push('globalThis.C2C_SENDS_PUSH = true;');
+  // Deploy-time opt-in only (docs/doc-pickers.md): `generateUi` never passes it, so
+  // generated output carries no key. `<` is escaped so the JSON cannot close the script.
+  if (opts.docPicker) lines.push(`globalThis.C2C_DOC_PICKER = ${JSON.stringify({ google: { apiKey: opts.docPicker.apiKey, clientId: opts.docPicker.clientId } }).replace(/</g, '\\u003c')};`);
   // The smoke plan the hidden #/admin/smoke page runs: form/field/route names
   // and canned fill values only — no credentials, no record data. `</` is
   // escaped so the JSON cannot close the inline script element.

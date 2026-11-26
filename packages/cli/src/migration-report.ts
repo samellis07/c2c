@@ -19,6 +19,7 @@ import { readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { entryKind, listDsFiles, parseFileOrProjectWithSidecars, type App } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
+import { terminalSafe } from '../../doctor/src/sanitize.js';
 import { readLockIfPresent, type FillLock, type LockFileFs } from '../../deluge/src/index.js';
 import { analyze, guidedTodoSteps, type GuidedTodoStep, type TodoKind } from './analyze.js';
 import type { FieldGap } from '../../schema/src/generator.js';
@@ -265,12 +266,12 @@ export function migrationReportForDir(dir: string, label: string): MigrationRepo
 }
 
 export function migrationReportAsJson(report: MigrationReport): string {
-  return `${JSON.stringify(report, (key, value: unknown) => (key === 'identifiers' ? undefined : value), 2)}\n`;
+  return `${JSON.stringify(report, (key, value: unknown) => (key === 'identifiers' ? undefined : typeof value === 'string' ? terminalSafe(value) : value), 2)}\n`;
 }
 
 export function migrationReportAsText(report: MigrationReport): string {
   const a = report.aggregate;
-  return [
+  return terminalSafe([
     `migration report: ${report.label}  apps ${a.totalApps}  deterministic ${a.deterministicApps} (${a.deterministicShare}%)`,
     `targets (deterministic apps only): 95% needs ${a.targets.p95.required} — ${a.targets.p95.met ? 'met' : 'NOT met'}; 100% needs ${a.targets.p100.required} — ${a.targets.p100.met ? 'met' : 'NOT met'}`,
     `apps with no residual todos: ${a.noTodoApps}/${a.totalApps}`,
@@ -286,5 +287,5 @@ export function migrationReportAsText(report: MigrationReport): string {
     ...report.apps.flatMap((app) => app.hiddenParts.map((part) => `  ${app.app}: ${part.location}: ${part.reason}`)),
     `UI TODO stubs on deterministic apps: ${a.deterministicWithUiTodos.uiTodos} in ${a.deterministicWithUiTodos.apps} of the ${a.deterministicApps} deterministic apps`,
     ...a.todoKinds.slice(0, 20).map((kind) => `  ${kind.count} ${kind.construct}`),
-  ].join('\n');
+  ].join('\n'));
 }

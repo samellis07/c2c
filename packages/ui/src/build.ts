@@ -34,6 +34,8 @@ const SHELL = new Set(['slate/index.html', 'slate/sw.js', 'slate/assets/model.js
  * c2c-config.js; Slate reads _redirects by name.
  */
 const STABLE = new Set(['slate/c2c-config.js', 'slate/_redirects']);
+/** Fetched background images already carry their sha256 in the name and are referenced by that name from CSS. */
+const CONTENT_NAMED_PREFIX = 'slate/bg/';
 
 export function solidPng(size: number, rgb: [number, number, number]): Buffer {
   return imagePng(size, () => [rgb[0], rgb[1], rgb[2], 255]);
@@ -73,7 +75,7 @@ export function buildSlate(files: OutFile[]): OutFile[] {
   const hashed = new Map<string, { outPath: string; data: string | Buffer }>();
 
   for (const file of slate) {
-    if (SHELL.has(file.path) || STABLE.has(file.path)) continue;
+    if (SHELL.has(file.path) || STABLE.has(file.path) || file.path.startsWith(CONTENT_NAMED_PREFIX)) continue;
     const rel = file.path.slice('slate/'.length);
     hashed.set(file.path, { outPath: withHash(rel, sha(file.data)), data: file.data });
   }
@@ -116,7 +118,7 @@ export function buildSlate(files: OutFile[]): OutFile[] {
   }
   out.push({ path: 'slate/index.html', data: indexText });
   out.push({ path: 'slate/sw.js', data: swText });
-  for (const file of slate) if (STABLE.has(file.path)) out.push({ path: file.path, data: file.data });
+  for (const file of slate) if (STABLE.has(file.path) || file.path.startsWith(CONTENT_NAMED_PREFIX)) out.push({ path: file.path, data: file.data });
   return out;
 }
 

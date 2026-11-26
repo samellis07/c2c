@@ -48,3 +48,13 @@ test('app translate options list date and date-time fields', () => {
   const app = deriveIr(parse(`application "T"\n{\n\tform Task\n\t{\n\t\tDue\n\t\t(\n\t\t\ttype = date\n\t\t)\n\t\tStamp\n\t\t(\n\t\t\ttype = datetime\n\t\t)\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n}\n`));
   assert.deepEqual(appTranslateOptions(app).dateFields, ['Due', 'Stamp']);
 });
+
+test('a system date-time read printed with toString() is Creator date-time text, not the stored stamp', () => {
+  const t = translate('row = Orders[Status == "open"];\nout = row.Added_Time.toString();', { formNames: ['Orders'] });
+  assert.deepEqual(t.todos.map((x) => x.construct), []);
+  assert.match(t.server, /shim\.date\.format\(await shim\.datastore\.field\(ctx, d_row, "Added_Time"\), "dd-MMM-yyyy HH:mm:ss", ctx\)/);
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC', now: new Date('2020-06-15T12:00:00Z') });
+  const ctx = runtime.context({ record: {} });
+  assert.equal(runtime.shim.date.format('2026-11-25 09:05:07', 'dd-MMM-yyyy HH:mm:ss', ctx), '25-Nov-2026 09:05:07');
+  assert.equal(runtime.shim.date.text(runtime.shim.date.toDate('2026-11-25 09:05:07', ctx), ctx), '25-Nov-2026');
+});

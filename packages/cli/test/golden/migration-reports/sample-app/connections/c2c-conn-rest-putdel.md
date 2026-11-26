@@ -47,10 +47,13 @@ App: c2c-conn-rest-putdel
 
 ## Human steps
 
-- Accept invite: accept the app invite mail
-- Sign in once: sign in to the deployed app once
+- Connect Catalyst: run `c2c doctor` (it checks your login, scope and plugin install and says what to fix), then open the Catalyst console for: console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
+- Accept invite and sign in once: accept the app invite mail, then sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
-- console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
+
+## Review checklist
+
+- none
 
 ## Not converted
 

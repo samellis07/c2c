@@ -10,7 +10,7 @@
  * goes through `c2c plan --previous`, the schema delta is applied to the
  * harness store, and the new tree is redeployed and read back. Additive
  * changes must keep every row and value; a drop or rename must be refused
- * without --allow-destructive and a verified backup, and the backup must exist
+ * without --allow-destructive and a verified backup (a rename is told from a drop plus an add by the change detector, and its values are copied), and the backup must exist
  * before the store changes. Anything c2c cannot do yet is a counted gap.
  * Nothing here opens a socket beyond 127.0.0.1 or reads a credential.
  */
@@ -22,7 +22,7 @@ import { parseCst } from '../../core/src/cst.js';
 import { closedChoices, deriveIr, unquote, type App, type Field, type Form } from '../../core/src/ir.js';
 import { generateSeed, type SeedResult } from '../../data/src/seed.js';
 import { generateSchema, type SchemaColumn, type SchemaTable } from '../../schema/src/generator.js';
-import { deployCli, loadApp, type Io } from './cli.js';
+import { deployCli, loadApp, recordDeployedModel, type Io } from './cli.js';
 import { applySchemaDelta, modelPlan, planDelta, type StoreDriver } from './delta.js';
 import type { FieldRename } from './edit.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
@@ -43,6 +43,8 @@ export interface SchemaChange {
   /** Rewrites the previous .ds text into the re-export. Throws when the anchor is missing. */
   apply(ds: string): string;
   renames?: FieldRename[];
+  /** The rename is not named to the plan: it must be told from a drop plus an add by the change detector. */
+  detected?: boolean;
 }
 
 export interface ScenarioResult {
@@ -71,6 +73,8 @@ export interface SchemaChangeReport {
   seedSkipped: string[];
   /** Forms left out because the deployed API refused their seed row, with the refusal. */
   seedRefused: string[];
+  /** Forms whose rows the API could not take, seeded straight into the store instead (`Form: reason`). */
+  seedDirect?: string[];
   scenarios: ScenarioResult[];
   gaps: SchemaChangeGap[];
   summary: { pass: number; fail: number; gaps: number };
@@ -80,6 +84,7 @@ type Row = Record<string, unknown>;
 
 interface FakeSdk {
   setSession(token: string, user: unknown): void;
+  initialize(req: unknown, opts?: { scope?: string }): { datastore(): { table(name: string): { insertRows(rows: Row[]): Promise<unknown> } } };
   state(): { tables: Record<string, Row[]> };
 }
 
@@ -92,6 +97,9 @@ const SEED_TAG = 'c2c-schema-change';
 
 /** Field types whose seeded cell is one scalar the store keeps as written. */
 const SCALAR_TYPES = new Set(['text', 'textarea', 'email', 'number', 'decimal', 'currency', 'percent', 'url', 'phonenumber', 'date']);
+
+/** Text-like field types a rename scenario may rename. */
+const RENAMEABLE_TYPES = new Set(['text', 'textarea', 'email', 'url', 'phonenumber']);
 
 /** Field types the offline seed posts no cell for: no Stratus objects and no user list offline. */
 const UNSEEDED_TYPES = new Set(['upload file', 'image', 'audio', 'video', 'signature', 'users']);
@@ -160,6 +168,35 @@ function onlyBareReferences(ds: string, name: string, noColumnOptions: boolean):
   return noColumnOptions ? blocks === 1 : blocks >= 1;
 }
 
+/**
+ * Renames every code reference to `from`, as Creator does when a field's link
+ * name changes: text inside double quotes (display labels, messages) and
+ * comments is left alone.
+ */
+function renameOutsideStrings(ds: string, from: string, to: string): string {
+  const word = new RegExp(`\\b${escapeRegExp(from)}\\b`, 'g');
+  let out = '';
+  let code = '';
+  const flush = () => {
+    out += code.replace(word, to);
+    code = '';
+  };
+  for (let i = 0; i < ds.length; ) {
+    const rest = ds.slice(i);
+    const skip = /^(?:"(?:[^"\\]|\\.)*"|\/\/[^\n]*|\/\*[\s\S]*?\*\/)/.exec(rest);
+    if (skip) {
+      flush();
+      out += skip[0];
+      i += skip[0].length;
+    } else {
+      code += ds[i];
+      i += 1;
+    }
+  }
+  flush();
+  return out;
+}
+
 function freshName(ds: string, base: string): string {
   for (let i = 1; ; i++) {
     const name = i === 1 ? base : `${base}_${i}`;
@@ -220,7 +257,7 @@ function gap(id: string, detail: string): SchemaChangeGap {
  * seed rows the deployed API refused, with the refusal). A scenario the target
  * cannot carry is a gap with the reason, never a pass.
  */
-export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<string, string> = new Map()): DerivedScenarios {
+export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<string, string> = new Map(), direct = false): DerivedScenarios {
   const seed = generateSeed(app, { n: SEED_ROWS, seed: SEED_TAG });
   const blocked = new Set(seed.blockers.map((b) => b.form));
   const seeded = new Map(seed.tables.map((t) => [t.form, t]));
@@ -237,6 +274,10 @@ export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<
   // cell the offline seed leaves out (file, image, users ...), or refused a seed
   // row; or the rows look each other up in a cycle (no posting order exists).
   const unfillable = (name: string): string | undefined => {
+    // Seeded straight into the store, the posting order, the app's validations
+    // and the file or image cells it cannot take do not apply; only a form the
+    // seed generates no rows for is left out.
+    if (direct) return blocked.has(name) ? `${name}: ${seed.blockers.find((b) => b.form === name)!.message}` : seeded.get(name)?.rows.length ? undefined : `${name}: the seed generates no rows`;
     const deps = seedDependencies(seed, name);
     if (!seedOrder(seed, [...deps])) return `${name}: its seed rows and the rows they look up (${[...deps].sort(compareText).join(', ')}) look each other up in a cycle`;
     for (const dep of deps) {
@@ -252,20 +293,29 @@ export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<
     return undefined;
   };
   const refused: string[] = [];
-  let best: { form: Form; text?: Field; picklist?: Field; deletable?: Field; score: number } | undefined;
+  let best: { form: Form; text?: Field; anyText?: Field; picklist?: Field; deletable?: Field; score: number } | undefined;
   for (const form of app.forms) {
     const why = form.fields.length ? unfillable(form.name) : `${form.name}: no fields`;
     if (why) {
       refused.push(why);
       continue;
     }
-    const text = form.fields.find((f) => type(f) === 'text' && unique(f) && held(form.name, f.name) !== undefined && onlyBareReferences(ds, f.name, false));
+    const textFields = form.fields.filter((f) => type(f) === 'text' && unique(f) && held(form.name, f.name) !== undefined);
+    // A field named only by its declaration and report columns first; else any
+    // text field, renamed everywhere in the script code as Creator does.
+    const text = textFields.find((f) => onlyBareReferences(ds, f.name, false));
     const picklist = form.fields.find((f) => (closedChoices(f)?.length ?? 0) >= 2 && held(form.name, f.name) !== undefined);
     const deletable = [...form.fields]
       .reverse()
       .find((f) => f !== text && f !== picklist && SCALAR_TYPES.has(type(f)) && !f.required && !f.unique && unique(f) && held(form.name, f.name) !== undefined && onlyBareReferences(ds, f.name, true));
+    // The same name in other forms is renamed with it (every declaration and
+    // reference), as Creator does: only when each declaration is a plain
+    // text-like field (a composite of the same name is several columns).
+    const plain = (f: Field) => RENAMEABLE_TYPES.has(type(f)) && !f.subfields.length && !/[^A-Za-z0-9_]/.test(f.name);
+    const everywherePlain = (f: Field) => app.forms.every((o) => o.fields.every((g) => g.name !== f.name || plain(g)));
+    const anyText = textFields.find((f) => f !== deletable) ?? form.fields.find((f) => f !== deletable && plain(f) && everywherePlain(f) && held(form.name, f.name) !== undefined);
     const score = Number(!!text) + Number(!!picklist) + Number(!!deletable);
-    if (!best || score > best.score) best = { form, text, picklist, deletable, score };
+    if (!best || score > best.score) best = { form, text, anyText, picklist, deletable, score };
   }
 
   const gaps: SchemaChangeGap[] = [];
@@ -275,6 +325,8 @@ export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<
     return { changes: [], gaps, seed };
   }
   const form = best.form.name;
+  // The target keeps the form chosen by its bare-reference fields; a text field named elsewhere renames everywhere.
+  best.text ??= best.anyText;
   const choices = best.picklist ? closedChoices(best.picklist)! : [];
   const target: ScenarioTarget = {
     form,
@@ -347,12 +399,13 @@ export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<
       apply: (text) => {
         const bare = bareLine(from, 'gm');
         if (!bare.test(text)) throw new Error(`schema change anchor not found: ${form}.${from}`);
-        return text.replace(bare, `$1${to}$2`);
+        return onlyBareReferences(text, from, false) ? text.replace(bare, `$1${to}$2`) : renameOutsideStrings(text, from, to);
       },
       renames: [{ form, from, to }],
+      detected: true,
     });
   } else {
-    gaps.push(gap('rename-field', `form ${form} has no text field with seeded values whose only references are its declaration and report columns`));
+    gaps.push(gap('rename-field', `form ${form} has no uniquely named text field with seeded values`));
   }
   if (target.deletable) {
     const name = target.deletable;
@@ -492,7 +545,12 @@ class Harness {
         this.columns.set(table.name, table.columns.map((c) => c.name));
       },
       addColumn: async (table: string, column: SchemaColumn) => {
-        this.columns.get(table)!.push(column.name);
+        if (!this.columns.get(table)!.includes(column.name)) this.columns.get(table)!.push(column.name);
+      },
+      // The live Data Store cannot rename a column in place: model that, so a rename is a copy.
+      nativeRename: false,
+      copyColumn: async (table, from, to) => {
+        for (const row of rows(table)) if (from in row) row[to] = row[from];
       },
       renameColumn: async (table, from, to) => {
         this.columns.set(table, this.columns.get(table)!.map((c) => (c === from ? to : c)));
@@ -562,7 +620,14 @@ function backupCells(app: App, files: readonly { path: string; body: string }[])
  * Seeded values that the store no longer holds (under the same or the renamed
  * column), unless the delta drops that column and the verified backup holds the value.
  */
-function lostValues(before: Map<string, Map<string, Row>>, after: Map<string, Map<string, Row>>, renames: readonly { table: string; from: string; to: string }[], dropped: ReadonlySet<string>, backup: BackupCells | undefined): string[] {
+/** `Table.shadow` -> the field column it mirrors. A rollback export holds the field, never its shadow. */
+function shadowBases(app: App): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const table of generateSchema(app).tables) for (const column of table.columns) if (column.shadowFor) out.set(`${table.name}.${column.name}`, column.shadowFor);
+  return out;
+}
+
+function lostValues(before: Map<string, Map<string, Row>>, after: Map<string, Map<string, Row>>, renames: readonly { table: string; from: string; to: string }[], dropped: ReadonlySet<string>, backup: BackupCells | undefined, shadows: ReadonlyMap<string, string> = new Map()): string[] {
   const lost: string[] = [];
   for (const [table, rows] of before) {
     for (const [rowid, row] of rows) {
@@ -573,6 +638,9 @@ function lostValues(before: Map<string, Map<string, Row>>, after: Map<string, Ma
         if (now && now[moved] === value) continue;
         // Only a column the delta drops may leave the store, and only into the backup.
         if (dropped.has(`${table}.${column}`) && backup?.get(table)?.get(rowid)?.get(column) === String(value)) continue;
+        // A dropped shadow column goes with its field; the backup holds the field's value.
+        const base = shadows.get(`${table}.${column}`);
+        if (base && dropped.has(`${table}.${column}`) && dropped.has(`${table}.${base}`) && (backup?.get(table)?.get(rowid)?.get(base) ?? '') !== '') continue;
         lost.push(`${table}.${column} row ${rowid}: ${JSON.stringify(value)}${now ? '' : ' (row gone)'}`);
       }
     }
@@ -681,6 +749,25 @@ async function seedTarget(harness: Harness, app: App, derived: DerivedScenarios,
   return undefined;
 }
 
+/**
+ * Seeds the target form's rows straight into the store when the deployed API
+ * cannot take them (a required image, a validate script, a lookup cycle): the
+ * scalar and choice cells the schema has a column for; lookups stay empty.
+ */
+async function seedDirect(harness: Harness, app: App, derived: DerivedScenarios): Promise<void> {
+  if (!derived.target) return;
+  const table = generateSchema(app).tables.find((t) => t.role === 'form' && t.form === derived.target!.form);
+  const seeded = derived.seed.tables.find((t) => t.form === derived.target!.form);
+  if (!table || !seeded) return;
+  const known = new Set(table.columns.map((c) => c.name));
+  const rows = seeded.rows.map((row) => {
+    const record: Row = {};
+    for (const [name, value] of Object.entries(row.columns)) if (known.has(name) && typeof value === 'string' && value !== '' && !value.includes('#')) record[name] = value;
+    return record;
+  });
+  if (rows.length) await harness.sdk.initialize({}, { scope: 'admin' }).datastore().table(table.name).insertRows(rows);
+}
+
 export interface RunOptions {
   /** The deployed .ds. */
   ds: string;
@@ -703,12 +790,16 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
   let prevText = readFileSync(opts.ds, 'utf8');
   writeFileSync(prevPath, prevText);
   let prev = loadApp(prevPath);
+  // Like a real deploy, the deployed model is recorded beside it and the next plan names that folder.
+  let prevRef = join(opts.workDir, '0-deployed');
+  recordDeployedModel(prevRef, prevPath);
   const harness = new Harness(opts.sdkPath);
   const scenarios: ScenarioResult[] = [];
   const seedSkipped: string[] = [];
   const refusedForms = new Map<string, string>();
   let derived = deriveScenarios(prev, prevText, refusedForms);
   const gaps: SchemaChangeGap[] = [];
+  const seedDirectNote: string[] = [];
   try {
     await harness.deploy(prev, join(opts.workDir, '0-deployed', 'tree'));
     for (const table of generateSchema(prev).tables) harness.columns.set(table.name, table.columns.map((c) => c.name));
@@ -719,6 +810,16 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
       harness.clear();
       seedSkipped.splice(0);
       derived = deriveScenarios(prev, prevText, refusedForms);
+    }
+    if (!derived.target && !opts.changes) {
+      const reasons = derived.gaps[0]?.detail.replace(/^no form the seed can fill: /, '') ?? 'the API could not take the seed rows';
+      const direct = deriveScenarios(prev, prevText, new Map(), true);
+      if (direct.target) {
+        harness.clear();
+        await seedDirect(harness, prev, direct);
+        derived = direct;
+        seedDirectNote.push(`${direct.target.form}: ${reasons}`);
+      }
     }
     if (!opts.changes) gaps.push(...derived.gaps);
     const driver = opts.wrapDriver ? opts.wrapDriver(harness.driver()) : harness.driver();
@@ -734,20 +835,28 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
         if (!cond) ok = false;
       };
       const before = snapshot(harness.tables());
-      const nextText = change.apply(prevText);
+      let nextText: string;
+      try {
+        nextText = change.apply(prevText);
+      } catch (err) {
+        check(false, `the change could not be applied to the export: ${err instanceof Error ? err.message : String(err)}`);
+        scenarios.push({ id: change.id, title: change.title, kind: change.kind, status: 'FAIL', evidence, lost: [], rows: { before: counts(before), after: counts(before) } });
+        continue;
+      }
       const nextPath = join(dir, 'app.ds');
       writeFileSync(nextPath, nextText);
       const next = loadApp(nextPath);
-      const renameArgs = (change.renames ?? []).flatMap((r) => ['--rename', `${r.form}.${r.from}=${r.to}`]);
+      const renameArgs = (change.detected ? [] : (change.renames ?? [])).flatMap((r) => ['--rename', `${r.form}.${r.from}=${r.to}`]);
       const plan = async (extra: string[]) => {
         const io = offlineIo();
-        const code = await planCli([nextPath, '--out', join(dir, 'plan'), '--dc', DC, '--previous', prevPath, '--allow-budget-fail', ...renameArgs, ...extra], io);
+        const code = await planCli([nextPath, '--out', join(dir, 'plan'), '--dc', DC, '--previous', prevRef, '--allow-budget-fail', ...renameArgs, ...extra], io);
         return { code, out: io.out.join(''), err: io.err.join('') };
       };
       let backup: BackupCells | undefined;
-      const delta = planDelta(modelPlan(prev, DC), modelPlan(next, DC), { app: next.name || 'app', edits: [], renames: change.renames ?? [] });
+      const delta = planDelta(modelPlan(prev, DC), modelPlan(next, DC), { app: next.name || 'app', edits: [], renames: change.detected ? [] : (change.renames ?? []), detect: !!change.detected });
       const schemaOps = [...delta.tables.map((t) => `${t.op} table ${t.table}`), ...delta.columns.map((c) => (c.op === 'rename' ? `rename ${c.table}.${c.from}->${c.to}` : `${c.op} ${c.table}.${'column' in c ? c.column : ''}`))];
       evidence.push(`schema delta: ${schemaOps.length ? schemaOps.join(', ') : 'none'}`);
+      if (change.detected) check(delta.columns.some((c) => c.op === 'rename' && c.detected) && !delta.columns.some((c) => c.op === 'drop'), 'the change detector reads the re-export as a rename, not a drop plus an add, with no --rename given');
       let backedUp: Set<string> | undefined;
 
       if (change.kind === 'additive') {
@@ -757,6 +866,9 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
       } else {
         const refused = await plan([]);
         check(refused.code === 1 && /next steps:/.test(refused.err) && /c2c rollback-export/.test(refused.err), `c2c plan --previous refuses without --allow-destructive and names the next step (exit ${refused.code})`);
+        if (change.detected) check(/detected rename/.test(refused.err) && /values move to the new name/.test(refused.err), 'the refusal names the detected rename and says the values move');
+        else if (/would lose:/.test(refused.err)) evidence.push(`refusal lists what would be lost: ${refused.err.split('\n').filter((l) => /^ {2}- /.test(l)).map((l) => l.trim().slice(2)).join('; ')}`);
+        else check(false, 'the refusal lists what would be lost');
         const noBackup = await plan(['--allow-destructive']);
         check(noBackup.code === 1 && /needs --backup/.test(noBackup.err), `--allow-destructive alone is refused: a backup is required (exit ${noBackup.code})`);
         const bogus = join(dir, 'not-a-backup');
@@ -780,7 +892,7 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
         const allowed = await plan(['--allow-destructive', '--backup', backupDir]);
         check(allowed.code === 0, `c2c plan --previous --allow-destructive --backup exits 0 (exit ${allowed.code}${allowed.err ? `: ${allowed.err.trim().split('\n')[0]}` : ''})`);
         const deployIo = offlineIo();
-        const deployCode = await deployCli([nextPath, '--previous', prevPath, '--dc', DC, ...renameArgs], deployIo);
+        const deployCode = await deployCli([nextPath, '--previous', prevRef, '--dc', DC, ...renameArgs], deployIo);
         const refusal = deployIo.err.join('').split('\n').filter((l) => l.startsWith('- '));
         evidence.push(`c2c deploy --previous (live table step) exit ${deployCode}${refusal.length ? `: ${refusal.join('; ')}` : ''}`);
         if (deployCode !== 0) for (const line of refusal) gaps.push({ id: `live-${change.id}`, scenario: change.id, detail: line.slice(2) });
@@ -805,25 +917,25 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
       const after = snapshot(harness.tables());
       const renamed = delta.columns.flatMap((c) => (c.op === 'rename' ? [{ table: c.table, from: c.from, to: c.to }] : []));
       const dropped = new Set(delta.columns.flatMap((c) => (c.op === 'drop' ? [`${c.table}.${c.column}`] : [])));
-      const lost = lostValues(before, after, renamed, dropped, backup);
+      const lost = lostValues(before, after, renamed, dropped, backup, shadowBases(prev));
       check(lost.length === 0, `no seeded value lost (rows ${JSON.stringify(counts(before))} -> ${JSON.stringify(counts(after))})`);
       scenarios.push({ id: change.id, title: change.title, kind: change.kind, status: ok ? 'PASS' : 'FAIL', evidence, lost, rows: { before: counts(before), after: counts(after) } });
       if (change.id === 'picklist-remove') {
-        gaps.push({ id: 'picklist-stored-values', scenario: change.id, detail: 'a removed choice is reported as a plan note; c2c does not list or remap the stored rows that still hold it' });
+        gaps.push({ id: 'picklist-stored-values', scenario: change.id, detail: 'a removed choice is reported as a plan note and rows that hold it keep the stored value; c2c does not list or remap them' });
       }
       if (ok) {
         prevText = nextText;
         prevPath = nextPath;
+        prevRef = dir;
+        recordDeployedModel(prevRef, prevPath);
         prev = next;
       }
     }
   } finally {
     await harness.close();
   }
-  gaps.push({ id: 'deployed-model-not-recorded', scenario: '*', detail: 'the deploy state keeps a bundle digest, not the deployed model: the operator must pass the deployed .ds as --previous' });
-  gaps.push({ id: 'creator-rename-undetectable', scenario: 'rename-field', detail: 'a .ds re-export carries no rename record: without --rename Form.Old=New a renamed field reads as a drop plus an add' });
   const pass = scenarios.filter((s) => s.status === 'PASS').length;
-  return { schema: 'c2c-scorecard-d12/1', app: prev.name || 'app', ...(derived.target ? { target: derived.target } : {}), seedSkipped, seedRefused: [...refusedForms].map(([form, detail]) => `${form}: ${detail}`), scenarios, gaps, summary: { pass, fail: scenarios.length - pass, gaps: gaps.length } };
+  return { schema: 'c2c-scorecard-d12/1', app: prev.name || 'app', ...(derived.target ? { target: derived.target } : {}), seedSkipped, seedRefused: [...refusedForms].map(([form, detail]) => `${form}: ${detail}`), ...(seedDirectNote.length ? { seedDirect: seedDirectNote } : {}), scenarios, gaps, summary: { pass, fail: scenarios.length - pass, gaps: gaps.length } };
 }
 
 export function formatSchemaChangeReport(report: SchemaChangeReport): string {
@@ -836,6 +948,7 @@ export function formatSchemaChangeReport(report: SchemaChangeReport): string {
     '',
   );
   if (report.seedRefused.length) lines.push(`Forms left out (the deployed API refused a seed row): ${report.seedRefused.join('; ')}`, '');
+  if (report.seedDirect?.length) lines.push(`Seeded straight into the store (the deployed API could not take the rows): ${report.seedDirect.join('; ')}`, '');
   if (report.seedSkipped.length) lines.push(`Seed cells the app's admin profile may not write (left out): ${report.seedSkipped.join(', ')}`, '');
   lines.push('| # | Scenario | Kind | Result | Rows before -> after | Lost values |', '|---|---|---|---|---|---|');
   for (const [i, s] of report.scenarios.entries()) {

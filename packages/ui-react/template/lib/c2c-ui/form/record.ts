@@ -173,7 +173,7 @@ function uploadFileError(field: FieldSpec, file: File): string | null {
  * like the picker: any declared type is fine, but a missing or opaque
  * Content-Type is still a refusal.
  */
-function uploadSourceTypeOk(mime: string, accept?: string): boolean {
+export function uploadSourceTypeOk(mime: string, accept?: string): boolean {
   const wanted = (accept ?? '')
     .split(',')
     .map((token) => token.trim().toLowerCase())
@@ -184,7 +184,7 @@ function uploadSourceTypeOk(mime: string, accept?: string): boolean {
 }
 
 /** Read a fetched upload-source body under UPLOAD_SOURCE_MAX_BYTES: the declared length and the read length both must fit. */
-async function uploadSourceBlob(res: Response): Promise<Blob> {
+export async function uploadSourceBlob(res: Response): Promise<Blob> {
   const declared = Number(res.headers?.get('content-length'));
   if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
   const reader = res.body?.getReader?.();
@@ -295,7 +295,8 @@ export function validate(form: FormSpec, record: FormRecord, files: Map<FieldSpe
   return errors;
 }
 
-const FOCUSABLE = 'input:not([type="hidden"]), select:not([hidden]), textarea, button:not([disabled])';
+// A mirror or file input kept out of the tab order (hidden or aria-hidden) is not where focus should land: the widget's own button is.
+const FOCUSABLE = 'input:not([type="hidden"]):not([hidden]):not([aria-hidden="true"]), select:not([hidden]), textarea, button:not([disabled]), [role="radio"][tabindex="0"]';
 
 /**
  * The control the first error should focus. Keys are field names and subform
@@ -304,12 +305,33 @@ const FOCUSABLE = 'input:not([type="hidden"]), select:not([hidden]), textarea, b
  */
 export function firstErrorControl(formEl: HTMLFormElement, errors: Record<string, string>): HTMLElement | null {
   const keys = Object.keys(errors);
+  // Page order, not the order the checks ran in: focus goes to the first invalid control a user meets.
   const boxes = Array.from(formEl.querySelectorAll<HTMLElement>('[data-field], [data-cell]'));
-  for (const key of keys) {
-    if (keys.some((other) => other.startsWith(`${key}[`))) continue;
-    const box = boxes.find((el) => el.getAttribute('data-cell') === key) ?? boxes.find((el) => el.getAttribute('data-field') === key);
-    const control = box?.querySelector<HTMLElement>(FOCUSABLE);
+  for (const box of boxes) {
+    const key = box.getAttribute('data-cell') ?? box.getAttribute('data-field') ?? '';
+    if (!(key in errors) || keys.some((other) => other.startsWith(`${key}[`))) continue;
+    const control = box.querySelector<HTMLElement>(FOCUSABLE);
     if (control) return control;
   }
   return null;
+}
+
+/**
+ * Ties each shown field error to its controls: the error gets an id and the
+ * controls name it in aria-describedby (dropped again once the error clears),
+ * so a screen reader reads the message with the control.
+ */
+export function linkFieldErrors(formEl: HTMLFormElement): void {
+  for (const box of Array.from(formEl.querySelectorAll<HTMLElement>('[data-field]'))) {
+    const slot = box.querySelector<HTMLElement>('[data-error-for]');
+    const controls = Array.from(box.querySelectorAll<HTMLElement>('input:not([type="hidden"]), select, textarea'));
+    const mine = slot?.id || `c2c-err-${(box.getAttribute('data-field') ?? '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    if (slot && !slot.id) slot.id = mine;
+    for (const control of controls) {
+      const rest = (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter((id) => id && id !== mine);
+      const ids = slot ? [...rest, mine] : rest;
+      if (ids.length) control.setAttribute('aria-describedby', ids.join(' '));
+      else control.removeAttribute('aria-describedby');
+    }
+  }
 }

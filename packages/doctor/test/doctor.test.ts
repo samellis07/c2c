@@ -839,6 +839,26 @@ test('gate B3: the stamp carries provenance (at, scope, c2c)', () => {
   assert.equal(empty.at, undefined);
 });
 
+test('gate B3: hand-edited non-string and exotic provenance never reaches a stamp', () => {
+  const dir = tmp();
+  const exotic = `x${String.fromCharCode(0x1b, 0x0d, 0) + String.fromCodePoint(0x202e, 0x2066, 0x2060, 0x061c, 0x180e, 0xe0041)}q`;
+  const file = doctorFile() as unknown as Record<string, unknown>;
+  file.at = { bad: true };
+  file.c2c = ['bad'];
+  file.scope = { dc: exotic, org: 42, project: ['bad'] };
+  mkdirSync(join(dir, 'c2c-out', '.c2c'), { recursive: true });
+  writeFileSync(doctorJsonPath(dir), JSON.stringify(file));
+  const stamp = doctorStamp({ workspace: dir });
+  assert.equal(stamp.at, undefined);
+  assert.equal(stamp.c2c, undefined);
+  assert.equal(stamp.scope?.dc?.at(0), 'x');
+  assert.equal(stamp.scope?.dc?.at(-1), 'q');
+  const text = JSON.stringify(stamp);
+  for (const code of [0x1b, 0x0d, 0, 0x202e, 0x2066, 0x2060, 0x061c, 0x180e, 0xe0041]) {
+    assert.ok(!text.includes(String.fromCodePoint(code)), `U+${code.toString(16)} must not reach stamp`);
+  }
+});
+
 test('evidence B4: scheme-less URLs and paths are rejected wherever they hide', () => {
   const mutants: Record<string, unknown>[] = [
     { server: 'mcp.zoho.in/mcp/SECRETPATH/message' },

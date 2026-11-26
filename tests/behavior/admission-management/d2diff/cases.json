@@ -1,0 +1,582 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Admission Management",
+  "cases": [
+    {
+      "id": "dept-mandatory-missing-refused",
+      "tags": [
+        "d2diff"
+      ],
+      "notes": [
+        "Department_Name is 'must have unique' in Add_Department; an empty record is refused and nothing is stored"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {},
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Department": []
+        }
+      }
+    },
+    {
+      "id": "dept-unique-duplicate-refused",
+      "tags": [
+        "d2diff"
+      ],
+      "notes": [
+        "must have unique Department_Name: second identical submit refused, one row kept"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {
+            "Department_Name": "Science"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {
+            "Department_Name": "Science"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Department": [
+            {
+              "Department_Name": "Science"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "eligibility-pref-minimum-percent-mandatory",
+      "tags": [
+        "d2diff"
+      ],
+      "notes": [
+        "Minimum_Percent is a must-have percentage: omitted -> refused, nothing written"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {
+            "Department_Name": "Science"
+          },
+          "bind": {
+            "d": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Division",
+          "record": {
+            "Division_Name": "Morning"
+          },
+          "bind": {
+            "dv": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Course",
+          "record": {
+            "Department": "<ref:d>",
+            "Course_Name": "Physics",
+            "Divisions": [
+              "<ref:dv>"
+            ]
+          },
+          "bind": {
+            "c": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Start_New_Admission",
+          "record": {
+            "Course": "<ref:c>",
+            "Division": "<ref:dv>",
+            "Course_Period": "P1",
+            "Department": "<ref:d>",
+            "Required_Seats": 30,
+            "Max_No_Of_Applications": 60,
+            "Admission_Deadline": "2027-01-15 10:30:00"
+          },
+          "bind": {
+            "a": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Eligibility_Course",
+          "record": {
+            "Course_Name": "Physics"
+          },
+          "bind": {
+            "ec": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Eligibility_Preference",
+          "record": {
+            "Choose_Course": "<ref:ec>",
+            "Course_Admission_Id": "<ref:a>"
+          },
+          "expect": {
+            "outcome": "refused"
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Course_Admission_Id"
+          ]
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Eligibility_Preference": []
+        }
+      }
+    },
+    {
+      "id": "eligibility-pref-hidden-mandatory-lookup-unverified",
+      "tags": [
+        "d2diff",
+        "UNVERIFIED"
+      ],
+      "notes": [
+        "[UNVERIFIED] Run_Scripts_On_Always21 hides must-have Course_Admission_Id unconditionally; expectation (hidden field not enforced, record saved) is a guess about Creator semantics, not stated in the .ds or docs"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {
+            "Department_Name": "Science"
+          },
+          "bind": {
+            "d": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Division",
+          "record": {
+            "Division_Name": "Morning"
+          },
+          "bind": {
+            "dv": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Course",
+          "record": {
+            "Department": "<ref:d>",
+            "Course_Name": "Physics",
+            "Divisions": [
+              "<ref:dv>"
+            ]
+          },
+          "bind": {
+            "c": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Start_New_Admission",
+          "record": {
+            "Course": "<ref:c>",
+            "Division": "<ref:dv>",
+            "Course_Period": "P1",
+            "Department": "<ref:d>",
+            "Required_Seats": 30,
+            "Max_No_Of_Applications": 60,
+            "Admission_Deadline": "2027-01-15 10:30:00"
+          },
+          "bind": {
+            "a": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Eligibility_Course",
+          "record": {
+            "Course_Name": "Physics"
+          },
+          "bind": {
+            "ec": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Eligibility_Preference",
+          "record": {
+            "Choose_Course": "<ref:ec>",
+            "Minimum_Percent": 55.5
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Eligibility_Preference": [
+            {
+              "Choose_Course": "<ref:ec>",
+              "Minimum_Percent": 55.5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "academic-info-obtained-percent-mandatory",
+      "tags": [
+        "d2diff"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Eligibility_Course",
+          "record": {
+            "Course_Name": "Physics"
+          },
+          "bind": {
+            "ec": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Academic_Info",
+          "record": {
+            "Course": "<ref:ec>"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Academic_Info",
+          "record": {
+            "Course": "<ref:ec>",
+            "Obtained_Percent": 82.5
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Academic_Info": [
+            {
+              "Course": "<ref:ec>",
+              "Obtained_Percent": 82.5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "admission-status-flow-defaults-and-id-composition",
+      "tags": [
+        "d2diff"
+      ],
+      "notes": [
+        "initial value Status=Upcoming, Admission_Flow=Direct Admission; Run_Scripts_On_Always12 on validate sets Course_Admission_Id = Course_Name + ' ' + Division_Name + ' (' + Course_Period + ')'"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {
+            "Department_Name": "Science"
+          },
+          "bind": {
+            "d": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Division",
+          "record": {
+            "Division_Name": "Morning"
+          },
+          "bind": {
+            "dv": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Course",
+          "record": {
+            "Department": "<ref:d>",
+            "Course_Name": "Physics",
+            "Divisions": [
+              "<ref:dv>"
+            ]
+          },
+          "bind": {
+            "c": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Start_New_Admission",
+          "record": {
+            "Course": "<ref:c>",
+            "Division": "<ref:dv>",
+            "Course_Period": "Jun 2027 - Apr 2030",
+            "Department": "<ref:d>",
+            "Required_Seats": 30,
+            "Max_No_Of_Applications": 60,
+            "Admission_Deadline": "2027-01-15 10:30:00"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Start_New_Admission": [
+            {
+              "Course_Admission_Id": "Physics Morning (Jun 2027 - Apr 2030)",
+              "Status": "Upcoming",
+              "Admission_Flow": "Direct Admission",
+              "Required_Seats": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "admission-duplicate-open-cancel-submit",
+      "tags": [
+        "d2diff"
+      ],
+      "notes": [
+        "Run_Scripts_While_Adding_10 on validate: same Course+Required_Seats+Division already present (count==1) -> cancel submit"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {
+            "Department_Name": "Science"
+          },
+          "bind": {
+            "d": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Division",
+          "record": {
+            "Division_Name": "Morning"
+          },
+          "bind": {
+            "dv": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Course",
+          "record": {
+            "Department": "<ref:d>",
+            "Course_Name": "Physics",
+            "Divisions": [
+              "<ref:dv>"
+            ]
+          },
+          "bind": {
+            "c": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Start_New_Admission",
+          "record": {
+            "Course": "<ref:c>",
+            "Division": "<ref:dv>",
+            "Course_Period": "P1",
+            "Department": "<ref:d>",
+            "Required_Seats": 30,
+            "Max_No_Of_Applications": 60,
+            "Admission_Deadline": "2027-01-15 10:30:00"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Start_New_Admission",
+          "record": {
+            "Course": "<ref:c>",
+            "Division": "<ref:dv>",
+            "Course_Period": "P2",
+            "Department": "<ref:d>",
+            "Required_Seats": 30,
+            "Max_No_Of_Applications": 60,
+            "Admission_Deadline": "2027-01-15 10:30:00"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Start_New_Admission": [
+            {
+              "Course_Period": "P1",
+              "Required_Seats": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "admission-different-seats-not-duplicate",
+      "tags": [
+        "d2diff"
+      ],
+      "notes": [
+        "same Course and Division but different Required_Seats: count==0 so the second submit is saved"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Department",
+          "record": {
+            "Department_Name": "Science"
+          },
+          "bind": {
+            "d": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Division",
+          "record": {
+            "Division_Name": "Morning"
+          },
+          "bind": {
+            "dv": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Course",
+          "record": {
+            "Department": "<ref:d>",
+            "Course_Name": "Physics",
+            "Divisions": [
+              "<ref:dv>"
+            ]
+          },
+          "bind": {
+            "c": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Start_New_Admission",
+          "record": {
+            "Course": "<ref:c>",
+            "Division": "<ref:dv>",
+            "Course_Period": "P1",
+            "Department": "<ref:d>",
+            "Required_Seats": 30,
+            "Max_No_Of_Applications": 60,
+            "Admission_Deadline": "2027-01-15 10:30:00"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Start_New_Admission",
+          "record": {
+            "Course": "<ref:c>",
+            "Division": "<ref:dv>",
+            "Course_Period": "P2",
+            "Department": "<ref:d>",
+            "Required_Seats": 40,
+            "Max_No_Of_Applications": 60,
+            "Admission_Deadline": "2027-01-15 10:30:00"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Start_New_Admission": [
+            {
+              "Course_Period": "P1",
+              "Required_Seats": 30
+            },
+            {
+              "Course_Period": "P2",
+              "Required_Seats": 40
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

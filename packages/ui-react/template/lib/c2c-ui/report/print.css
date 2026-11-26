@@ -77,9 +77,48 @@
   break-inside: avoid;
 }
 
+[data-print-only] {
+  display: none;
+}
+
 @media print {
-  body > *:not([data-print-sheet]) {
+  /* App chrome never prints. */
+  .c2c-topbar,
+  #nav,
+  #drawer,
+  #tabbar {
     display: none !important;
+  }
+  /* A record print sheet is the only content of its page: the record around it is hidden. */
+  .c2c-card:has(> [data-print-sheet]) > :not([data-print-sheet]) {
+    display: none !important;
+  }
+  /* A report prints its full table: no scroll box, no controls, no action or select column. */
+  [data-report] .c2c-report-tools,
+  [data-report] [data-print-view],
+  [data-report] [data-bulk-edit],
+  [data-report] .c2c-pages,
+  [data-report] .c2c-notice,
+  [data-report] tbody button,
+  [data-report] .c2c-row-actions,
+  [data-report] th[data-key="__actions"],
+  [data-report] td[data-key="__actions"],
+  [data-report] th[data-key="__bulkSelect"],
+  [data-report] td[data-key="__bulkSelect"] {
+    display: none !important;
+  }
+  [data-report] .table-wrap {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  [data-report] thead {
+    display: table-header-group;
+  }
+  [data-report] tr {
+    break-inside: avoid;
+  }
+  [data-print-only] {
+    display: block;
   }
   [data-print-sheet] {
     position: static;

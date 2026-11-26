@@ -358,6 +358,8 @@ function safeStyleValue(raw, prop) {
   if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>{}]/.test(text) || text.includes('/*')) return false;
   if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
+  // The one url() an inline style may carry: a background image this app ships under bg/, named by its sha256.
+  if (prop === 'background' || prop === 'background-image') text = text.replace(/url\(bg\/[0-9a-f]{64}\.(?:png|jpg|gif|webp)\)/g, ' ');
   const flat = flatUrl(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
   const rest = replaceStyleCalls(text, (name, args) => {
@@ -757,7 +759,8 @@ export function validateField(field, value) {
   if (field.choices && field.choices.length && !field.othersOption && field.widget !== 'lookup' && field.widget !== 'lookup-multi') {
     const items = Array.isArray(value) ? value.map(String) : [text];
     for (const item of items) {
-      if (!field.choices.includes(item)) return 'Choose a listed value.';
+      // A stored choice may carry trailing blanks the control's value drops.
+      if (!field.choices.includes(item) && !field.choices.some((choice) => String(choice).trim() === item)) return 'Choose a listed value.';
     }
   }
   return null;
@@ -948,6 +951,11 @@ function fieldControl(field, id, describedBy) {
     if (sources.includes('file')) {
       inner += `<label class="filepick-btn" for="${id}">${verb}</label><input${idAttr} name="${name}" type="file"${accept}${nativeRequired}${described} data-upload="${escapeHtml(field.uploadEndpoint || '')}"${previewDuration} class="visually-hidden">`;
     }
+    // Opt-in Google Drive picker: only when the deployer's runtime config carries a key
+    // (docs/doc-pickers.md). Without one the field is the local upload alone.
+    if (sources.includes('file') && field.widget === 'file' && Array.isArray(field.browseSources) && field.browseSources.includes('google_docs') && googlePickerConfig(globalThis)) {
+      inner += `<button type="button" class="filepick-btn" data-doc-picker="google" data-pick-for="${id}" data-pick-field="${name}" data-pick-accept="${escapeHtml(field.accept || '')}">Choose from Google Drive</button>`;
+    }
     if (sources.includes('camera')) {
       inner += `<label class="filepick-btn" for="${id}-cam">Take Photo</label><input id="${id}-cam" name="${name}__camera" type="file"${accept} capture${previewDuration} class="visually-hidden">`;
     }
@@ -964,7 +972,15 @@ function fieldControl(field, id, describedBy) {
     if (field.widget === 'image' && field.imageTitle) {
       companions += `<input id="${id}-title" name="${escapeHtml(field.imageTitleColumn || '')}" type="text" placeholder="Title" aria-label="${escapeHtml(field.label)} title">`;
     }
-    return `<span class="filepick">${inner}<span class="filepick-name"></span></span>${companions}`;
+    const picker = `<span class="filepick">${inner}<span class="filepick-name"></span></span>${companions}`;
+    // Live capture, recording cap, markup and open-on-load (model.ts ui.media):
+    // attachMediaTools builds the panel inside this wrapper.
+    const media = field.media;
+    if (media && (field.widget === 'image' || field.widget === 'video' || field.widget === 'audio')) {
+      const seconds = Number(media.recordSeconds);
+      return `<div class="media-field" data-media-kind="${field.widget}" data-media-camera="${media.camera === 'secondary' ? 'secondary' : 'primary'}"${Number.isInteger(seconds) && seconds >= 1 ? ` data-media-seconds="${seconds}"` : ''}${media.annotate ? ' data-media-annotate="true"' : ''}${media.onload ? ' data-media-onload="true"' : ''}>${picker}</div>`;
+    }
+    return picker;
   }
   if (field.widget === 'signature') {
     return `<canvas data-signature="${name}" width="320" height="120"></canvas><button type="button" data-signature-save="${name}">Save signature</button><input${idAttr} name="${name}" type="hidden" data-upload="${escapeHtml(field.uploadEndpoint || '')}">`;
@@ -1319,10 +1335,20 @@ export function reportStateHtml(state, opts) {
     const action = options.formHref
       ? `<a class="button-primary" href="${escapeHtml(options.formHref)}">Add a record</a>`
       : '';
+    if (options.filtered) {
+      return `<div data-state="empty"><div class="state-empty"><p>No records match.</p><button type="button" data-clear-search>Clear search</button></div></div>`;
+    }
     return `<div data-state="empty"><div class="state-empty"><p>No records yet</p>${action}</div></div>`;
   }
   if (state === 'error') {
     return `<div data-state="error" role="alert"><div class="state-error"><p>Could not load these records.</p><button type="button" data-retry>Retry</button></div></div>`;
+  }
+  if (state === 'denied') {
+    return `<div data-state="denied" role="alert"><div class="state-error"><h2>You don't have access to this report</h2><p>Ask the app administrator for access.</p><a href="#/">Go to home</a></div></div>`;
+  }
+  if (state === 'session-expired') {
+    const login = options.loginHref ? `<a class="button-primary" href="${escapeHtml(options.loginHref)}">Sign in again</a>` : '';
+    return `<div data-state="session-expired" role="alert"><div class="state-error"><p>Your session ended. Sign in again to continue; what you entered on this page is kept until you leave it.</p>${login}</div></div>`;
   }
   return '';
 }
@@ -1376,6 +1402,18 @@ export function submitCommitted(res, body) {
   return !!(res && (res.ok || (body && body.wrote === true)));
 }
 
+/**
+ * Server text shown to the user: control and direction-override characters
+ * removed, whitespace collapsed, length capped. It is only ever set as text.
+ */
+export function cleanServerText(value) {
+  const text = String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 300 ? `${text.slice(0, 299)}\u2026` : text;
+}
+
 /** Append a success or failure toast to the live region (or the body without one). */
 export function showToast(doc, kind, text) {
   const documentRef = doc || (typeof document !== 'undefined' ? document : null);
@@ -1385,10 +1423,87 @@ export function showToast(doc, kind, text) {
   const el = documentRef.createElement('div');
   el.className = 'toast';
   el.setAttribute('data-kind', kind);
-  el.setAttribute('role', 'status');
-  el.textContent = String(text ?? '');
+  // A failure interrupts; a success waits its turn.
+  el.setAttribute('role', kind === 'failure' ? 'alert' : 'status');
+  const message = documentRef.createElement('span');
+  message.textContent = cleanServerText(text);
+  el.appendChild(message);
+  const close = documentRef.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '\u00d7';
+  close.addEventListener('click', () => el.remove());
+  el.appendChild(close);
   host.appendChild(el);
+  // A success clears itself; a failure stays until dismissed.
+  const view = documentRef.defaultView;
+  if (kind !== 'failure' && view && typeof view.setTimeout === 'function') view.setTimeout(() => el.remove(), 5000);
   return el;
+}
+
+/**
+ * Ask before a destructive action in an in-page alertdialog (Creator's confirm
+ * dialog). Resolves true only on the confirm button; Cancel, Escape and a click
+ * on the backdrop resolve false. One dialog at a time, focus starts on Cancel
+ * and returns to the control that opened it (the trigger, else the focused one).
+ */
+export function askConfirm(doc, message, labels, trigger) {
+  const documentRef = doc || (typeof document !== 'undefined' ? document : null);
+  const host = documentRef && documentRef.body;
+  if (!host) return Promise.resolve(false);
+  const opener = trigger || documentRef.activeElement;
+  const old = documentRef.querySelector('[data-confirm-dialog]');
+  if (old) old.remove();
+  return new Promise((resolve) => {
+    const backdrop = documentRef.createElement('div');
+    backdrop.className = 'modal';
+    backdrop.setAttribute('data-confirm-dialog', '');
+    const box = documentRef.createElement('div');
+    box.className = 'modal-card';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'c2c-confirm-msg');
+    const msg = documentRef.createElement('p');
+    msg.id = 'c2c-confirm-msg';
+    msg.textContent = String(message ?? '');
+    const cancel = documentRef.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = (labels && labels.cancelLabel) || 'Cancel';
+    const ok = documentRef.createElement('button');
+    ok.type = 'button';
+    ok.setAttribute('data-confirm-ok', '');
+    ok.textContent = (labels && labels.confirmLabel) || 'Delete';
+    let done = false;
+    const finish = (answer) => {
+      if (done) return;
+      done = true;
+      documentRef.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      if (opener && typeof opener.focus === 'function' && opener.isConnected !== false) opener.focus();
+      resolve(answer);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === 'Tab') {
+        // Keep focus inside the two buttons while the dialog is open.
+        event.preventDefault();
+        (documentRef.activeElement === cancel ? ok : cancel).focus();
+      }
+    };
+    cancel.addEventListener('click', () => finish(false));
+    ok.addEventListener('click', () => finish(true));
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) finish(false);
+    });
+    documentRef.addEventListener('keydown', onKey, true);
+    box.append(msg, cancel, ok);
+    backdrop.appendChild(box);
+    host.appendChild(backdrop);
+    cancel.focus();
+  });
 }
 
 /** In-app chart report chrome: title, Refresh/Sort controls, and the drawing area. */
@@ -2397,7 +2512,7 @@ function loadChart(report, section, viewRef) {
     post(withFilter({ op: 'query', page: 0, pageSize: report.pageSize || PAGE_SIZE })).then((res) => {
       // A static host has no data function: that is an empty report, not an error.
       if (!res || res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
-      if (!res.ok) throw new Error(`chart query ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(`chart query ${res.status}`), { refused: res.status });
       return responseJson(res).then((body) => {
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         // The fold reads one page; a full page means more rows may follow.
@@ -2417,7 +2532,7 @@ function loadChart(report, section, viewRef) {
         if (res && (res.status === 404 || res.status === 405 || res.status === 501)) return { rows: [] };
         // A refused group field or a server error is a load failure: the panel
         // shows its error state, never a fake "No Data Available".
-        throw new Error(`chart aggregate ${res && res.status}`);
+        throw Object.assign(new Error(`chart aggregate ${res && res.status}`), { refused: res && res.status });
       })
     : foldRows();
   return first
@@ -2434,8 +2549,12 @@ function loadChart(report, section, viewRef) {
         drawChart(host, report, rows, order, null, { truncated: !!result.truncated, scanned: result.scanned || rows.length });
       }
     })
-    .catch(() => {
-      if (stateEl) stateEl.innerHTML = reportStateHtml('error');
+    .catch((error) => {
+      if (!stateEl) return;
+      const refused = error && error.refused;
+      if (refused === 401) stateEl.innerHTML = reportStateHtml('session-expired', { loginHref: viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '' });
+      else if (refused === 403) stateEl.innerHTML = reportStateHtml('denied');
+      else stateEl.innerHTML = reportStateHtml('error');
     });
 }
 
@@ -3150,7 +3269,7 @@ export function renderRoute(appModel, route, doc) {
   if (route.name === 'home') return renderHome(appModel);
   if (route.name === 'form') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
-    return form ? renderForm(form) : `<p class="todo">Unknown form.</p>`;
+    return form ? renderForm(form) : notFoundHtml('form');
   }
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
@@ -3158,7 +3277,7 @@ export function renderRoute(appModel, route, doc) {
       const form = (appModel.forms || []).find((item) => item.name === report.form);
       return form ? `${renderReport(report)}<section class="record-summary" data-record-summary="${escapeHtml(form.name)}" data-record-report="${escapeHtml(report.name)}" data-record-id="${escapeHtml(route.row)}"><p>Loading record…</p></section>` : `<p class="todo">Unknown report form.</p>`;
     }
-    return report ? renderReport(report) : `<p class="todo">Unknown report.</p>`;
+    return report ? renderReport(report) : notFoundHtml('report');
   }
   if (route.name === 'record') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
@@ -3166,10 +3285,15 @@ export function renderRoute(appModel, route, doc) {
   }
   if (route.name === 'page') {
     const page = (appModel.pages || []).find((item) => item.name === route.id);
-    return page ? renderPage(page, doc, appModel) : `<p class="todo">Unknown page.</p>`;
+    return page ? renderPage(page, doc, appModel) : notFoundHtml('page');
   }
   if (route.name === 'smoke') return renderSmokeShell();
-  return `<p class="todo">That page is not in this app.</p>`;
+  return notFoundHtml('page');
+}
+
+/** The screen an unknown route shows: a heading focus can land on, and the way back to the first screen. */
+function notFoundHtml(kind) {
+  return `<section class="card" data-state="not-found"><h1 tabindex="-1">Not found</h1><p>This ${kind} is not part of the app. Choose a screen from the menu.</p><p><a class="button-primary" href="#/">Go to home</a></p></section>`;
 }
 
 /** Creator's banner after a successful submit when the success handler sets no `success message`. */
@@ -3184,8 +3308,11 @@ export function submitFailureText(body) {
   const server = body && (typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : '');
   // The row is stored; only a step after the write failed. A resubmit would add it twice.
   // The generic "request failed" adds nothing; a Deluge runtime error's text does.
-  if (body && body.wrote === true) return `The record was saved, but a step after saving failed${server && server.trim() && server.trim() !== 'request failed' ? `: ${server.trim()}` : '.'}`;
-  return server && server.trim() ? server : 'The record was not saved.';
+  if (body && body.wrote === true) {
+    const said = cleanServerText(server);
+    return `The record was saved, but a step after saving failed${said && said !== 'request failed' ? `: ${said}` : '.'}`;
+  }
+  return server && cleanServerText(server) ? cleanServerText(server) : 'The record was not saved.';
 }
 
 /**
@@ -7364,6 +7491,414 @@ function startScanner(input) {
   return { start, stop };
 }
 
+const MEDIA_IMAGE_MAX_SIDE = 2048;
+const MEDIA_PEN_COLORS = ['#d32f2f', '#1565c0', '#212121'];
+const MEDIA_RECORD_TYPES = {
+  video: ['video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4'],
+  audio: ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'],
+};
+const mediaPicked = new WeakSet();
+
+/**
+ * Creator's image `annotation`, `show onload` and front `camera` lens, and a
+ * video or audio field's `duration`: a small panel beside the file control
+ * (model.ts ui.media). Capture and recording use getUserMedia and
+ * MediaRecorder in the page; a drawing editor marks up a chosen or captured
+ * photo before it is stored. The result is always a File placed in the
+ * field's own file input, so the existing size/type checks and upload run
+ * unchanged. When the camera, microphone or an API is missing or refused the
+ * panel says so and the file chooser keeps working.
+ */
+function startMediaTools(blockEl, spec) {
+  const doc = blockEl.ownerDocument;
+  const win = doc.defaultView;
+  const kind = spec.kind;
+  const fileInputs = Array.from(blockEl.querySelectorAll('input[type="file"]'));
+  const target = fileInputs[0];
+  if (!target) return null;
+  let stream = null;
+  let recorder = null;
+  let tick = 0;
+  let stopTimer = 0;
+  let session = 0;
+
+  const box = doc.createElement('div');
+  box.className = 'media-tools';
+  const status = doc.createElement('p');
+  status.className = 'media-status';
+  status.setAttribute('role', 'status');
+  const video = doc.createElement('video');
+  video.className = 'media-video';
+  video.style.maxWidth = '100%';
+  video.setAttribute('playsinline', '');
+  video.muted = true;
+  video.hidden = true;
+  const open = doc.createElement('button');
+  open.type = 'button';
+  open.className = 'media-open';
+  open.textContent = kind === 'image' ? 'Use camera' : kind === 'video' ? 'Record video' : 'Record audio';
+  const act = doc.createElement('button');
+  act.type = 'button';
+  act.className = 'media-act';
+  act.textContent = kind === 'image' ? 'Capture' : 'Stop recording';
+  act.hidden = true;
+  const close = doc.createElement('button');
+  close.type = 'button';
+  close.className = 'media-close';
+  close.textContent = kind === 'image' ? 'Close camera' : 'Cancel';
+  close.hidden = true;
+  const editor = doc.createElement('div');
+  editor.className = 'media-editor';
+  editor.hidden = true;
+  box.append(open, act, close, video, status, editor);
+  const anchor = blockEl.querySelector('.filepick');
+  if (anchor) anchor.insertAdjacentElement('afterend', box);
+  else blockEl.append(box);
+
+  const say = (text) => {
+    status.textContent = text;
+  };
+  const unavailable = `${kind === 'image' ? 'The camera' : 'Recording'} is not available here (it needs ${kind === 'video' ? 'a camera, a microphone' : kind === 'audio' ? 'a microphone' : 'a camera'}, a supported browser and HTTPS). Choose a file instead.`;
+  const refused = `${kind === 'audio' ? 'Microphone' : kind === 'video' ? 'Camera or microphone' : 'Camera'} access was refused or none was found. Choose a file instead.`;
+
+  function release() {
+    session += 1;
+    if (tick) win.clearInterval(tick);
+    if (stopTimer) win.clearTimeout(stopTimer);
+    tick = 0;
+    stopTimer = 0;
+    const live = recorder;
+    recorder = null;
+    if (live) {
+      live.discard = true;
+      try {
+        if (live.state !== 'inactive') live.stop();
+      } catch {
+        // already stopped
+      }
+    }
+    if (stream) {
+      for (const track of stream.getTracks()) track.stop();
+      stream = null;
+    }
+    video.srcObject = null;
+    video.hidden = true;
+    act.hidden = true;
+    close.hidden = true;
+    open.hidden = false;
+  }
+
+  function place(file) {
+    try {
+      const transfer = new win.DataTransfer();
+      transfer.items.add(file);
+      target.files = transfer.files;
+    } catch {
+      say('This browser cannot attach the result. Choose a file instead.');
+      return false;
+    }
+    mediaPicked.add(target);
+    target.dispatchEvent(new win.Event('change', { bubbles: true }));
+    return true;
+  }
+
+  async function openStream() {
+    const nav = win.navigator;
+    if (!nav || !nav.mediaDevices || typeof nav.mediaDevices.getUserMedia !== 'function') {
+      say(unavailable);
+      return false;
+    }
+    if (kind !== 'image' && typeof win.MediaRecorder !== 'function') {
+      say(unavailable);
+      return false;
+    }
+    const mine = ++session;
+    let media;
+    try {
+      media = await nav.mediaDevices.getUserMedia({
+        video: kind === 'audio' ? false : { facingMode: spec.camera === 'secondary' ? 'user' : 'environment' },
+        audio: kind !== 'image',
+      });
+    } catch {
+      if (mine === session) say(refused);
+      return false;
+    }
+    if (mine !== session) {
+      for (const track of media.getTracks()) track.stop();
+      return false;
+    }
+    stream = media;
+    if (kind !== 'audio') {
+      video.srcObject = media;
+      video.hidden = false;
+      try {
+        const played = video.play();
+        if (played && typeof played.catch === 'function') played.catch(() => {});
+      } catch {
+        // jsdom and some browsers refuse; frames are read either way
+      }
+    }
+    open.hidden = true;
+    act.hidden = false;
+    close.hidden = false;
+    return true;
+  }
+
+  function capture() {
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 480;
+    const scale = Math.min(1, MEDIA_IMAGE_MAX_SIDE / Math.max(width, height));
+    const canvas = doc.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      say(unavailable);
+      return;
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        say('The photo could not be captured. Choose a file instead.');
+        return;
+      }
+      release();
+      say('');
+      place(new win.File([blob], 'photo.jpg', { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.92);
+  }
+
+  async function record() {
+    if (!(await openStream())) return;
+    const types = MEDIA_RECORD_TYPES[kind];
+    const supported = typeof win.MediaRecorder.isTypeSupported === 'function' ? types.find((t) => win.MediaRecorder.isTypeSupported(t)) : undefined;
+    let rec;
+    try {
+      rec = supported ? new win.MediaRecorder(stream, { mimeType: supported }) : new win.MediaRecorder(stream);
+    } catch {
+      release();
+      say(unavailable);
+      return;
+    }
+    recorder = rec;
+    const chunks = [];
+    let bytes = 0;
+    rec.ondataavailable = (event) => {
+      if (!event.data || !event.data.size) return;
+      chunks.push(event.data);
+      bytes += event.data.size;
+      // A recording never outgrows what the upload accepts.
+      if (bytes >= UPLOAD_SOURCE_MAX_BYTES && rec.state !== 'inactive') {
+        rec.discard = false;
+        rec.stop();
+      }
+    };
+    rec.onstop = () => {
+      const discarded = rec.discard === true;
+      const mime = String(rec.mimeType || supported || '').split(';')[0] || (kind === 'video' ? 'video/webm' : 'audio/webm');
+      if (recorder === rec) {
+        recorder = null;
+        release();
+      }
+      if (discarded) return;
+      if (!chunks.length) {
+        say('Nothing was recorded. Choose a file instead.');
+        return;
+      }
+      const ext = mime.endsWith('mp4') ? 'mp4' : 'webm';
+      say('');
+      place(new win.File(chunks, `recording.${ext}`, { type: mime }));
+    };
+    // The recording is kept unless Cancel, a reset or leaving the page discards it.
+    rec.discard = false;
+    let left = spec.recordSeconds;
+    say(`Recording… ${left}s left.`);
+    tick = win.setInterval(() => {
+      left -= 1;
+      if (left > 0) say(`Recording… ${left}s left.`);
+    }, 1000);
+    // Auto-stop: the declared duration is a hard limit on the recording.
+    stopTimer = win.setTimeout(() => {
+      if (recorder === rec && rec.state !== 'inactive') rec.stop();
+    }, spec.recordSeconds * 1000);
+    rec.start(1000);
+  }
+
+  function markup(file) {
+    editor.textContent = '';
+    editor.hidden = false;
+    const keep = () => {
+      editor.hidden = true;
+      say('The photo could not be opened for markup; it is kept unmarked.');
+    };
+    const reader = new win.FileReader();
+    reader.onerror = keep;
+    reader.onload = () => {
+      const img = new win.Image();
+      img.onerror = keep;
+      img.onload = () => {
+        const scale = Math.min(1, MEDIA_IMAGE_MAX_SIDE / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        const canvas = doc.createElement('canvas');
+        canvas.className = 'media-canvas';
+        canvas.style.maxWidth = '100%';
+        canvas.style.touchAction = 'none';
+        canvas.width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+        canvas.height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          keep();
+          return;
+        }
+        const paint = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        paint();
+        ctx.lineWidth = Math.max(2, Math.round(canvas.width / 200));
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = MEDIA_PEN_COLORS[0];
+        const tools = doc.createElement('div');
+        tools.className = 'media-tools-row';
+        for (const color of MEDIA_PEN_COLORS) {
+          const swatch = doc.createElement('button');
+          swatch.type = 'button';
+          swatch.className = 'media-pen';
+          swatch.setAttribute('aria-label', `Pen ${color}`);
+          swatch.style.background = color;
+          swatch.addEventListener('click', () => {
+            ctx.strokeStyle = color;
+          });
+          tools.append(swatch);
+        }
+        const clear = doc.createElement('button');
+        clear.type = 'button';
+        clear.className = 'media-clear';
+        clear.textContent = 'Clear markup';
+        clear.addEventListener('click', paint);
+        const done = doc.createElement('button');
+        done.type = 'button';
+        done.className = 'media-done';
+        done.textContent = 'Use marked-up photo';
+        const cancel = doc.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'media-cancel';
+        cancel.textContent = 'Keep original';
+        tools.append(clear, done, cancel);
+        let pen = null;
+        const at = (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const w = rect.width || canvas.width;
+          const h = rect.height || canvas.height;
+          return [((event.clientX - rect.left) / w) * canvas.width, ((event.clientY - rect.top) / h) * canvas.height];
+        };
+        canvas.addEventListener('pointerdown', (event) => {
+          pen = at(event);
+          try {
+            canvas.setPointerCapture(event.pointerId);
+          } catch {
+            // not every engine supports capture
+          }
+          ctx.beginPath();
+          ctx.moveTo(pen[0], pen[1]);
+          ctx.lineTo(pen[0] + 0.01, pen[1]);
+          ctx.stroke();
+        });
+        canvas.addEventListener('pointermove', (event) => {
+          if (!pen) return;
+          const next = at(event);
+          ctx.beginPath();
+          ctx.moveTo(pen[0], pen[1]);
+          ctx.lineTo(next[0], next[1]);
+          ctx.stroke();
+          pen = next;
+        });
+        const lift = () => {
+          pen = null;
+        };
+        canvas.addEventListener('pointerup', lift);
+        canvas.addEventListener('pointercancel', lift);
+        const finish = () => {
+          editor.hidden = true;
+          editor.textContent = '';
+        };
+        cancel.addEventListener('click', finish);
+        done.addEventListener('click', () => {
+          const type = 'image/png';
+          canvas.toBlob((blob) => {
+            finish();
+            if (!blob) {
+              say('The marked-up photo could not be saved; the original is kept.');
+              return;
+            }
+            const base = String(file.name || 'photo').replace(/\.[^.]*$/, '') || 'photo';
+            place(new win.File([blob], `${base}-marked.png`, { type }));
+          }, type);
+        });
+        editor.append(canvas, tools);
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  open.addEventListener('click', () => {
+    if (kind === 'image') openStream();
+    else record();
+  });
+  act.addEventListener('click', () => {
+    if (kind === 'image') capture();
+    else if (recorder && recorder.state !== 'inactive') recorder.stop();
+  });
+  close.addEventListener('click', () => {
+    release();
+    say('');
+  });
+  if (spec.annotate) {
+    for (const input of fileInputs) {
+      input.addEventListener('change', () => {
+        if (mediaPicked.has(input)) {
+          mediaPicked.delete(input);
+          return;
+        }
+        const file = input.files && input.files[0];
+        if (file && /^image\//.test(file.type) && !refusedImageType(file.type)) markup(file);
+      });
+    }
+  }
+  box.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && stream) {
+      release();
+      say('');
+    }
+  });
+  win.addEventListener('pagehide', release);
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.visibilityState === 'hidden') release();
+  });
+  const form = target.form;
+  if (form) form.addEventListener('reset', release);
+  if (spec.onload && kind === 'image') openStream();
+  return { release };
+}
+
+/** Give every `[data-media-kind]` file field its capture, recording and markup tools, once each. */
+export function attachMediaTools(formEl) {
+  if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
+  for (const block of formEl.querySelectorAll('[data-media-kind]')) {
+    if (block.getAttribute('data-media-bound') === 'true') continue;
+    block.setAttribute('data-media-bound', 'true');
+    const kind = block.getAttribute('data-media-kind');
+    if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
+    const seconds = Number(block.getAttribute('data-media-seconds'));
+    const recordSeconds = Number.isInteger(seconds) && seconds >= 1 && seconds <= 3600 ? seconds : 0;
+    if (kind !== 'image' && !recordSeconds) continue;
+    startMediaTools(block, {
+      kind,
+      camera: block.getAttribute('data-media-camera') === 'secondary' ? 'secondary' : 'primary',
+      recordSeconds,
+      annotate: kind === 'image' && block.getAttribute('data-media-annotate') === 'true',
+      onload: block.getAttribute('data-media-onload') === 'true',
+    });
+  }
+}
+
 /** Give every `[data-scan-camera]` field its scanner controls, once each. */
 export function attachScanners(formEl) {
   if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
@@ -7371,6 +7906,126 @@ export function attachScanners(formEl) {
     if (input.getAttribute('data-scan-bound') === 'true') continue;
     input.setAttribute('data-scan-bound', 'true');
     startScanner(input);
+  }
+}
+
+const GOOGLE_API_SCRIPT = 'https://apis.google.com/js/api.js';
+const GOOGLE_IDENTITY_SCRIPT = 'https://accounts.google.com/gsi/client';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GOOGLE_NATIVE_PREFIX = 'application/vnd.google-apps.';
+const GOOGLE_FILE_ID = /^[A-Za-z0-9_-]{10,200}$/;
+
+/** The deployer's picker settings from the runtime config, or null when none are configured (the default). */
+function googlePickerConfig(view) {
+  const config = view && view.C2C_DOC_PICKER;
+  const google = config && config.google;
+  if (!google || typeof google.apiKey !== 'string' || typeof google.clientId !== 'string' || !google.apiKey || !google.clientId) return null;
+  return { apiKey: google.apiKey, clientId: google.clientId };
+}
+
+/** Load one of the two fixed Google scripts. The URLs are constants here; no configured or user value reaches `src`. */
+function loadGoogleScript(view, src) {
+  return new Promise((resolve, reject) => {
+    const doc = view.document;
+    const script = doc.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('script'));
+    doc.head.appendChild(script);
+  });
+}
+
+/**
+ * The opt-in Google Drive picker for a `browse = google_docs` file field. Asks for
+ * the `drive.file` scope only (the one chosen file), refuses Google-native
+ * documents, ids that are not plain Drive ids and anything over
+ * UPLOAD_SOURCE_MAX_BYTES, then downloads the bytes in the page so they take
+ * the same signed upload as a picked file. Resolves to a File, null when the
+ * user cancels, or { error } with a message the form can show.
+ */
+export async function pickGoogleDoc(field, view) {
+  const config = googlePickerConfig(view);
+  if (!config) return { error: 'The Google Drive picker is not configured; choose a file from this device.' };
+  try {
+    if (!view.gapi) await loadGoogleScript(view, GOOGLE_API_SCRIPT);
+    if (!(view.google && view.google.accounts && view.google.accounts.oauth2)) await loadGoogleScript(view, GOOGLE_IDENTITY_SCRIPT);
+    await new Promise((resolve) => view.gapi.load('picker', () => resolve()));
+    const token = await new Promise((resolve, reject) => {
+      const client = view.google.accounts.oauth2.initTokenClient({
+        client_id: config.clientId,
+        scope: GOOGLE_DRIVE_SCOPE,
+        callback: (response) => (response && response.access_token ? resolve(response.access_token) : reject(new Error('auth'))),
+        error_callback: () => reject(new Error('auth')),
+      });
+      client.requestAccessToken();
+    });
+    const picker = view.google.picker;
+    const chosen = await new Promise((resolve) => {
+      new picker.PickerBuilder()
+        .setDeveloperKey(config.apiKey)
+        .setAppId(config.clientId.split('-')[0])
+        .setOAuthToken(token)
+        .addView(new picker.DocsView())
+        .setCallback((response) => {
+          const action = response[picker.Response.ACTION];
+          if (action === picker.Action.PICKED) resolve((response[picker.Response.DOCUMENTS] || [])[0] || null);
+          else if (action === picker.Action.CANCEL) resolve(null);
+        })
+        .build()
+        .setVisible(true);
+    });
+    if (!chosen) return null;
+    const id = String(chosen[picker.Document.ID] || '');
+    const mime = String(chosen[picker.Document.MIME_TYPE] || '');
+    const size = Number(chosen[picker.Document.SIZE_BYTES]);
+    if (!GOOGLE_FILE_ID.test(id)) return { error: 'That Google Drive item could not be used.' };
+    if (mime.toLowerCase().startsWith(GOOGLE_NATIVE_PREFIX)) return { error: 'Google-native documents (Docs, Sheets, Slides) cannot be attached; download or export one first.' };
+    if (Number.isFinite(size) && size > UPLOAD_SOURCE_MAX_BYTES) return { error: `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.` };
+    const accept = field && field.accept;
+    if (accept && !uploadSourceTypeOk(mime, accept)) return { error: 'That file type is not accepted by this field.' };
+    const res = await view.fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res || !res.ok) return { error: 'Google Drive did not return the file.' };
+    const blob = await uploadSourceBlob(res, view);
+    const name = String(chosen[picker.Document.NAME] || 'file').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 255) || 'file';
+    return new view.File([blob], name, { type: mime });
+  } catch (cause) {
+    if (cause instanceof Error && /larger than/.test(cause.message)) return { error: `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.` };
+    return { error: 'Could not read the file from Google Drive.' };
+  }
+}
+
+/** Wire every Google Drive control in the form: the chosen File lands in the field's own file input, exactly as a picked file would. */
+export function attachDocPickers(formEl) {
+  if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
+  for (const button of formEl.querySelectorAll('[data-doc-picker="google"]')) {
+    if (button.getAttribute('data-doc-picker-bound') === 'true') continue;
+    button.setAttribute('data-doc-picker-bound', 'true');
+    button.addEventListener('click', async () => {
+      const view = viewOf(button);
+      const input = view.document.getElementById(button.getAttribute('data-pick-for') || '');
+      const fieldName = button.getAttribute('data-pick-field') || '';
+      const errorEl = Array.from(formEl.querySelectorAll('[data-error-for]')).find((el) => el.getAttribute('data-error-for') === fieldName) || null;
+      const result = await pickGoogleDoc({ widget: 'file', accept: button.getAttribute('data-pick-accept') || '' }, view);
+      if (!result || !input) return;
+      if (typeof result.error === 'string') {
+        if (errorEl) errorEl.textContent = result.error;
+        return;
+      }
+      if (errorEl) errorEl.textContent = '';
+      try {
+        const data = new view.DataTransfer();
+        data.items.add(result);
+        input.files = data.files;
+      } catch {
+        if (errorEl) errorEl.textContent = 'This browser cannot attach a file from Google Drive; choose a file from this device.';
+        return;
+      }
+      const nameEl = input.closest ? input.closest('.filepick') : null;
+      const label = nameEl && nameEl.querySelector ? nameEl.querySelector('.filepick-name') : null;
+      if (label) label.textContent = result.name;
+      input.dispatchEvent(new view.Event('change', { bubbles: true }));
+    });
   }
 }
 
@@ -7425,6 +8080,40 @@ export function attachCapturePreviews(formEl) {
 }
 
 /** Values the submit POST sends. Read-only fields are left out. File widgets are references, or omitted when empty. */
+/**
+ * The browser position for the Added_Location / Modified_Location stamps,
+ * asked for once per submit (the browser shows its own permission prompt).
+ * Denied, unavailable, timed out or not finite resolves undefined: the
+ * stamped columns then stay null and the submit goes ahead.
+ */
+function capturePosition(viewRef) {
+  return new Promise((resolve) => {
+    const nav = viewRef && viewRef.navigator ? viewRef.navigator : typeof navigator === 'undefined' ? undefined : navigator;
+    const geolocation = nav && nav.geolocation;
+    if (!geolocation || typeof geolocation.getCurrentPosition !== 'function') {
+      resolve(undefined);
+      return;
+    }
+    const timer = setTimeout(() => resolve(undefined), 12000);
+    const done = (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      geolocation.getCurrentPosition(
+        (position) => {
+          const coords = position && position.coords;
+          done(coords && Number.isFinite(coords.latitude) && Number.isFinite(coords.longitude) ? { latitude: coords.latitude, longitude: coords.longitude } : undefined);
+        },
+        () => done(undefined),
+        { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 },
+      );
+    } catch {
+      done(undefined);
+    }
+  });
+}
+
 export async function submitRecord(formEl, form, upload) {
   const raw = readValues(formEl);
   const record = {};
@@ -8772,6 +9461,47 @@ export function boot(appModel, doc) {
       })
       .catch(() => {});
   });
+  // After a route change, retitle the document to the open screen and move focus
+  // to its heading so a keyboard or screen-reader user lands on the new screen.
+  let watchHeading = null;
+  let lastRouteIdentity = null;
+  const announceRoute = (routeIdentity) => {
+    const movedToNewRoute = lastRouteIdentity !== null && lastRouteIdentity !== routeIdentity;
+    lastRouteIdentity = routeIdentity;
+    if (watchHeading) watchHeading.disconnect();
+    const heading = main.querySelector('h1, h2');
+    const current = nav && nav.querySelector ? nav.querySelector('a[aria-current="page"]') : null;
+    const label = ((current && current.textContent) || (heading && heading.textContent) || '').replace(/\s+/g, ' ').trim();
+    const app = appModel.name || '';
+    documentRef.title = label && app ? `${label} - ${app}` : label || app || documentRef.title;
+    const announcer = documentRef.querySelector('[data-route-announcer]');
+    if (announcer && movedToNewRoute) announcer.textContent = label;
+    if (!heading || typeof heading.focus !== 'function' || !movedToNewRoute) return;
+    if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+    heading.focus({ preventScroll: true });
+    // A screen that redraws itself once its data lands replaces the heading;
+    // put focus on the new one unless the user has already moved on.
+    const Observer = documentRef.defaultView && documentRef.defaultView.MutationObserver;
+    if (!Observer) return;
+    if (watchHeading) watchHeading.disconnect();
+    let watch = null;
+    const done = () => {
+      if (watch) watch.disconnect();
+      if (watchHeading === watch) watchHeading = null;
+    };
+    watch = new Observer(() => {
+      if (heading.isConnected) return;
+      const active = documentRef.activeElement;
+      if (active && active !== documentRef.body) return done();
+      const next = main.querySelector('h1, h2');
+      if (!next) return;
+      if (!next.hasAttribute('tabindex')) next.setAttribute('tabindex', '-1');
+      next.focus({ preventScroll: true });
+      done();
+    });
+    watchHeading = watch;
+    watch.observe(main, { childList: true, subtree: true });
+  };
   const paintAllowed = (route) => {
     if (!main) return;
     // A same-hash repaint must not restart the run: the shell is already up.
@@ -8780,6 +9510,9 @@ export function boot(appModel, doc) {
     for (const modal of documentRef.querySelectorAll('[data-modal-form]')) modal.remove();
     main.innerHTML = renderRoute(appModel, route, documentRef);
     markCurrent();
+    // An unknown screen announces itself: focus lands on its heading.
+    const lost = main.querySelector('[data-state="not-found"] h1');
+    if (lost && typeof lost.focus === 'function') lost.focus();
     if (route.name === 'form') {
       const form = (appModel.forms || []).find((item) => item.name === route.id);
       const formEl = main.querySelector('form');
@@ -8804,7 +9537,7 @@ export function boot(appModel, doc) {
         const section = tbody.closest ? tbody.closest('section[data-report]') : null;
         const loadLive = (page) => {
           const live = reportRowsSlot(section);
-          loadRows(report, live || tbody, view, page);
+          loadRows(report, live || tbody, view, page, section);
         };
         const search = section && section.querySelector('[data-report-search]');
         if (search) {
@@ -8814,6 +9547,17 @@ export function boot(appModel, doc) {
           });
         }
         const filter = section && section.querySelector('select[data-filter]');
+        if (section) {
+          section.addEventListener('click', (event) => {
+            const clear = event.target && event.target.closest ? event.target.closest('[data-clear-search]') : null;
+            if (!clear) return;
+            const box = section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+            if (box) box.value = '';
+            const pick = section.querySelector('select[data-filter]');
+            if (pick) pick.value = '';
+            loadLive(0);
+          });
+        }
         if (filter) filter.addEventListener('change', () => loadLive(0));
       }
     }
@@ -8822,6 +9566,7 @@ export function boot(appModel, doc) {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
     if (report && report.form) loadRecordSummary(appModel, { ...route, id: report.form, report: report.name }, main, view);
   }
+  announceRoute(`${route.name}|${route.id || ""}|${route.row || ""}|${route.edit || ""}`);
   };
   const paint = () => {
     if (!main) return Promise.resolve();
@@ -8989,13 +9734,12 @@ export function boot(appModel, doc) {
         event.preventDefault();
         if (customAction.disabled) return;
         const message = customAction.getAttribute('data-confirm-message');
-        if (message) {
-          const ok = typeof view.confirm === 'function' ? view.confirm(message) : true;
-          if (!ok) return;
-        }
         const endpoint = customAction.getAttribute('data-action');
         const call = view.fetch || globalThis.fetch;
-        if (endpoint && typeof call === 'function') {
+        const run = () => {
+          if (!(endpoint && typeof call === 'function')) return;
+          customAction.disabled = true;
+          customAction.setAttribute('aria-busy', 'true');
           apiCall(call, view, endpoint, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -9012,8 +9756,17 @@ export function boot(appModel, doc) {
               const msg = body && typeof body.error === 'string' && body.error.trim() ? body.error : 'The action did not run.';
               showToast(documentRef, 'failure', msg);
             })
-            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'));
-        }
+            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'))
+            .finally(() => {
+              customAction.disabled = false;
+              customAction.removeAttribute('aria-busy');
+            });
+        };
+        if (message) {
+          askConfirm(documentRef, message, { confirmLabel: customAction.getAttribute('data-confirm-label'), cancelLabel: customAction.getAttribute('data-cancel-label') }, customAction).then((ok) => {
+            if (ok) run();
+          });
+        } else run();
         return;
       }
       const action = target.closest('[data-retry], [data-prev], [data-next]');
@@ -9048,8 +9801,11 @@ export function boot(appModel, doc) {
           const form = (appModel.forms || []).find((item) => item.name === report.form);
           const call = view.fetch || globalThis.fetch;
           // Creator asks before deleting; Cancel (or no dialog at all) sends nothing.
-          const confirmed = typeof view.confirm === 'function' && view.confirm(DELETE_CONFIRM_TEXT) === true;
-          if (form && form.deleteEndpoint && typeof call === 'function' && confirmed) {
+          if (!(form && form.deleteEndpoint && typeof call === 'function') || rowOp.disabled) return;
+          askConfirm(documentRef, DELETE_CONFIRM_TEXT, null, rowOp).then((confirmed) => {
+            if (!confirmed || rowOp.disabled) return;
+            rowOp.disabled = true;
+            rowOp.setAttribute('aria-busy', 'true');
             apiCall(call, view, form.deleteEndpoint, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -9069,8 +9825,12 @@ export function boot(appModel, doc) {
               })
               .catch(() => {
                 showToast(documentRef, 'failure', 'The record was not deleted.');
+              })
+              .finally(() => {
+                rowOp.disabled = false;
+                rowOp.removeAttribute('aria-busy');
               });
-          }
+          });
           return;
         }
       }
@@ -9127,6 +9887,10 @@ export function boot(appModel, doc) {
   const flag = () => {
     if (offline) offline.hidden = navg ? navg.onLine : true;
   };
+  // Coming back online re-reads each report that failed while offline, once.
+  view.addEventListener('online', () => {
+    for (const retry of documentRef.querySelectorAll('section[data-report] [data-state="error"] [data-retry]')) retry.click();
+  });
   view.addEventListener('online', flag);
   view.addEventListener('offline', flag);
   flag();
@@ -9164,10 +9928,11 @@ export function boot(appModel, doc) {
     }
   }
 
-  function loadRows(report, tbody, viewRef, page) {
+  function loadRows(report, tbody, viewRef, page, sectionHint) {
     const call = (viewRef && viewRef.fetch) || globalThis.fetch;
     if (!report.queryEndpoint || typeof call !== 'function') return Promise.resolve();
-    const section = tbody.closest ? tbody.closest('section[data-report]') : null;
+    // An empty answer removes the grid's tbody; the section still owns the repaint.
+    const section = (tbody.closest ? tbody.closest('section[data-report]') : null) || sectionHint || null;
     const current = typeof page === 'number' && page >= 0 ? page : 0;
     if (section && section.dataset) section.dataset.page = String(current);
     const stateEl = section && section.querySelector('[data-state]');
@@ -9178,6 +9943,12 @@ export function boot(appModel, doc) {
     const paintEmpty = () => {
       if (stateEl) stateEl.innerHTML = reportStateHtml('empty', emptyOpts);
     };
+    const narrowed = (() => {
+      const box = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+      const pick = section && section.querySelector('select[data-filter]');
+      return !!((box && box.value) || (pick && pick.value));
+    })();
+    const rowsEmptyOpts = narrowed ? { filtered: true } : emptyOpts;
     if (stateEl) stateEl.innerHTML = reportStateHtml('loading');
     const qInput = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
     const filterEl = section && section.querySelector('select[data-filter]');
@@ -9214,12 +9985,20 @@ export function boot(appModel, doc) {
             paintEmpty();
             return null;
           }
+          if (res && (res.status === 401 || res.status === 403)) return { refused: res.status };
           throw new Error(`report query ${res ? res.status : 'no response'}`);
         }
         return responseJson(res);
       })
       .then((body) => {
         if (body == null) return;
+        if (body.refused) {
+          // A refusal is its own screen, never the generic error with a Retry that cannot help.
+          setReportChrome(section, false);
+          const href = viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '';
+          if (stateEl) stateEl.innerHTML = body.refused === 401 ? reportStateHtml('session-expired', { loginHref: href }) : reportStateHtml('denied');
+          return;
+        }
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         const doc = tbody.ownerDocument;
         if (tbody.hasAttribute('data-board')) fillBoard(report, tbody, rows);
@@ -9237,7 +10016,7 @@ export function boot(appModel, doc) {
         if (bulkButton) bulkButton.disabled = selectedCount === 0;
         setReportChrome(section, rows.length > 0);
         if (stateEl) {
-          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', emptyOpts);
+          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', rowsEmptyOpts);
         }
         updatePages(section, current, rows, pageSize);
         const text = body && typeof body.notice === 'string' ? body.notice : '';
@@ -9404,7 +10183,9 @@ export function boot(appModel, doc) {
     fillLookups(form, formEl, viewRef).catch(() => {});
     attachLookupAddNew(model, formEl, viewRef);
     attachCapturePreviews(formEl);
+    attachDocPickers(formEl);
     attachScanners(formEl);
+    attachMediaTools(formEl);
     const mode = open && open.mode === 'edit' ? 'edit' : 'add';
     const rowId = mode === 'edit' && open && open.rowId ? String(open.rowId) : '';
     // Creator's edit screen submits with an Update button.
@@ -9540,10 +10321,11 @@ export function boot(appModel, doc) {
         if (banner) banner.textContent = 'Upload failed. The form was not submitted.';
         return;
       }
+      const geo = form.capturesLocation ? await capturePosition(viewRef) : undefined;
       const res = await apiCall(call, viewRef, endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ record, ...(rowId ? { ROWID: rowId } : {}), idempotencyKey: submitKey }, jsonReplacer),
+        body: JSON.stringify({ record, ...(geo ? { geo } : {}), ...(rowId ? { ROWID: rowId } : {}), idempotencyKey: submitKey }, jsonReplacer),
       }).catch(() => null);
       const banner = formEl.querySelector('[data-banner]');
       const formDoc = formEl.ownerDocument || (typeof document !== 'undefined' ? document : null);
@@ -9563,6 +10345,12 @@ export function boot(appModel, doc) {
           failure = submitFailureText(body);
         }
         if (banner) banner.textContent = failure;
+        // A 400 that names a field lands on that field and takes focus.
+        const named = res && answer && typeof answer.field === 'string' ? (form.fields || []).find((item) => item.name === answer.field) : null;
+        if (named) {
+          const control = showErrors(formEl, form, { [named.name]: failure });
+          if (control && typeof control.focus === 'function') control.focus();
+        }
         if (formDoc) showToast(formDoc, 'failure', submitNotice({ ok: false, dryRun: !live, message: failure }));
         return;
       }

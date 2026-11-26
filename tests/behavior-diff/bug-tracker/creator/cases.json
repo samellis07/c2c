@@ -1,0 +1,267 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Bug Tracker",
+  "source": {
+    "file": "Bug_Tracker.ds",
+    "origin": "local gallery fixture corpus, not redistributable",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "user-checkbox-initial-false",
+      "name": "Add_User: Can_Assign_Bug checkbox initial value false",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Dee",
+              "last_name": "Fox"
+            },
+            "Email": "dee.fox@example.com"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Email": "dee.fox@example.com",
+              "Can_Assign_Bug": "false",
+              "Name1_first_name": "Dee",
+              "Name1_last_name": "Fox"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "user-checkbox-true",
+      "name": "Add_User: checkbox true is stored as true",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Dee",
+              "last_name": "Fox"
+            },
+            "Email": "dee.fox@example.com",
+            "Can_Assign_Bug": true
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Can_Assign_Bug": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "user-email-format",
+      "name": "[UNVERIFIED] Add_User: type = email refuses a value without @ (exact Creator rule unpublished)",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Dee",
+              "last_name": "Fox"
+            },
+            "Email": "notanemail"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_User": []
+        }
+      }
+    },
+    {
+      "id": "user-mandatory-email",
+      "name": "Add_User: must have Email refuses a write without it",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Dee",
+              "last_name": "Fox"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_User": []
+        }
+      }
+    },
+    {
+      "id": "milestone-mandatory-description",
+      "name": "Add_Miletone: must have Description refuses a write without it",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Miletone",
+          "record": {
+            "Product_Name": "Alpha"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Miletone": []
+        }
+      }
+    },
+    {
+      "id": "status-popup-mandatory-comment",
+      "name": "Change_Status_PopUp: must have Comment refuses a write with only Status",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Change_Status_PopUp",
+          "record": {
+            "Status": "Fixed"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Change_Status_PopUp": []
+        }
+      }
+    },
+    {
+      "id": "status-popup-radio-rejects-unlisted",
+      "name": "Change_Status_PopUp: Status radiobuttons refuse a value outside the eight choices",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Change_Status_PopUp",
+          "record": {
+            "Status": "Closed",
+            "Comment": "done"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Change_Status_PopUp": []
+        }
+      }
+    },
+    {
+      "id": "comments-add-saved",
+      "name": "Comments: a plain comment is stored with its text",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Comments",
+          "record": {
+            "Comment": "Needs a repro"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Comments": [
+            {
+              "Comment": "Needs a repro"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "newbug-priority-radio-rejects-unlisted",
+      "name": "New_Bug: Priority radiobuttons refuse a value outside High/Medium/Low",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Miletone",
+          "record": {
+            "Product_Name": "Alpha",
+            "Description": "first"
+          },
+          "setup": true,
+          "bind": {
+            "prod": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "New_Bug",
+          "record": {
+            "Bug_Title": "Crash",
+            "Products": "<ref:prod>",
+            "Notes": "steps",
+            "Priority": "Urgent"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "New_Bug": []
+        }
+      }
+    },
+    {
+      "id": "newbug-bug-id-from-autonumber",
+      "name": "[UNVERIFIED] New_Bug On Success sets Bug_ID = \"Bug-\" + Auto_Number (start index 1 -> Bug-1); skipped: the mandatory Screenshot image cannot be sent through the REST API",
+      "skip": "unreachable-via-api: New_Bug has must have Screenshot (image); addRecords cannot upload a file",
+      "tags": [
+        "unreachable-via-api"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Bug",
+          "record": {
+            "Bug_Title": "Crash"
+          }
+        }
+      ]
+    }
+  ]
+}

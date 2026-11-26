@@ -25,8 +25,8 @@
  *
  * Offline and deterministic: no network, no clock, no randomness.
  */
-import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import { openKind, readRegularFileIfPresent, type App, type Field as IrField, type Property } from '../../core/src/index.js';
 import { phoneColumns, reportColumnLabel } from '../../core/src/phone-columns.js';
 import { fileURLToPath } from 'node:url';
@@ -90,7 +90,24 @@ export function bundleFromFiles(files: BundleFile[]): UiBundle {
 export function bundleFromDir(dir: string): UiBundle {
   const slate = openKind(join(dir, 'slate', 'index.html')) ? join(dir, 'slate') : dir;
   // One descriptor per file: a directory, FIFO or socket reads as absent and never blocks.
-  const text = (rel: string): string | undefined => readRegularFileIfPresent(join(slate, rel));
+  const root = realpathOrUndefined(slate);
+  const text = (rel: string, module = false): string | undefined => {
+    if (root === undefined || !insideRoot(root, slate, rel)) {
+      if (module) throw new Error(`ui bundle: "${rel}" resolves outside the bundle`);
+      return undefined;
+    }
+    const path = join(slate, rel);
+    // A hardlink has no useful bundle boundary: its bytes may be shared with
+    // an otherwise unrelated path outside the bundle. Refuse it just like an
+    // escaping symlink, using lstat so we inspect the directory entry itself.
+    try {
+      const stat = lstatSync(path);
+      if (stat.isFile() && stat.nlink > 1) return undefined;
+    } catch {
+      return undefined;
+    }
+    return readRegularFileIfPresent(path);
+  };
   const listJs = (): string[] => {
     const out: string[] = [];
     const walk = (rel: string): void => {
@@ -106,7 +123,41 @@ export function bundleFromDir(dir: string): UiBundle {
   return resolveBundle(text, listJs);
 }
 
-function resolveBundle(text: (rel: string) => string | undefined, listJs: () => string[]): UiBundle {
+function realpathOrUndefined(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether `rel` (a bundle-relative path as a page would write it) names a file
+ * whose real path is under the bundle's real root: percent-escapes and
+ * backslashes are normalised, absolute and dot-dot paths and symlinks that lead
+ * out are not inside. A path that does not exist yet is checked by its deepest
+ * existing ancestor.
+ */
+function insideRoot(root: string, slate: string, rel: string): boolean {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rel);
+  } catch {
+    return false;
+  }
+  const parts = decoded.replace(/\\/g, '/').split('/').filter((part) => part !== '' && part !== '.');
+  if (parts.includes('..') || /^[A-Za-z]:/.test(parts[0] ?? '')) return false;
+  let probe = join(slate, ...parts);
+  for (;;) {
+    const real = realpathOrUndefined(probe);
+    if (real !== undefined) return real === root || real.startsWith(root + sep);
+    const up = dirname(probe);
+    if (up === probe) return false;
+    probe = up;
+  }
+}
+
+function resolveBundle(text: (rel: string, module?: boolean) => string | undefined, listJs: () => string[]): UiBundle {
   const html = text('index.html');
   if (html === undefined) throw new Error('ui bundle: slate/index.html not found');
   // Every stylesheet the page links, in document order, then the ones a
@@ -125,13 +176,13 @@ function resolveBundle(text: (rel: string) => string | undefined, listJs: () => 
       if (!linkedCss.includes(rel)) lazyCss.push(rel);
       continue;
     }
-    const source = text(rel);
+    const source = text(rel, true);
     if (source !== undefined) modules[rel] = source;
   }
   const css = [...linkedCss, ...lazyCss.sort()].map((rel) => text(rel) ?? '').join('\n');
   const runtime = modules[entry] ?? '';
   const modelRel = /from\s+["']\.\/(model\.[^"']+\.js)["']/.exec(runtime)?.[1];
-  const model = (modelRel && text(join(dirname(entry), modelRel))) ?? '';
+  const model = (modelRel && text(join(dirname(entry), modelRel), true)) ?? '';
   return { html, css, runtime, model, modules, entry };
 }
 
@@ -906,7 +957,11 @@ export function createFakeApi(sample: Map<string, Record<string, string>>, rows:
       if (lane === 'query') {
         const report = /\/reports\/([^/?]+)/.exec(path);
         const row = sample.get(decodeURIComponent(report?.[1] ?? ''));
-        return reply(200, { rows: mode === 'empty' ? [] : row ? [row] : rows });
+        const all = row ? [row] : rows;
+        // A search narrows the rows the way the server does: a row stays when a value holds the text.
+        const q = typeof (body as { q?: unknown }).q === 'string' ? (body as { q: string }).q.trim().toLowerCase() : '';
+        const kept = q ? all.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(q))) : all;
+        return reply(200, { rows: mode === 'empty' ? [] : kept });
       }
       if (lane === 'record') return reply(200, { record: rows[0] ?? [...sample.values()][0] ?? null });
       if (lane === 'remove' || lane === 'submit' || lane === 'action') return reply(200, { ok: true, dryRun: false });

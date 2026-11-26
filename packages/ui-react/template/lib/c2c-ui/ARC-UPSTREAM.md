@@ -15,6 +15,7 @@ source we own and adapt, not an npm dependency.
 | `sortable-data-table.tsx` | `ResizeObserver` use guarded; `getComputedStyle` taken from the table's own window | the app can be booted into a document of another realm (a test or scoring harness) |
 | `number-field.tsx` | `empty` and `onClear` props: an unset value shows no number, and a draft with no digits commits as a clear instead of returning to the last value | a stored number can be emptied on an edit form; empty is not 0 |
 | `sortable-data-table.tsx` | cells carry `data-th` (the column label) and `data-phone` (shown on the phone card); the column type gains `phone` | phone record cards and the report contract in docs/react-target.md |
+| `sortable-data-table.tsx` | cells carry `data-key` (the column key), as the headers already do | the print stylesheet hides the action and select columns by key, since a label can repeat |
 | `pagination.tsx` | `ResizeObserver` use guarded | the app can be booted into a document of another realm (a test or scoring harness) |
 | `combobox.tsx` | `ResizeObserver` taken from the control's own window and skipped when absent; the outside-click listener goes on the control's own document | same realm reason as the data table |
 | `combobox.tsx` | new props `hideLabel` (label kept for assistive technology only), `footer` (content below the options in the open menu) and `onOpenChange`; `.footer` and `.srOnly` added to the module CSS | lookup pickers: a grid cell is named by its column header, and the menu carries the lookup paging controls (load more, retry) |

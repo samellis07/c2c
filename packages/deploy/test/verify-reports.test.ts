@@ -205,7 +205,7 @@ test('an offered export control is found and its download captured; a broken exp
 const SKIP = templateRuntimeReady() ? false : process.env.CI === 'true' ? false : TEMPLATE_MISSING;
 const KITCHEN = join(repoRoot(), 'fixtures/synthetic/kitchen-sink/kitchen_sink.ds');
 
-test('offline kitchen-sink: rows, totals and chart match the seed; exports and print are counted gaps', { skip: SKIP }, async () => {
+test('offline kitchen-sink: rows, totals and chart match the seed; CSV, XLSX and print pass; a direct PDF export stays a counted gap', { skip: SKIP }, async () => {
   const app = deriveIr(parse(readFileSync(KITCHEN, 'utf8')));
   const result = await runReportChecks(app, KITCHEN, { n: 4 });
   assert.equal(result.error, undefined);
@@ -214,16 +214,16 @@ test('offline kitchen-sink: rows, totals and chart match the seed; exports and p
   const gear = screen('All_Gear');
   assert.equal(gear.kind, 'list');
   assert.deepEqual(gear.checks.filter((c) => c.check === 'rows' || c.check === 'totals' || c.check === 'cells').map((c) => [c.check, c.status]), [['rows', 'pass'], ['totals', 'pass'], ['cells', 'pass']]);
-  for (const format of ['csv', 'xlsx', 'pdf', 'print'] as const) {
-    const check = gear.checks.find((c) => c.check === format)!;
-    assert.equal(check.status, 'gap', `${format} is a gap, never a pass`);
-    assert.match(check.detail, /offers no/);
-  }
+  for (const format of ['csv', 'xlsx', 'print'] as const) assert.equal(gear.checks.find((c) => c.check === format)!.status, 'pass', `${format} is offered and verified against the on-screen table`);
+  const pdf = gear.checks.find((c) => c.check === 'pdf')!;
+  assert.equal(pdf.status, 'gap', 'the PDF is the print dialog; a direct PDF export is not claimed');
+  assert.match(pdf.detail, /offers no/);
   assert.equal(screen('Bookings_By_Status').checks.find((c) => c.check === 'chart')!.status, 'pass');
   assert.equal(screen('Front_Desk').kind, 'dashboard');
   const report = summarize([result]);
   assert.equal(report.totals.fail, 0, formatReportCheckMarkdown(report));
-  assert.ok(report.byCheck.csv!.gap > 0 && report.byCheck.csv!.pass === 0);
+  assert.ok(report.byCheck.csv!.pass > 0 && report.byCheck.csv!.fail === 0);
+  assert.ok(report.byCheck.pdf!.gap > 0 && report.byCheck.pdf!.pass === 0);
 });
 
 test('offline kitchen-sink: an endpoint that drops a row or alters a total FAILS the run', { skip: SKIP }, async () => {
@@ -508,4 +508,132 @@ test('expectedBuckets folds date-time category values by calendar day, like the 
   ];
   const chart = { x: 'On', measures: [{ fn: 'count' as const, field: 'V', label: 'n' }], filter: [] };
   assert.deepEqual(expectedBuckets(rows, chart), { '2020-01-26': 2, '2020-01-27': 1 });
+});
+
+test('the expected CSV neutralises formula cells and keeps a plain negative number', () => {
+  const want = expectedCsv(['A'], [['=1+1'], ['-5'], ['- Name'], ['@x'], ['+1'], ['plain']]);
+  assert.equal(want, "A\r\n'=1+1\r\n-5\r\n'- Name\r\n'@x\r\n'+1\r\nplain\r\n");
+  assert.equal(verifyCsvExport('A\r\n=1+1\r\n', ['A'], [['=1+1']]).status, 'fail', 'a CSV that leaves a formula live fails');
+});
+
+test('readTable reads the nth cell for the nth column that shares a label', () => {
+  const doc = dom('<table><tbody><tr><td data-th="Email">a@x</td><td data-th="Email">b@x</td></tr></tbody></table>');
+  const table = readTable(doc.getElementById('root')!, [{ key: 'Email', label: 'Email' }, { key: 'Corp.Email', label: 'Email' }]);
+  assert.deepEqual(table.rows, [['a@x', 'b@x']]);
+});
+
+const RESERVED_LOOKUP = `application "ReservedLookup"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+	forms
+	{
+		form Account
+		{
+			Name
+			(
+				type = text
+			)
+			Status
+			(
+				type = picklist
+				values = {"Active","Archive"}
+			)
+		}
+		form Transfer
+		{
+			Label
+			(
+				type = text
+			)
+			Note
+			(
+				type = text
+			)
+			From
+			(
+				type = picklist
+				values = Account[ID != 0].ID
+				displayformat = [Name]
+			)
+		}
+	}
+	reports
+	{
+		list Account_All
+		{
+			show all rows from Account
+			(
+				Name
+				Status
+			)
+		}
+		list Moved
+		{
+			displayName = "Moved"
+			show all rows from Transfer [From.Status == "Active"]
+			(
+				Label
+				From
+				Note
+			)
+		}
+	}
+	share_settings
+	{
+		"Administrator"
+		{
+			name = "Administrator"
+			type = Users_Permissions
+			permissions = {Chat:true, Predefined:true, ApiAccess:true, PIIAccess:true, ePHIAccess:true}
+		}
+	}
+	web
+	{
+		reports
+		{
+			report Moved
+			{
+				detailview
+				(
+					layout
+					(
+						datablock1
+						(
+							title = "Overview"
+							fields
+							(
+								Label
+								From
+							)
+						)
+					)
+				)
+			}
+		}
+		menu
+		{
+			section Main
+			{
+				displayname = "Main"
+				list Account_All
+				{
+				}
+				list Moved
+				{
+				}
+			}
+		}
+	}
+}
+`;
+
+test('a report criteria on a reserved-name lookup selects the same seeded rows on the served read and in the oracle', { skip: SKIP }, async () => {
+  const app = deriveIr(parse(RESERVED_LOOKUP));
+  const result = await runReportChecks(app, 'inline', { n: 6 });
+  assert.equal(result.error, undefined);
+  const moved = result.screens.find((s) => s.screen === 'Moved')!;
+  const rows = moved.checks.find((c) => c.check === 'rows')!;
+  assert.equal(rows.status, 'pass', rows.detail);
 });

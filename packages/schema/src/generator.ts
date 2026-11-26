@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { flowStatusColumn, formLink, formScheduleSweepGap, isApprovalWorkflow, isBlueprintWorkflow, isFormScheduleWorkflow, type App, type Field, type Form } from '../../core/src/ir.js';
+import { LOCATION_PARTS, LOCATION_RECORD_COLUMNS, RECORD_STATUS_NOT_APPLICABLE, builtinRecordColumns, flowStatusColumn, formLink, formScheduleSweepGap, isApprovalWorkflow, isBlueprintWorkflow, isFormScheduleWorkflow, type App, type Field, type Form } from '../../core/src/ir.js';
 import { toolchain } from '../../core/src/toolchain.js';
 import { quantizeDecimal } from '../../shims/src/decimal.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
@@ -292,6 +292,52 @@ function pushSystemColumns(columns: SchemaColumn[], groups: ColumnGroups): void 
   }
 }
 
+/**
+ * Creator's built-in record columns that reports list: the geo stamps as
+ * latitude / longitude Double parts (the Address part shape the map pin
+ * reader already uses) and `Record_Status` as a plain VarChar. The generated
+ * submit endpoint stamps them; the client cannot write them.
+ */
+function pushBuiltinRecordColumns(columns: SchemaColumn[], groups: ColumnGroups, wanted: { location: boolean; status: boolean }): void {
+  const present = new Set<string>();
+  for (const column of columns) present.add(column.name);
+  const add = (column: SchemaColumn): void => {
+    if (present.has(column.name)) return;
+    groups.set(column, ANCHOR_GROUP);
+    columns.push(column);
+  };
+  if (wanted.location) {
+    for (const stamp of LOCATION_RECORD_COLUMNS) {
+      for (const part of LOCATION_PARTS) {
+        add({
+          name: `${stamp}_${part}`,
+          creatorType: 'system',
+          matrixId: 'c2c-builtin-record',
+          status: 'supported',
+          dataType: 'Double',
+          precision: 6,
+          mandatory: false,
+          unique: false,
+          note: `${stamp} ${part}: the browser position captured on ${stamp === 'Added_Location' ? 'add' : 'edit'}. Null when the user denied or the browser lacks geolocation.`,
+        });
+      }
+    }
+  }
+  if (wanted.status) {
+    add({
+      name: 'Record_Status',
+      creatorType: 'system',
+      matrixId: 'c2c-builtin-record',
+      status: 'supported',
+      dataType: 'VarChar',
+      length: 255,
+      mandatory: false,
+      unique: false,
+      note: `Creator's Record_Status. A form no approval or blueprint machine governs stores "${RECORD_STATUS_NOT_APPLICABLE}". The generated submit endpoint writes it; the client cannot.`,
+    });
+  }
+}
+
 function pushSourceId(columns: SchemaColumn[], groups: ColumnGroups): void {
   const column = sourceIdColumn();
   groups.set(column, ANCHOR_GROUP);
@@ -411,7 +457,8 @@ export function isMultiChoiceField(field: Field): boolean {
   return !field.lookup && isMulti(field);
 }
 
-function isMulti(field: Field): boolean {
+/** A multi select, checkboxes or multi-lookup field: the client posts a JSON array for it. */
+export function isMulti(field: Field): boolean {
   const token = creatorTypeOf(field);
   if (MULTI_TOKENS.has(token)) return true;
   if (token === 'checkbox' && ((field.choices?.length ?? 0) > 0 || field.lookup)) return true;
@@ -1070,6 +1117,7 @@ export function generateSchema(app: App, opts?: { source?: readonly SourceTableD
       groups.set(column, ANCHOR_GROUP);
       columns.push(column);
     }
+    pushBuiltinRecordColumns(columns, groups, builtinRecordColumns(app, form));
     pushSystemColumns(columns, groups);
     pushSourceId(columns, groups);
     tables.push(table);
@@ -1154,6 +1202,32 @@ export function generateSchema(app: App, opts?: { source?: readonly SourceTableD
     ];
     pushSystemColumns(columns, groups);
     tables.push({ name: alloc('C2CJobCheckpoint'), form: 'C2CJobCheckpoint', role: 'system', nosql: false, columns });
+  }
+
+  // Autonumber claims live in one table (shims/src/counters.ts): an insert
+  // per claimed number, the unique claim_key letting one claimant win. It is
+  // generated state, planned exactly when a form has an autonumber field.
+  if (tables.some((table) => table.columns.some((column) => column.matrixId === 'auto-number'))) {
+    const claim = (name: string, dataType: CatalystType, extra: Partial<SchemaColumn> = {}): SchemaColumn => ({
+      name,
+      creatorType: 'system',
+      matrixId: `c2c-seq-${name}`,
+      status: 'supported',
+      dataType,
+      ...(dataType === 'VarChar' ? { length: 255 } : {}),
+      mandatory: true,
+      unique: false,
+      ...extra,
+    });
+    const columns: SchemaColumn[] = [
+      claim('claim_key', 'VarChar', { unique: true }),
+      claim('seq_name', 'VarChar'),
+      claim('n', 'BigInt'),
+      claim('value', 'VarChar', { mandatory: false }),
+      claim('owner', 'VarChar', { mandatory: false }),
+    ];
+    pushSystemColumns(columns, groups);
+    tables.push({ name: alloc('c2c_seq_claim'), form: 'c2c_seq_claim', role: 'system', nosql: false, columns });
   }
 
   // Source rows decide whether a Creator constraint can be a store constraint;

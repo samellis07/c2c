@@ -27,6 +27,8 @@ import { parseZml, zmlReferences, type ZmlElement, type ZmlReference } from './z
 import { detectDialect, normaliseDialect, type Dialect } from './dialect.js';
 import { compareEnUs } from './order.js';
 
+import type { RemoteAsset } from './remote-assets.js';
+
 export const IR_VERSION = 1 as const;
 
 export interface Span {
@@ -504,6 +506,11 @@ export interface App {
    * so an export that only has `.ds` files keeps the same IR.
    */
   widgets?: WidgetSidecar[];
+  /**
+   * Remote CSS background images recorded by `c2c fetch-assets` in
+   * `c2c-assets.lock.json` next to the export. Omitted when there is no lock.
+   */
+  remoteAssets?: RemoteAsset[];
 }
 
 // ---------------------------------------------------------------------------
@@ -2731,4 +2738,31 @@ export function recordStatusColumn(app: App, form: Form | undefined): string | u
     (w) => (isApprovalWorkflow(w) || isBlueprintWorkflow(w)) && formLink(w.form).name === form.name,
   );
   return governed ? flowStatusColumn(form.fields) : undefined;
+}
+
+/** Creator's geo-stamp system columns: where a record was added and last edited. */
+export const LOCATION_RECORD_COLUMNS = ['Added_Location', 'Modified_Location'] as const;
+
+/** The two stored parts of one location stamp, in Creator's `latitude` / `longitude` order. */
+export const LOCATION_PARTS = ['latitude', 'longitude'] as const;
+
+/** The value a form no approval or blueprint machine governs carries in `Record_Status`. */
+export const RECORD_STATUS_NOT_APPLICABLE = 'Not Applicable';
+
+/**
+ * The built-in record columns the schema stores for one form: the location
+ * stamps when a report on the form lists either, and a plain `Record_Status`
+ * column when a report lists it and no machine status column holds it.
+ */
+export function builtinRecordColumns(app: App, form: Form | undefined): { location: boolean; status: boolean } {
+  if (!form) return { location: false, status: false };
+  const listed = new Set<string>();
+  for (const report of app.reports) {
+    if (report.form !== form.name) continue;
+    for (const column of report.columns) listed.add(column.field);
+  }
+  const declared = new Set(form.fields.map((field) => field.name));
+  const location = LOCATION_RECORD_COLUMNS.some((name) => listed.has(name) && !declared.has(name));
+  const status = listed.has('Record_Status') && !declared.has('Record_Status') && !recordStatusColumn(app, form);
+  return { location, status };
 }

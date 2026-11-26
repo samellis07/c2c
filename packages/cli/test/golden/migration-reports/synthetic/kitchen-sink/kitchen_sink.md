@@ -19,7 +19,7 @@ App: Kitchen_Sink_Studio
 - 6 forms
 - 8 reports
 - 1 page
-- The generated Catalyst app carries 9 Data Store tables, 1 Catalyst function, 2 scheduled jobs, 15 pages
+- The generated Catalyst app carries 10 Data Store tables, 1 Catalyst function, 2 scheduled jobs, 15 pages
 - Deluge: 0 statements translated, 14 kept working through a compatibility shim, of 14
 
 ## TODO counts
@@ -72,15 +72,19 @@ App: Kitchen_Sink_Studio
 
 ## Human steps
 
-- Accept invite: accept the app invite mail
-- Sign in once: sign in to the deployed app once
+- Connect Catalyst: run `c2c doctor` (it checks your login, scope and plugin install and says what to fix), then open the Catalyst console for: console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table); console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)
+- Accept invite and sign in once: accept the app invite mail, then sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
-- console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
-- console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)
+- Review 1 counted item: work through the review checklist in this report, one line per item with its reason and manual step
+
+## Review checklist
+
+1. [ ] `field-property:Media_Kit.Total_Hours property value` — property value is not carried by the generated formula field. The value is computed, not entered. A text column holds the result until expression translation knows the result type. It is not dropped and it is not a ROWID.
+   - Step: The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, open Media_Kit.Total_Hours and set its property value setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.
 
 ## Not converted
 
 Silent drops: 1 (still counted; each has a guided step below)
 
 - `field-property:Media_Kit.Total_Hours property value` — not converted. property value is not carried by the generated formula field. The value is computed, not entered. A text column holds the result until expression translation knows the result type. It is not dropped and it is not a ROWID.
-  - Step: The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, configure that setting for Media_Kit.Total_Hours, then preview the form or report and confirm the field behaves as expected.
+  - Step: The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, open Media_Kit.Total_Hours and set its property value setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.

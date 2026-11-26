@@ -35,13 +35,14 @@ import { applyFunctionEnvSecrets, deployFunctionEnv, functionIdFromList, liveEnv
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
 import { applyFunctionConnectSrc, functionOriginFromApiBase, SHELL_CONTENT_SECURITY_POLICY } from '../../ui/src/csp.js';
 import { appTimeZone, authBridgeUrl, generateUi, slateConfigSource } from '../../ui/src/generate.js';
+import { appHasGoogleBrowse, applyDocPickerCsp, DOC_PICKER_ENV, readDocPickerEnv, stripDocPickerCsp, type DocPickerConfig } from '../../ui/src/doc-picker.js';
 import { emptyRegistry, type ProjectRegistry } from './registry.js';
 import { catalystRestCall, listCatalystProjects, readCliAccessToken } from './rest.js';
 import { importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuidedStep, unknownImportAgeGuidedStep, type ListedProject } from './stuck-import.js';
 import { spawnWithRetry, restWithRetry, type RetryOptions } from './retry.js';
 import { SLATE_FIRST_USE_GUIDANCE, slateAppName, slateConfigToml, slateNameProblem, waitForSlateApp, waitForSlateDomain } from './slate.js';
 import { applyEdits, editsPathFor, readEdits, withEdits } from './edit.js';
-import { renameFlags, unsupportedSchemaOps } from './delta.js';
+import { renameFlags, reviewSchemaChange, unsupportedSchemaOps } from './delta.js';
 import { assertProjectDetails, assertReportedScope, catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { assertSeedReferences, assertSeedTables, foreignKeysForApp } from './remap.js';
 import { formatMigratePlan, formatSkipped, migrateSeed, parseSeed, parseSeedBlocked, seedBucketName, seedFileColumns, seedStoreColumns, type SeedTable } from './seed.js';
@@ -604,6 +605,49 @@ export interface DeployState {
 
 export const STATE_FILE = '.c2c-deploy-state.json';
 
+/** Folder beside the deploy state that holds the deployed model: the .ds (and its edits file) the last successful deploy came from. */
+export const DEPLOYED_MODEL_DIR = '.c2c-deployed-model';
+
+/**
+ * Keeps the deployed model with the deploy, so a later `c2c plan --previous <deploy dir>`
+ * compares against what is really deployed and the operator does not have to keep the
+ * old export. Only a single .ds file target is recorded; returns the copy, or undefined.
+ */
+export function recordDeployedModel(dir: string, target: string): string | undefined {
+  if (!statSync(target, { throwIfNoEntry: false })?.isFile() || !target.toLowerCase().endsWith('.ds')) return undefined;
+  const folder = join(dir, DEPLOYED_MODEL_DIR);
+  rmSync(folder, { recursive: true, force: true });
+  mkdirSync(folder, { recursive: true });
+  const copy = join(folder, basename(target));
+  writeFileSync(copy, readFileSync(target));
+  const edits = editsPathFor(target);
+  if (existsSync(edits)) writeFileSync(editsPathFor(copy), readFileSync(edits));
+  return copy;
+}
+
+/** A model to compare against must have something in it: a previous export that parses to no tables would plan every column as an add and make a deleted field invisible. */
+export function requireComparableModel(app: App, label: string): App {
+  if (app.forms.length === 0) {
+    throw new Error(`${label} holds no forms to compare against; a missing or unreadable previous model is refused (nothing was planned)`);
+  }
+  return app;
+}
+
+/** `--previous` may name a deploy folder: the model it recorded stands in for the old export. */
+export function deployedModelPath(previous: string): string {
+  const folder = join(previous, DEPLOYED_MODEL_DIR);
+  if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) {
+    // A deploy folder without its recorded model cannot stand in for the old export: an empty comparison would read every column as new and hide a delete. Fail closed.
+    if (statSync(join(previous, STATE_FILE), { throwIfNoEntry: false })?.isFile()) {
+      throw new Error(`${previous} is a deploy folder with no recorded deployed model (${DEPLOYED_MODEL_DIR}); pass the previous .ds export as --previous instead, or deploy once more to record it`);
+    }
+    return previous;
+  }
+  const ds = readdirSync(folder).filter((name) => name.toLowerCase().endsWith('.ds'));
+  if (ds.length !== 1) throw new Error(`${folder} must hold exactly one .ds (found ${ds.length})`);
+  return join(folder, ds[0]!);
+}
+
 
 const SHELL_CSP_META = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")[^"]*(")/;
 
@@ -851,8 +895,7 @@ function hostOf(url: string): string | undefined {
 }
 
 /** Write connect-src for the function origin into a shell that already carries the CSP meta. */
-function rewriteShellConnectSrc(file: string, apiBase: string | undefined): void {
-  if (!apiBase) return;
+function rewriteShellConnectSrc(file: string, apiBase: string | undefined, picker = false): void {
   // The read itself proves the file is present — a separate existence check
   // could be outrun by the file's state changing before the read (CodeQL
   // js/file-system-race).
@@ -862,7 +905,10 @@ function rewriteShellConnectSrc(file: string, apiBase: string | undefined): void
   } catch {
     return;
   }
-  const next = applyFunctionConnectSrc(html, apiBase);
+  // The Google picker origins (docs/doc-pickers.md) are present only when this deploy has a key
+  // for an app with a google_docs browse field; any other deploy removes them again.
+  const withOrigin = apiBase ? applyFunctionConnectSrc(html, apiBase) : html;
+  const next = picker ? applyDocPickerCsp(withOrigin) : stripDocPickerCsp(withOrigin);
   if (next === html) return;
   // Publish atomically: a same-directory temp file renamed over the target is
   // one commit point, so a reader never meets a half-written shell.
@@ -877,13 +923,34 @@ function rewriteShellConnectSrc(file: string, apiBase: string | undefined): void
  * and patch dist again at the Slate steps (a skipped or clean build can leave
  * the previous bytes).
  */
-function rewriteDeployShells(cwd: string, ui: DeployUi, apiBase: string | undefined): void {
+export function rewriteDeployShells(cwd: string, ui: DeployUi, apiBase: string | undefined, picker = false): void {
   if (ui === 'react') {
-    rewriteShellConnectSrc(join(cwd, 'web', 'index.html'), apiBase);
-    rewriteShellConnectSrc(join(cwd, 'web', 'dist', 'index.html'), apiBase);
+    rewriteShellConnectSrc(join(cwd, 'web', 'index.html'), apiBase, picker);
+    rewriteShellConnectSrc(join(cwd, 'web', 'dist', 'index.html'), apiBase, picker);
   } else {
-    rewriteShellConnectSrc(join(cwd, 'slate', 'index.html'), apiBase);
+    rewriteShellConnectSrc(join(cwd, 'slate', 'index.html'), apiBase, picker);
   }
+}
+
+/**
+ * The opt-in Google Drive picker for `browse = google_docs` fields. Reads the deployer's
+ * C2C_GOOGLE_PICKER_API_KEY / C2C_GOOGLE_PICKER_CLIENT_ID; returns the config only when
+ * both are valid and the app has such a field. The values are never printed.
+ */
+export function docPickerFor(app: Parameters<typeof appHasGoogleBrowse>[0], env: NodeJS.ProcessEnv, io: Io): { config?: DocPickerConfig; error?: string } {
+  let config: DocPickerConfig | undefined;
+  try {
+    config = readDocPickerEnv(env);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  if (!config) return {};
+  if (!appHasGoogleBrowse(app)) {
+    io.stdout(`note: ${DOC_PICKER_ENV.apiKey} is set but no file field names google_docs in browse; the Google Drive picker is not enabled\n`);
+    return {};
+  }
+  io.stdout('Google Drive picker enabled: runtime config gets the key; the shell CSP adds script-src https://apis.google.com https://accounts.google.com, frame-src https://docs.google.com https://accounts.google.com, connect-src https://www.googleapis.com\n');
+  return { config };
 }
 
 /**
@@ -962,11 +1029,15 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }
     // A re-export compared with the deployed model (--previous): the same
     // refusal, since the live table step adds tables and columns only.
-    const deployedSource = flag(rest, '--previous');
+    const previousFlag = flag(rest, '--previous');
+    const deployedSource = previousFlag === undefined ? undefined : deployedModelPath(previousFlag);
     if (deployedSource !== undefined) {
-      const blocked = unsupportedSchemaOps(generateSchema(loadSource(deployedSource)), generateSchema(app), renameFlags(rest));
+      const blocked = unsupportedSchemaOps(generateSchema(requireComparableModel(loadSource(deployedSource), 'the previous model')), generateSchema(app), renameFlags(rest), !rest.includes('--no-detect-renames'));
       if (blocked.length > 0) {
-        io.stderr(`c2c deploy: the re-export changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}\n`);
+        const review = reviewSchemaChange(loadSource(deployedSource), app, 'in', renameFlags(rest), { detect: !rest.includes('--no-detect-renames') });
+        const lost = review.losses.length ? `would lose:\n${review.losses.map((l) => `  - ${l}`).join('\n')}\n` : '';
+        const moved = review.detectedRenames.length ? `${review.detectedRenames.map((l) => `  ${l}`).join('\n')}\n` : '';
+        io.stderr(`c2c deploy: the re-export changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}\n${moved}${lost}`);
         return 1;
       }
     }
@@ -1465,6 +1536,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         // The function base the app calls (what `c2c smoke --owner-session --url` takes).
         ...(apiBase && /^https:\/\//.test(apiBase) ? { functions: { apiBase } } : {}),
       };
+      if (report.exitCode === 0) recordDeployedModel(cwd, target);
       writeFileSync(join(cwd, DEPLOY_REPORT), `${JSON.stringify(report, null, 2)}\n`);
       io.stdout(`report: ${join(cwd, DEPLOY_REPORT)}\n`);
       return report.exitCode;
@@ -1493,8 +1565,13 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         }
       }
       if (command.id === 'slate-link' || command.id === 'slate') {
-        rewriteDeployShells(cwd, ui, apiBase);
-        const config = slateConfigSource({ apiBase, auth: true, authBridge: authBridgeUrl(apiBase), appTimeZone: appTimeZone(app), smokePlan: smokePlanOf(app, guard), smokeProject: guard.projectId, ...(bundle.sendsPush ? { sendsPush: true } : {}) });
+        const picker = docPickerFor(app, io.env, io);
+        if (picker.error) {
+          io.stderr(`c2c: ${picker.error}\n`);
+          return await finish(1);
+        }
+        rewriteDeployShells(cwd, ui, apiBase, picker.config !== undefined);
+        const config = slateConfigSource({ ...(picker.config ? { docPicker: picker.config } : {}), apiBase, auth: true, authBridge: authBridgeUrl(apiBase), appTimeZone: appTimeZone(app), smokePlan: smokePlanOf(app, guard), smokeProject: guard.projectId, ...(bundle.sendsPush ? { sendsPush: true } : {}) });
         if (ui === 'react') {
           // The built tree is what the Slate steps link and deploy, so the
           // config must land in dist/ — written here, after `npm run build`,
@@ -1671,7 +1748,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         }
       }
       // Source HTML must name the function origin before ui-build copies it into dist.
-      if (command.id === 'functions') rewriteDeployShells(cwd, ui, apiBase);
+      if (command.id === 'functions') rewriteDeployShells(cwd, ui, apiBase, docPickerFor(app, io.env, { ...io, stdout: () => {} }).config !== undefined);
       // The crons target c2c_jobs by id, which exists only once it is deployed:
       // read it back now, so a deploy that did not land it stops here.
       if (command.id === 'functions-jobs') {
