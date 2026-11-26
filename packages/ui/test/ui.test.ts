@@ -3163,7 +3163,7 @@ test('browser form: a committed submit whose on-success failed (200 + warning) s
   form.submit();
   await form.tick();
   assert.equal(form.banner(), 'Item Added Successfully');
-  assert.deepEqual(form.toasts(), [{ kind: 'success', text: 'Item Added Successfully' }]);
+  assert.deepEqual(form.toasts(), [{ kind: 'success', text: 'Item Added Successfully×' }]);
 });
 
 test('browser form: a 5xx that says wrote true is a stored row and says the save landed but a step after it failed', async () => {
