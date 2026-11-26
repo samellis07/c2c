@@ -8856,6 +8856,42 @@ export function boot(appModel, doc) {
       })
       .catch(() => {});
   });
+  // After a route change, retitle the document to the open screen and move focus
+  // to its heading so a keyboard or screen-reader user lands on the new screen.
+  let watchHeading = null;
+  const announceRoute = () => {
+    if (watchHeading) watchHeading.disconnect();
+    const heading = main.querySelector('h1, h2');
+    const current = nav && nav.querySelector ? nav.querySelector('a[aria-current="page"]') : null;
+    const label = ((current && current.textContent) || (heading && heading.textContent) || '').replace(/\s+/g, ' ').trim();
+    const app = appModel.name || '';
+    documentRef.title = label && app ? `${label} - ${app}` : label || app || documentRef.title;
+    if (!heading || typeof heading.focus !== 'function') return;
+    if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+    heading.focus({ preventScroll: true });
+    // A screen that redraws itself once its data lands replaces the heading;
+    // put focus on the new one unless the user has already moved on.
+    const Observer = documentRef.defaultView && documentRef.defaultView.MutationObserver;
+    if (!Observer) return;
+    if (watchHeading) watchHeading.disconnect();
+    let watch = null;
+    const done = () => {
+      if (watch) watch.disconnect();
+      if (watchHeading === watch) watchHeading = null;
+    };
+    watch = new Observer(() => {
+      if (heading.isConnected) return;
+      const active = documentRef.activeElement;
+      if (active && active !== documentRef.body) return done();
+      const next = main.querySelector('h1, h2');
+      if (!next) return;
+      if (!next.hasAttribute('tabindex')) next.setAttribute('tabindex', '-1');
+      next.focus({ preventScroll: true });
+      done();
+    });
+    watchHeading = watch;
+    watch.observe(main, { childList: true, subtree: true });
+  };
   const paintAllowed = (route) => {
     if (!main) return;
     // A same-hash repaint must not restart the run: the shell is already up.
@@ -8920,6 +8956,7 @@ export function boot(appModel, doc) {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
     if (report && report.form) loadRecordSummary(appModel, { ...route, id: report.form, report: report.name }, main, view);
   }
+  announceRoute();
   };
   const paint = () => {
     if (!main) return Promise.resolve();
