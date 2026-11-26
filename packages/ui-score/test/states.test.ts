@@ -78,10 +78,7 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   for (const [state, issue] of Object.entries({
     'confirm-open': 'ux-confirm-pending',
     toast: 'ux-toasts-field-errors',
-    offline: 'ux-offline-session',
     'server-field-error': 'ux-toasts-field-errors',
-    'session-expired': 'ux-offline-session',
-    denied: 'ux-offline-session',
     'not-found': 'ux-loading-empty-not-found',
     'route-focus': 'ux-focus-motion',
   })) {

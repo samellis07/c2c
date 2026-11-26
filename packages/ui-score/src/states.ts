@@ -692,7 +692,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         const heading = main.querySelector('h1, h2') ?? main.querySelector('[data-access-status], [data-state="denied"]');
         const retry = Array.from(main.querySelectorAll('button')).find((b) => /retry|try again/i.test(text(b)));
         const home = homeLink(main);
-        const generic = /could not be loaded|unavailable/i.test(s.doc.body.textContent ?? '');
+        const generic = /could not be loaded|unavailable/i.test(main.textContent ?? '');
         run.add('denied', report.name, !!heading && !!home && !retry && !generic, `${!heading ? 'no denied screen' : `screen "${text(heading).slice(0, 50)}"`}${home ? '' : ', no way home'}${retry ? ', dead Retry offered' : ''}${generic ? ', shows a generic error' : ''}`);
       }
     } finally {

@@ -1324,6 +1324,13 @@ export function reportStateHtml(state, opts) {
   if (state === 'error') {
     return `<div data-state="error" role="alert"><div class="state-error"><p>Could not load these records.</p><button type="button" data-retry>Retry</button></div></div>`;
   }
+  if (state === 'denied') {
+    return `<div data-state="denied" role="alert"><div class="state-error"><h2>You don't have access to this report</h2><p>Ask the app administrator for access.</p><a href="#/">Go to home</a></div></div>`;
+  }
+  if (state === 'session-expired') {
+    const login = options.loginHref ? `<a class="button-primary" href="${escapeHtml(options.loginHref)}">Sign in again</a>` : '';
+    return `<div data-state="session-expired" role="alert"><div class="state-error"><p>Your session ended. Sign in again to continue; what you entered on this page is kept until you leave it.</p>${login}</div></div>`;
+  }
   return '';
 }
 
@@ -2397,7 +2404,7 @@ function loadChart(report, section, viewRef) {
     post(withFilter({ op: 'query', page: 0, pageSize: report.pageSize || PAGE_SIZE })).then((res) => {
       // A static host has no data function: that is an empty report, not an error.
       if (!res || res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
-      if (!res.ok) throw new Error(`chart query ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(`chart query ${res.status}`), { refused: res.status });
       return responseJson(res).then((body) => {
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         // The fold reads one page; a full page means more rows may follow.
@@ -2417,7 +2424,7 @@ function loadChart(report, section, viewRef) {
         if (res && (res.status === 404 || res.status === 405 || res.status === 501)) return { rows: [] };
         // A refused group field or a server error is a load failure: the panel
         // shows its error state, never a fake "No Data Available".
-        throw new Error(`chart aggregate ${res && res.status}`);
+        throw Object.assign(new Error(`chart aggregate ${res && res.status}`), { refused: res && res.status });
       })
     : foldRows();
   return first
@@ -2434,8 +2441,12 @@ function loadChart(report, section, viewRef) {
         drawChart(host, report, rows, order, null, { truncated: !!result.truncated, scanned: result.scanned || rows.length });
       }
     })
-    .catch(() => {
-      if (stateEl) stateEl.innerHTML = reportStateHtml('error');
+    .catch((error) => {
+      if (!stateEl) return;
+      const refused = error && error.refused;
+      if (refused === 401) stateEl.innerHTML = reportStateHtml('session-expired', { loginHref: viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '' });
+      else if (refused === 403) stateEl.innerHTML = reportStateHtml('denied');
+      else stateEl.innerHTML = reportStateHtml('error');
     });
 }
 
@@ -9099,6 +9110,10 @@ export function boot(appModel, doc) {
   const flag = () => {
     if (offline) offline.hidden = navg ? navg.onLine : true;
   };
+  // Coming back online re-reads each report that failed while offline, once.
+  view.addEventListener('online', () => {
+    for (const retry of documentRef.querySelectorAll('section[data-report] [data-state="error"] [data-retry]')) retry.click();
+  });
   view.addEventListener('online', flag);
   view.addEventListener('offline', flag);
   flag();
@@ -9186,12 +9201,20 @@ export function boot(appModel, doc) {
             paintEmpty();
             return null;
           }
+          if (res && (res.status === 401 || res.status === 403)) return { refused: res.status };
           throw new Error(`report query ${res ? res.status : 'no response'}`);
         }
         return responseJson(res);
       })
       .then((body) => {
         if (body == null) return;
+        if (body.refused) {
+          // A refusal is its own screen, never the generic error with a Retry that cannot help.
+          setReportChrome(section, false);
+          const href = viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '';
+          if (stateEl) stateEl.innerHTML = body.refused === 401 ? reportStateHtml('session-expired', { loginHref: href }) : reportStateHtml('denied');
+          return;
+        }
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         const doc = tbody.ownerDocument;
         if (tbody.hasAttribute('data-board')) fillBoard(report, tbody, rows);
