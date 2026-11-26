@@ -2715,7 +2715,7 @@ test('an island the attribute allowlist removes stays a counted snippet, quoted 
 });
 
 const ID_TOKEN_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-const SHELL_ID_NAMES = ['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title'];
+const SHELL_ID_NAMES = ['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title', 'nav', 'drawer', 'nav-drawer-open', 'offline', 'sign-out', 'install', 'menu-toggle', 'root', 'c2c-login', 'c2c-login-title', 'c2c-session-body', 'c2c-session-title', 'c2c-smoke-code', 'c2c-smoke-json'];
 
 const ID_HOSTILE_VALUES = [
   'plain',
@@ -2809,7 +2809,7 @@ test('two long values never share an id: a value whose token passes 24 character
       assert.equal(out.status, 500, `a long token must fail closed, never print a shared id: ${JSON.stringify(v)}`);
       assert.doesNotMatch(JSON.stringify(out.body), /\sid=/);
     }
-    assert.equal(await idOf('a'.repeat(24)), `c2c-${'a'.repeat(24)}`, 'the longest value still renders its id');
+    assert.equal(await idOf('a'.repeat(24)), `c2c-u-${'a'.repeat(24)}`, 'the longest value still renders its id');
     assert.notEqual(await idOf('x_y'), await idOf('x__y'), 'the encoding stays injective for short values');
   } finally {
     live.restore();
@@ -2825,8 +2825,8 @@ test('a lead island in an id gets a fixed prefix, so no value spells a shell id'
       const out = await invoke(mod.default as never, { ...USER, body: { input: { v } } });
       assert.equal(out.status, 200, JSON.stringify(out.body));
       const html = String(out.body.html);
-      assert.match(html, new RegExp(`for="c2c-${v}"`));
-      assert.match(html, new RegExp(`id="c2c-${v}"`));
+      assert.match(html, new RegExp(`for="c2c-u-${v}"`));
+      assert.match(html, new RegExp(`id="c2c-u-${v}"`));
     }
   } finally {
     live.restore();

@@ -2136,7 +2136,7 @@ ${indented}
     if (item.k === "H") c2c_parts.push(item.v == null ? "" : String(item.v));
     else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
     else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
-    else if (item.k === "I" || item.k === "J") c2c_parts.push((item.k === "J" ? "c2c-" : "") + c2cIdToken(c2cStr(item.v)));
+    else if (item.k === "I" || item.k === "J") c2c_parts.push((item.k === "J" ? "c2c-u-" : "") + c2cIdToken(c2cStr(item.v)));
 ${opts.popups ? '    else if (item.k === "P") c2c_parts.push(\'<div data-zml="popup-\' + c2cEsc(c2cStr(item.v)) + \'"></div>\');\n' : ''}    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)${opts.routes ? ', shim' : ''}));${opts.markup ? '\n    else if (item.k === "M") c2c_parts.push(c2cMarkup(c2cStr(item.v), c2c_notes, (text) => c2cHref(shim, text)));' : ''}
     else if (item.k === "Q") {
       const piece = c2cStr(item.v);
