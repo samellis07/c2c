@@ -248,7 +248,25 @@ async function firstQueryingReport(s: Session, api: FakeApi, reports: Expected['
  * The full 20-row run against one built bundle. `exp` is the scorer's
  * Creator-side expectation; `ui` picks the named waivers.
  */
+/**
+ * The gate drives generated apps under node. A screen handler that awaits a failed chunk without a catch is an unhandled rejection in
+ * the app: in a browser it is a console error and the page carries on, but under node it would end the whole gate before any count.
+ * Observe such rejections for the length of the run instead of dying; the crash row already judges the recovery card.
+ */
 export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOptions): Promise<StateVerdict[]> {
+  const strays: unknown[] = [];
+  const onStray = (reason: unknown): void => void strays.push(reason);
+  process.on('unhandledRejection', onStray);
+  try {
+    return await checkUiStatesRun(app, bundle, opts);
+  } finally {
+    // Rejections still in flight settle before the observer goes away.
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    process.off('unhandledRejection', onStray);
+  }
+}
+
+async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions): Promise<StateVerdict[]> {
   const exp = expectedFromIr(app);
   const run = runner(opts);
   const rules = parseCss(bundle.css);
