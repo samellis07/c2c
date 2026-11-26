@@ -1134,7 +1134,9 @@ function valueMarker(value: ComponentParam['value']): string {
  * any other binding could reach it (a non-literal or compound assignment, a loop variable of that name, a script
  * that does not parse) or it is never assigned.
  */
-function literalChoices(template: string, name: string): string[] | null {
+function literalChoices(template: string, name: string, opaque: ReadonlySet<string> = new Set()): string[] | null {
+  // A page parameter holds whatever the caller sent, so a literal the script sets on some branch is not all it can hold.
+  if ([...opaque].some((param) => param.toLowerCase() === name.toLowerCase())) return null;
   const chunks = splitChunks(template);
   if (!chunks) return null;
   let script: Script;
@@ -1171,7 +1173,7 @@ interface AssignedName {
   clean: boolean;
 }
 
-function assignmentTable(template: string): Map<string, AssignedName> | null {
+function assignmentTable(template: string, opaque: ReadonlySet<string> = new Set()): Map<string, AssignedName> | null {
   const chunks = splitChunks(template);
   if (!chunks) return null;
   let script: Script;
@@ -1205,6 +1207,8 @@ function assignmentTable(template: string): Map<string, AssignedName> | null {
     for (const key of Object.keys(rec).sort()) if (key !== 'span') visit(rec[key]);
   };
   visit(script.body);
+  // A page parameter holds whatever the caller sent, so a name that is one is never a closed value.
+  for (const name of [...opaque].sort()) row(name).clean = false;
   return table;
 }
 
@@ -1285,9 +1289,9 @@ function valueArms(name: string, closed: ClosedValues): { test: string; text: st
  * name, with the value written into `params`. Each arm is then a plain embed, read as any other: a read in `params` is applied as
  * the filter or prefill and is encoded. A name that can hold anything else, or a tag with another island, keeps its tag.
  */
-function rewriteParamChoices(template: string): string {
+function rewriteParamChoices(template: string, opaque: ReadonlySet<string> = new Set()): string {
   if (!/\belname\s*=\s*['"]zc-component['"]/i.test(template) || !template.includes('<%=')) return template;
-  const table = assignmentTable(template);
+  const table = assignmentTable(template, opaque);
   if (!table) return template;
   const commented = htmlCommentRanges(template);
   const choiceLink = /\b(?:form|view|report)linkname[ \t\r\n]*=[ \t\r\n]*(["'])<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>\1/i;
@@ -1325,9 +1329,9 @@ function rewriteParamChoices(template: string): string {
  * and one encoded read. The values hold no space or quote, so the quoted value is the one the browser would take from the unquoted
  * one. The link then goes through the same URL check as any quoted link island. A name that can hold anything else keeps its tag.
  */
-function quoteRouteHrefs(template: string, app: App): string {
+function quoteRouteHrefs(template: string, app: App, opaque: ReadonlySet<string> = new Set()): string {
   if (!/\bhref[ \t\r\n]*=[ \t\r\n]*<%=/i.test(template)) return template;
-  const table = assignmentTable(template);
+  const table = assignmentTable(template, opaque);
   if (!table) return template;
   const commented = htmlCommentRanges(template);
   const own = (route: string, whole: boolean): boolean => {
@@ -1395,9 +1399,9 @@ function rowIdFunctionForm(app: App, fn: App['functions'][number]): string | nul
  * Names the script sets once to the result of an app function that returns row ids of one form, with that form. The name is a row
  * id of that form wherever it is read, so a lookup prefill to that form may carry it as it carries a page input's row id.
  */
-function functionRowIdNames(template: string, app: App): Map<string, string> {
+function functionRowIdNames(template: string, app: App, opaque: ReadonlySet<string> = new Set()): Map<string, string> {
   const out = new Map<string, string>();
-  const table = assignmentTable(template);
+  const table = assignmentTable(template, opaque);
   if (!table) return out;
   for (const name of [...table.keys()].sort()) {
     const row = table.get(name)!;
@@ -1514,12 +1518,12 @@ function embeddedComponents(
   app: App,
   own: ReadonlySet<string> = new Set(),
 ): { template: string; components: EmbeddedComponent[]; markers: string[]; todos: { target: string; step?: string }[] } {
-  template = rewriteParamChoices(template);
+  template = rewriteParamChoices(template, own);
   const components: EmbeddedComponent[] = [];
   const markers: string[] = [];
   const todos: { target: string; step?: string }[] = [];
   const idNames = pageInputIdNames(template, own);
-  const idForms = functionRowIdNames(template, app);
+  const idForms = functionRowIdNames(template, app, own);
   const embed = (tag: string, slots: readonly string[]): string | null => {
     if (!/\belname\s*=/i.test(tag)) return tag;
     const attrs = componentAttributes(tag);
@@ -1596,7 +1600,7 @@ function embeddedComponents(
     // What else the tag carries as islands is read once, as a plain embed reads it: `embed` accepts them in `params` only.
     const { tokenized, slots } = tokenizeIslands(inner.replace(link[0], '\u0002'));
     if (tokenized.includes('<%') || tokenized.includes('%>')) return whole;
-    const values = literalChoices(template, link[2]);
+    const values = literalChoices(template, link[2], own);
     if (!values) return whole;
     const before = { components: components.length, markers: markers.length, todos: todos.length };
     const branches = values.map((value) => {
@@ -4422,7 +4426,7 @@ export function compileHtmlpage(
   head.template = head.template.replace(CREATOR_HOST_BEFORE_APPURI, '');
   head.template = dropCutOffEndTag(head.template);
   head.template = rewriteConditionalAttributes(head.template);
-  head.template = quoteRouteHrefs(head.template, app);
+  head.template = quoteRouteHrefs(head.template, app, new Set([...head.params, ...(app.pages.find((item) => item.name === page)?.params ?? [])]));
   head.template = rewriteRecordSummaryFrames(inlineSummaryUrlVariable(head.template), app, decoded);
   head.template = rewriteBlankFrames(head.template);
   head.template = rewriteMapFrames(head.template);
