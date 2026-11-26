@@ -122,10 +122,14 @@ const QUOTED_NAME = /"[^"]*"/g;
  * quoted one — so it must not survive into a public construct bucket just
  * because the sentence never puts it in quotes.
  */
-const UNQUOTED_FIELD_OR_REPORT_NAME = /^(Field|Report) ([A-Za-z_][A-Za-z0-9_]*)\b/;
+const UNQUOTED_FIELD_OR_REPORT_NAME = /^(Field|Report) ([^\s"`]+)/;
+
+/** An app identifier is any non-space token, not just ASCII: the parser accepts `Ünï_Rep` and `9lives`. Redaction fails closed on shape, not on a name pattern. */
+const NAME_TOKEN = '[^\\s"`]+';
+const MAP_REPORT_PREFIX = 'Map report ';
 
 /** `Map report <report> is shown as a list because <form> has no address field to plot.` names two unquoted identifiers. */
-const MAP_AS_LIST = /^Map report ([A-Za-z_][A-Za-z0-9_]*) is shown as a list because ([A-Za-z_][A-Za-z0-9_]*) has no address field to plot\.$/;
+const MAP_AS_LIST = new RegExp(`^Map report (${NAME_TOKEN}) is shown as a list because (${NAME_TOKEN}) has no address field to plot\\.$`, 'u');
 
 /**
  * The construct name as it may appear in a committed doc. Translator kinds
@@ -145,10 +149,14 @@ const MAP_AS_LIST = /^Map report ([A-Za-z_][A-Za-z0-9_]*) is shown as a list bec
 export function publicConstruct(construct: string): string {
   let text = construct.replace(QUOTED_NAME, '(app identifier)');
   text = text.replace(MAP_AS_LIST, 'Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.');
+  // Fail closed: a map-report sentence that is not exactly the known shape still names app identifiers.
+  if (text.startsWith(MAP_REPORT_PREFIX) && !text.includes('(app identifier)')) return `${MAP_REPORT_PREFIX}(app identifier)`;
   const named = UNQUOTED_FIELD_OR_REPORT_NAME.exec(text);
-  if (named) {
-    const name = named[2]!;
-    text = text.replace(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'), '(app identifier)');
+  if (named && named[2] !== '(app') {
+    const name = named[2]!.replace(/[.,;:)]+$/u, '');
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // \b is ASCII-only: use Unicode letter/digit lookarounds so `Ünï_Rep` and `9lives` match whole.
+    text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'gu'), '(app identifier)');
   }
   const at = text.indexOf(':');
   if (at < 0) return text;
