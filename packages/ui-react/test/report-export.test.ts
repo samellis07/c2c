@@ -14,7 +14,7 @@ const columns = [
 ];
 
 test('csvCell neutralises a leading formula character', () => {
-  for (const lead of ['=', '+', '-', '@', '\t', '\r']) {
+  for (const lead of ['=', '+', '-', '@', '\t', '\r', '\n', '\f', '\v', String.fromCharCode(0)]) {
     const out = csvCell(`${lead}SUM(A1)`);
     assert.ok(out.replace(/^"/, '').startsWith("'"), `${JSON.stringify(lead)} is prefixed`);
   }

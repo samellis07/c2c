@@ -14,7 +14,8 @@ export interface ExportColumn {
   label: string;
 }
 
-const FORMULA_LEAD = /^[=+\-@\t\r]/;
+// A spreadsheet reads a cell as a formula after =, +, - or @, and some versions after a leading control character (tab, CR, LF, FF, VT, NUL...).
+const FORMULA_LEAD = /^[\u0000-\u001f=+\-@]/;
 const PLAIN_NEGATIVE = /^-\d[\d,]*(\.\d+)?$/;
 
 /** One CSV cell: formula-neutralised, then quoted when it holds a comma, quote or line break. */
