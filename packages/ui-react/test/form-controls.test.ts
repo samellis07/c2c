@@ -599,3 +599,113 @@ test('no scan controls unless the field declares a scanner', async () => {
   const { doc } = await render([field('Plain', 'text')]);
   assert.equal(doc.querySelector('.c2c-scan'), null);
 });
+
+/** Browser stubs for media fields: a camera, a recorder that keeps what it is given, a canvas and DataTransfer. */
+function mediaStubs(options: { denied?: boolean; noApi?: boolean } = {}) {
+  const requests: any[] = [];
+  const timers: { fn: () => void; ms: number }[] = [];
+  const recorders: any[] = [];
+  let stopped = 0;
+  const prepare = (win: any) => {
+    win.setTimeout = (fn: () => void, ms: number) => (timers.push({ fn, ms }), timers.length);
+    if (!options.noApi) {
+      Object.defineProperty(win.navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: async (constraints: unknown) => {
+            requests.push(constraints);
+            if (options.denied) throw new Error('NotAllowedError');
+            return { getTracks: () => [{ stop: () => (stopped += 1) }] };
+          },
+        },
+      });
+      win.MediaRecorder = class {
+        static isTypeSupported = () => true;
+        state = 'inactive';
+        mimeType = 'video/webm';
+        ondataavailable: any = null;
+        onstop: any = null;
+        constructor() { recorders.push(this); }
+        start() { this.state = 'recording'; }
+        stop() {
+          if (this.state === 'inactive') return;
+          this.state = 'inactive';
+          this.ondataavailable?.({ data: new win.Blob(['abc']) });
+          this.onstop?.();
+        }
+      };
+    }
+    win.DataTransfer = class {
+      files: any[] = [];
+      items = { add: (f: any) => { this.files.push(f); } };
+    };
+    globalThis.DataTransfer = win.DataTransfer;
+    // jsdom's `files` only takes a real FileList; a plain list lets the stub DataTransfer land a file.
+    Object.defineProperty(win.HTMLInputElement.prototype, 'files', { configurable: true, get() { return this._files ?? []; }, set(v: any) { this._files = v; } });
+    win.HTMLCanvasElement.prototype.getContext = () => ({ drawImage() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {} });
+    win.HTMLCanvasElement.prototype.toBlob = function toBlob(cb: any, type: string) { cb(new win.Blob(['px'], { type })); };
+    win.HTMLMediaElement.prototype.play = () => Promise.resolve();
+    win.Image = class { naturalWidth = 40; naturalHeight = 20; onload: any; onerror: any; set src(_v: string) { setTimeout(() => this.onload?.(), 0); } };
+  };
+  return { prepare, requests, timers, recorders, stopped: () => stopped };
+}
+
+const mediaField = (widget: 'image' | 'video' | 'audio', media: NonNullable<FieldSpec['media']>) => field('Clip', widget, { media, accept: `${widget}/*`, uploadEndpoint: '/u' });
+const buttonLabelled = (doc: Document, label: string) => [...doc.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
+
+test('a video field with a duration records and stops itself at the limit', async () => {
+  const stubs = mediaStubs();
+  const { dom } = await bundle();
+  const { doc, win } = await render([mediaField('video', { camera: 'primary', recordSeconds: 30 })], {}, stubs.prepare);
+  dom.flushSync(() => buttonLabelled(doc, 'Record video')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+  await until(() => stubs.recorders.length === 1, 'recorder started');
+  assert.deepEqual(stubs.requests[0], { video: { facingMode: 'environment' }, audio: true });
+  const limit = stubs.timers.find((t) => t.ms === 30000);
+  assert.ok(limit, 'auto-stop timer is the declared 30 s');
+  dom.flushSync(() => limit!.fn());
+  const file = (doc.querySelector('input[name="Clip"]') as HTMLInputElement).files![0] as File;
+  assert.equal(file.name, 'recording.webm');
+  assert.equal(stubs.stopped(), 1);
+});
+
+test('an image field with camera = secondary opens the front lens and a refusal keeps the file chooser', async () => {
+  const stubs = mediaStubs({ denied: true });
+  const { dom } = await bundle();
+  const { doc, win } = await render([mediaField('image', { camera: 'secondary' })], {}, stubs.prepare);
+  dom.flushSync(() => buttonLabelled(doc, 'Use camera')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+  await until(() => (doc.querySelector('.c2c-media-status')?.textContent ?? '') !== '', 'message');
+  assert.equal(stubs.requests[0].video.facingMode, 'user');
+  assert.match(doc.querySelector('.c2c-media-status')!.textContent!, /refused or none was found\. Choose a file instead\./);
+  assert.ok(doc.querySelector('input[name="Clip"]'), 'the file input is still there');
+});
+
+test('an image field with show onload opens the camera with the form; no API says so', async () => {
+  const stubs = mediaStubs();
+  await render([mediaField('image', { camera: 'primary', onload: true })], {}, stubs.prepare);
+  await until(() => stubs.requests.length === 1, 'camera opened as the form opened');
+  const none = mediaStubs({ noApi: true });
+  const { doc } = await render([mediaField('image', { camera: 'primary', onload: true })], {}, none.prepare);
+  await until(() => (doc.querySelector('.c2c-media-status')?.textContent ?? '') !== '', 'message');
+  assert.match(doc.querySelector('.c2c-media-status')!.textContent!, /not available here/);
+});
+
+test('annotation: a captured photo opens the editor and the marked-up file is stored; Keep original stores the photo', async () => {
+  const stubs = mediaStubs();
+  const { dom } = await bundle();
+  const { doc, win } = await render([mediaField('image', { camera: 'primary', annotate: true })], {}, stubs.prepare);
+  const picked = (extra: any) => (doc.querySelector('input[name="Clip"]') as HTMLInputElement).files?.[0] as File | undefined;
+  dom.flushSync(() => buttonLabelled(doc, 'Use camera')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+  await until(() => buttonLabelled(doc, 'Capture') !== undefined, 'Capture');
+  dom.flushSync(() => buttonLabelled(doc, 'Capture')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+  await until(() => buttonLabelled(doc, 'Use marked-up photo') !== undefined, 'editor');
+  assert.equal(picked(0), undefined, 'nothing is stored before the markup step ends');
+  dom.flushSync(() => buttonLabelled(doc, 'Use marked-up photo')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+  await until(() => picked(0) !== undefined, 'marked-up file stored');
+  assert.equal(picked(0)!.name, 'photo-marked.jpg');
+  assert.equal(doc.querySelector('.c2c-media-canvas'), null, 'the editor closed');
+});
+
+test('no media tools unless the field declares them', async () => {
+  const { doc } = await render([field('Clip', 'image', { accept: 'image/*', uploadEndpoint: '/u' })]);
+  assert.equal(doc.querySelector('.c2c-media'), null);
+});

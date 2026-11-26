@@ -30,6 +30,14 @@ export interface ScannerSpec {
   onload: boolean;
 }
 
+/** Live capture, recording cap, markup and open-on-load for an image, video or audio field (see form/media.ts). */
+export interface MediaSpec {
+  camera: 'primary' | 'secondary';
+  recordSeconds?: number;
+  annotate?: boolean;
+  onload?: boolean;
+}
+
 export interface FieldSpec {
   name: string;
   label: string;
@@ -57,6 +65,8 @@ export interface FieldSpec {
   uploadEndpoint?: string;
   /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
   uploadSources?: string[];
+  /** Image, video or audio field: the capture, recording and markup tools beside the file control. */
+  media?: MediaSpec;
   /** Scan fields: the camera/gallery scanner beside the text input. */
   scanner?: ScannerSpec;
   /** Scan fields: offer a button that switches between the front and back camera. */

@@ -679,7 +679,14 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   // case there is a gap (listed through model.ts's dedicated UI todo). A false/omitted
   // value matches the generated behavior already, on any field.
   // A scan field's onload is generated (ui.scanner.onload): the scanner opens as the form does.
-  if (key === 'show onload') return text.toLowerCase() !== 'true' || ui?.scanner?.onload === true;
+  // An image field's onload is generated too (ui.media.onload): the live camera panel opens with the form.
+  if (key === 'show onload') return text.toLowerCase() !== 'true' || ui?.scanner?.onload === true || ui?.media?.onload === true;
+  // `annotation = true` is the markup step (ui.media.annotate); `false` is DEFAULT_EQUIVALENCE.
+  if (key === 'annotation' && ui?.widget === 'image' && text.toLowerCase() === 'true') return ui.media?.annotate === true;
+  // A whole-second `duration` on a video or audio field is the recorder's auto-stop (ui.media.recordSeconds).
+  if (key === 'duration' && (ui?.widget === 'video' || ui?.widget === 'audio') && ui.media?.recordSeconds !== undefined) return text === String(ui.media.recordSeconds);
+  // A front (secondary) lens on an image field is the live camera panel's lens (ui.media.camera).
+  if (key === 'camera' && ui?.widget === 'image' && ui.media !== undefined) return ui.media.camera === text.toLowerCase();
   if (key === 'sortorder') return sortOrderProved(text, field, ui, app, out);
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');

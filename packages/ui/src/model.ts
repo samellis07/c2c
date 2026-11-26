@@ -85,6 +85,22 @@ export interface ScannerSpec {
   onload: boolean;
 }
 
+/**
+ * In-page media tools a generated image, video or audio field carries: the
+ * lens a live capture opens, the recording length cap, the markup step, and
+ * open-on-load. Absent when the field declares none of them (client-runtime.js
+ * attachMediaTools, form/media.ts).
+ */
+export interface MediaSpec {
+  camera: 'primary' | 'secondary';
+  /** Seconds a video or audio recording runs before it stops by itself. */
+  recordSeconds?: number;
+  /** Image field `annotation = true`: the photo is drawn on before it is stored. */
+  annotate?: boolean;
+  /** Image field `show onload = true`: the camera opens when the form opens. */
+  onload?: boolean;
+}
+
 export interface UiField {
   name: string;
   label: string;
@@ -118,6 +134,8 @@ export interface UiField {
    * seconds unless the user retakes first (client-runtime.js showCapturePreview).
    */
   previewDuration?: number;
+  /** Live capture, recording cap, markup and open-on-load for an image, video or audio field. */
+  media?: MediaSpec;
   scan: boolean;
   /** Scan control exposes the device camera switch when Creator enables it. */
   switchCamera?: boolean;
@@ -659,6 +677,26 @@ function recordPrivacyFlags(formName: string, field: Field, todos: UiTodo[], dep
 // camera app with no such limit, so the setting is recorded as a manual step
 // rather than invented as UI.
 const VIDEO_DURATION_PROPERTY_KEY = 'duration';
+
+// The longest recording the generated recorder accepts as a declared limit.
+const RECORD_SECONDS_MAX = 3600;
+
+/** A declared `duration` as whole seconds from 1 to RECORD_SECONDS_MAX, else undefined. */
+function recordSeconds(text: string): number | undefined {
+  const plain = unquote(text).trim();
+  if (!/^\d{1,4}$/.test(plain)) return undefined;
+  const seconds = Number(plain);
+  return seconds >= 1 && seconds <= RECORD_SECONDS_MAX ? seconds : undefined;
+}
+
+/** The field's media block, created on first use with the lens its `camera` property names. */
+function mediaOf(ui: UiField, field: Field): MediaSpec {
+  if (!ui.media) {
+    const lens = prop(field, 'camera');
+    ui.media = { camera: lens !== undefined && unquote(lens).trim().toLowerCase() === 'secondary' ? 'secondary' : 'primary' };
+  }
+  return ui.media;
+}
 
 // `show onload = true` (scan field: "get input before the form is displayed"; image
 // field: launch the camera automatically) asks Creator to open the camera/scanner
@@ -1788,14 +1826,21 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   if (widget === 'video') {
     const duration = prop(field, VIDEO_DURATION_PROPERTY_KEY);
     if (duration !== undefined) {
-      const name = `${formName}.${field.name} property ${VIDEO_DURATION_PROPERTY_KEY}`;
-      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-        todos.push({
-          area: 'field',
-          name,
-          reason: `Field ${field.name} sets \`duration = ${duration}\`; the generated video field hands recording off to the device camera app with no recording-length limit.`,
-          manualStep: `Enforce the ${duration}-second recording limit by hand (client-side timer, or server-side rejection of longer uploads), or accept recordings of any length, per your policy — this is not generated.`,
-        });
+      const seconds = recordSeconds(duration);
+      if (seconds !== undefined) {
+        // Generated: a Record button films through the camera and stops by
+        // itself after this many seconds (client-runtime.js attachMediaTools).
+        mediaOf(ui, field).recordSeconds = seconds;
+      } else {
+        const name = `${formName}.${field.name} property ${VIDEO_DURATION_PROPERTY_KEY}`;
+        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+          todos.push({
+            area: 'field',
+            name,
+            reason: `Field ${field.name} sets \`duration = ${duration}\`, which is not a whole number of seconds from 1 to ${RECORD_SECONDS_MAX}; the generated video field sets no recording-length limit for it.`,
+            manualStep: `Decide the recording limit for ${field.name} by hand — the declared value \`${duration}\` is not generated.`,
+          });
+        }
       }
     }
   }
@@ -1803,8 +1848,10 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   if (ui.scan || widget === 'image') {
     const showOnload = prop(field, SHOW_ONLOAD_PROPERTY_KEY);
     // A scan field's onload is generated: the runtime opens the scanner when
-    // the form opens (ui.scanner.onload). An image field still has none.
-    if (showOnload?.trim().toLowerCase() === 'true' && !ui.scanner) {
+    // the form opens (ui.scanner.onload). An image field's is generated too:
+    // the live camera panel opens when the form opens (ui.media.onload).
+    if (showOnload?.trim().toLowerCase() === 'true' && widget === 'image') mediaOf(ui, field).onload = true;
+    else if (showOnload?.trim().toLowerCase() === 'true' && !ui.scanner) {
       const name = `${formName}.${field.name} property ${SHOW_ONLOAD_PROPERTY_KEY}`;
       if (!todos.some((t) => t.area === 'field' && t.name === name)) {
         todos.push({
@@ -1878,17 +1925,13 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   }
   if (widget === 'image') {
     const annotation = prop(field, ANNOTATION_PROPERTY_KEY);
-    if (annotation?.trim().toLowerCase() === 'true') {
-      const name = `${formName}.${field.name} property ${ANNOTATION_PROPERTY_KEY}`;
-      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-        todos.push({
-          area: 'field',
-          name,
-          reason: `Field ${field.name} sets \`annotation = true\`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.`,
-          manualStep: `Add a way to draw or mark up the photo for ${field.name} before it is stored, by hand — this is not generated.`,
-        });
-      }
-    }
+    // Generated: the chosen or captured photo opens in a small drawing editor
+    // and the marked-up image is what is stored (client-runtime.js attachMediaTools).
+    if (annotation?.trim().toLowerCase() === 'true') mediaOf(ui, field).annotate = true;
+    // A front (secondary) lens needs the live camera panel: the device camera
+    // app a bare `capture` input opens cannot be told which lens to use.
+    const lens = prop(field, 'camera');
+    if (lens !== undefined && lens.trim().toLowerCase() === 'secondary') mediaOf(ui, field);
     const ratio = prop(field, ASPECT_RATIO_PROPERTY_KEY);
     if (ratio !== undefined && ratio.trim().toLowerCase() !== 'original') {
       const name = `${formName}.${field.name} property ${ASPECT_RATIO_PROPERTY_KEY}`;
@@ -2101,14 +2144,19 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
     if (widget === 'audio') {
       const duration = prop(field, AUDIO_DURATION_PROPERTY_KEY);
       if (duration !== undefined) {
-        const name = `${formName}.${field.name} property ${AUDIO_DURATION_PROPERTY_KEY}`;
-        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-          todos.push({
-            area: 'field',
-            name,
-            reason: `Field ${field.name} sets \`duration = ${duration}\`; the generated audio recorder enforces no maximum recording length.`,
-            manualStep: `Enforce the ${duration}-second recording limit in the client (stop or trim the recorder) or accept longer recordings, per your policy — this is not generated.`,
-          });
+        const seconds = recordSeconds(duration);
+        if (seconds !== undefined) {
+          mediaOf(ui, field).recordSeconds = seconds;
+        } else {
+          const name = `${formName}.${field.name} property ${AUDIO_DURATION_PROPERTY_KEY}`;
+          if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+            todos.push({
+              area: 'field',
+              name,
+              reason: `Field ${field.name} sets \`duration = ${duration}\`, which is not a whole number of seconds from 1 to ${RECORD_SECONDS_MAX}; the generated audio recorder sets no maximum recording length for it.`,
+              manualStep: `Decide the recording limit for ${field.name} by hand — the declared value \`${duration}\` is not generated.`,
+            });
+          }
         }
       }
     }

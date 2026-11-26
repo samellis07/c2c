@@ -4915,25 +4915,24 @@ test('a manual input field property stays a silent drop on a non-scan field', ()
   );
 });
 
-test('a duration field property on a video field is listed through a dedicated UI todo', () => {
-  const withDuration = appWithField({ ...field('Demo_Video', 'video'), properties: [{ key: 'duration', value: '30', span: Z }] });
-  // The generator always notes it, so the audit passes.
-  assert.deepEqual(
-    auditApp(withDuration).filter((d) => d.name.includes('property duration')),
-    [],
-  );
-  const todo = collectOutputs(withDuration).model.todos.find((t) => t.name === 'Orders.Demo_Video property duration');
-  assert.ok(todo, 'a UI todo names the duration setting');
-  assert.ok(todo.manualStep, 'the todo names a manual step');
+test('a duration field property on a video field is generated as a recording limit', () => {
+  const withProp = appWithField({ ...field('Demo_Video', 'video'), properties: [{ key: 'duration', value: '30', span: Z }] });
+  const outputs = collectOutputs(withProp);
+  assert.equal(outputs.model.todos.some((t) => t.name.includes('property duration')), false, 'no manual-step todo remains');
+  assert.deepEqual(auditApp(withProp, outputs).filter((d) => d.name.includes('property duration')), []);
+  assert.equal(rowStatus(withProp, outputs, 'Orders.Demo_Video property duration'), 'emitted');
 
-  // Without the note, the same setting is a silent drop.
-  const unlisted = collectOutputs(withDuration);
-  unlisted.model = { ...unlisted.model, todos: [] };
-  const drops = auditApp(withDuration, unlisted);
-  assert.deepEqual(
-    drops.map((d) => d.name),
-    ['Orders.Demo_Video property duration'],
-  );
+  // Mutation: without the generated media block the same setting is a silent drop.
+  const stripped = collectOutputs(withProp);
+  stripped.model = { ...stripped.model, forms: stripped.model.forms.map((f) => ({ ...f, fields: f.fields.map((u) => ({ ...u, media: undefined })) })) };
+  assert.deepEqual(auditApp(withProp, stripped).map((d) => d.name), ['Orders.Demo_Video property duration']);
+});
+
+test('a video duration that is not a whole number of seconds stays a listed todo', () => {
+  const bad = appWithField({ ...field('Demo_Video', 'video'), properties: [{ key: 'duration', value: 'abc', span: Z }] });
+  const outputs = collectOutputs(bad);
+  assert.ok(outputs.model.todos.find((t) => t.name === 'Orders.Demo_Video property duration'));
+  assert.deepEqual(auditApp(bad, outputs).filter((d) => d.name.includes('property duration')), []);
 });
 
 test('a duration field property stays a silent drop on a non-video, non-audio field', () => {
@@ -4959,15 +4958,17 @@ test('a show onload field property on a scan field is generated, not listed or d
   assert.equal(rowStatus(withShowOnload, outputs, 'Orders.Code property show onload'), 'emitted');
 });
 
-test('a show onload field property on an image field is listed through a dedicated UI todo', () => {
-  const withShowOnload = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show onload', value: 'true', span: Z }] });
-  assert.deepEqual(
-    auditApp(withShowOnload).filter((d) => d.name.includes('show onload')),
-    [],
-  );
-  const todo = collectOutputs(withShowOnload).model.todos.find((t) => t.name === 'Orders.Photo property show onload');
-  assert.ok(todo, 'a UI todo names the show onload setting');
-  assert.ok(todo.manualStep, 'the todo names a manual step');
+test('a show onload field property on an image field is generated as an open-on-load camera', () => {
+  const withProp = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'show onload', value: 'true', span: Z }] });
+  const outputs = collectOutputs(withProp);
+  assert.equal(outputs.model.todos.some((t) => t.name.includes('property show onload')), false, 'no manual-step todo remains');
+  assert.deepEqual(auditApp(withProp, outputs).filter((d) => d.name.includes('property show onload')), []);
+  assert.equal(rowStatus(withProp, outputs, 'Orders.Photo property show onload'), 'emitted');
+
+  // Mutation: without the generated media block the same setting is a silent drop.
+  const stripped = collectOutputs(withProp);
+  stripped.model = { ...stripped.model, forms: stripped.model.forms.map((f) => ({ ...f, fields: f.fields.map((u) => ({ ...u, media: undefined })) })) };
+  assert.deepEqual(auditApp(withProp, stripped).map((d) => d.name), ['Orders.Photo property show onload']);
 });
 
 test('a show onload field property stays a silent drop on a field that is neither scan nor image', () => {
@@ -4990,24 +4991,17 @@ test('a show onload field property set to false is not flagged', () => {
   );
 });
 
-test('an annotation field property on an image field is listed through a dedicated UI todo', () => {
-  const withAnnotation = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
-  assert.deepEqual(
-    auditApp(withAnnotation).filter((d) => d.name.includes('property annotation')),
-    [],
-  );
-  const todo = collectOutputs(withAnnotation).model.todos.find((t) => t.name === 'Orders.Photo property annotation');
-  assert.ok(todo, 'a UI todo names the annotation setting');
-  assert.ok(todo.manualStep, 'the todo names a manual step');
+test('an annotation field property on an image field is generated as a markup step', () => {
+  const withProp = appWithField({ ...field('Photo', 'image'), properties: [{ key: 'annotation', value: 'true', span: Z }] });
+  const outputs = collectOutputs(withProp);
+  assert.equal(outputs.model.todos.some((t) => t.name.includes('property annotation')), false, 'no manual-step todo remains');
+  assert.deepEqual(auditApp(withProp, outputs).filter((d) => d.name.includes('property annotation')), []);
+  assert.equal(rowStatus(withProp, outputs, 'Orders.Photo property annotation'), 'emitted');
 
-  // Without the note, the same setting is a silent drop.
-  const unlisted = collectOutputs(withAnnotation);
-  unlisted.model = { ...unlisted.model, todos: [] };
-  const drops = auditApp(withAnnotation, unlisted);
-  assert.deepEqual(
-    drops.map((d) => d.name),
-    ['Orders.Photo property annotation'],
-  );
+  // Mutation: without the generated media block the same setting is a silent drop.
+  const stripped = collectOutputs(withProp);
+  stripped.model = { ...stripped.model, forms: stripped.model.forms.map((f) => ({ ...f, fields: f.fields.map((u) => ({ ...u, media: undefined })) })) };
+  assert.deepEqual(auditApp(withProp, stripped).map((d) => d.name), ['Orders.Photo property annotation']);
 });
 
 test('an annotation field property stays a silent drop on a non-image field', () => {
@@ -5030,25 +5024,17 @@ test('an annotation field property set to false is not flagged', () => {
   );
 });
 
-test('a duration field property on an audio field is listed through a dedicated UI todo', () => {
-  const withDuration = appWithField({ ...field('Voice_Note', 'audio'), properties: [{ key: 'duration', value: '60', span: Z }] });
-  // The generator always notes it, so the audit passes.
-  assert.deepEqual(
-    auditApp(withDuration).filter((d) => d.name.includes('property duration')),
-    [],
-  );
-  const todo = collectOutputs(withDuration).model.todos.find((t) => t.name === 'Orders.Voice_Note property duration');
-  assert.ok(todo, 'a UI todo names the duration setting');
-  assert.ok(todo.manualStep, 'the todo names a manual step');
+test('a duration field property on an audio field is generated as a recording limit', () => {
+  const withProp = appWithField({ ...field('Voice_Note', 'audio'), properties: [{ key: 'duration', value: '60', span: Z }] });
+  const outputs = collectOutputs(withProp);
+  assert.equal(outputs.model.todos.some((t) => t.name.includes('property duration')), false, 'no manual-step todo remains');
+  assert.deepEqual(auditApp(withProp, outputs).filter((d) => d.name.includes('property duration')), []);
+  assert.equal(rowStatus(withProp, outputs, 'Orders.Voice_Note property duration'), 'emitted');
 
-  // Without the note, the same setting is a silent drop (RED).
-  const unlisted = collectOutputs(withDuration);
-  unlisted.model = { ...unlisted.model, todos: [] };
-  const drops = auditApp(withDuration, unlisted);
-  assert.deepEqual(
-    drops.map((d) => d.name),
-    ['Orders.Voice_Note property duration'],
-  );
+  // Mutation: without the generated media block the same setting is a silent drop.
+  const stripped = collectOutputs(withProp);
+  stripped.model = { ...stripped.model, forms: stripped.model.forms.map((f) => ({ ...f, fields: f.fields.map((u) => ({ ...u, media: undefined })) })) };
+  assert.deepEqual(auditApp(withProp, stripped).map((d) => d.name), ['Orders.Voice_Note property duration']);
 });
 
 test('an enable linkname flag is listed only when the generated field carries no link name', () => {

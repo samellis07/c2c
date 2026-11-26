@@ -964,7 +964,15 @@ function fieldControl(field, id, describedBy) {
     if (field.widget === 'image' && field.imageTitle) {
       companions += `<input id="${id}-title" name="${escapeHtml(field.imageTitleColumn || '')}" type="text" placeholder="Title" aria-label="${escapeHtml(field.label)} title">`;
     }
-    return `<span class="filepick">${inner}<span class="filepick-name"></span></span>${companions}`;
+    const picker = `<span class="filepick">${inner}<span class="filepick-name"></span></span>${companions}`;
+    // Live capture, recording cap, markup and open-on-load (model.ts ui.media):
+    // attachMediaTools builds the panel inside this wrapper.
+    const media = field.media;
+    if (media && (field.widget === 'image' || field.widget === 'video' || field.widget === 'audio')) {
+      const seconds = Number(media.recordSeconds);
+      return `<div class="media-field" data-media-kind="${field.widget}" data-media-camera="${media.camera === 'secondary' ? 'secondary' : 'primary'}"${Number.isInteger(seconds) && seconds >= 1 ? ` data-media-seconds="${seconds}"` : ''}${media.annotate ? ' data-media-annotate="true"' : ''}${media.onload ? ' data-media-onload="true"' : ''}>${picker}</div>`;
+    }
+    return picker;
   }
   if (field.widget === 'signature') {
     return `<canvas data-signature="${name}" width="320" height="120"></canvas><button type="button" data-signature-save="${name}">Save signature</button><input${idAttr} name="${name}" type="hidden" data-upload="${escapeHtml(field.uploadEndpoint || '')}">`;
@@ -7336,6 +7344,411 @@ function startScanner(input) {
   return { start, stop };
 }
 
+const MEDIA_IMAGE_MAX_SIDE = 2048;
+const MEDIA_PEN_COLORS = ['#d32f2f', '#1565c0', '#212121'];
+const MEDIA_RECORD_TYPES = {
+  video: ['video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4'],
+  audio: ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'],
+};
+const mediaPicked = new WeakSet();
+
+/**
+ * Creator's image `annotation`, `show onload` and front `camera` lens, and a
+ * video or audio field's `duration`: a small panel beside the file control
+ * (model.ts ui.media). Capture and recording use getUserMedia and
+ * MediaRecorder in the page; a drawing editor marks up a chosen or captured
+ * photo before it is stored. The result is always a File placed in the
+ * field's own file input, so the existing size/type checks and upload run
+ * unchanged. When the camera, microphone or an API is missing or refused the
+ * panel says so and the file chooser keeps working.
+ */
+function startMediaTools(blockEl, spec) {
+  const doc = blockEl.ownerDocument;
+  const win = doc.defaultView;
+  const kind = spec.kind;
+  const fileInputs = Array.from(blockEl.querySelectorAll('input[type="file"]'));
+  const target = fileInputs[0];
+  if (!target) return null;
+  let stream = null;
+  let recorder = null;
+  let tick = 0;
+  let stopTimer = 0;
+  let session = 0;
+
+  const box = doc.createElement('div');
+  box.className = 'media-tools';
+  const status = doc.createElement('p');
+  status.className = 'media-status';
+  status.setAttribute('role', 'status');
+  const video = doc.createElement('video');
+  video.className = 'media-video';
+  video.style.maxWidth = '100%';
+  video.setAttribute('playsinline', '');
+  video.muted = true;
+  video.hidden = true;
+  const open = doc.createElement('button');
+  open.type = 'button';
+  open.className = 'media-open';
+  open.textContent = kind === 'image' ? 'Use camera' : kind === 'video' ? 'Record video' : 'Record audio';
+  const act = doc.createElement('button');
+  act.type = 'button';
+  act.className = 'media-act';
+  act.textContent = kind === 'image' ? 'Capture' : 'Stop recording';
+  act.hidden = true;
+  const close = doc.createElement('button');
+  close.type = 'button';
+  close.className = 'media-close';
+  close.textContent = kind === 'image' ? 'Close camera' : 'Cancel';
+  close.hidden = true;
+  const editor = doc.createElement('div');
+  editor.className = 'media-editor';
+  editor.hidden = true;
+  box.append(open, act, close, video, status, editor);
+  const anchor = blockEl.querySelector('.filepick');
+  if (anchor) anchor.insertAdjacentElement('afterend', box);
+  else blockEl.append(box);
+
+  const say = (text) => {
+    status.textContent = text;
+  };
+  const unavailable = `${kind === 'image' ? 'The camera' : 'Recording'} is not available here (it needs ${kind === 'video' ? 'a camera, a microphone' : kind === 'audio' ? 'a microphone' : 'a camera'}, a supported browser and HTTPS). Choose a file instead.`;
+  const refused = `${kind === 'audio' ? 'Microphone' : kind === 'video' ? 'Camera or microphone' : 'Camera'} access was refused or none was found. Choose a file instead.`;
+
+  function release() {
+    session += 1;
+    if (tick) win.clearInterval(tick);
+    if (stopTimer) win.clearTimeout(stopTimer);
+    tick = 0;
+    stopTimer = 0;
+    const live = recorder;
+    recorder = null;
+    if (live) {
+      live.discard = live.discard !== false;
+      try {
+        if (live.state !== 'inactive') live.stop();
+      } catch {
+        // already stopped
+      }
+    }
+    if (stream) {
+      for (const track of stream.getTracks()) track.stop();
+      stream = null;
+    }
+    video.srcObject = null;
+    video.hidden = true;
+    act.hidden = true;
+    close.hidden = true;
+    open.hidden = false;
+  }
+
+  function place(file) {
+    try {
+      const transfer = new win.DataTransfer();
+      transfer.items.add(file);
+      target.files = transfer.files;
+    } catch {
+      say('This browser cannot attach the result. Choose a file instead.');
+      return false;
+    }
+    mediaPicked.add(target);
+    target.dispatchEvent(new win.Event('change', { bubbles: true }));
+    return true;
+  }
+
+  async function openStream() {
+    const nav = win.navigator;
+    if (!nav || !nav.mediaDevices || typeof nav.mediaDevices.getUserMedia !== 'function') {
+      say(unavailable);
+      return false;
+    }
+    if (kind !== 'image' && typeof win.MediaRecorder !== 'function') {
+      say(unavailable);
+      return false;
+    }
+    const mine = ++session;
+    let media;
+    try {
+      media = await nav.mediaDevices.getUserMedia({
+        video: kind === 'audio' ? false : { facingMode: spec.camera === 'secondary' ? 'user' : 'environment' },
+        audio: kind !== 'image',
+      });
+    } catch {
+      if (mine === session) say(refused);
+      return false;
+    }
+    if (mine !== session) {
+      for (const track of media.getTracks()) track.stop();
+      return false;
+    }
+    stream = media;
+    if (kind !== 'audio') {
+      video.srcObject = media;
+      video.hidden = false;
+      try {
+        const played = video.play();
+        if (played && typeof played.catch === 'function') played.catch(() => {});
+      } catch {
+        // jsdom and some browsers refuse; frames are read either way
+      }
+    }
+    open.hidden = true;
+    act.hidden = false;
+    close.hidden = false;
+    return true;
+  }
+
+  function capture() {
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 480;
+    const scale = Math.min(1, MEDIA_IMAGE_MAX_SIDE / Math.max(width, height));
+    const canvas = doc.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      say(unavailable);
+      return;
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        say('The photo could not be captured. Choose a file instead.');
+        return;
+      }
+      release();
+      say('');
+      place(new win.File([blob], 'photo.jpg', { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.92);
+  }
+
+  async function record() {
+    if (!(await openStream())) return;
+    const types = MEDIA_RECORD_TYPES[kind];
+    const supported = typeof win.MediaRecorder.isTypeSupported === 'function' ? types.find((t) => win.MediaRecorder.isTypeSupported(t)) : undefined;
+    let rec;
+    try {
+      rec = supported ? new win.MediaRecorder(stream, { mimeType: supported }) : new win.MediaRecorder(stream);
+    } catch {
+      release();
+      say(unavailable);
+      return;
+    }
+    recorder = rec;
+    const chunks = [];
+    let bytes = 0;
+    rec.ondataavailable = (event) => {
+      if (!event.data || !event.data.size) return;
+      chunks.push(event.data);
+      bytes += event.data.size;
+      // A recording never outgrows what the upload accepts.
+      if (bytes >= UPLOAD_SOURCE_MAX_BYTES && rec.state !== 'inactive') {
+        rec.discard = false;
+        rec.stop();
+      }
+    };
+    rec.onstop = () => {
+      const discarded = rec.discard === true;
+      const mime = String(rec.mimeType || supported || '').split(';')[0] || (kind === 'video' ? 'video/webm' : 'audio/webm');
+      if (recorder === rec) release();
+      if (discarded) return;
+      if (!chunks.length) {
+        say('Nothing was recorded. Choose a file instead.');
+        return;
+      }
+      const ext = mime.endsWith('mp4') ? 'mp4' : 'webm';
+      say('');
+      place(new win.File(chunks, `recording.${ext}`, { type: mime }));
+    };
+    // The recording is kept unless Cancel, a reset or leaving the page discards it.
+    rec.discard = false;
+    let left = spec.recordSeconds;
+    say(`Recording… ${left}s left.`);
+    tick = win.setInterval(() => {
+      left -= 1;
+      if (left > 0) say(`Recording… ${left}s left.`);
+    }, 1000);
+    // Auto-stop: the declared duration is a hard limit on the recording.
+    stopTimer = win.setTimeout(() => {
+      if (recorder === rec && rec.state !== 'inactive') rec.stop();
+    }, spec.recordSeconds * 1000);
+    rec.start(1000);
+  }
+
+  function markup(file) {
+    editor.textContent = '';
+    editor.hidden = false;
+    const keep = () => {
+      editor.hidden = true;
+      say('The photo could not be opened for markup; it is kept unmarked.');
+    };
+    const reader = new win.FileReader();
+    reader.onerror = keep;
+    reader.onload = () => {
+      const img = new win.Image();
+      img.onerror = keep;
+      img.onload = () => {
+        const scale = Math.min(1, MEDIA_IMAGE_MAX_SIDE / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        const canvas = doc.createElement('canvas');
+        canvas.className = 'media-canvas';
+        canvas.style.maxWidth = '100%';
+        canvas.style.touchAction = 'none';
+        canvas.width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+        canvas.height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          keep();
+          return;
+        }
+        const paint = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        paint();
+        ctx.lineWidth = Math.max(2, Math.round(canvas.width / 200));
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = MEDIA_PEN_COLORS[0];
+        const tools = doc.createElement('div');
+        tools.className = 'media-tools-row';
+        for (const color of MEDIA_PEN_COLORS) {
+          const swatch = doc.createElement('button');
+          swatch.type = 'button';
+          swatch.className = 'media-pen';
+          swatch.setAttribute('aria-label', `Pen ${color}`);
+          swatch.style.background = color;
+          swatch.addEventListener('click', () => {
+            ctx.strokeStyle = color;
+          });
+          tools.append(swatch);
+        }
+        const clear = doc.createElement('button');
+        clear.type = 'button';
+        clear.className = 'media-clear';
+        clear.textContent = 'Clear markup';
+        clear.addEventListener('click', paint);
+        const done = doc.createElement('button');
+        done.type = 'button';
+        done.className = 'media-done';
+        done.textContent = 'Use marked-up photo';
+        const cancel = doc.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'media-cancel';
+        cancel.textContent = 'Keep original';
+        tools.append(clear, done, cancel);
+        let pen = null;
+        const at = (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const w = rect.width || canvas.width;
+          const h = rect.height || canvas.height;
+          return [((event.clientX - rect.left) / w) * canvas.width, ((event.clientY - rect.top) / h) * canvas.height];
+        };
+        canvas.addEventListener('pointerdown', (event) => {
+          pen = at(event);
+          try {
+            canvas.setPointerCapture(event.pointerId);
+          } catch {
+            // not every engine supports capture
+          }
+          ctx.beginPath();
+          ctx.moveTo(pen[0], pen[1]);
+          ctx.lineTo(pen[0] + 0.01, pen[1]);
+          ctx.stroke();
+        });
+        canvas.addEventListener('pointermove', (event) => {
+          if (!pen) return;
+          const next = at(event);
+          ctx.beginPath();
+          ctx.moveTo(pen[0], pen[1]);
+          ctx.lineTo(next[0], next[1]);
+          ctx.stroke();
+          pen = next;
+        });
+        const lift = () => {
+          pen = null;
+        };
+        canvas.addEventListener('pointerup', lift);
+        canvas.addEventListener('pointercancel', lift);
+        const finish = () => {
+          editor.hidden = true;
+          editor.textContent = '';
+        };
+        cancel.addEventListener('click', finish);
+        done.addEventListener('click', () => {
+          const type = file.type === 'image/png' || file.type === 'image/webp' ? file.type : 'image/jpeg';
+          canvas.toBlob((blob) => {
+            finish();
+            if (!blob) {
+              say('The marked-up photo could not be saved; the original is kept.');
+              return;
+            }
+            const base = String(file.name || 'photo').replace(/\.[^.]*$/, '') || 'photo';
+            place(new win.File([blob], `${base}-marked.${type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg'}`, { type }));
+          }, type, 0.92);
+        });
+        editor.append(canvas, tools);
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  open.addEventListener('click', () => {
+    if (kind === 'image') openStream();
+    else record();
+  });
+  act.addEventListener('click', () => {
+    if (kind === 'image') capture();
+    else if (recorder && recorder.state !== 'inactive') recorder.stop();
+  });
+  close.addEventListener('click', () => {
+    release();
+    say('');
+  });
+  if (spec.annotate) {
+    for (const input of fileInputs) {
+      input.addEventListener('change', () => {
+        if (mediaPicked.has(input)) {
+          mediaPicked.delete(input);
+          return;
+        }
+        const file = input.files && input.files[0];
+        if (file && /^image\//.test(file.type) && !refusedImageType(file.type)) markup(file);
+      });
+    }
+  }
+  box.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && stream) {
+      release();
+      say('');
+    }
+  });
+  win.addEventListener('pagehide', release);
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.visibilityState === 'hidden') release();
+  });
+  const form = target.form;
+  if (form) form.addEventListener('reset', release);
+  if (spec.onload && kind === 'image') openStream();
+  return { release };
+}
+
+/** Give every `[data-media-kind]` file field its capture, recording and markup tools, once each. */
+export function attachMediaTools(formEl) {
+  if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
+  for (const block of formEl.querySelectorAll('[data-media-kind]')) {
+    if (block.getAttribute('data-media-bound') === 'true') continue;
+    block.setAttribute('data-media-bound', 'true');
+    const kind = block.getAttribute('data-media-kind');
+    if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
+    const seconds = Number(block.getAttribute('data-media-seconds'));
+    const recordSeconds = Number.isInteger(seconds) && seconds >= 1 && seconds <= 3600 ? seconds : 0;
+    if (kind !== 'image' && !recordSeconds) continue;
+    startMediaTools(block, {
+      kind,
+      camera: block.getAttribute('data-media-camera') === 'secondary' ? 'secondary' : 'primary',
+      recordSeconds,
+      annotate: kind === 'image' && block.getAttribute('data-media-annotate') === 'true',
+      onload: block.getAttribute('data-media-onload') === 'true',
+    });
+  }
+}
+
 /** Give every `[data-scan-camera]` field its scanner controls, once each. */
 export function attachScanners(formEl) {
   if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
@@ -9411,6 +9824,7 @@ export function boot(appModel, doc) {
     attachLookupAddNew(model, formEl, viewRef);
     attachCapturePreviews(formEl);
     attachScanners(formEl);
+    attachMediaTools(formEl);
     const mode = open && open.mode === 'edit' ? 'edit' : 'add';
     const rowId = mode === 'edit' && open && open.rowId ? String(open.rowId) : '';
     // Creator's edit screen submits with an Update button.

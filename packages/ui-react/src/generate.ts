@@ -112,6 +112,7 @@ function fieldSpec(field: UiField): FieldSpec {
   if (field.uploadSources !== undefined) spec.uploadSources = field.uploadSources;
   if (field.scan && field.scanner) spec.scanner = { camera: field.scanner.camera, formats: [...field.scanner.formats], gallery: field.scanner.gallery, onload: field.scanner.onload };
   if (field.scan && field.scanner && field.switchCamera) spec.switchCamera = true;
+  if (field.media) spec.media = { camera: field.media.camera, ...(field.media.recordSeconds !== undefined ? { recordSeconds: field.media.recordSeconds } : {}), ...(field.media.annotate ? { annotate: true } : {}), ...(field.media.onload ? { onload: true } : {}) };
   if (field.captureCoordinates) spec.captureCoordinates = true;
   if (field.adjustUsingMap) spec.adjustUsingMap = true;
   if (field.imageLink) spec.imageLink = true;
