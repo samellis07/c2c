@@ -63,8 +63,11 @@ function c2cEsc(v) {
 // An island inside a quoted id (or a label's for) renders one bounded token:
 // letters, digits and '-' stay, '_' doubles, every other character becomes
 // '_' + its hex code point + '_', so two different values never share an id
-// and no quote, space, '#' or URL text survives. A long value becomes 'h' + a
-// 32-bit hash + its length. One linear pass.
+// and no quote, space, '#' or URL text survives. The encoding is reversible, so
+// it is injective. A value whose token passes 24 characters (the page sanitizer
+// keeps an id of 64 characters at most, with room for a written prefix and a second island) gets '!',
+// which no id may hold: the render audit refuses the page, so a shortened or hashed
+// token that two values could share is never printed. One linear pass.
 function c2cIdToken(v) {
   const text = String(v);
   let out = "";
@@ -72,12 +75,9 @@ function c2cIdToken(v) {
     if (/[A-Za-z0-9-]/.test(ch)) out += ch;
     else if (ch === "_") out += "__";
     else out += "_" + ch.codePointAt(0).toString(16) + "_";
-    if (out.length > 24) break;
+    if (out.length > 24) return "!";
   }
-  if (out.length <= 24) return out;
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
-  return "h" + hash.toString(16) + "-" + text.length.toString(16);
+  return out;
 }
 
 // An island inside a quoted style attribute renders only a strict CSS value:
