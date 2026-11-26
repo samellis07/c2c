@@ -296,7 +296,7 @@ const NAMED: Record<string, UiElement['kind']> = {
 };
 
 /** Ids the page shell owns: a snippet control may not take one (getElementById would find it first, or a label for it would click a shell button). */
-export const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title']);
+export const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title', 'nav', 'drawer', 'nav-drawer-open', 'offline', 'sign-out', 'install', 'menu-toggle', 'root', 'c2c-login', 'c2c-login-title', 'c2c-session-body', 'c2c-session-title', 'c2c-smoke-code', 'c2c-smoke-json']);
 
 /**
  * An id (or a label's `for`) a snippet may keep: one bounded token, a letter then letters, digits, `_` or `-`, at most 64 long, and

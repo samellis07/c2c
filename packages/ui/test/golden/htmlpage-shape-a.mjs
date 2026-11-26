@@ -139,7 +139,7 @@ function c2cUrlOk(url) {
 
 const C2C_AUDIT_TAGS = new Set(["a","abbr","b","blockquote","br","button","caption","code","col","colgroup","dd","del","div","dl","dt","em","figcaption","figure","font","h1","h2","h3","h4","h5","h6","hr","i","img","input","ins","kbd","label","li","mark","ol","p","pre","q","s","samp","small","span","strong","sub","sup","table","tbody","td","tfoot","th","thead","tr","u","ul","var","wbr"]);
 const C2C_AUDIT_ATTRS = {"*":["class","data-style-dropped","data-zml","id","title"],"a":["href","title","rel"],"button":["data-fn-argc","data-fn-args","data-fn-call","data-fn-msg","data-fn-refresh","type"],"font":["color","face","size"],"img":["alt","height","src","title","width"],"input":["checked","type"],"label":["for"],"ol":["start","title"],"td":["colspan","rowspan","title"],"th":["colspan","rowspan","title"]};
-const C2C_AUDIT_SHELL_IDS = ["main","tabbar","more-sheet","more-tab","toasts","app-title"];
+const C2C_AUDIT_SHELL_IDS = ["main","tabbar","more-sheet","more-tab","toasts","app-title","nav","drawer","nav-drawer-open","offline","sign-out","install","menu-toggle","root","c2c-login","c2c-login-title","c2c-session-body","c2c-session-title","c2c-smoke-code","c2c-smoke-json"];
 const C2C_AUDIT_URLS = /^(href|src|srcset|action|formaction|xlink:href|poster|cite|background|longdesc|profile|usemap|data|ping|manifest|codebase|archive|lowsrc|dynsrc|srcdoc)$/i;
 function c2cAttrAuditOk(tag, name, value) {
   const attr = String(name).toLowerCase();
