@@ -135,6 +135,53 @@ test('publicConstruct redacts an unquoted field or report name naming model.ts b
 const QUOTED_IDENTIFIER = /"[A-Za-z_][A-Za-z0-9_]*"/;
 
 /** No quoted identifier remains in any public construct string. */
+test('unquoted non-ASCII and digit-leading app names never reach the status doc or JSON', () => {
+  const names = ['Ünï_Rep', '9lives', '9Ünï_Mix'];
+  const sentences = [
+    `Map report ${names[0]} is shown as a list because ${names[1]} has no address field to plot.`,
+    `Map report ${names[2]} is shown as a list because Plain_Form has no address field to plot.`,
+    `Field ${names[0]} is flagged \`personal data = true\`; Catalyst generates no privacy or access control for this field.`,
+    `Field ${names[1]} is flagged \`personal data = true\`; Catalyst generates no privacy or access control for this field.`,
+    `Report ${names[2]} has an \`options\` setting (icon = travel-world) that Catalyst does not carry into the generated list report.`,
+    `Report ${names[2]} lists ${names[2]} twice.`,
+  ];
+  for (const sentence of sentences) {
+    const out = publicConstruct(sentence);
+    for (const name of names) assert.equal(out.includes(name), false, out);
+  }
+  const apps = sentences.map((construct, i) => ({
+    app: `folder-${i}`,
+    deterministic: false,
+    todoCount: 1,
+    fillLockEntries: 0,
+    todoKinds: [{ construct, count: 1 }],
+    uiTodoCount: 0,
+    readiness: 0,
+    band: 'blocked',
+  }));
+  const report = {
+    schema: 'c2c-migration-report/1',
+    label: 'unit',
+    apps,
+    aggregate: {
+      totalApps: apps.length,
+      deterministicApps: 0,
+      deterministicShare: 0,
+      targets: { p95: { required: apps.length, met: false }, p100: { required: apps.length, met: false } },
+      todoTotal: apps.length,
+      distinctTodoKinds: sentences.length,
+      todoKinds: sentences.map((construct) => ({ construct, count: 1 })),
+      deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+      noTodoApps: 0,
+      silentDrops: 0,
+      silentDropKinds: [],
+    },
+  } as unknown as MigrationReport;
+  const status = statusFromReport(report);
+  const text = renderStatusDoc(status) + canonicalStatusJson(status);
+  for (const name of names) assert.equal(text.includes(name), false, name);
+});
+
 function assertNoQuotedIdentifiers(status: DeterminismStatus): void {
   for (const kind of status.kinds) assert.equal(QUOTED_IDENTIFIER.test(kind.construct), false, kind.construct);
   for (const set of status.perAppConstructSets) {
