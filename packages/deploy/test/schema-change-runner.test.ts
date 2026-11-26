@@ -303,3 +303,13 @@ test('an app whose only form the API cannot seed (a required image) is seeded st
   assert.equal(report.summary.fail, 0, formatSchemaChangeReport(report));
   assert.equal(report.summary.pass, 3);
 });
+
+const KITCHEN_SINK = join(root, 'fixtures/synthetic/kitchen-sink/kitchen_sink.ds');
+
+test('dropping a decimal field also drops its numeric shadow column: the verified backup holds the value, so nothing counts as lost', async (t) => {
+  const report = await runSchemaChangeScenarios({ ds: KITCHEN_SINK, workDir: scratch(t), sdkPath: SDK });
+  const drop = report.scenarios.find((s) => s.id === 'delete-field');
+  assert.ok(drop, 'the delete-field scenario ran');
+  assert.deepEqual(drop.lost, [], formatSchemaChangeReport(report));
+  assert.equal(drop.status, 'PASS', formatSchemaChangeReport(report));
+});

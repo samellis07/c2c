@@ -620,7 +620,14 @@ function backupCells(app: App, files: readonly { path: string; body: string }[])
  * Seeded values that the store no longer holds (under the same or the renamed
  * column), unless the delta drops that column and the verified backup holds the value.
  */
-function lostValues(before: Map<string, Map<string, Row>>, after: Map<string, Map<string, Row>>, renames: readonly { table: string; from: string; to: string }[], dropped: ReadonlySet<string>, backup: BackupCells | undefined): string[] {
+/** `Table.shadow` -> the field column it mirrors. A rollback export holds the field, never its shadow. */
+function shadowBases(app: App): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const table of generateSchema(app).tables) for (const column of table.columns) if (column.shadowFor) out.set(`${table.name}.${column.name}`, column.shadowFor);
+  return out;
+}
+
+function lostValues(before: Map<string, Map<string, Row>>, after: Map<string, Map<string, Row>>, renames: readonly { table: string; from: string; to: string }[], dropped: ReadonlySet<string>, backup: BackupCells | undefined, shadows: ReadonlyMap<string, string> = new Map()): string[] {
   const lost: string[] = [];
   for (const [table, rows] of before) {
     for (const [rowid, row] of rows) {
@@ -631,6 +638,9 @@ function lostValues(before: Map<string, Map<string, Row>>, after: Map<string, Ma
         if (now && now[moved] === value) continue;
         // Only a column the delta drops may leave the store, and only into the backup.
         if (dropped.has(`${table}.${column}`) && backup?.get(table)?.get(rowid)?.get(column) === String(value)) continue;
+        // A dropped shadow column goes with its field; the backup holds the field's value.
+        const base = shadows.get(`${table}.${column}`);
+        if (base && dropped.has(`${table}.${column}`) && dropped.has(`${table}.${base}`) && (backup?.get(table)?.get(rowid)?.get(base) ?? '') !== '') continue;
         lost.push(`${table}.${column} row ${rowid}: ${JSON.stringify(value)}${now ? '' : ' (row gone)'}`);
       }
     }
@@ -907,7 +917,7 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
       const after = snapshot(harness.tables());
       const renamed = delta.columns.flatMap((c) => (c.op === 'rename' ? [{ table: c.table, from: c.from, to: c.to }] : []));
       const dropped = new Set(delta.columns.flatMap((c) => (c.op === 'drop' ? [`${c.table}.${c.column}`] : [])));
-      const lost = lostValues(before, after, renamed, dropped, backup);
+      const lost = lostValues(before, after, renamed, dropped, backup, shadowBases(prev));
       check(lost.length === 0, `no seeded value lost (rows ${JSON.stringify(counts(before))} -> ${JSON.stringify(counts(after))})`);
       scenarios.push({ id: change.id, title: change.title, kind: change.kind, status: ok ? 'PASS' : 'FAIL', evidence, lost, rows: { before: counts(before), after: counts(after) } });
       if (change.id === 'picklist-remove') {
