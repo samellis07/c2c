@@ -23,7 +23,7 @@ import type { Expr, Script, Stmt } from './ast.js';
 import type { AccessPolicy, FieldRuleDenial, FormGrant, WriteField, WriteOp, WriteScalar } from '../../shims/src/access.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria, type DecimalColumn, type DecimalColumns } from '../../shims/src/criteria.js';
 import { integrityColumns, type IntegrityColumn } from '../../data/src/integrity.js';
-import { flowHistoryTable, generateSchema, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
+import { flowHistoryTable, generateSchema, isMulti, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
 import { LIMITS, jobPoolName } from '../../shims/src/index.js';
 import { scriptNavInstruction } from '../../shims/src/runtime.js';
@@ -6391,6 +6391,8 @@ function writeField(field: Field, app?: App): WriteField {
   }
   if (field.lookup) {
     node.kind = 'lookup';
+    // A list of ids is the multi lookup's shape; a single lookup refuses one.
+    if (isMulti(field)) node.multi = true;
     return node;
   }
   if (row && (row.id === 'file-upload' || row.id === 'image' || row.id === 'audio' || row.id === 'video' || row.id === 'signature')) {
@@ -6411,6 +6413,8 @@ function writeField(field: Field, app?: App): WriteField {
   }
   const scalar = writeScalar(row?.id);
   if (scalar) node.scalar = scalar;
+  // A multi select or checkbox list is the plain leaf that takes a JSON array.
+  if (isMultiChoiceField(field)) node.multi = true;
   const allowedDays = fieldAllowedDays(field);
   if (allowedDays) node.allowedDays = allowedDays;
   const choices = closedChoices(field);
