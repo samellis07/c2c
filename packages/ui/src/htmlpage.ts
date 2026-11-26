@@ -4015,7 +4015,18 @@ function dropCutOffEndTag(template: string): string {
 // A tag the HTML parser never closes on its own account: the sanitizer reads both arms' tags as one document, and a second `<p>` or
 // `<li>` there would end the first one in a piece of markup that belongs to the other arm.
 const PLAIN_TAGS = new Set(['article', 'aside', 'b', 'br', 'div', 'em', 'font', 'footer', 'header', 'hr', 'i', 'img', 'input', 'main', 'nav', 'ol', 'section', 'small', 'span', 'strong', 'table', 'u', 'ul']);
-const TAG_HEAD = /<([A-Za-z][\w:-]*)[^<>]*$/;
+/**
+ * The open tag a text ends inside (`<name` then no `<` or `>` to the end), or null: the last `<` of the text, when a tag name
+ * follows it and no `>` does. One `lastIndexOf` and one scan from there, so a long text is read once.
+ */
+function tagHead(text: string): { index: number; name: string; text: string } | null {
+  const index = text.lastIndexOf('<');
+  if (index < 0 || text.indexOf('>', index) >= 0) return null;
+  let end = index + 1;
+  if (!/[A-Za-z]/.test(text[end] ?? '')) return null;
+  while (end < text.length && /[\w:-]/.test(text[end]!)) end++;
+  return { index, name: text.slice(index + 1, end), text: text.slice(index) };
+}
 // `if(<condition>,"class='<token>'","")`: one literal class attribute, nothing otherwise. The class text is plain identifier characters.
 const CLASS_IF_ISLAND = /^\s*if\s*\(([\s\S]*?),\s*"class='([A-Za-z0-9_ -]*)'"\s*,\s*""\s*\)\s*$/;
 function countOf(text: string, ch: string): number {
@@ -4034,8 +4045,8 @@ function rewriteConditionalAttributes(template: string): string {
     const found = chunks[i]!.kind === 'expr' ? CLASS_IF_ISLAND.exec(chunks[i]!.text) : null;
     const before = chunks[i - 1]!;
     if (!found || before.kind !== 'static') continue;
-    const open = TAG_HEAD.exec(before.text);
-    if (!open || !/\s$/.test(before.text) || countOf(open[0], '"') % 2 !== 0 || countOf(open[0], "'") % 2 !== 0) continue;
+    const open = tagHead(before.text);
+    if (!open || !/\s$/.test(before.text) || countOf(open.text, '"') % 2 !== 0 || countOf(open.text, "'") % 2 !== 0) continue;
     const text = `if(${found[1]},"${found[2]}","")`;
     chunks[i - 1] = { kind: 'static', text: `${before.text}class="` };
     chunks[i] = { kind: 'expr', text, raw: `<%=${text}%>` };
@@ -4054,7 +4065,7 @@ function rewriteConditionalAttributes(template: string): string {
     let k = i;
     for (;;) {
       const here = chunks[k];
-      if (here?.kind !== 'static' || TAG_HEAD.test(here.text)) break;
+      if (here?.kind !== 'static' || tagHead(here.text)) break;
       if (/[<>]/.test(here.text) || k < 2 || chunks[k - 1]?.kind !== 'expr') {
         k = -1;
         break;
@@ -4062,7 +4073,7 @@ function rewriteConditionalAttributes(template: string): string {
       k -= 2;
     }
     const tagChunk = k >= 0 ? chunks[k] : undefined;
-    const tagAt = tagChunk?.kind === 'static' && PLAIN_TAGS.has((TAG_HEAD.exec(tagChunk.text)?.[1] ?? '').toLowerCase()) ? tagChunk.text.search(TAG_HEAD) : -1;
+    const tagAt = tagChunk?.kind === 'static' && PLAIN_TAGS.has((tagHead(tagChunk.text)?.name ?? '').toLowerCase()) ? (tagHead(tagChunk.text)?.index ?? -1) : -1;
     const gt = text(tail).indexOf('>');
     const fits =
       tagAt >= 0 &&
