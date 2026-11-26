@@ -778,7 +778,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         await s.go('#/report/__reset__');
         await driveReport(s, report);
         const control = (re: RegExp): HTMLElement | null =>
-          (Array.from(mainOf(s.doc).querySelectorAll('button, a[role="button"], a[href]')).find((b) => re.test(`${b.getAttribute('aria-label') ?? ''} ${text(b)}`)) as HTMLElement | undefined) ?? null;
+          (Array.from(mainOf(s.doc).querySelectorAll('button, a[role="button"], a[href]')).find((b) => !b.closest('th, [role="columnheader"]') && !/^sort\b/i.test(b.getAttribute('aria-label') ?? '') && re.test(`${b.getAttribute('aria-label') ?? ''} ${text(b)}`)) as HTMLElement | undefined) ?? null;
         const stopped = (el: HTMLElement | null): boolean => !!el && (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true');
         const next1 = control(/\bnext\b/i);
         const prev1 = control(/\b(prev|previous)\b/i);
