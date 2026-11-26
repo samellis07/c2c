@@ -1022,6 +1022,7 @@ test('timelineLaneKey: an impossible calendar day is no lane, with or without a 
   assert.equal(timelineLaneKey('2026-10-14 09:00:00'), '2026-10-14');
   assert.equal(timelineLaneKey('2024-02-29'), '2024-02-29', 'a real leap day stays');
   assert.equal(timelineLaneKey('14-Oct-2026', 'monday'), '2026-10-12');
+});
 function captureDownloads(win: Record<string, unknown>): { files: { name: string; mime: string; parts: unknown[] }[]; printed: number } {
   const seen = { files: [] as { name: string; mime: string; parts: unknown[] }[], printed: 0 };
   const blobs = new Map<string, { mime: string; parts: unknown[] }>();
