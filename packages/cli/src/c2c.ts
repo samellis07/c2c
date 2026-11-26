@@ -187,7 +187,7 @@ import { generateReactApp, HandEditedError, writeReactApp } from '../../ui-react
 import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyBehaviorCli, verifyCli } from '../../deploy/src/index.js';
 import { cutoverCli } from './cutover.js';
 import { ARGV_SPEC, argvShapeProblems, seedArgsProblem } from './argv.js';
-import { GATE_EXIT, c2cVersion, defaultDoctorIo, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
+import { GATE_EXIT, c2cVersion, defaultDoctorIo, terminalSafe, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
 import { FillTodoError, fillTodosMain } from '../../deluge/src/fill-todos.js';
 import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
 import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
@@ -469,7 +469,7 @@ function main(argv: string[]): number {
   // A flag the command does not know is refused, never silently ignored.
   const unknown = argvShapeProblems(cmd, restAll).filter((problem) => problem.startsWith('unknown flag '));
   if (unknown.length) {
-    process.stderr.write(`c2c ${cmd}: ${unknown.join('; ')}\n`);
+    process.stderr.write(terminalSafe(`c2c ${cmd}: ${unknown.join('; ')}\n`));
     return 2;
   }
   if (cmd === '--verify-vendor') {
@@ -482,7 +482,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'doctor failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        process.stderr.write(terminalSafe(`c2c: ${message}\n`));
         process.exitCode = 1;
       },
     );

@@ -108,10 +108,19 @@ export function doctorSpawn(command: string, args: string[], opts: { cwd: string
   return doSpawn();
 }
 
+/**
+ * Everything the doctor prints reaches the terminal here. A value interpolated into any message (an unknown flag, an evidence path, an
+ * error text, a table cell) can carry escape sequences, a carriage return, bidi or zero-width characters; none of them may reach the
+ * terminal. Newline and tab stay (the table and usage text are multi-line); the rest of the control set becomes '?'.
+ */
+export function terminalSafe(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '?');
+}
+
 export function defaultDoctorIo(): DoctorIo {
   return {
-    stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(text),
+    stdout: (text) => process.stdout.write(terminalSafe(text)),
+    stderr: (text) => process.stderr.write(terminalSafe(text)),
     env: process.env,
     spawn: doctorSpawn,
     stdin: () => readStdinBounded(),

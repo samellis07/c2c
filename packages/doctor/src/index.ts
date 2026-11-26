@@ -1,4 +1,4 @@
-export { doctorCli, verifyVendorCli, doctorGateForArgs, positionalOf, flag, defaultDoctorIo, doctorSpawn } from './cli.js';
+export { doctorCli, verifyVendorCli, doctorGateForArgs, positionalOf, flag, defaultDoctorIo, doctorSpawn, terminalSafe } from './cli.js';
 export {
   evaluateGate,
   gateRefusalMessage,
