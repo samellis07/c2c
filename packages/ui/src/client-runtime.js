@@ -1398,6 +1398,70 @@ export function showToast(doc, kind, text) {
   return el;
 }
 
+/**
+ * Ask before a destructive action in an in-page alertdialog (Creator's confirm
+ * dialog). Resolves true only on the confirm button; Cancel, Escape and a click
+ * on the backdrop resolve false. One dialog at a time, focus starts on Cancel
+ * and returns to the control that opened it (the trigger, else the focused one).
+ */
+export function askConfirm(doc, message, labels, trigger) {
+  const documentRef = doc || (typeof document !== 'undefined' ? document : null);
+  const host = documentRef && documentRef.body;
+  if (!host) return Promise.resolve(false);
+  const opener = trigger || documentRef.activeElement;
+  const old = documentRef.querySelector('[data-confirm-dialog]');
+  if (old) old.remove();
+  return new Promise((resolve) => {
+    const backdrop = documentRef.createElement('div');
+    backdrop.className = 'c2c-confirm';
+    backdrop.setAttribute('data-confirm-dialog', '');
+    const box = documentRef.createElement('div');
+    box.className = 'c2c-confirm-box';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'c2c-confirm-msg');
+    const msg = documentRef.createElement('p');
+    msg.id = 'c2c-confirm-msg';
+    msg.textContent = String(message ?? '');
+    const cancel = documentRef.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = (labels && labels.cancelLabel) || 'Cancel';
+    const ok = documentRef.createElement('button');
+    ok.type = 'button';
+    ok.setAttribute('data-confirm-ok', '');
+    ok.textContent = (labels && labels.confirmLabel) || 'Delete';
+    let done = false;
+    const finish = (answer) => {
+      if (done) return;
+      done = true;
+      documentRef.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      if (opener && typeof opener.focus === 'function' && opener.isConnected !== false) opener.focus();
+      resolve(answer);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === 'Tab') {
+        // Keep focus inside the two buttons while the dialog is open.
+        event.preventDefault();
+        (documentRef.activeElement === cancel ? ok : cancel).focus();
+      }
+    };
+    cancel.addEventListener('click', () => finish(false));
+    ok.addEventListener('click', () => finish(true));
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) finish(false);
+    });
+    documentRef.addEventListener('keydown', onKey, true);
+    box.append(msg, cancel, ok);
+    backdrop.appendChild(box);
+    host.appendChild(backdrop);
+    cancel.focus();
+  });
+}
+
 /** In-app chart report chrome: title, Refresh/Sort controls, and the drawing area. */
 function chartPanel(report, heading) {
   return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="chart" data-endpoint="${escapeHtml(report.queryEndpoint || '')}" data-page-size="${report.pageSize || PAGE_SIZE}"><${heading}>${escapeHtml(report.label || report.name)}</${heading}><div class="report-tools" data-chart-tools><button type="button" data-chart-refresh>Refresh</button><button type="button" data-chart-sort>Sort</button></div><div data-state></div><div data-chart></div></section>`;
@@ -8972,13 +9036,12 @@ export function boot(appModel, doc) {
         event.preventDefault();
         if (customAction.disabled) return;
         const message = customAction.getAttribute('data-confirm-message');
-        if (message) {
-          const ok = typeof view.confirm === 'function' ? view.confirm(message) : true;
-          if (!ok) return;
-        }
         const endpoint = customAction.getAttribute('data-action');
         const call = view.fetch || globalThis.fetch;
-        if (endpoint && typeof call === 'function') {
+        const run = () => {
+          if (!(endpoint && typeof call === 'function')) return;
+          customAction.disabled = true;
+          customAction.setAttribute('aria-busy', 'true');
           apiCall(call, view, endpoint, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -8995,8 +9058,17 @@ export function boot(appModel, doc) {
               const msg = body && typeof body.error === 'string' && body.error.trim() ? body.error : 'The action did not run.';
               showToast(documentRef, 'failure', msg);
             })
-            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'));
-        }
+            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'))
+            .finally(() => {
+              customAction.disabled = false;
+              customAction.removeAttribute('aria-busy');
+            });
+        };
+        if (message) {
+          askConfirm(documentRef, message, { confirmLabel: customAction.getAttribute('data-confirm-label'), cancelLabel: customAction.getAttribute('data-cancel-label') }, customAction).then((ok) => {
+            if (ok) run();
+          });
+        } else run();
         return;
       }
       const action = target.closest('[data-retry], [data-prev], [data-next]');
@@ -9031,8 +9103,11 @@ export function boot(appModel, doc) {
           const form = (appModel.forms || []).find((item) => item.name === report.form);
           const call = view.fetch || globalThis.fetch;
           // Creator asks before deleting; Cancel (or no dialog at all) sends nothing.
-          const confirmed = typeof view.confirm === 'function' && view.confirm(DELETE_CONFIRM_TEXT) === true;
-          if (form && form.deleteEndpoint && typeof call === 'function' && confirmed) {
+          if (!(form && form.deleteEndpoint && typeof call === 'function') || rowOp.disabled) return;
+          askConfirm(documentRef, DELETE_CONFIRM_TEXT, null, rowOp).then((confirmed) => {
+            if (!confirmed || rowOp.disabled) return;
+            rowOp.disabled = true;
+            rowOp.setAttribute('aria-busy', 'true');
             apiCall(call, view, form.deleteEndpoint, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -9052,8 +9127,12 @@ export function boot(appModel, doc) {
               })
               .catch(() => {
                 showToast(documentRef, 'failure', 'The record was not deleted.');
+              })
+              .finally(() => {
+                rowOp.disabled = false;
+                rowOp.removeAttribute('aria-busy');
               });
-          }
+          });
           return;
         }
       }

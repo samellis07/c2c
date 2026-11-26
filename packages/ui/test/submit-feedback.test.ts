@@ -66,7 +66,6 @@ function modelWith(actions: Record<string, unknown>[] = [], columns: Record<stri
 interface Win {
   document: Document;
   fetch: unknown;
-  confirm: (text: string) => boolean;
   Event: typeof Event;
   MouseEvent: typeof MouseEvent;
 }
@@ -145,28 +144,27 @@ test('a refused or failed submit always says so; a failure after the write says 
 test('a row Delete asks first; Cancel sends nothing and keeps the row', async () => {
   const runtime = await loadRuntime();
   const { win, doc, calls } = setup('#/report/R', live);
-  const asked: string[] = [];
-  let answer = false;
-  win.confirm = (text) => {
-    asked.push(text);
-    return answer;
-  };
   await runtime.boot(modelWith(), doc);
   await settle();
-  const click = async () => {
-    const button = doc.querySelector('[data-rows] tbody tr button[data-row-delete]');
-    assert.ok(button, 'the row draws a Delete');
+  const click = async (button: Element | null) => {
+    assert.ok(button, 'the control is drawn');
     button.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
     await settle();
   };
-  await click();
-  assert.deepEqual(asked, ['Are you sure you want to delete this record?']);
+  const del = doc.querySelector('[data-rows] tbody tr button[data-row-delete]');
+  await click(del);
+  const dialog = doc.querySelector('[role="alertdialog"]');
+  assert.equal(dialog?.querySelector('p')?.textContent, 'Are you sure you want to delete this record?');
+  assert.equal(calls.filter((c) => c.url === '/forms/F/delete').length, 0, 'the dialog posts nothing yet');
+  await click(Array.from(dialog!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel') ?? null);
+  assert.equal(doc.querySelector('[role="alertdialog"]'), null, 'Cancel closes the dialog');
+  assert.equal(doc.activeElement, del, 'focus returns to the Delete button');
   assert.equal(calls.filter((c) => c.url === '/forms/F/delete').length, 0, 'Cancel sends no delete');
   assert.equal(doc.querySelectorAll('[data-rows] tbody tr').length, 1, 'Cancel keeps the row');
 
-  answer = true;
-  await click();
-  assert.deepEqual(calls.filter((c) => c.url === '/forms/F/delete').map((c) => c.body), [{ ROWID: '11' }], 'OK posts the delete once');
+  await click(del);
+  await click(doc.querySelector('[role="alertdialog"] [data-confirm-ok]'));
+  assert.deepEqual(calls.filter((c) => c.url === '/forms/F/delete').map((c) => c.body), [{ ROWID: '11' }], 'Delete posts once');
 });
 
 test('a custom action whose endpoint is a dry-run stub is turned off and named', async () => {

@@ -76,7 +76,6 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   assert.equal(byState(verdicts, 'crash')!.status, 'waived');
   // Everything a tracked issue owns reports an expected-fail naming the issue.
   for (const [state, issue] of Object.entries({
-    'confirm-open': 'ux-confirm-pending',
     toast: 'ux-toasts-field-errors',
     'server-field-error': 'ux-toasts-field-errors',
     'not-found': 'ux-loading-empty-not-found',
