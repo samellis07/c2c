@@ -587,6 +587,54 @@ test('doctor, plan and the limits facts agree at the 250-column hard cap', () =>
   assert.equal(doctorOver.detail, `table Over_Cap needs ${cap + 1} columns (max ${cap})`);
 });
 
+test('the plan prints a runtime call estimate from row counts and the documented limits, unknown without rows', () => {
+  const app = loadApp(writeDs());
+  const rows = (count: number) => ({ table: 'Item', rows: Array.from({ length: count }, () => ({ columns: {} })) });
+  const page = LIMITS.zcqlRowsPerQuery;
+  const aggregateCap = page * 10;
+  const find = (source?: ReturnType<typeof rows>[]) =>
+    buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, ...(source ? { source } : {}) }).plan.budgets.find((item) => item.id === 'runtime-calls');
+
+  const none = find();
+  assert.ok(none, 'a runtime-calls budget is listed');
+  assert.equal(none.status, 'pass');
+  assert.match(none.detail ?? '', /unknown: no source row counts/);
+  assert.match(none.detail ?? '', /no Catalyst price is recorded in the repo/);
+
+  const small = find([rows(page * 2)]);
+  assert.ok(small);
+  assert.equal(small.status, 'pass', small.detail);
+  assert.match(small.detail ?? '', /Item 2 list page requests/);
+  assert.match(small.detail ?? '', /aggregate calls = \(row selects \+ lookup selects\) x scanned pages = \(1 \+ 0\) x 2 = 2 /);
+  assert.match(small.detail ?? '', /function\.timeout_seconds/);
+
+  const big = find([rows(aggregateCap + 1)]);
+  assert.ok(big);
+  assert.equal(big.status, 'warn');
+  assert.match(big.detail ?? '', new RegExp(`aggregate stops at ${aggregateCap} rows`));
+  assert.match(big.fix ?? '', /page the report|raise AGGREGATE_ROW_CAP/);
+});
+
+test('the runtime call estimate counts the lookup columns of the report, printing its formula', () => {
+  const lookups = ['Type_Ref', 'Level_Ref', 'Seat_Ref'];
+  const field = (name: string) => `\t\t${name}\n\t\t(\n\t\t\ttype = picklist\n\t\t\tvalues = Parent.ID\n\t\t\tdisplayformat = [Label]\n\t\t)`;
+  const text = [
+    'application "Calls"', '{', '\ttime zone = "Asia/Kolkata"',
+    '\tform Parent\n\t{\n\t\tLabel\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}',
+    `\tform Child\n\t{\n\t\tLabel\n\t\t(\n\t\t\ttype = text\n\t\t)\n${lookups.map(field).join('\n')}\n\t}`,
+    `\tlist Child_Report\n\t{\n\t\tshow all rows from Child\n\t\t(\n\t\t\tLabel\n${lookups.map((name) => `\t\t\t${name}`).join('\n')}\n\t\t)\n\t}`,
+    '}', '',
+  ].join('\n');
+  const app = deriveIr(parse(text));
+  const page = LIMITS.zcqlRowsPerQuery;
+  const rows = (table: string, count: number) => ({ table, rows: Array.from({ length: count }, () => ({ columns: {} })) });
+  const budget = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows('Parent', page), rows('Child', page * 10)] }).plan.budgets.find((item) => item.id === 'runtime-calls');
+  assert.ok(budget);
+  // 10 scanned pages x (1 row select + 3 lookup selects) = 40 aggregate calls.
+  assert.match(budget.detail ?? '', /Child 10 list page requests \(3000 rows\), aggregate calls = \(row selects \+ lookup selects\) x scanned pages = \(1 \+ 3 \[3 lookup columns of Child_Report\]\) x 10 = 40 /);
+  assert.match(budget.detail ?? '', /Parent 1 list page request \(300 rows\), aggregate calls = \(row selects \+ lookup selects\) x scanned pages = \(1 \+ 0\) x 1 = 1 /);
+});
+
 test('the plan budgets the mover write calls against the stated Dev write rate', () => {
   const app = loadApp(writeDs());
   const rows = (count: number) => ({ table: 'Item', rows: Array.from({ length: count }, () => ({ columns: {} })) });

@@ -681,13 +681,30 @@ const NO_PRICE = 'no Catalyst price is recorded in the repo, so no cost is estim
  * table, the Data Store reads one full list walk and one aggregate make
  * (one ZCQL page of zcqlRowsPerQuery rows per call; aggregate stops at
  * AGGREGATE_ROW_CAP rows). Aggregate lookup display/scope resolution reads
- * are included too: one bounded page walk per lookup column, using the same
- * 300-id/ZCQL page chunking as the generated handler.
+ * are included too: the generated handler (packages/ui/src/generate.ts, op
+ * "aggregate") resolves every lookup column of the report (a relation column
+ * and each Lookup.Part subcolumn count separately) once per chunk of
+ * zcqlRowsPerQuery distinct ids (at most one chunk per scanned page), and each
+ * read of a parent is one ZCQL statement per zcql.select_columns stage of that
+ * parent, and the row read is itself staged for a table past
+ * zcql.select_columns, so calls = (row selects + lookup selects) x scanned
+ * pages, for the report with the most lookup selects. A group/measure lookup column is read
+ * by scopeLookupIds instead of resolveLookupDisplays, which adds no call. It
+ * assumes at least a page of distinct parent ids, so it is the count for a
+ * plain group + count aggregate, not a bound: a request that names a dotted
+ * lookup path adds resolveLookupPaths reads.
  * Only documented limits are used: the repo records no price and no per-call
  * latency, so cost and time stay unknown. Warns when an aggregate would be
  * truncated. Without --source-* counts it says unknown.
  */
-function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTableData[]): PlanBudget {
+/** ZCQL statements one read of a parent table takes: its columns are staged past zcql.select_columns, each statement repeating ROWID. */
+function stagesOf(table: SchemaTable | undefined): number {
+  const columns = table?.columns.length ?? 0;
+  const limit = limitValue('zcql.select_columns');
+  return columns + 1 <= limit ? 1 : Math.ceil(columns / (limit - 1));
+}
+
+function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTableData[], lookupColumns?: ReadonlyMap<string, { report: string; parents: string[] }>): PlanBudget {
   const timeout = `function.timeout_seconds ${limitValue('function.timeout_seconds')}s, unverified`;
   if (!source) {
     return {
@@ -707,10 +724,12 @@ function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTable
     if (rows === undefined || rows === 0) continue;
     const pages = Math.ceil(rows / page);
     const scanned = Math.min(pages, Math.ceil(AGGREGATE_ROW_CAP / page));
-    const lookups = table.columns.filter((column) => column.relation).length;
-    const lookupReads = lookups * scanned;
-    const aggregateCalls = scanned + lookupReads;
-    parts.push(`${table.name} ${pages} list page request${pages === 1 ? '' : 's'} (${rows} rows), aggregate reads ${scanned} page${scanned === 1 ? '' : 's'} + ${lookupReads} lookup-resolution read${lookupReads === 1 ? '' : 's'} = ${aggregateCalls} aggregate call${aggregateCalls === 1 ? '' : 's'} (same ${page}-row/${page}-id chunk cap)`);
+    const lookup = lookupColumns?.get(table.name) ?? { report: '', parents: [] };
+    const stages = lookup.parents.reduce((sum, parent) => sum + stagesOf(tables.find((item) => item.name === parent)), 0);
+    const own = stagesOf(table);
+    const aggregateCalls = (own + stages) * scanned;
+    const formula = `(${own} + ${stages}${stages ? ` [${lookup.parents.length} lookup column${lookup.parents.length === 1 ? '' : 's'} of ${lookup.report}]` : ''}) x ${scanned}`;
+    parts.push(`${table.name} ${pages} list page request${pages === 1 ? '' : 's'} (${rows} rows), aggregate calls = (row selects + lookup selects) x scanned pages = ${formula} = ${aggregateCalls} (${page}-row/${page}-id chunks)`);
     if (rows > AGGREGATE_ROW_CAP) truncated.push(table.name);
   }
   const body = parts.length ? parts.join('; ') : 'no measured rows';
@@ -726,7 +745,7 @@ function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTable
   return { id: 'runtime-calls', status: 'pass', detail: base };
 }
 
-export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]): { budgets: PlanBudget[]; ok: boolean } {
+export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[], lookupColumns?: ReadonlyMap<string, { report: string; parents: string[] }>): { budgets: PlanBudget[]; ok: boolean } {
   const budgets: PlanBudget[] = [];
   for (const table of tables) {
     const unique = uniqueVarchar(table);
@@ -821,6 +840,7 @@ export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTabl
   budgets.push({ ...varcharLengthBudget(tables, source), id: PLAN_BUDGET_IDS[7] });
   budgets.push({ ...devApiCallsBudget(tables, source), id: PLAN_BUDGET_IDS[8] });
   budgets.push({ ...writeRateBudget(tables, source), id: PLAN_BUDGET_IDS[9] });
+  budgets.push({ ...runtimeCallsBudget(tables, source, lookupColumns), id: PLAN_BUDGET_IDS[10] });
   return { budgets, ok: budgets.every((budget) => budget.status !== 'fail') };
 }
 
@@ -1697,7 +1717,14 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
   const connectionSecrets = extractConnectionSecrets(app);
   const connectionSecretKeys = connectionSecrets.map((s) => s.envKey);
   const mailStep = opts.mail || signals.sendmail;
-  const { budgets, ok } = buildBudgets(schema.tables, opts.source);
+  const lookupColumns = new Map<string, { report: string; parents: string[] }>();
+  const stageCount = (forms: readonly string[]) => forms.reduce((sum, form) => sum + stagesOf(schema.tables.find((item) => item.name === form)), 0);
+  for (const report of ui.model.reports) {
+    if (!report.form) continue;
+    const parents = report.columns.flatMap((column) => (column.lookup ? [column.lookup.form] : []));
+    if (stageCount(parents) > stageCount(lookupColumns.get(report.form)?.parents ?? [])) lookupColumns.set(report.form, { report: report.name, parents });
+  }
+  const { budgets, ok } = buildBudgets(schema.tables, opts.source, lookupColumns);
   // One mapping source: the generator's schedule plans (deluge
   // schedulePlansFor) name every cron and pick OneTime vs CronExpression, the
   // same plans job-scheduling.json carries.
