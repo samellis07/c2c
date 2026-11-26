@@ -35,9 +35,11 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readF
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { isDirectoryPath } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
+import { PUBLIC_WORDS } from './public-words.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { analyze } from '../../cli/src/analyze.js';
 import {
+  appIdentifiers,
   listReportApps,
   loadIr,
   lockFor,
@@ -90,6 +92,7 @@ export function resolveStatusDir(env: Record<string, string | undefined>, argvDi
  * language keywords or documented legacy builtins rather than app identifiers.
  */
 const KEYWORDS = new Set(['for', 'getUrl', 'if', 'input', 'postUrl', 'pushnotification', 'return', 'sort', 'while']);
+const KEYWORD_LOWER = new Set([...KEYWORDS].map((word) => word.toLowerCase()));
 const ATTACHMENT_KINDS = new Set(['file', 'template', 'view']);
 
 let catalogue: Set<string> | undefined;
@@ -131,6 +134,35 @@ const MAP_REPORT_PREFIX = 'Map report ';
 /** `Map report <report> is shown as a list because <form> has no address field to plot.` names two unquoted identifiers. */
 const MAP_AS_LIST = new RegExp(`^Map report (${NAME_TOKEN}) is shown as a list because (${NAME_TOKEN}) has no address field to plot\\.$`, 'u');
 
+const BOUNDARY = '[\\p{L}\\p{N}_-]';
+
+/** A name equal to a public sentence word, a keyword or a catalogue builtin is left to the slot rules (see public-words.ts). */
+function collidesWithPublicWord(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (PUBLIC_WORDS.has(lower) || KEYWORD_LOWER.has(lower) || catalogueNames().has(lower)) return true;
+  // A multi-word label ("Custom action") collides only when every one of its words is a public word.
+  const words = lower.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return words.length > 0 && words.every((word) => PUBLIC_WORDS.has(word));
+}
+
+function redactIdentifiers(text: string, identifiers: Iterable<string> | undefined): string {
+  if (!identifiers) return text;
+  const haystack = text.toLowerCase();
+  // Only names that occur in this sentence can match: an app declares thousands, a sentence is short.
+  const present = new Set<string>();
+  for (const raw of identifiers) {
+    const name = raw.replace(/^[^\p{L}\p{N}_]+|[^\p{L}\p{N}_]+$/gu, '');
+    if (name && !/^\d+$/.test(name) && haystack.includes(name.toLowerCase()) && !collidesWithPublicWord(name)) present.add(name);
+  }
+  if (!present.size) return text;
+  const alternation = [...present]
+    .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  // Whole token with Unicode letter/digit/underscore (and hyphen) boundaries: \b is ASCII-only, `Ünï_Rep` and `9lives` are names.
+  return text.replace(new RegExp(`(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'giu'), '(app identifier)');
+}
+
 /**
  * The construct name as it may appear in a committed doc. Translator kinds
  * (`criteria-dynamic`) and catalogue builtins / keywords pass through; any
@@ -146,7 +178,7 @@ const MAP_AS_LIST = new RegExp(`^Map report (${NAME_TOKEN}) is shown as a list b
  * two shapes `prefix:name` and `Print template "x": ...` are actually built
  * to be split this way. Anything else is a sentence and passes through whole.
  */
-export function publicConstruct(construct: string): string {
+export function publicConstruct(construct: string, identifiers?: Iterable<string>): string {
   let text = construct.replace(QUOTED_NAME, '(app identifier)');
   text = text.replace(MAP_AS_LIST, 'Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.');
   // Fail closed: the filter reason names its report; model.ts quotes it, but an unquoted name is an identifier too.
@@ -160,6 +192,9 @@ export function publicConstruct(construct: string): string {
     // \b is ASCII-only: use Unicode letter/digit lookarounds so `Ünï_Rep` and `9lives` match whole.
     text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'gu'), '(app identifier)');
   }
+  // Name-aware layer: every identifier the analysed app declares is redacted wherever it appears, whatever the sentence
+  // shape, quoted or not. The shape rules above are the second layer, for names the IR does not list.
+  text = redactIdentifiers(text, identifiers);
   const at = text.indexOf(':');
   if (at < 0) return text;
   const prefix = text.slice(0, at);
@@ -183,36 +218,39 @@ function compareConstructSets(a: PerAppConstructSet, b: PerAppConstructSet): num
 }
 
 /** Sorted public names and the item count. Private names that share a bucket collapse to one entry. */
-function constructSetForApp(app: { todoKinds: { construct: string; count: number }[]; todoCount: number }): PerAppConstructSet {
+function constructSetForApp(app: { todoKinds: { construct: string; count: number }[]; todoCount: number }, identifiers: readonly string[]): PerAppConstructSet {
   const names = new Set<string>();
-  for (const kind of app.todoKinds) names.add(publicConstruct(kind.construct));
+  for (const kind of app.todoKinds) names.add(publicConstruct(kind.construct, identifiers));
   return { constructs: [...names].sort(compareEnUs), items: app.todoCount };
 }
 
 /** Merge kinds that share a public bucket. */
-function publicKinds(kinds: readonly { construct: string; count: number }[]): StatusKind[] {
+function publicKinds(kinds: readonly { construct: string; count: number }[], identifiers: readonly string[]): StatusKind[] {
   const merged = new Map<string, number>();
   for (const kind of kinds) {
-    const name = publicConstruct(kind.construct);
+    const name = publicConstruct(kind.construct, identifiers);
     merged.set(name, (merged.get(name) ?? 0) + kind.count);
   }
   return [...merged.entries()].map(([construct, count]) => ({ construct, count })).sort(byKind);
 }
 
 export function statusFromReport(report: MigrationReport): DeterminismStatus {
+  // The aggregate kinds are merged across apps, so redact with every analysed app's identifiers: over-redacting one app's
+  // sentence with another's names only ever hides more.
+  const all = [...new Set(report.apps.flatMap((app) => app.identifiers ?? []))];
   return {
     totalApps: report.aggregate.totalApps,
     noTodoApps: report.aggregate.noTodoApps,
     deterministicApps: report.aggregate.deterministicApps,
     todoTotal: report.aggregate.todoTotal,
-    kinds: publicKinds(report.aggregate.todoKinds),
+    kinds: publicKinds(report.aggregate.todoKinds, all),
     perAppConstructSets: report.apps
       .filter((app) => !app.deterministic)
-      .map(constructSetForApp)
+      .map((app) => constructSetForApp(app, all))
       .sort(compareConstructSets),
     deterministicWithUiTodos: report.aggregate.deterministicWithUiTodos,
     silentDropTotal: report.aggregate.silentDrops,
-    silentDropKinds: publicKinds(report.aggregate.silentDropKinds),
+    silentDropKinds: publicKinds(report.aggregate.silentDropKinds, all),
   };
 }
 
@@ -273,12 +311,14 @@ export interface SiteAttribution {
 export function siteAttributionForDir(dir: string, label: string): SiteAttribution {
   const apps = listReportApps(dir).map((entry) => {
     const lock = lockFor(entry.target);
-    const report = analyze(loadIr(entry.target), lock ? { lock } : undefined);
+    const ir = loadIr(entry.target);
+    const identifiers = appIdentifiers(ir);
+    const report = analyze(ir, lock ? { lock } : undefined);
     const todos = report.deluge.todoLocations.map((todo) => ({
       scope: todo.scope,
       location: todo.location,
       construct: todo.construct,
-      signature: publicConstruct(todo.construct),
+      signature: publicConstruct(todo.construct, identifiers),
     }));
     return {
       app: entry.name,
