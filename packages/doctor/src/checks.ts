@@ -935,7 +935,7 @@ async function checkReact(ctx: DoctorContext): Promise<CheckResult[]> {
     rmSync(probe);
     out.push(pass('D-R4', 'npm cache writable'));
   } catch {
-    out.push(fail('D-R4', `the npm cache ${cacheDir} is not writable`, `make ${cacheDir} writable, or point npm at a writable cache (npm config set cache <dir>)`));
+    out.push(fail('D-R4', `the npm cache ${clean(cacheDir)} is not writable`, `make ${clean(cacheDir)} writable, or point npm at a writable cache (npm config set cache <dir>)`));
   }
   return out;
 }

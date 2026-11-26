@@ -2439,3 +2439,18 @@ test('D-A1: no guided setup step when the Catalyst skills are installed', async 
   await doctorCli([], io, { hooks: NO_HOOKS });
   assert.doesNotMatch(out(), /SETUP STEP/);
 });
+
+test('doctor react prerequisites: an npm cache path with terminal and bidi controls is neutralised in D-R4', async () => {
+  const { dir, env } = greenWorkspace();
+  const react = resolveScope({ cwd: dir, flags: { ui: 'react' }, hooks: NO_HOOKS });
+  // A regular file in the path makes the cache directory impossible to create, so D-R4 fails and echoes the path.
+  const blocker = join(dir, 'cache-blocker');
+  writeFileSync(blocker, 'x');
+  const hostile = join(blocker, `c${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x202e)}${String.fromCharCode(0x200b)}d`);
+  const result = await runDoctorChecks({ io: hostIo(env, hostile).io, workspace: dir, scope: react, local: false });
+  const d4 = result.checks.find((check) => check.id === 'D-R4');
+  assert.equal(d4?.status, 'fail');
+  const shown = `${d4?.detail}\n${d4?.fix}`;
+  for (const code of [0x1b, 0x202e, 0x200b]) assert.ok(!shown.includes(String.fromCharCode(code)), `U+${code.toString(16)} must not reach the output`);
+  assert.ok(shown.includes('cache-blocker'), 'the readable part of the path is kept');
+});
