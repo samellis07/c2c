@@ -600,7 +600,6 @@ test('no scan controls unless the field declares a scanner', async () => {
   assert.equal(doc.querySelector('.c2c-scan'), null);
 });
 
-<<<<<<< HEAD
 /** Browser stubs for media fields: a camera, a recorder that keeps what it is given, a canvas and DataTransfer. */
 function mediaStubs(options: { denied?: boolean; noApi?: boolean } = {}) {
   const requests: any[] = [];
@@ -749,7 +748,6 @@ test('Stop recording keeps the take once and a later pagehide does not remove it
   dom.flushSync(() => win.dispatchEvent(new win.Event('pagehide')));
   assert.equal(storedFile(doc), kept, 'the attached take survives');
   assert.equal(stubs.stopped(), 1);
-=======
 const PICKER_KEY = 'AIzaSyTestKeyTestKeyTestKeyTestKey123456';
 const PICKER_CLIENT = '123456789012-abcdefghijklmnop.apps.googleusercontent.com';
 
@@ -835,5 +833,4 @@ test('a Google-native document is refused with a visible message and nothing is 
   for (let i = 0; i < 50 && !box(doc, 'Doc').querySelector('[role="alert"]'); i++) await delay(10);
   assert.match(box(doc, 'Doc').querySelector('[role="alert"]')!.textContent!, /Google-native/);
   assert.ok(!calls.some((c) => c.startsWith('fetch:')));
->>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
 });

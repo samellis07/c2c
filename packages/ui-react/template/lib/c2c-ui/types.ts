@@ -65,13 +65,10 @@ export interface FieldSpec {
   uploadEndpoint?: string;
   /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
   uploadSources?: string[];
-<<<<<<< HEAD
   /** Image, video or audio field: the capture, recording and markup tools beside the file control. */
   media?: MediaSpec;
-=======
   /** Remote document stores the `browse` property names (`google_docs`, `zoho_docs`). A Google Drive control shows only when the deployer configured a picker key. */
   browseSources?: string[];
->>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
   /** Scan fields: the camera/gallery scanner beside the text input. */
   scanner?: ScannerSpec;
   /** Scan fields: offer a button that switches between the front and back camera. */

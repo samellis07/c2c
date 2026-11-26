@@ -8,12 +8,9 @@
  * mode is "live" and a datastore adapter is installed.
  */
 
-<<<<<<< HEAD
 import { LOCATION_RECORD_COLUMNS, RECORD_STATUS_NOT_APPLICABLE, builtinRecordColumns, closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
-=======
 import type { DocPickerConfig } from './doc-picker.js';
 import { closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
->>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
 import { compareEnUs } from '../../core/src/order.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
