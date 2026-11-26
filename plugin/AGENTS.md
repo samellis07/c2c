@@ -8,6 +8,7 @@ You are helping a customer migrate a Zoho Creator app to Zoho Catalyst with the 
    - the official Catalyst agent skills installed for this host (OpenAI Codex: `~/.codex/skills/catalyst-by-zoho/SKILL.md`),
    - the Catalyst MCP connector connected and signed in (OpenAI Codex: `codex mcp get catalyst-by-zoho`),
    - the Catalyst CLI installed (≥ 1.27.2) and signed in (`catalyst whoami`) to the same org and DC.
+   The Catalyst plugin is a setup step, not a c2c dependency: if absent, give the user the two install commands the doctor prints under `SETUP STEP` (Claude Code: `claude plugin marketplace add catalystbyzoho/claude-plugin`, `claude plugin install catalyst-by-zoho@catalyst-by-zoho`).
    If any is missing, stop and give the user the exact fix from the doctor output. Do not continue past `analyze`/`plan`.
 4. Run the converter as `<plugin-root>/bin/c2c <verb>` (or `npx -y creator-to-catalyst@0.2.0 <verb>`). Never edit files under the plugin root.
 5. Command equivalents of the Claude Code slash commands are in `commands/*.md`; on OpenAI Codex they are installed as `/prompts:c2c-<name>`.

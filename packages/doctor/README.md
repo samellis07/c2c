@@ -22,7 +22,7 @@ a missing evidence file, 6 on Node/vendor integrity. Output is
 
 The CLI cannot see the host's MCP session, so doctor runs in two halves:
 
-- **CLI half** (`c2c doctor`): D-A1/A4 skills on disk, D-C* Catalyst CLI,
+- **CLI half** (`c2c doctor`): D-A1/A4 skills on disk (when missing, a `SETUP STEP` block prints the two `claude plugin marketplace add` / `claude plugin install` commands), D-C* Catalyst CLI,
   D-D* Creator export and data source, D-E* Node and plugin integrity,
   D-F* org/project budgets, D-C5 data centre, D-R* React build prerequisites
   (run for the default React target; `--ui vanilla` or `"ui": "vanilla"`

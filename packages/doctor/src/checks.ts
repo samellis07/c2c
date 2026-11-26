@@ -298,8 +298,14 @@ function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; err
   }
 }
 
+/** The one-time Claude Code setup for the official Catalyst plugin; c2c does not bundle or depend on it. */
+export const CATALYST_PLUGIN_INSTALL_COMMANDS = [
+  'claude plugin marketplace add catalystbyzoho/claude-plugin',
+  'claude plugin install catalyst-by-zoho@catalyst-by-zoho',
+] as const;
+
 const D_A1_FIX =
-  'the official Catalyst skills are not installed. Claude Code: /plugin marketplace add catalystbyzoho/claude-plugin then /plugin install catalyst-by-zoho@catalyst-by-zoho. Codex: copy the Catalyst agent skills into ~/.codex/skills/ (exact repo path [UNVERIFIED]). Cursor: clone the skills repo and set C2C_CATALYST_SKILLS_DIR=<path>/skills';
+  'the official Catalyst skills are not installed (one-time setup, see SETUP STEP). Claude Code: claude plugin marketplace add catalystbyzoho/claude-plugin then claude plugin install catalyst-by-zoho@catalyst-by-zoho. Codex: copy the Catalyst agent skills into ~/.codex/skills/ (exact repo path [UNVERIFIED]). Cursor: clone the skills repo and set C2C_CATALYST_SKILLS_DIR=<path>/skills';
 
 /** The skills the agent half must see in-session (D-A3, per plugin/references/doctor-spec.md). */
 const REQUIRED_SKILLS = [
@@ -378,7 +384,7 @@ async function checkA2(ctx: DoctorContext): Promise<CheckResult> {
     return skip(
       'D-A2',
       'catalyst-by-zoho is not in claude plugin list',
-      'install or enable catalyst-by-zoho (Claude Code: /plugin enable catalyst-by-zoho), then re-run c2c doctor',
+      'install it (claude plugin marketplace add catalystbyzoho/claude-plugin; claude plugin install catalyst-by-zoho@catalyst-by-zoho) or enable it (/plugin enable catalyst-by-zoho), then re-run c2c doctor',
     );
   const enabled = hits.filter((e) => e.enabled === true);
   if (enabled.length === 0) {
