@@ -901,7 +901,7 @@ function fieldControl(field, id, describedBy) {
       // A stored value outside the list selects Others and pre-fills its text box.
       const other = initialItems.find((item) => !listed.has(item));
       const othersMark = other !== undefined ? ' selected' : '';
-      const text = `<input type="text" data-others-text maxlength="${field.maxLength ?? 255}"${other === undefined ? ' hidden' : ` value="${escapeHtml(String(other))}"`}>`;
+      const text = `<input type="text" data-others-text aria-label="${escapeHtml(field.label || field.name)} (other)" maxlength="${field.maxLength ?? 255}"${other === undefined ? ' hidden' : ` value="${escapeHtml(String(other))}"`}>`;
       select = `<select${idAttr} name="${name}"${required}${lookup}${described} data-others-choice>${blank}${options}<option value="${OTHERS_VALUE}"${othersMark}>Others</option></select>${text}`;
     } else {
       select = `<select${idAttr} name="${name}"${multiple}${required}${lookup}${described}>${blank}${extra}${options}</select>`;
@@ -928,7 +928,7 @@ function fieldControl(field, id, describedBy) {
       const other = initial !== '' && !new Set(choices.map((choice) => String(choice))).has(initial) ? initial : '';
       const cid = `${id}-choice-others`;
       parts.push(`<label class="choice" for="${cid}"><input id="${cid}" type="radio" name="${name}" value="${OTHERS_VALUE}" data-others-choice${other !== '' ? ' checked' : ''}${required}${described}> Others</label>`);
-      parts.push(`<input type="text" data-others-text maxlength="${field.maxLength ?? 255}"${other === '' ? ' hidden' : ` value="${escapeHtml(other)}"`}>`);
+      parts.push(`<input type="text" data-others-text aria-label="${escapeHtml(field.label || field.name)} (other)" maxlength="${field.maxLength ?? 255}"${other === '' ? ' hidden' : ` value="${escapeHtml(other)}"`}>`);
     }
     return choiceGroup(field, parts.join(''));
   }
@@ -9246,6 +9246,10 @@ export function boot(appModel, doc) {
     if (!sheet) return;
     sheet.hidden = !open;
     if (moreTab) moreTab.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      const first = sheet.querySelector('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (first && first.focus) first.focus();
+    }
   };
   if (moreTab && sheet) {
     moreTab.addEventListener('click', () => {
@@ -9260,6 +9264,13 @@ export function boot(appModel, doc) {
       if (event.key === 'Escape' && !sheet.hidden) {
         setMore(false);
         moreTab.focus();
+      } else if (event.key === 'Tab' && !sheet.hidden) {
+        const focusable = Array.from(sheet.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && documentRef.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && documentRef.activeElement === last) { event.preventDefault(); first.focus(); }
       }
     });
   }
@@ -9418,7 +9429,7 @@ export function boot(appModel, doc) {
     if (popup.target === 'report') {
       const report = (appModel.reports || []).find((item) => item.name === name);
       if (!report) return;
-      wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true">${close}${renderReport(report)}</div>`;
+      wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(report.label || report.name)}">${close}${renderReport(report)}</div>`;
       docRef.body.appendChild(wrap);
       if (report.view === 'chart') {
         const section = wrap.querySelector('section[data-report]');
@@ -9436,7 +9447,37 @@ export function boot(appModel, doc) {
       if (formEl) wireForm(appModel, form, formEl, viewRef);
     }
     const closeButton = wrap.querySelector('[data-modal-close]');
-    if (closeButton) closeButton.addEventListener('click', () => wrap.remove());
+    const opener = docRef.activeElement;
+    const dialog = wrap.querySelector('.modal-card');
+    // The key handler lives exactly as long as the popup: every way the popup can go (the close
+    // button, Escape, closeDialog, a route sweep, any other removal) detaches it, so it never leaks
+    // and never steals focus from a later screen.
+    let removalWatch = null;
+    const detach = () => {
+      docRef.removeEventListener('keydown', onKey, true);
+      if (removalWatch) { removalWatch.disconnect(); removalWatch = null; }
+    };
+    const closePopup = () => { wrap.remove(); detach(); if (opener && opener.isConnected && opener.focus) opener.focus(); };
+    if (closeButton) closeButton.addEventListener('click', closePopup);
+    const onKey = (event) => {
+      if (!wrap.isConnected) { detach(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); closePopup(); }
+      else if (event.key === 'Tab' && dialog) {
+        const focusable = Array.from(dialog.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'));
+        if (!focusable.length) return;
+        const first = focusable[0]; const last = focusable[focusable.length - 1];
+        if (event.shiftKey && docRef.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && docRef.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    docRef.addEventListener('keydown', onKey, true);
+    const Watcher = docRef.defaultView && docRef.defaultView.MutationObserver;
+    if (Watcher) {
+      removalWatch = new Watcher(() => { if (!wrap.isConnected) detach(); });
+      removalWatch.observe(docRef.body, { childList: true });
+    }
+    const first = dialog && dialog.querySelector('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (first && first.focus) first.focus();
   };
   setPopupOpener((popup, root, viewRef) => {
     // A popup target that lives only in a hidden nav section asks the server first, like its route does.
