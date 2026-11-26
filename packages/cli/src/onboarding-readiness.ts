@@ -93,7 +93,6 @@ function readIfPresent(path: string): string | undefined {
 }
 
 export async function loadAppInputs(repoRoot: string, fixture: InRepoFixture): Promise<AppInputs> {
-  const privateDir = process.env.C2C_FIXTURES_DIR ?? null;
   const ir = parseFileWithSidecars(fixture.file).ir;
   const source = decode(readFileSync(fixture.file)).text;
   const report = await buildFixtureMigrationReport(fixture);
