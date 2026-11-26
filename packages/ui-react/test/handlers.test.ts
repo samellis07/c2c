@@ -949,3 +949,20 @@ test('a form whose report lists Added_Location posts the browser position as geo
     assert.deepEqual((posted[0]!.body as Record<string, unknown>).geo, expected, `${form} geo`);
   }
 });
+
+test('a 400 naming a field lands on that field: text, aria-describedby, aria-invalid, focus; hostile server text stays plain and bounded', async () => {
+  const { spec, handlers } = libraryForms();
+  const form = spec.forms['Staff_Members']!;
+  const hostile = `<img src=x onerror=alert(1)>\u0007‮${'z'.repeat(2000)}`;
+  const rendered = await renderForm(form, handlers, { reply: () => ({ ok: false, status: 400, body: { dryRun: false, wrote: false, error: hostile, field: 'Staff_Email' } }) });
+  await fillStaff(rendered);
+  await submit(rendered);
+  const slot = rendered.formEl.querySelector('[data-error-for="Staff_Email"]') as HTMLElement;
+  const control = rendered.formEl.querySelector('[name="Staff_Email"]') as HTMLElement;
+  assert.ok(slot?.id, 'the error has an id');
+  assert.ok((control.getAttribute('aria-describedby') ?? '').split(/\s+/).includes(slot.id), 'the control is described by its error');
+  assert.equal(control.getAttribute('aria-invalid'), 'true');
+  assert.equal(rendered.win.document.activeElement, control, 'focus moves to the field');
+  assert.equal(rendered.container.querySelector('img'), null, 'no markup from server text');
+  assert.ok((slot.textContent ?? '').length <= 300 && !/[\u0000-\u0008‪-‮]/.test(slot.textContent ?? ''), 'bounded plain text');
+});

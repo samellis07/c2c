@@ -315,3 +315,23 @@ export function firstErrorControl(formEl: HTMLFormElement, errors: Record<string
   }
   return null;
 }
+
+/**
+ * Ties each shown field error to its controls: the error gets an id and the
+ * controls name it in aria-describedby (dropped again once the error clears),
+ * so a screen reader reads the message with the control.
+ */
+export function linkFieldErrors(formEl: HTMLFormElement): void {
+  for (const box of Array.from(formEl.querySelectorAll<HTMLElement>('[data-field]'))) {
+    const slot = box.querySelector<HTMLElement>('[data-error-for]');
+    const controls = Array.from(box.querySelectorAll<HTMLElement>('input:not([type="hidden"]), select, textarea'));
+    const mine = slot?.id || `c2c-err-${(box.getAttribute('data-field') ?? '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    if (slot && !slot.id) slot.id = mine;
+    for (const control of controls) {
+      const rest = (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter((id) => id && id !== mine);
+      const ids = slot ? [...rest, mine] : rest;
+      if (ids.length) control.setAttribute('aria-describedby', ids.join(' '));
+      else control.removeAttribute('aria-describedby');
+    }
+  }
+}

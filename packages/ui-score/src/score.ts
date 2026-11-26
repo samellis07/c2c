@@ -957,7 +957,11 @@ export function createFakeApi(sample: Map<string, Record<string, string>>, rows:
       if (lane === 'query') {
         const report = /\/reports\/([^/?]+)/.exec(path);
         const row = sample.get(decodeURIComponent(report?.[1] ?? ''));
-        return reply(200, { rows: mode === 'empty' ? [] : row ? [row] : rows });
+        const all = row ? [row] : rows;
+        // A search narrows the rows the way the server does: a row stays when a value holds the text.
+        const q = typeof (body as { q?: unknown }).q === 'string' ? (body as { q: string }).q.trim().toLowerCase() : '';
+        const kept = q ? all.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(q))) : all;
+        return reply(200, { rows: mode === 'empty' ? [] : kept });
       }
       if (lane === 'record') return reply(200, { record: rows[0] ?? [...sample.values()][0] ?? null });
       if (lane === 'remove' || lane === 'submit' || lane === 'action') return reply(200, { ok: true, dryRun: false });

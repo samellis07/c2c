@@ -66,6 +66,16 @@ export function AppShell({ title, sections, current, phoneLayout, children }: Ap
   const isCurrent = (item: NavItem) => `${item.kind}/${item.name}` === current;
   const screen = items.find(isCurrent)?.label ?? current;
   const boundaryKey = `${current}|${route.name === 'form' ? route.edit ?? '' : route.name === 'report' ? route.row ?? '' : ''}`;
+  const previousRoute = useRef<string | null>(null);
+  const shape = route as { name: string; id?: string; row?: string; edit?: string };
+  const routeIdentity = `${shape.name}|${shape.id ?? ''}|${shape.row ?? ''}|${shape.edit ?? ''}`;
+  useEffect(() => {
+    const changed = previousRoute.current !== null && previousRoute.current !== routeIdentity;
+    previousRoute.current = routeIdentity;
+    if (!changed) return;
+    const heading = doc.getElementById('main')?.querySelector<HTMLElement>('h1, h2');
+    if (heading) { if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+  }, [doc, routeIdentity]);
 
   // The sheet answers synchronously: a click or Escape leaves the DOM in its final state.
   const setSheet = (next: boolean) => {
@@ -165,7 +175,7 @@ export function AppShell({ title, sections, current, phoneLayout, children }: Ap
         ))}
       </nav>
       {online ? null : (
-        <div id="offline" className="c2c-offline" role="status">
+        <div id="offline" className="c2c-offline" role="status" hidden={online}>
           Offline. Saved screens stay readable; changes need a network and are not sent until you are back online.
         </div>
       )}

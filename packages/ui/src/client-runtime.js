@@ -759,7 +759,8 @@ export function validateField(field, value) {
   if (field.choices && field.choices.length && !field.othersOption && field.widget !== 'lookup' && field.widget !== 'lookup-multi') {
     const items = Array.isArray(value) ? value.map(String) : [text];
     for (const item of items) {
-      if (!field.choices.includes(item)) return 'Choose a listed value.';
+      // A stored choice may carry trailing blanks the control's value drops.
+      if (!field.choices.includes(item) && !field.choices.some((choice) => String(choice).trim() === item)) return 'Choose a listed value.';
     }
   }
   return null;
@@ -1334,10 +1335,20 @@ export function reportStateHtml(state, opts) {
     const action = options.formHref
       ? `<a class="button-primary" href="${escapeHtml(options.formHref)}">Add a record</a>`
       : '';
+    if (options.filtered) {
+      return `<div data-state="empty"><div class="state-empty"><p>No records match.</p><button type="button" data-clear-search>Clear search</button></div></div>`;
+    }
     return `<div data-state="empty"><div class="state-empty"><p>No records yet</p>${action}</div></div>`;
   }
   if (state === 'error') {
     return `<div data-state="error" role="alert"><div class="state-error"><p>Could not load these records.</p><button type="button" data-retry>Retry</button></div></div>`;
+  }
+  if (state === 'denied') {
+    return `<div data-state="denied" role="alert"><div class="state-error"><h2>You don't have access to this report</h2><p>Ask the app administrator for access.</p><a href="#/">Go to home</a></div></div>`;
+  }
+  if (state === 'session-expired') {
+    const login = options.loginHref ? `<a class="button-primary" href="${escapeHtml(options.loginHref)}">Sign in again</a>` : '';
+    return `<div data-state="session-expired" role="alert"><div class="state-error"><p>Your session ended. Sign in again to continue; what you entered on this page is kept until you leave it.</p>${login}</div></div>`;
   }
   return '';
 }
@@ -1391,6 +1402,18 @@ export function submitCommitted(res, body) {
   return !!(res && (res.ok || (body && body.wrote === true)));
 }
 
+/**
+ * Server text shown to the user: control and direction-override characters
+ * removed, whitespace collapsed, length capped. It is only ever set as text.
+ */
+export function cleanServerText(value) {
+  const text = String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 300 ? `${text.slice(0, 299)}\u2026` : text;
+}
+
 /** Append a success or failure toast to the live region (or the body without one). */
 export function showToast(doc, kind, text) {
   const documentRef = doc || (typeof document !== 'undefined' ? document : null);
@@ -1400,10 +1423,87 @@ export function showToast(doc, kind, text) {
   const el = documentRef.createElement('div');
   el.className = 'toast';
   el.setAttribute('data-kind', kind);
-  el.setAttribute('role', 'status');
-  el.textContent = String(text ?? '');
+  // A failure interrupts; a success waits its turn.
+  el.setAttribute('role', kind === 'failure' ? 'alert' : 'status');
+  const message = documentRef.createElement('span');
+  message.textContent = cleanServerText(text);
+  el.appendChild(message);
+  const close = documentRef.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '\u00d7';
+  close.addEventListener('click', () => el.remove());
+  el.appendChild(close);
   host.appendChild(el);
+  // A success clears itself; a failure stays until dismissed.
+  const view = documentRef.defaultView;
+  if (kind !== 'failure' && view && typeof view.setTimeout === 'function') view.setTimeout(() => el.remove(), 5000);
   return el;
+}
+
+/**
+ * Ask before a destructive action in an in-page alertdialog (Creator's confirm
+ * dialog). Resolves true only on the confirm button; Cancel, Escape and a click
+ * on the backdrop resolve false. One dialog at a time, focus starts on Cancel
+ * and returns to the control that opened it (the trigger, else the focused one).
+ */
+export function askConfirm(doc, message, labels, trigger) {
+  const documentRef = doc || (typeof document !== 'undefined' ? document : null);
+  const host = documentRef && documentRef.body;
+  if (!host) return Promise.resolve(false);
+  const opener = trigger || documentRef.activeElement;
+  const old = documentRef.querySelector('[data-confirm-dialog]');
+  if (old) old.remove();
+  return new Promise((resolve) => {
+    const backdrop = documentRef.createElement('div');
+    backdrop.className = 'modal';
+    backdrop.setAttribute('data-confirm-dialog', '');
+    const box = documentRef.createElement('div');
+    box.className = 'modal-card';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'c2c-confirm-msg');
+    const msg = documentRef.createElement('p');
+    msg.id = 'c2c-confirm-msg';
+    msg.textContent = String(message ?? '');
+    const cancel = documentRef.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = (labels && labels.cancelLabel) || 'Cancel';
+    const ok = documentRef.createElement('button');
+    ok.type = 'button';
+    ok.setAttribute('data-confirm-ok', '');
+    ok.textContent = (labels && labels.confirmLabel) || 'Delete';
+    let done = false;
+    const finish = (answer) => {
+      if (done) return;
+      done = true;
+      documentRef.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      if (opener && typeof opener.focus === 'function' && opener.isConnected !== false) opener.focus();
+      resolve(answer);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === 'Tab') {
+        // Keep focus inside the two buttons while the dialog is open.
+        event.preventDefault();
+        (documentRef.activeElement === cancel ? ok : cancel).focus();
+      }
+    };
+    cancel.addEventListener('click', () => finish(false));
+    ok.addEventListener('click', () => finish(true));
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) finish(false);
+    });
+    documentRef.addEventListener('keydown', onKey, true);
+    box.append(msg, cancel, ok);
+    backdrop.appendChild(box);
+    host.appendChild(backdrop);
+    cancel.focus();
+  });
 }
 
 /** In-app chart report chrome: title, Refresh/Sort controls, and the drawing area. */
@@ -2412,7 +2512,7 @@ function loadChart(report, section, viewRef) {
     post(withFilter({ op: 'query', page: 0, pageSize: report.pageSize || PAGE_SIZE })).then((res) => {
       // A static host has no data function: that is an empty report, not an error.
       if (!res || res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
-      if (!res.ok) throw new Error(`chart query ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(`chart query ${res.status}`), { refused: res.status });
       return responseJson(res).then((body) => {
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         // The fold reads one page; a full page means more rows may follow.
@@ -2432,7 +2532,7 @@ function loadChart(report, section, viewRef) {
         if (res && (res.status === 404 || res.status === 405 || res.status === 501)) return { rows: [] };
         // A refused group field or a server error is a load failure: the panel
         // shows its error state, never a fake "No Data Available".
-        throw new Error(`chart aggregate ${res && res.status}`);
+        throw Object.assign(new Error(`chart aggregate ${res && res.status}`), { refused: res && res.status });
       })
     : foldRows();
   return first
@@ -2449,8 +2549,12 @@ function loadChart(report, section, viewRef) {
         drawChart(host, report, rows, order, null, { truncated: !!result.truncated, scanned: result.scanned || rows.length });
       }
     })
-    .catch(() => {
-      if (stateEl) stateEl.innerHTML = reportStateHtml('error');
+    .catch((error) => {
+      if (!stateEl) return;
+      const refused = error && error.refused;
+      if (refused === 401) stateEl.innerHTML = reportStateHtml('session-expired', { loginHref: viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '' });
+      else if (refused === 403) stateEl.innerHTML = reportStateHtml('denied');
+      else stateEl.innerHTML = reportStateHtml('error');
     });
 }
 
@@ -3165,7 +3269,7 @@ export function renderRoute(appModel, route, doc) {
   if (route.name === 'home') return renderHome(appModel);
   if (route.name === 'form') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
-    return form ? renderForm(form) : `<p class="todo">Unknown form.</p>`;
+    return form ? renderForm(form) : notFoundHtml('form');
   }
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
@@ -3173,7 +3277,7 @@ export function renderRoute(appModel, route, doc) {
       const form = (appModel.forms || []).find((item) => item.name === report.form);
       return form ? `${renderReport(report)}<section class="record-summary" data-record-summary="${escapeHtml(form.name)}" data-record-report="${escapeHtml(report.name)}" data-record-id="${escapeHtml(route.row)}"><p>Loading record…</p></section>` : `<p class="todo">Unknown report form.</p>`;
     }
-    return report ? renderReport(report) : `<p class="todo">Unknown report.</p>`;
+    return report ? renderReport(report) : notFoundHtml('report');
   }
   if (route.name === 'record') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
@@ -3181,10 +3285,15 @@ export function renderRoute(appModel, route, doc) {
   }
   if (route.name === 'page') {
     const page = (appModel.pages || []).find((item) => item.name === route.id);
-    return page ? renderPage(page, doc, appModel) : `<p class="todo">Unknown page.</p>`;
+    return page ? renderPage(page, doc, appModel) : notFoundHtml('page');
   }
   if (route.name === 'smoke') return renderSmokeShell();
-  return `<p class="todo">That page is not in this app.</p>`;
+  return notFoundHtml('page');
+}
+
+/** The screen an unknown route shows: a heading focus can land on, and the way back to the first screen. */
+function notFoundHtml(kind) {
+  return `<section class="card" data-state="not-found"><h1 tabindex="-1">Not found</h1><p>This ${kind} is not part of the app. Choose a screen from the menu.</p><p><a class="button-primary" href="#/">Go to home</a></p></section>`;
 }
 
 /** Creator's banner after a successful submit when the success handler sets no `success message`. */
@@ -3199,8 +3308,11 @@ export function submitFailureText(body) {
   const server = body && (typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : '');
   // The row is stored; only a step after the write failed. A resubmit would add it twice.
   // The generic "request failed" adds nothing; a Deluge runtime error's text does.
-  if (body && body.wrote === true) return `The record was saved, but a step after saving failed${server && server.trim() && server.trim() !== 'request failed' ? `: ${server.trim()}` : '.'}`;
-  return server && server.trim() ? server : 'The record was not saved.';
+  if (body && body.wrote === true) {
+    const said = cleanServerText(server);
+    return `The record was saved, but a step after saving failed${said && said !== 'request failed' ? `: ${said}` : '.'}`;
+  }
+  return server && cleanServerText(server) ? cleanServerText(server) : 'The record was not saved.';
 }
 
 /**
@@ -9321,6 +9433,47 @@ export function boot(appModel, doc) {
       })
       .catch(() => {});
   });
+  // After a route change, retitle the document to the open screen and move focus
+  // to its heading so a keyboard or screen-reader user lands on the new screen.
+  let watchHeading = null;
+  let lastRouteIdentity = null;
+  const announceRoute = (routeIdentity) => {
+    const movedToNewRoute = lastRouteIdentity !== null && lastRouteIdentity !== routeIdentity;
+    lastRouteIdentity = routeIdentity;
+    if (watchHeading) watchHeading.disconnect();
+    const heading = main.querySelector('h1, h2');
+    const current = nav && nav.querySelector ? nav.querySelector('a[aria-current="page"]') : null;
+    const label = ((current && current.textContent) || (heading && heading.textContent) || '').replace(/\s+/g, ' ').trim();
+    const app = appModel.name || '';
+    documentRef.title = label && app ? `${label} - ${app}` : label || app || documentRef.title;
+    const announcer = documentRef.querySelector('[data-route-announcer]');
+    if (announcer && movedToNewRoute) announcer.textContent = label;
+    if (!heading || typeof heading.focus !== 'function' || !movedToNewRoute) return;
+    if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+    heading.focus({ preventScroll: true });
+    // A screen that redraws itself once its data lands replaces the heading;
+    // put focus on the new one unless the user has already moved on.
+    const Observer = documentRef.defaultView && documentRef.defaultView.MutationObserver;
+    if (!Observer) return;
+    if (watchHeading) watchHeading.disconnect();
+    let watch = null;
+    const done = () => {
+      if (watch) watch.disconnect();
+      if (watchHeading === watch) watchHeading = null;
+    };
+    watch = new Observer(() => {
+      if (heading.isConnected) return;
+      const active = documentRef.activeElement;
+      if (active && active !== documentRef.body) return done();
+      const next = main.querySelector('h1, h2');
+      if (!next) return;
+      if (!next.hasAttribute('tabindex')) next.setAttribute('tabindex', '-1');
+      next.focus({ preventScroll: true });
+      done();
+    });
+    watchHeading = watch;
+    watch.observe(main, { childList: true, subtree: true });
+  };
   const paintAllowed = (route) => {
     if (!main) return;
     // A same-hash repaint must not restart the run: the shell is already up.
@@ -9329,6 +9482,9 @@ export function boot(appModel, doc) {
     for (const modal of documentRef.querySelectorAll('[data-modal-form]')) modal.remove();
     main.innerHTML = renderRoute(appModel, route, documentRef);
     markCurrent();
+    // An unknown screen announces itself: focus lands on its heading.
+    const lost = main.querySelector('[data-state="not-found"] h1');
+    if (lost && typeof lost.focus === 'function') lost.focus();
     if (route.name === 'form') {
       const form = (appModel.forms || []).find((item) => item.name === route.id);
       const formEl = main.querySelector('form');
@@ -9353,7 +9509,7 @@ export function boot(appModel, doc) {
         const section = tbody.closest ? tbody.closest('section[data-report]') : null;
         const loadLive = (page) => {
           const live = reportRowsSlot(section);
-          loadRows(report, live || tbody, view, page);
+          loadRows(report, live || tbody, view, page, section);
         };
         const search = section && section.querySelector('[data-report-search]');
         if (search) {
@@ -9363,6 +9519,17 @@ export function boot(appModel, doc) {
           });
         }
         const filter = section && section.querySelector('select[data-filter]');
+        if (section) {
+          section.addEventListener('click', (event) => {
+            const clear = event.target && event.target.closest ? event.target.closest('[data-clear-search]') : null;
+            if (!clear) return;
+            const box = section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+            if (box) box.value = '';
+            const pick = section.querySelector('select[data-filter]');
+            if (pick) pick.value = '';
+            loadLive(0);
+          });
+        }
         if (filter) filter.addEventListener('change', () => loadLive(0));
       }
     }
@@ -9371,6 +9538,7 @@ export function boot(appModel, doc) {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
     if (report && report.form) loadRecordSummary(appModel, { ...route, id: report.form, report: report.name }, main, view);
   }
+  announceRoute(`${route.name}|${route.id || ""}|${route.row || ""}|${route.edit || ""}`);
   };
   const paint = () => {
     if (!main) return Promise.resolve();
@@ -9538,13 +9706,12 @@ export function boot(appModel, doc) {
         event.preventDefault();
         if (customAction.disabled) return;
         const message = customAction.getAttribute('data-confirm-message');
-        if (message) {
-          const ok = typeof view.confirm === 'function' ? view.confirm(message) : true;
-          if (!ok) return;
-        }
         const endpoint = customAction.getAttribute('data-action');
         const call = view.fetch || globalThis.fetch;
-        if (endpoint && typeof call === 'function') {
+        const run = () => {
+          if (!(endpoint && typeof call === 'function')) return;
+          customAction.disabled = true;
+          customAction.setAttribute('aria-busy', 'true');
           apiCall(call, view, endpoint, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -9561,8 +9728,17 @@ export function boot(appModel, doc) {
               const msg = body && typeof body.error === 'string' && body.error.trim() ? body.error : 'The action did not run.';
               showToast(documentRef, 'failure', msg);
             })
-            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'));
-        }
+            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'))
+            .finally(() => {
+              customAction.disabled = false;
+              customAction.removeAttribute('aria-busy');
+            });
+        };
+        if (message) {
+          askConfirm(documentRef, message, { confirmLabel: customAction.getAttribute('data-confirm-label'), cancelLabel: customAction.getAttribute('data-cancel-label') }, customAction).then((ok) => {
+            if (ok) run();
+          });
+        } else run();
         return;
       }
       const action = target.closest('[data-retry], [data-prev], [data-next]');
@@ -9597,8 +9773,11 @@ export function boot(appModel, doc) {
           const form = (appModel.forms || []).find((item) => item.name === report.form);
           const call = view.fetch || globalThis.fetch;
           // Creator asks before deleting; Cancel (or no dialog at all) sends nothing.
-          const confirmed = typeof view.confirm === 'function' && view.confirm(DELETE_CONFIRM_TEXT) === true;
-          if (form && form.deleteEndpoint && typeof call === 'function' && confirmed) {
+          if (!(form && form.deleteEndpoint && typeof call === 'function') || rowOp.disabled) return;
+          askConfirm(documentRef, DELETE_CONFIRM_TEXT, null, rowOp).then((confirmed) => {
+            if (!confirmed || rowOp.disabled) return;
+            rowOp.disabled = true;
+            rowOp.setAttribute('aria-busy', 'true');
             apiCall(call, view, form.deleteEndpoint, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -9618,8 +9797,12 @@ export function boot(appModel, doc) {
               })
               .catch(() => {
                 showToast(documentRef, 'failure', 'The record was not deleted.');
+              })
+              .finally(() => {
+                rowOp.disabled = false;
+                rowOp.removeAttribute('aria-busy');
               });
-          }
+          });
           return;
         }
       }
@@ -9676,6 +9859,10 @@ export function boot(appModel, doc) {
   const flag = () => {
     if (offline) offline.hidden = navg ? navg.onLine : true;
   };
+  // Coming back online re-reads each report that failed while offline, once.
+  view.addEventListener('online', () => {
+    for (const retry of documentRef.querySelectorAll('section[data-report] [data-state="error"] [data-retry]')) retry.click();
+  });
   view.addEventListener('online', flag);
   view.addEventListener('offline', flag);
   flag();
@@ -9713,10 +9900,11 @@ export function boot(appModel, doc) {
     }
   }
 
-  function loadRows(report, tbody, viewRef, page) {
+  function loadRows(report, tbody, viewRef, page, sectionHint) {
     const call = (viewRef && viewRef.fetch) || globalThis.fetch;
     if (!report.queryEndpoint || typeof call !== 'function') return Promise.resolve();
-    const section = tbody.closest ? tbody.closest('section[data-report]') : null;
+    // An empty answer removes the grid's tbody; the section still owns the repaint.
+    const section = (tbody.closest ? tbody.closest('section[data-report]') : null) || sectionHint || null;
     const current = typeof page === 'number' && page >= 0 ? page : 0;
     if (section && section.dataset) section.dataset.page = String(current);
     const stateEl = section && section.querySelector('[data-state]');
@@ -9727,6 +9915,12 @@ export function boot(appModel, doc) {
     const paintEmpty = () => {
       if (stateEl) stateEl.innerHTML = reportStateHtml('empty', emptyOpts);
     };
+    const narrowed = (() => {
+      const box = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+      const pick = section && section.querySelector('select[data-filter]');
+      return !!((box && box.value) || (pick && pick.value));
+    })();
+    const rowsEmptyOpts = narrowed ? { filtered: true } : emptyOpts;
     if (stateEl) stateEl.innerHTML = reportStateHtml('loading');
     const qInput = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
     const filterEl = section && section.querySelector('select[data-filter]');
@@ -9763,12 +9957,20 @@ export function boot(appModel, doc) {
             paintEmpty();
             return null;
           }
+          if (res && (res.status === 401 || res.status === 403)) return { refused: res.status };
           throw new Error(`report query ${res ? res.status : 'no response'}`);
         }
         return responseJson(res);
       })
       .then((body) => {
         if (body == null) return;
+        if (body.refused) {
+          // A refusal is its own screen, never the generic error with a Retry that cannot help.
+          setReportChrome(section, false);
+          const href = viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '';
+          if (stateEl) stateEl.innerHTML = body.refused === 401 ? reportStateHtml('session-expired', { loginHref: href }) : reportStateHtml('denied');
+          return;
+        }
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         const doc = tbody.ownerDocument;
         if (tbody.hasAttribute('data-board')) fillBoard(report, tbody, rows);
@@ -9786,7 +9988,7 @@ export function boot(appModel, doc) {
         if (bulkButton) bulkButton.disabled = selectedCount === 0;
         setReportChrome(section, rows.length > 0);
         if (stateEl) {
-          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', emptyOpts);
+          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', rowsEmptyOpts);
         }
         updatePages(section, current, rows, pageSize);
         const text = body && typeof body.notice === 'string' ? body.notice : '';
@@ -10115,6 +10317,12 @@ export function boot(appModel, doc) {
           failure = submitFailureText(body);
         }
         if (banner) banner.textContent = failure;
+        // A 400 that names a field lands on that field and takes focus.
+        const named = res && answer && typeof answer.field === 'string' ? (form.fields || []).find((item) => item.name === answer.field) : null;
+        if (named) {
+          const control = showErrors(formEl, form, { [named.name]: failure });
+          if (control && typeof control.focus === 'function') control.focus();
+        }
         if (formDoc) showToast(formDoc, 'failure', submitNotice({ ok: false, dryRun: !live, message: failure }));
         return;
       }

@@ -35,7 +35,7 @@ import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
 import { actionNavHref, hrefFor, navNeedsRow, reportClickFilter, useLocationHash, useOnline } from '../runtime/router';
 import { performActionNav, type ActionNavInstruction } from '../runtime/navigation';
-import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
+import { cleanServerText, failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { matchCriteria } from './criteria';
 import { MapPlot } from './MapView';
 import { PrintSheet } from './PrintSheet';
@@ -80,7 +80,7 @@ function navigationControl(nav: Parameters<typeof actionNavHref>[0], row: Row | 
 
 /** The notice line for a refused or failed row/header action. */
 function actionFailure(status: number, fallback: string): string {
-  return failureText(status) || fallback;
+  return failureText(status) || cleanServerText(fallback);
 }
 
 /** A cell's text: composite values joined, lists comma-separated, decisions as Yes/No, file references by name. */
@@ -708,7 +708,7 @@ function ReportList({ report }: { report: ReportSpec }) {
         </div>
       ) : null}
       {actionNote ? (
-        <div className="c2c-notice c2c-toast" role="status" data-toast="" data-kind={/not |failed|did not/i.test(actionNote) ? 'error' : 'success'}>
+        <div className="c2c-notice c2c-toast" role={/not |failed|did not/i.test(actionNote) ? 'alert' : 'status'} data-toast="" data-kind={/not |failed|did not/i.test(actionNote) ? 'error' : 'success'}>
           <span>{actionNote}</span>
           <Button type="button" variant="secondary" size="sm" aria-label="Dismiss message" onClick={() => setActionNote(null)}>
             Dismiss

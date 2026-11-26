@@ -66,7 +66,6 @@ function modelWith(actions: Record<string, unknown>[] = [], columns: Record<stri
 interface Win {
   document: Document;
   fetch: unknown;
-  confirm: (text: string) => boolean;
   Event: typeof Event;
   MouseEvent: typeof MouseEvent;
 }
@@ -145,28 +144,27 @@ test('a refused or failed submit always says so; a failure after the write says 
 test('a row Delete asks first; Cancel sends nothing and keeps the row', async () => {
   const runtime = await loadRuntime();
   const { win, doc, calls } = setup('#/report/R', live);
-  const asked: string[] = [];
-  let answer = false;
-  win.confirm = (text) => {
-    asked.push(text);
-    return answer;
-  };
   await runtime.boot(modelWith(), doc);
   await settle();
-  const click = async () => {
-    const button = doc.querySelector('[data-rows] tbody tr button[data-row-delete]');
-    assert.ok(button, 'the row draws a Delete');
+  const click = async (button: Element | null) => {
+    assert.ok(button, 'the control is drawn');
     button.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
     await settle();
   };
-  await click();
-  assert.deepEqual(asked, ['Are you sure you want to delete this record?']);
+  const del = doc.querySelector('[data-rows] tbody tr button[data-row-delete]');
+  await click(del);
+  const dialog = doc.querySelector('[role="alertdialog"]');
+  assert.equal(dialog?.querySelector('p')?.textContent, 'Are you sure you want to delete this record?');
+  assert.equal(calls.filter((c) => c.url === '/forms/F/delete').length, 0, 'the dialog posts nothing yet');
+  await click(Array.from(dialog!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel') ?? null);
+  assert.equal(doc.querySelector('[role="alertdialog"]'), null, 'Cancel closes the dialog');
+  assert.equal(doc.activeElement, del, 'focus returns to the Delete button');
   assert.equal(calls.filter((c) => c.url === '/forms/F/delete').length, 0, 'Cancel sends no delete');
   assert.equal(doc.querySelectorAll('[data-rows] tbody tr').length, 1, 'Cancel keeps the row');
 
-  answer = true;
-  await click();
-  assert.deepEqual(calls.filter((c) => c.url === '/forms/F/delete').map((c) => c.body), [{ ROWID: '11' }], 'OK posts the delete once');
+  await click(del);
+  await click(doc.querySelector('[role="alertdialog"] [data-confirm-ok]'));
+  assert.deepEqual(calls.filter((c) => c.url === '/forms/F/delete').map((c) => c.body), [{ ROWID: '11' }], 'Delete posts once');
 });
 
 test('a custom action whose endpoint is a dry-run stub is turned off and named', async () => {
@@ -286,4 +284,66 @@ test('the client draws a dispatchable action enabled and turns off only the stub
   await settle();
   assert.equal(calls.filter((c) => c.url.includes('/actions/archive')).length, 0, 'a turned-off action posts nothing');
   assert.equal(doc.querySelector('[data-action-preview]')?.textContent, 'Not available yet, so turned off: Archive.');
+});
+
+const toastsOf = (doc: Document): Element[] => Array.from(doc.querySelectorAll('#toasts > *'));
+
+test('a failure toast is an alert with a close and stays; a success toast is a status and clears itself', async () => {
+  const runtime = await loadRuntime();
+  const { win, doc } = setup('#/form/F', { status: 400, body: { error: 'Name is taken' } });
+  await runtime.boot(modelWith(), doc);
+  await submitForm(win, doc);
+  const [failure] = toastsOf(doc);
+  assert.equal(failure?.getAttribute('role'), 'alert');
+  assert.ok(failure?.querySelector('button[aria-label="Dismiss"]'), 'the toast can be dismissed');
+  (failure!.querySelector('button') as HTMLElement).dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  assert.equal(toastsOf(doc).length, 0);
+  const ok = setup('#/form/F', live);
+  await runtime.boot(modelWith(), ok.doc);
+  await submitForm(ok.win, ok.doc);
+  const [success] = toastsOf(ok.doc);
+  assert.equal(success?.getAttribute('role'), 'status');
+  await new Promise((resolve) => setTimeout(resolve, 5300));
+  assert.equal(toastsOf(ok.doc).length, 0, 'a success toast clears itself');
+});
+
+test('a 400 naming a field lands on that field: text, aria-describedby, aria-invalid and focus', async () => {
+  const runtime = await loadRuntime();
+  const { win, doc } = setup('#/form/F', { status: 400, body: { error: 'Name is taken', field: 'Item_Name' } });
+  await runtime.boot(modelWith(), doc);
+  await submitForm(win, doc);
+  const slot = doc.querySelector('[data-error-for="Item_Name"]');
+  const control = doc.querySelector('input[name="Item_Name"]');
+  assert.equal(slot?.textContent, 'Name is taken');
+  assert.ok(slot?.id && (control?.getAttribute('aria-describedby') ?? '').split(/\s+/).includes(slot.id), 'the control is described by its error');
+  assert.equal(control?.getAttribute('aria-invalid'), 'true');
+  assert.equal(doc.activeElement, control, 'focus moves to the field');
+});
+
+test('server text shown to the user is plain text with control and direction characters removed and a length cap', async () => {
+  const runtime = await loadRuntime();
+  const hostile = `<img src=x onerror=alert(1)>\u0007‮evil${'x'.repeat(2000)}`;
+  const { win, doc } = setup('#/form/F', { status: 400, body: { error: hostile, field: 'Item_Name' } });
+  await runtime.boot(modelWith(), doc);
+  await submitForm(win, doc);
+  assert.equal(doc.querySelector('#main img, #toasts img'), null, 'no markup is built from server text');
+  for (const el of [doc.querySelector('[data-banner]'), doc.querySelector('[data-error-for="Item_Name"]'), toastsOf(doc)[0]]) {
+    const text = el?.textContent ?? '';
+    assert.ok(!/[\u0000-\u0008\u000B-\u001F\u007F‪-‮⁦-⁩]/.test(text), 'no control or direction characters');
+    assert.ok(text.length <= 320, `capped (${text.length})`);
+    assert.ok(text.includes('<img src=x'), 'shown as text');
+  }
+});
+
+test('a choice stored with a trailing blank can be picked and submitted', async () => {
+  const runtime = await loadRuntime();
+  const { win, doc, calls } = setup('#/form/F', live);
+  const model = modelWith();
+  (model.forms[0]!.fields as unknown as Record<string, unknown>[]).push({ name: 'Slot', ...field, widget: 'select', required: true, choices: ['00:00 ', '00:15'] });
+  await runtime.boot(model, doc);
+  const form = doc.querySelector('form[data-form="F"]') as HTMLFormElement;
+  (form.querySelector('select[name="Slot"]') as HTMLSelectElement).value = '00:00 ';
+  await submitForm(win, doc);
+  assert.equal(doc.querySelector('[data-error-for="Slot"]')?.textContent, '', 'the listed value is accepted');
+  assert.equal(calls.filter((c) => c.url === '/forms/F/submit').length, 1);
 });

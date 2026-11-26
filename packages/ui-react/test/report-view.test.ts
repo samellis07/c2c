@@ -166,6 +166,8 @@ interface Mounted {
 }
 
 /** Mount <ReportView> against a fake endpoint that applies the posted sort like the report endpoint. */
+let actionAnswer: { ok: boolean; status: number; body?: unknown } | undefined;
+
 async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, forms: Record<string, FormSpec> = {}, rowId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; body?: unknown }>, appSettings: Partial<AppSpec> = {}): Promise<Mounted> {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
@@ -222,7 +224,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
       calls.push(body);
       posted.push({ endpoint, body });
       if (endpoint.endsWith('/record')) return recordReply ? recordReply() : { ok: true, status: 200, body: { record: { ROWID: String(body.ROWID), Memo: 'Read me', Lines: [{ ROWID: '2', Material: 'Bolt', Quantity: 3 }] } } };
-      if (endpoint.includes('/actions/')) return { ok: true, status: 200, body: { dryRun: true } };
+      if (endpoint.includes('/actions/')) return actionAnswer ?? { ok: true, status: 200, body: { dryRun: true } };
       const ordered = order(rows, (body.sort ?? []) as { field: string; order?: string }[]);
       const page = typeof body.page === 'number' ? body.page : 0;
       const pageSize = typeof body.pageSize === 'number' && body.pageSize > 0 ? body.pageSize : ordered.length || 1;
@@ -1135,4 +1137,27 @@ test('show export = false draws no export buttons but keeps Print', { skip: SKIP
   const view = await mount(out, { ...spec.reports.Orders!, showExport: false }, ROWS, new Set(['Total']));
   assert.equal(view.container.querySelector('[data-export]'), null);
   assert.ok(view.container.querySelector('[data-print]'));
+});
+
+test('an action result is announced by kind: a failure as an alert, a success as a status; server text is cleaned', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'toast-roles');
+  const spec = reactAppSpec(appOf());
+  const report = { ...spec.reports.Orders!, customActions: [{ name: 'Print Invoice', endpoint: '/reports/Orders/actions/print-invoice' }] };
+  const toast = (view: Mounted) => view.container.querySelector('[data-toast]');
+  try {
+    actionAnswer = { ok: false, status: 400, body: { error: 'nope' } };
+    const failed = await mount(out, report, ROWS, new Set(['Total']), spec.forms);
+    await failed.click(failed.byRole('button', 'Print Invoice'));
+    assert.equal(toast(failed)?.getAttribute('role'), 'alert', 'a failure interrupts');
+    actionAnswer = undefined;
+    const ok = await mount(out, report, ROWS, new Set(['Total']), spec.forms);
+    await ok.click(ok.byRole('button', 'Print Invoice'));
+    assert.equal(toast(ok)?.getAttribute('role'), 'status', 'a success waits its turn');
+  } finally {
+    actionAnswer = undefined;
+  }
+  const { cleanServerText } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/runtime/StatusScreens.js')).href)) as { cleanServerText: (value: unknown) => string };
+  const cleaned = cleanServerText(`<b>x</b>\u0007\u202Eevil${'y'.repeat(2000)}`);
+  assert.ok(!/[\u0000-\u0008\u000B-\u001F\u007F\u202A-\u202E\u2066-\u2069]/.test(cleaned), 'no control or direction characters');
+  assert.ok(cleaned.length <= 300 && cleaned.startsWith('<b>x</b>'), 'plain text, capped');
 });

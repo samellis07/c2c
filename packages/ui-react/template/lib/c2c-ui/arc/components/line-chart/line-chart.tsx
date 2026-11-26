@@ -160,7 +160,7 @@ function Gridline({ value, scale, height }: { value: number; scale: Scale; heigh
 
 function TickLabel({ value, scale, height, format }: { value: number; scale: Scale; height: number; format: (value: number) => string }) {
   const y = useRowY(value, scale, height);
-  return <motion.span className={styles.tick} style={{ y }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: fadeFast }} transition={{ duration: duration.standard, ease: [...ease.standard] }}>
+  return <motion.span className={styles.tick} style={{ top: y }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: fadeFast }} transition={{ duration: duration.standard, ease: [...ease.standard] }}>
     <span className={styles.tickText}>{format(value)}</span>
   </motion.span>;
 }

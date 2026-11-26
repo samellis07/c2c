@@ -154,6 +154,9 @@ function sampleValue(control: HTMLInputElement | HTMLTextAreaElement): string {
   if (/^(number|decimal|percentage|percent|currency|money)$/.test(widget)) return '12';
   if (widget === 'email') return 'gate@example.com';
   if (widget === 'url') return 'https://example.com';
+  // A text control that shows a date pattern as its hint takes a date written that way.
+  const hint = control.getAttribute('placeholder') ?? '';
+  if (/^(dd|MM{1,3}|yyyy)[-/ .](dd|MM{1,3}|yyyy)/.test(hint)) return hint.replace('yyyy', '2024').replace('MMM', 'Jan').replace('MM', '01').replace('dd', '15').replace('HH', '10').replace('mm', '30').replace('ss', '00');
   const type = (control.getAttribute('type') ?? 'text').toLowerCase();
   const mode = (control.getAttribute('inputmode') ?? '').toLowerCase();
   if (type === 'email') return 'gate@example.com';
@@ -280,6 +283,8 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
   }
   const allRows = [...sample.values()];
   const tableReports = exp.reports.filter((r) => !r.chart);
+  // Reports drawn as a grid of rows: a board, calendar, timeline or map has no page controls and no table cells.
+  const gridReports = tableReports.filter((r) => !['kanban', 'calendar', 'timeline', 'map', 'gantt', 'summary'].includes(r.type));
   const loaded = loadRuntime(bundle);
   const both = (s: Session, el: Element | null | undefined): boolean => !!el && VIEWPORTS.every((vp) => s.shown(el, vp));
 
@@ -302,8 +307,11 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
       if (run.wants('route-focus')) {
         if (!firstItem) run.skip('route-focus', 'app', 'no menu destinations');
         else {
+          const target = `#/${firstItem.kind}/${encodeURIComponent(firstItem.name)}`;
+          // A navigation moves from somewhere else: the app opens on this very screen.
+          if (s.win.location.hash === target) await s.go('#/report/__no_such_screen__');
           const titleBefore = s.doc.title;
-          await s.go(`#/${firstItem.kind}/${encodeURIComponent(firstItem.name)}`);
+          await s.go(target);
           const heading = mainOf(s.doc).querySelector('h1, h2');
           const focused = !!heading && s.doc.activeElement === heading;
           const titled = norm(s.doc.title) !== norm(titleBefore) && norm(s.doc.title).includes(norm(firstItem.label));
@@ -323,7 +331,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
 
       // empty-filtered: search to no match → a clear control restores rows.
       if (run.wants('empty-filtered')) {
-        const report = await firstQueryingReport(s, api, tableReports.filter((r) => r.columns.length > 0));
+        const report = await firstQueryingReport(s, api, gridReports.filter((r) => r.columns.length > 0));
         if (!report) run.skip('empty-filtered', 'app', 'no report that queries to filter');
         else {
           const main = await driveReport(s, report);
@@ -426,10 +434,18 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         let how = '';
         const report = tableReports[0];
         if (report) await driveReport(s, report);
-        const action = mainOf(s.doc).querySelector('[data-action]') as HTMLElement | null;
+        const action = mainOf(s.doc).querySelector('[data-action]:not([disabled])') as HTMLElement | null;
         if (action) {
+          // An action that asks first (a native confirm, or a dialog) is answered yes: this row is about the result's toast.
+          (s.win as unknown as { confirm: () => boolean }).confirm = () => true;
           click(s.win, action);
           await settle(s.win);
+          const asked = s.doc.querySelector('[role="alertdialog"], [role="dialog"], [data-confirm-dialog]');
+          const yes = asked && Array.from(asked.querySelectorAll('button')).find((b) => /run|send|continue|confirm|yes|ok|delete|remove/i.test(text(b)));
+          if (yes) {
+            click(s.win, yes);
+            await settle(s.win);
+          }
           toasted = true;
           how = 'custom action';
         } else if (pickForm(exp)) {
@@ -437,11 +453,15 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
           await goFresh(`#/form/${encodeURIComponent(form.name)}`);
           const el = s.doc.querySelector('#main form');
           if (el) {
+            const postsBefore = api.matching('/submit').length;
             fillForm(s, form);
             fire(s.win, el, 'submit');
             await settle(s.win);
-            toasted = true;
-            how = 'submit';
+            // A form this script could not fill past the client checks posted nothing, so there is no write to toast.
+            if (api.matching('/submit').length > postsBefore || toastOf(s.doc)) {
+              toasted = true;
+              how = 'submit';
+            }
           }
         }
         if (!toasted) run.skip('toast', 'app', 'no write action to toast');
@@ -535,7 +555,8 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
             const reached = api.matching('/submit').length > postsBefore;
             const marker = el.querySelector(`[data-error-for="${target.name}"]`);
             const box = el.querySelector(`[data-field="${target.name}"]`);
-            const control = box?.querySelector(FOCUS_TARGET) as HTMLElement | null;
+            // A rich-text field leads with toolbar buttons; the control to fix is the entry area, so toolbar buttons are passed over.
+            const control = Array.from(box?.querySelectorAll(FOCUS_TARGET) ?? []).find((c) => !c.closest('[role="toolbar"]')) as HTMLElement | undefined ?? null;
             const focused = !!control && (s.doc.activeElement === control || control.contains(s.doc.activeElement));
             if (!reached) run.skip('server-field-error', form.name, 'the filled form was refused client-side before it posted: this script cannot synthesize a value for it');
             else run.add('server-field-error', `${form.name}.${target.name}`, !!marker && text(marker) !== '' && focused, `400 {field:${target.name}} → marker ${marker ? `"${text(marker).slice(0, 40)}"` : 'missing'}, focus ${focused ? 'on the field' : 'not moved'}`);
@@ -692,7 +713,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         const heading = main.querySelector('h1, h2') ?? main.querySelector('[data-access-status], [data-state="denied"]');
         const retry = Array.from(main.querySelectorAll('button')).find((b) => /retry|try again/i.test(text(b)));
         const home = homeLink(main);
-        const generic = /could not be loaded|unavailable/i.test(s.doc.body.textContent ?? '');
+        const generic = /could not be loaded|unavailable/i.test(main.textContent ?? '');
         run.add('denied', report.name, !!heading && !!home && !retry && !generic, `${!heading ? 'no denied screen' : `screen "${text(heading).slice(0, 50)}"`}${home ? '' : ', no way home'}${retry ? ', dead Retry offered' : ''}${generic ? ', shows a generic error' : ''}`);
       }
     } finally {
@@ -770,7 +791,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
     };
     const s = await openSession(bundle, loaded, paged, sample, widthCss);
     try {
-      const report = await firstQueryingReport(s, base, tableReports);
+      const report = await firstQueryingReport(s, base, gridReports);
       if (!report) {
         if (run.wants('pagination')) run.skip('pagination', 'app', 'no report that queries');
         if (run.wants('disabled')) run.skip('disabled', 'app', 'no report that queries');
@@ -778,10 +799,10 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         await s.go('#/report/__reset__');
         await driveReport(s, report);
         const control = (re: RegExp): HTMLElement | null =>
-          (Array.from(mainOf(s.doc).querySelectorAll('button, a[role="button"], a[href]')).find((b) => re.test(`${b.getAttribute('aria-label') ?? ''} ${text(b)}`)) as HTMLElement | undefined) ?? null;
+          (Array.from(mainOf(s.doc).querySelectorAll('button, a[role="button"], a[href]')).find((b) => !b.closest('th, [role="columnheader"]') && !/^sort\b/i.test(b.getAttribute('aria-label') ?? '') && re.test(`${b.getAttribute('aria-label') ?? ''} ${text(b)}`)) as HTMLElement | undefined) ?? null;
         const stopped = (el: HTMLElement | null): boolean => !!el && (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true');
-        const next1 = control(/\bnext\b/i);
-        const prev1 = control(/\b(prev|previous)\b/i);
+        const next1 = control(/^\s*next\b/i);
+        const prev1 = control(/^\s*(prev|previous)\b/i);
         const prev1Stopped = stopped(prev1);
         const firstSize = queries.at(-1)?.size ?? 25;
         const q0 = queries.length;
@@ -792,16 +813,16 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
           click(s.win, next1);
           await settle(s.win);
           advanced = queries.length > q0 && queries.at(-1)!.page === 1;
-          const prev2 = control(/\b(prev|previous)\b/i);
-          const next2 = control(/\bnext\b/i);
+          const prev2 = control(/^\s*(prev|previous)\b/i);
+          const next2 = control(/^\s*next\b/i);
           if (next2 && !stopped(next2)) {
             click(s.win, next2);
             await settle(s.win);
           }
           const lastRows = mainOf(s.doc).querySelectorAll('tbody tr, [data-row], [data-row-link]').length;
-          const next3 = control(/\bnext\b/i);
+          const next3 = control(/^\s*next\b/i);
           lastStop = queries.at(-1)?.page === 2 && (!next3 || stopped(next3)) && lastRows > 0 && lastRows < firstSize;
-          const back = control(/\b(prev|previous)\b/i);
+          const back = control(/^\s*(prev|previous)\b/i);
           if (prev2 && back && !stopped(back)) {
             click(s.win, back);
             await settle(s.win);
@@ -826,9 +847,10 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
   // ---- session I: long text — a very long cell must wrap or scroll, never push the page wider
   if (run.wants('long-text')) {
     const long = 'LongValue' + 'x'.repeat(240) + ' ' + 'word '.repeat(60).trim();
-    const fields = tableReports.flatMap((r) => r.columns.map((c) => ({ r, c }))).find(({ r }) => r.columns.length > 0);
+    const fields = gridReports.flatMap((r) => r.columns.map((c) => ({ r, c }))).find(({ r }) => r.columns.length > 0);
     const wide = new Map(sample);
-    if (fields) wide.set(fields.r.name, { ...(sample.get(fields.r.name) ?? { ROWID: '1001' }), [fields.c.field]: long });
+    // Every column holds the long value: a lookup or subform column draws its own words, a plain one draws this.
+    if (fields) wide.set(fields.r.name, { ...(sample.get(fields.r.name) ?? { ROWID: '1001' }), ...Object.fromEntries(fields.r.columns.map((c) => [c.field, long])) });
     const api = createFakeApi(wide, [...wide.values()]);
     const s = await openSession(bundle, loaded, api.fetch, wide, widthCss);
     try {
@@ -899,8 +921,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         return /transform\s*:\s*(?!\s|none\b)/.test(style) || /animation\s*:/.test(style);
       });
       // The stylesheet must carry a reduce rule that kills animation AND transition.
-      const reduceBlocks = [...bundle.css.matchAll(/@media[^{]*prefers-reduced-motion\s*:\s*reduce[^}]*\{([\s\S]*?)\}\s*\}/g)].map((m) => m[1] ?? '');
-      const kills = reduceBlocks.some((block) => /animation\s*:\s*none/.test(block) && /transition\s*:\s*none/.test(block)) || reduceBlocks.some((block) => /(animation|transition)\s*:\s*none[^}]*(animation|transition)\s*:\s*none/.test(block));
+      const { kills } = reducedMotionCoverage(bundle.css);
       run.add('reduced-motion', 'app', moved.length === 0 && kills, `${moved.length} element(s) carry inline transform/animation under reduce${moved[0] ? ` (first: <${moved[0].tagName.toLowerCase()} class="${(moved[0].getAttribute('class') ?? '').slice(0, 40)}" style="${(moved[0].getAttribute('style') ?? '').slice(0, 80)}">)` : ''}; stylesheet reduce rule ${kills ? 'kills animation and transition' : 'does NOT kill both'}`);
     } finally {
       s.close();
@@ -908,4 +929,62 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
   }
 
   return run.verdicts;
+}
+
+/**
+ * Does the stylesheet kill motion for EVERY selector that animates or transitions?
+ * An unrelated `prefers-reduced-motion` block does not count: each animated
+ * selector needs its own `animation|transition: none` rule under reduce (or a `*` rule).
+ * The CSS is walked by brace depth so nested at-rules are read correctly.
+ */
+export function reducedMotionCoverage(css: string): { kills: boolean; uncovered: string[] } {
+  type Kind = 'animation' | 'transition';
+  const animated = new Map<string, Set<Kind>>();
+  const killed = new Map<string, Set<Kind>>();
+  const add = (map: Map<string, Set<Kind>>, selector: string, kind: Kind): void => {
+    const have = map.get(selector) ?? new Set<Kind>();
+    have.add(kind);
+    map.set(selector, have);
+  };
+  const walk = (text: string, inReduce: boolean): void => {
+    let at = 0;
+    while (at < text.length) {
+      const open = text.indexOf('{', at);
+      if (open < 0) return;
+      const prelude = text.slice(at, open).trim();
+      let depth = 1;
+      let close = open + 1;
+      while (close < text.length && depth > 0) {
+        const ch = text[close];
+        if (ch === '{') depth += 1;
+        else if (ch === '}') depth -= 1;
+        close += 1;
+      }
+      const body = text.slice(open + 1, close - 1);
+      at = close;
+      if (prelude.startsWith('@')) {
+        if (/^@(keyframes|font-face)|^@-\w+-keyframes/.test(prelude)) continue;
+        walk(body, inReduce || /^@media[^{]*prefers-reduced-motion\s*:\s*reduce/.test(prelude));
+        continue;
+      }
+      const selectors = prelude.split(',').map((v) => v.trim()).filter(Boolean).map((v) => (/^\*(::(before|after))?$/.test(v) ? '*' : v));
+      for (const decl of body.split(';')) {
+        const colon = decl.indexOf(':');
+        if (colon < 0) continue;
+        const prop = decl.slice(0, colon).trim().toLowerCase();
+        const value = decl.slice(colon + 1).replace(/!important/i, '').trim().toLowerCase();
+        const kind: Kind | null = /^animation(-name)?$/.test(prop) ? 'animation' : /^transition(-property)?$/.test(prop) ? 'transition' : null;
+        if (!kind) continue;
+        const none = value === 'none' || (prop === 'animation' && /^none\b/.test(value)) || (prop === 'transition' && /^none\b/.test(value));
+        if (inReduce) {
+          if (none) for (const selector of selectors) add(killed, selector, kind);
+        } else if (!none) {
+          for (const selector of selectors) add(animated, selector, kind);
+        }
+      }
+    }
+  };
+  walk(css.replace(/\/\*[\s\S]*?\*\//g, ''), false);
+  const uncovered = [...animated].filter(([selector, kinds]) => [...kinds].some((kind) => !killed.get(selector)?.has(kind) && !killed.get('*')?.has(kind))).map(([selector]) => selector);
+  return { kills: animated.size > 0 && uncovered.length === 0, uncovered };
 }
