@@ -18,6 +18,7 @@ There are exactly **five things only you can do**, all in
 7. [Glossary](07-glossary.md) — the words the AI will use, in plain language.
 8. [Go-live and rollback](08-go-live-and-rollback.md) — freeze, last data delta, switch, verify, and how to go back.
 9. [After go-live](09-after-go-live.md) — change a field without losing data, back up your data, move to a newer c2c.
+10. [A worked example](10-worked-example.md) — one sample app through every offline step, with real output.
 
 ## The one rule of the whole trip
 
