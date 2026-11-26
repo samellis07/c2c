@@ -17,11 +17,27 @@ offline.
 $ c2c --version
 0.2.0
 $ c2c precheck Admission_Management.ds
-Admission Management  findings 7  blockers 0  warnings 7
+precheck Admission Management  findings 7  blockers 0  warnings 7
+link-name max: unverified limit
+[warning] store-calls-lookup-path-filter  line 1865  form Fill_New_Application  field Select_Course
+  Report Direct_Admissions criteria filters on lookup path Select_Course.Admission_Flow. ...
+  fix: Keep Start_New_Admission small, or store the filtered value on Fill_New_Application itself and filter on that field.
+[warning] store-calls-lookup-path-filter  line 1922  form Fill_New_Application  field Select_Course
+  ...
+[warning] store-calls-on-success  line 3129  form Fill_New_Application  field -
+  Fill_New_Application on success makes at least 7 Data Store calls per submit, over the 4-call target; ...
+  fix: Keep running totals updated on write instead of re-reading other forms, or move the recalculation to a scheduled function.
+[warning] table-name-length-unverified  line 265  form Add_Department  field -
+  Add_Department__Start_New_Admission_Course_Admission_Id is 55 characters. ...
+...
 ```
 
 Zero blockers: nothing has to be fixed in Creator before going on.
-The four table-name warnings are named in step 1.
+The seven warnings are three slow-pattern warnings (two report filters
+that read a lookup path and one form that makes many Data Store calls
+on submit) and four table-name warnings: a few generated table names
+are longer than any name Catalyst has been seen to keep, so the plan
+asks you to shorten them or confirm they create.
 
 The setup check (`c2c doctor`) reads your Catalyst sign-in and
 installed tools, so its output depends on your machine and account:
@@ -33,8 +49,9 @@ installed tools, so its output depends on your machine and account:
 ```
 $ c2c analyze Admission_Management.ds
 application: Admission Management  shape: B  dialect: D1
+matrix: feature-matrix-v4 snapshot 2026-10-06  sha256 1f256aed8a4e
 score: 77/100 needs-work  (features 74, deluge 81)
-features used: 63  supported 0  adapter 62  needs-assessment 0  gap 1  blocker 0
+features used: 63  supported 0  adapter 62  needs-assessment 0  gap 1  blocker 0  not-a-creator-feature 7
 scope: Payments — not supported in this version (counted)
 scope: Offline — not supported in this version (counted)
 ...
@@ -43,29 +60,19 @@ field behavior gaps: 44 across 11 types
   phone: 5 (Add_Assessor.Phone_Number, ...) — There is no phone column. Stored ...
 hidden from end users: 9
 deluge: 287 statements  translated 10  shimmed 277  todo 0  (69 units)
+deterministic: yes  (todo items 0, lock fills 0; UI TODO stubs 0, included in the todo items; silent drops 0)
+...
 blockers: 0
-catalyst (estimate): tables 21  nosql 0  deluge units 69  functions 1  cron 3  slate pages 41
+effort (estimate, not a quote): 173.2 h
+catalyst (estimate): tables 21  nosql 0  deluge units 69  functions 1  cron 3  slate pages 41  cost not estimated
 ```
 
 How to read it: **blockers: 0** means no must-fix-in-Creator list.
 **todo 0** means no script is left untranslated. The 44 field
 behaviour gaps are fields Catalyst stores differently (for example,
 an email or phone number is kept as text); each is counted, not
-hidden. The two "slow pattern" warnings from
-[step 1](03-the-journey.md) show up here:
-
-```
-[warning] store-calls-lookup-path-filter  form Fill_New_Application  field Select_Course
-  Report Direct_Admissions criteria filters on lookup path Select_Course.Admission_Flow. ...
-  fix: Keep Start_New_Admission small, or store the filtered value on Fill_New_Application itself ...
-[warning] store-calls-on-success  form Fill_New_Application
-  Fill_New_Application on success makes at least 7 Data Store calls per submit, over the 4-call target ...
-  fix: Keep running totals updated on write instead of re-reading other forms, ...
-```
-
-The rest are four table-name warnings: a few generated table names are
-longer than any name Catalyst has been seen to keep, so the plan asks
-you to shorten them or confirm they create.
+hidden. `analyze` does not repeat the slow-pattern and table-name
+warnings: they come from `precheck` in step 0.
 
 ## Step 2 — Plan
 
@@ -94,8 +101,15 @@ next step: c2c provision --out plan needs the org: pass --org <id> or add "org" 
 The top of `plan/plan.md`:
 
 ```
+# c2c plan for Admission Management
+
+dc: in (from --dc)
+doctor: not-run (plan is offline; provision and deploy need a green doctor)
+budgets: ok
+...
 tables: 21 (207 columns)  functions: 31  schedules: 3  reports: 26  pages: 1  roles: 6  custom APIs: 0
 mail: the app sends mail, so a sender step is planned
+...
 files: 2 Stratus-backed fields
 project: new — provision/plan.json creates it with one IaC import ...
 ```
@@ -135,12 +149,16 @@ The ordered list the AI will work through, and how far along it is:
 ```
 $ c2c provision --out plan --status
 provision Admission Management
+scope: dc=in org=? project=(not created yet)
+
 - import [cli] pending
 - cloudscale-enable [console] pending
 - tables [cli] pending
 ...
 - mail-sender [console] pending
+...
 - crons [cli] pending
+
 done: 0/17
 ```
 
@@ -173,8 +191,13 @@ The offline dry run of what would be set up:
 $ c2c auth Admission_Management.ds
 # Auth plan (dry run)
 Nothing in this plan is applied. Role ids and user invites are not invented.
-- Hosted login: true   - Embedded login: true   - Public signup: false
-- Roles: 6             - Table permission rows: 98
+- Hosted login: true
+- Embedded login: true
+- Public signup: false
+- Roles: 6
+...
+- Table permission rows: 98
+...
 ```
 
 Applying it, the invite mail and the first sign-in: **needs your
