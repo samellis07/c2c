@@ -75,10 +75,15 @@ export interface DoctorContext {
   nodeVersion?: string;
 }
 
-const pass = (id: string, detail: string, extra: Partial<CheckResult> = {}): CheckResult => ({ id, status: 'pass', detail, fix: null, ...extra });
-const warn = (id: string, detail: string, fix: string | null = null): CheckResult => ({ id, status: 'warn', detail, fix });
-const fail = (id: string, detail: string, fix: string | null): CheckResult => ({ id, status: 'fail', detail, fix });
-const skip = (id: string, detail: string, fix: string | null = null): CheckResult => ({ id, status: 'skip', detail, fix });
+/** Bidi controls, zero-width and invisible format characters: never echoed from an environment or file value (they reorder or hide text in a terminal). */
+const INVISIBLE_CHARS = /[\u00ad\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
+const hide = (text: string): string => text.replace(INVISIBLE_CHARS, '?');
+const hideFix = (fix: string | null): string | null => (fix === null ? null : hide(fix));
+
+const pass = (id: string, detail: string, extra: Partial<CheckResult> = {}): CheckResult => ({ id, status: 'pass', fix: null, ...extra, detail: hide(detail) });
+const warn = (id: string, detail: string, fix: string | null = null): CheckResult => ({ id, status: 'warn', detail: hide(detail), fix: hideFix(fix) });
+const fail = (id: string, detail: string, fix: string | null): CheckResult => ({ id, status: 'fail', detail: hide(detail), fix: hideFix(fix) });
+const skip = (id: string, detail: string, fix: string | null = null): CheckResult => ({ id, status: 'skip', detail: hide(detail), fix: hideFix(fix) });
 
 /** The fix for a recorded evidence field that is present but not the shape a check can read. */
 const RE_RECORD = 'run /c2c:doctor again so the evidence is collected fresh';
@@ -333,8 +338,9 @@ function semverGte(a: string, b: string): boolean {
   return a1 !== b1 ? a1 > b1 : a2 !== b2 ? a2 > b2 : a3 >= b3;
 }
 
-/** Control characters, C1, and line/paragraph separators: never echoed from an environment-supplied path or its error. */
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+/** Control characters, C1, line/paragraph separators and the invisible/bidi set: never echoed from an environment-supplied path, file value or error. */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
+const clean = (text: string): string => text.replace(CONTROL_CHARS, '?');
 
 function checkA(ctx: DoctorContext): CheckResult[] {
   const found = findCatalystSkill(ctx);
@@ -344,10 +350,10 @@ function checkA(ctx: DoctorContext): CheckResult[] {
     const paths = found.searched.length > 0 ? ` (searched: ${found.searched.join('; ').replace(CONTROL_CHARS, '?')})` : '';
     return [fail('D-A1', `the official Catalyst skills are not installed${note}${paths}`, D_A1_FIX)];
   }
-  const out = [pass('D-A1', `catalyst skills found: ${hit.kind} v${hit.version ?? 'unknown'}`)];
+  const out = [pass('D-A1', `catalyst skills found: ${hit.kind} v${hit.version === undefined ? 'unknown' : clean(hit.version)}`)];
   const floor = compat.catalystPlugin.min;
   if (hit.version && !semverGte(hit.version, floor)) {
-    out.push(warn('D-A4', `catalyst-by-zoho ${hit.version} is older than ${floor}`, `/plugin update catalyst-by-zoho@<marketplace>`));
+    out.push(warn('D-A4', `catalyst-by-zoho ${clean(hit.version)} is older than ${floor}`, `/plugin update catalyst-by-zoho@<marketplace>`));
   }
   return out;
 }
@@ -393,7 +399,7 @@ async function checkA2(ctx: DoctorContext): Promise<CheckResult> {
   if (enabled.length === 0) {
     return fail('D-A2', 'catalyst-by-zoho is installed but disabled', '/plugin enable catalyst-by-zoho@<marketplace>, then restart the session');
   }
-  const version = typeof enabled[0].version === 'string' ? ` ${enabled[0].version}` : '';
+  const version = typeof enabled[0].version === 'string' ? ` ${clean(enabled[0].version)}` : '';
   if (hits.length > 1) {
     return warn('D-A2', `catalyst-by-zoho${version} enabled, but ${hits.length} copies are installed; disable one (/plugin disable catalyst-by-zoho@<marketplace>)`);
   }
@@ -839,7 +845,7 @@ export function findVendorRoot(start = dirname(new URL(import.meta.url).pathname
   for (let i = 0; i < 6; i++) {
     if (presentEntry(join(dir, MANIFEST_NAME)).present) {
       const version = presentEntry(join(dir, 'VERSION'));
-      if (version.present) return { dir, name: version.text === undefined ? 'c2c' : `c2c ${version.text.trim()}` };
+      if (version.present) return { dir, name: version.text === undefined ? 'c2c' : `c2c ${clean(version.text.trim())}` };
     }
     const parent = dirname(dir);
     if (parent === dir) break;

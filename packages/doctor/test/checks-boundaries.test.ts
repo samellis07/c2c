@@ -374,3 +374,30 @@ test('D-V3: two connected MCP servers warn', async () => {
   assert.equal(result.status, 'warn');
   assert.match(result.detail, /two Catalyst MCP servers/);
 });
+
+const HIDDEN = [0x202e, 0x200b, 0x2066, 0x200f, 0x202a, 0x2069, 0x2028, 0xfeff, 0x00ad].map((c) => String.fromCodePoint(c));
+const HIDDEN_RE = new RegExp(`[${HIDDEN.join('')}\\u200c-\\u200e\\u2029-\\u202d\\u2067-\\u2068]`);
+
+test('D-A1: bidi and zero-width characters in C2C_CATALYST_SKILLS_DIR are not echoed; a normal path is unchanged', async () => {
+  const { dir, env } = workspace();
+  const hostile = join(dir, `none${HIDDEN.join('')}end`);
+  const result = await check('D-A1', { workspace: dir, io: io({ ...env, C2C_CATALYST_SKILLS_DIR: hostile }) });
+  assert.equal(result.status, 'fail', result.detail);
+  assert.ok(!HIDDEN_RE.test(result.detail), JSON.stringify(result.detail));
+  assert.ok(result.detail.includes('none'), 'path stays visible, sanitized');
+  const plain = join(dir, 'plain-skills');
+  const normal = await check('D-A1', { workspace: dir, io: io({ ...env, C2C_CATALYST_SKILLS_DIR: plain }) });
+  assert.ok(normal.detail.includes(join(plain, 'catalyst-by-zoho', 'SKILL.md')), normal.detail);
+});
+
+test('D-A1: bidi, zero-width and control characters in the SKILL.md version are not echoed', async () => {
+  const { dir, env } = workspace();
+  const skill = join(env.C2C_CATALYST_SKILLS_DIR!, 'catalyst-by-zoho', 'SKILL.md');
+  mkdirSync(join(env.C2C_CATALYST_SKILLS_DIR!, 'catalyst-by-zoho'), { recursive: true });
+  const version = `9.9.9${HIDDEN.join('')}\u001b[31m`;
+  writeFileSync(skill, `---\nname: catalyst-by-zoho\nmetadata:\n  version: "${version}"\n---\n`);
+  const result = await check('D-A1', { workspace: dir, io: io(env) });
+  assert.equal(result.status, 'pass', result.detail);
+  assert.ok(!HIDDEN_RE.test(result.detail) && !/[\u0000-\u001f\u007f-\u009f]/.test(result.detail), JSON.stringify(result.detail));
+  assert.ok(result.detail.includes('9.9.9'), result.detail);
+});
