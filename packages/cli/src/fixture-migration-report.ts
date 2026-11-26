@@ -259,7 +259,7 @@ export async function buildFixtureMigrationReport(fixture: InRepoFixture): Promi
 }
 
 export function fixtureMigrationReportAsJson(report: FixtureMigrationReport): string {
-  return `${JSON.stringify(report, null, 2)}\n`;
+  return `${JSON.stringify(report, (_key, value: unknown) => (typeof value === 'string' ? terminalSafe(value) : value), 2)}\n`;
 }
 
 function convertedLinesOf(converted: ConvertedInventory): string[] {

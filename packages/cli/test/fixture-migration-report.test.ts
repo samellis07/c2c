@@ -9,6 +9,7 @@ import { analyze, analyzeAsText } from '../src/analyze.js';
 import {
   buildFixtureMigrationReport,
   fixtureMigrationReportAsJson,
+  fixtureMigrationReportAsJson as fixtureJson,
   fixtureMigrationReportAsMarkdown,
   reviewChecklist,
   listInRepoFixtures,
@@ -354,4 +355,11 @@ test('hostile locations, constructs and steps never reach the review checklist o
   }
   assert.ok(checklist.every((item) => !/[\u0000-\u001f]/.test(item.where + item.reason + item.step)), 'checklist fields are single lines');
   assert.ok(markdown.includes('APP'), 'the readable part is kept');
+});
+
+test('the fixture migration report JSON carries no raw terminal, bidi or tag characters from hostile values', () => {
+  const hostile = `x${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x202e)}${String.fromCharCode(0x2060)}${String.fromCodePoint(0xe0001)}y`;
+  const json = fixtureJson({ fixture: hostile, app: hostile, scope: [], converted: [], todoKinds: [{ construct: hostile, count: 1 }], fieldGaps: [], manualSteps: [], hiddenParts: [], humanSteps: [], residuals: [], reviewChecklist: [{ kind: 'todo', where: hostile, reason: hostile, step: hostile }], todoSteps: [] } as unknown as FixtureMigrationReport);
+  for (const code of [0x1b, 0x202e, 0x2060, 0xe0001]) assert.ok(!json.includes(String.fromCodePoint(code)), `U+${code.toString(16)} must not appear raw in the JSON`);
+  assert.ok(json.includes('"x'), 'the readable part is kept');
 });
