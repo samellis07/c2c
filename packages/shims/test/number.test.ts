@@ -5,6 +5,21 @@ import { DelugeConversionError } from '../src/convert.js';
 import { Decimal } from '../src/decimal.js';
 import { DelugeRuntimeError, UntranslatedConstruct } from '../src/errors.js';
 
+test("round on the decimal text", () => {
+  assert.strictEqual(round(1.005, 2), 1.01);
+  assert.strictEqual(round(1.255, 2), 1.26);
+  assert.strictEqual(round(-1.005, 2), -1.01);
+  assert.strictEqual(round(2.5, 0), 3);
+  assert.strictEqual(round(-2.5, 0), -3);
+  assert.strictEqual(round(2.5), 3);
+  assert.strictEqual(round(1e21, 2), 1e21);
+  assert.strictEqual(round(-1e21, 0), -1e21);
+  assert.strictEqual(round(Decimal.from("1.005"), 2), 1.01);
+  assert.ok(Number.isNaN(round(NaN, 2)));
+  assert.strictEqual(round(Infinity, 2), Infinity);
+  assert.strictEqual(round(-Infinity, 2), -Infinity);
+});
+
 test('round', () => {
   assert.strictEqual(round(9007199254740993n), 9007199254740993n);
   assert.strictEqual(round(9007199254740993n, 2), 9007199254740993n);

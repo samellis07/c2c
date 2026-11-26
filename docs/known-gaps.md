@@ -72,3 +72,7 @@ Each row below is a construct that `c2c analyze` reports as a manual step becaus
 | `openurl-dropped-with-server-logic` | Runs server logic, then navigates. | The server logic is kept; the navigation after it is dropped. | A function that does server work cannot return client navigation. | Wire that navigation in the generated UI. |
 | `openurl-dropped-unrecognized-branch-shape` | Navigates from any branch layout. | The server logic is kept; the `openUrl` is dropped. | Only a bare `openUrl`, or an `if` whose branches are each one `openUrl` after plain assigns, is recognized. | Wire that navigation by hand. |
 | `sendmail-attachment:view` | Attaches a report view as a file. | The mail carries a typed descriptor; no file is rendered. | Catalyst Mail cannot render a Creator report view into a file (`docs/fill-todos.md`). | Render the matching rows in a Catalyst function, attach the file, and send a test mail. |
+
+### Date minus date is milliseconds
+
+Deluge `date - date` yields the difference in milliseconds, and the shim matches it: `input.Valid_Till.toDate() - input.ETA.toDate()` with `15-Oct-2026` and `14-Nov-2026` stores `2592000000`. A Creator script that labels the result "days" (for example the library app's `overdueDays`, which then multiplies by a per-day fine) gets a millisecond-sized value in Creator too, so the migration is faithful. Divide by 86400000, or use `daysBetween`, to get days.
