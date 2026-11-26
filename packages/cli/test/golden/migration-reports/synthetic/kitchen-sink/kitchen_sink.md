@@ -19,7 +19,7 @@ App: Kitchen_Sink_Studio
 - 6 forms
 - 8 reports
 - 1 page
-- The generated Catalyst app carries 9 Data Store tables, 1 Catalyst function, 2 scheduled jobs, 15 pages
+- The generated Catalyst app carries 10 Data Store tables, 1 Catalyst function, 2 scheduled jobs, 15 pages
 - Deluge: 0 statements translated, 14 kept working through a compatibility shim, of 14
 
 ## TODO counts

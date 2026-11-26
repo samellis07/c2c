@@ -5226,7 +5226,26 @@ export function writeRulesOption(app: App, schema?: SchemaPlan): string {
 
 /** Schema-derived createRuntime fields: decimals, app-unique columns, write rules, and split layouts. */
 export function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
-  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${countersOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+}
+
+/** form → autonumber field → start index, for the runtime's claim-table counters (shims/src/counters.ts). */
+export function autonumbersOf(app: App, schema?: SchemaPlan): Record<string, Record<string, { start?: number }>> {
+  const map: Record<string, Record<string, { start?: number }>> = {};
+  for (const table of (schema ?? schemaOf(app)).tables) {
+    if (table.role !== 'form') continue;
+    for (const column of table.columns) {
+      if (column.matrixId !== 'auto-number') continue;
+      const start = Number(/start index (\d+)/.exec(column.note ?? '')?.[1]);
+      (map[table.form] ??= {})[column.field ?? column.name] = Number.isSafeInteger(start) && start >= 0 ? { start } : {};
+    }
+  }
+  return map;
+}
+
+function countersOption(app: App, schema?: SchemaPlan): string {
+  const autonumber = autonumbersOf(app, schema);
+  return Object.keys(autonumber).length ? `, counters: ${JSON.stringify({ autonumber })}` : '';
 }
 
 export interface MultiLookupSpec {

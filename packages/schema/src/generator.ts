@@ -1204,6 +1204,32 @@ export function generateSchema(app: App, opts?: { source?: readonly SourceTableD
     tables.push({ name: alloc('C2CJobCheckpoint'), form: 'C2CJobCheckpoint', role: 'system', nosql: false, columns });
   }
 
+  // Autonumber claims live in one table (shims/src/counters.ts): an insert
+  // per claimed number, the unique claim_key letting one claimant win. It is
+  // generated state, planned exactly when a form has an autonumber field.
+  if (tables.some((table) => table.columns.some((column) => column.matrixId === 'auto-number'))) {
+    const claim = (name: string, dataType: CatalystType, extra: Partial<SchemaColumn> = {}): SchemaColumn => ({
+      name,
+      creatorType: 'system',
+      matrixId: `c2c-seq-${name}`,
+      status: 'supported',
+      dataType,
+      ...(dataType === 'VarChar' ? { length: 255 } : {}),
+      mandatory: true,
+      unique: false,
+      ...extra,
+    });
+    const columns: SchemaColumn[] = [
+      claim('claim_key', 'VarChar', { unique: true }),
+      claim('seq_name', 'VarChar'),
+      claim('n', 'BigInt'),
+      claim('value', 'VarChar', { mandatory: false }),
+      claim('owner', 'VarChar', { mandatory: false }),
+    ];
+    pushSystemColumns(columns, groups);
+    tables.push({ name: alloc('c2c_seq_claim'), form: 'c2c_seq_claim', role: 'system', nosql: false, columns });
+  }
+
   // Source rows decide whether a Creator constraint can be a store constraint;
   // demotion runs first so a relaxed column does not spend a unique varchar slot.
   const constraints = opts?.source ? applySourceConstraints(tables, opts.source, issues) : undefined;

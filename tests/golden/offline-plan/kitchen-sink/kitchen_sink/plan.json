@@ -10,9 +10,9 @@
     "forms": 6,
     "sourceFields": 43,
     "workflows": 12,
-    "tables": 9,
-    "dataStoreTables": 9,
-    "columns": 95,
+    "tables": 10,
+    "dataStoreTables": 10,
+    "columns": 104,
     "nosqlTables": 0,
     "functions": 0,
     "schedules": 2,
@@ -100,6 +100,15 @@
       "role": "system",
       "nosql": false,
       "columns": 6,
+      "uniqueVarchar": 1,
+      "fks": 0
+    },
+    {
+      "name": "c2c_seq_claim",
+      "form": "c2c_seq_claim",
+      "role": "system",
+      "nosql": false,
+      "columns": 9,
       "uniqueVarchar": 1,
       "fks": 0
     }
@@ -557,6 +566,24 @@
       "detail": "table C2CJobCheckpoint: 0/15 foreign keys"
     },
     {
+      "id": "columns",
+      "table": "c2c_seq_claim",
+      "status": "pass",
+      "detail": "table c2c_seq_claim: 9/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "c2c_seq_claim",
+      "status": "pass",
+      "detail": "table c2c_seq_claim: 1/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "c2c_seq_claim",
+      "status": "pass",
+      "detail": "table c2c_seq_claim: 0/15 foreign keys"
+    },
+    {
       "id": "select-width",
       "table": "Booking",
       "status": "pass",
@@ -570,7 +597,7 @@
     {
       "id": "org-tables",
       "status": "pass",
-      "detail": "this app creates 9 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED \"API Limit for table\" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once"
+      "detail": "this app creates 10 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED \"API Limit for table\" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once"
     },
     {
       "id": "dev-row-cap",
@@ -655,7 +682,8 @@
           "Guest",
           "Media_Kit",
           "Booking__Gear_Refs",
-          "C2CJobCheckpoint"
+          "C2CJobCheckpoint",
+          "c2c_seq_claim"
         ]
       },
       "readBack": {
@@ -671,7 +699,8 @@
             "Guest",
             "Media_Kit",
             "Booking__Gear_Refs",
-            "C2CJobCheckpoint"
+            "C2CJobCheckpoint",
+            "c2c_seq_claim"
           ]
         }
       }
@@ -733,6 +762,11 @@
             "path_variables": {
               "id": "<id:C2CJobCheckpoint>"
             }
+          },
+          {
+            "path_variables": {
+              "id": "<id:c2c_seq_claim>"
+            }
           }
         ],
         "note": "the IaC import set these grants; this step only proves them — a mismatch means the import did not apply them"
@@ -792,6 +826,11 @@
             {
               "path_variables": {
                 "id": "<id:C2CJobCheckpoint>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:c2c_seq_claim>"
               }
             }
           ]
@@ -902,6 +941,19 @@
             "Studio_Crew": []
           },
           "<id:C2CJobCheckpoint>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
+          },
+          "<id:c2c_seq_claim>": {
             "App Administrator": [
               "SELECT",
               "UPDATE",
@@ -974,6 +1026,11 @@
             "path_variables": {
               "id": "<id:C2CJobCheckpoint>"
             }
+          },
+          {
+            "path_variables": {
+              "id": "<id:c2c_seq_claim>"
+            }
           }
         ],
         "note": "the IaC import set these scopes; this step only proves them"
@@ -1033,6 +1090,11 @@
             {
               "path_variables": {
                 "id": "<id:C2CJobCheckpoint>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:c2c_seq_claim>"
               }
             }
           ]
@@ -1199,6 +1261,26 @@
             ]
           },
           "<id:C2CJobCheckpoint>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "USER"
+            ],
+            "Administrator": [
+              "USER"
+            ],
+            "Desk_Staff": [
+              "USER"
+            ],
+            "Studio_Lead": [
+              "USER"
+            ],
+            "Studio_Crew": [
+              "USER"
+            ]
+          },
+          "<id:c2c_seq_claim>": {
             "App Administrator": [
               "GLOBAL"
             ],

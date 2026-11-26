@@ -19,7 +19,7 @@ App: Freight Forwarding and Feeder Solution
 - 20 forms
 - 22 reports
 - 4 functions
-- The generated Catalyst app carries 26 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 42 pages
+- The generated Catalyst app carries 27 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 42 pages
 - Deluge: 56 statements translated, 497 kept working through a compatibility shim, of 553
 
 ## TODO counts

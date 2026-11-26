@@ -725,7 +725,7 @@
   },
   "effort": {
     "estimate": true,
-    "hours": 86,
+    "hours": 86.5,
     "weights": {
       "hoursPerFeature": {
         "supported": 0,
@@ -744,7 +744,7 @@
     }
   },
   "catalyst": {
-    "tables": 4,
+    "tables": 5,
     "nosqlCollections": 0,
     "delugeUnits": 14,
     "functions": 1,

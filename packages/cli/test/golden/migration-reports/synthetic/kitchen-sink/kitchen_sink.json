@@ -46,7 +46,7 @@
     "pages": 1,
     "functions": 0,
     "catalyst": {
-      "tables": 9,
+      "tables": 10,
       "nosqlCollections": 0,
       "functions": 1,
       "cronJobs": 2,

@@ -289,7 +289,7 @@ test('buildFixtureMigrationReport populates converted inventory, field gaps, wor
   const fixture = listInRepoFixtures(root).find((f) => f.id.endsWith('library_application'));
   assert.ok(fixture);
   const report = await buildFixtureMigrationReport(fixture);
-  assert.deepEqual(report.converted, { forms: 4, reports: 5, pages: 1, functions: 7, catalyst: { tables: 4, nosqlCollections: 0, functions: 1, cronJobs: 0, slatePages: 10 }, deluge: { statements: 65, translated: 5, shimmed: 60 } });
+  assert.deepEqual(report.converted, { forms: 4, reports: 5, pages: 1, functions: 7, catalyst: { tables: 5, nosqlCollections: 0, functions: 1, cronJobs: 0, slatePages: 10 }, deluge: { statements: 65, translated: 5, shimmed: 60 } });
   assert.equal(report.fieldGaps.length, 7);
   assert.equal(report.fieldGaps.reduce((sum, g) => sum + g.count, 0), 13);
   assert.ok(report.humanSteps.length <= 4, `${report.humanSteps.length} human steps`);

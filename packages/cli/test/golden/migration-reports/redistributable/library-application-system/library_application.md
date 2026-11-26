@@ -20,7 +20,7 @@ App: Library_System_Application
 - 5 reports
 - 1 page
 - 7 functions
-- The generated Catalyst app carries 4 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 10 pages
+- The generated Catalyst app carries 5 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 10 pages
 - Deluge: 5 statements translated, 60 kept working through a compatibility shim, of 65
 
 ## TODO counts
