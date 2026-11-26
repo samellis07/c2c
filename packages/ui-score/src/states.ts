@@ -307,8 +307,11 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
       if (run.wants('route-focus')) {
         if (!firstItem) run.skip('route-focus', 'app', 'no menu destinations');
         else {
+          const target = `#/${firstItem.kind}/${encodeURIComponent(firstItem.name)}`;
+          // A navigation moves from somewhere else: the app opens on this very screen.
+          if (s.win.location.hash === target) await s.go('#/report/__no_such_screen__');
           const titleBefore = s.doc.title;
-          await s.go(`#/${firstItem.kind}/${encodeURIComponent(firstItem.name)}`);
+          await s.go(target);
           const heading = mainOf(s.doc).querySelector('h1, h2');
           const focused = !!heading && s.doc.activeElement === heading;
           const titled = norm(s.doc.title) !== norm(titleBefore) && norm(s.doc.title).includes(norm(firstItem.label));
