@@ -295,7 +295,8 @@ export function validate(form: FormSpec, record: FormRecord, files: Map<FieldSpe
   return errors;
 }
 
-const FOCUSABLE = 'input:not([type="hidden"]), select:not([hidden]), textarea, button:not([disabled])';
+// A mirror or file input kept out of the tab order (hidden or aria-hidden) is not where focus should land: the widget's own button is.
+const FOCUSABLE = 'input:not([type="hidden"]):not([hidden]):not([aria-hidden="true"]), select:not([hidden]), textarea, button:not([disabled]), [role="radio"][tabindex="0"]';
 
 /**
  * The control the first error should focus. Keys are field names and subform
@@ -304,11 +305,12 @@ const FOCUSABLE = 'input:not([type="hidden"]), select:not([hidden]), textarea, b
  */
 export function firstErrorControl(formEl: HTMLFormElement, errors: Record<string, string>): HTMLElement | null {
   const keys = Object.keys(errors);
+  // Page order, not the order the checks ran in: focus goes to the first invalid control a user meets.
   const boxes = Array.from(formEl.querySelectorAll<HTMLElement>('[data-field], [data-cell]'));
-  for (const key of keys) {
-    if (keys.some((other) => other.startsWith(`${key}[`))) continue;
-    const box = boxes.find((el) => el.getAttribute('data-cell') === key) ?? boxes.find((el) => el.getAttribute('data-field') === key);
-    const control = box?.querySelector<HTMLElement>(FOCUSABLE);
+  for (const box of boxes) {
+    const key = box.getAttribute('data-cell') ?? box.getAttribute('data-field') ?? '';
+    if (!(key in errors) || keys.some((other) => other.startsWith(`${key}[`))) continue;
+    const control = box.querySelector<HTMLElement>(FOCUSABLE);
     if (control) return control;
   }
   return null;

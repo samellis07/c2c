@@ -33,7 +33,7 @@ import type { AppSpec, FormSpec, ReportSpec } from '../types';
 import { formattedNumber } from '../number-format';
 import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
-import { actionNavHref, hrefFor, navNeedsRow, reportClickFilter, useLocationHash } from '../runtime/router';
+import { actionNavHref, hrefFor, navNeedsRow, reportClickFilter, useLocationHash, useOnline } from '../runtime/router';
 import { performActionNav, type ActionNavInstruction } from '../runtime/navigation';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { matchCriteria } from './criteria';
@@ -330,6 +330,13 @@ function ReportList({ report }: { report: ReportSpec }) {
   }, [api, deny, report.queryEndpoint, bodyText, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  // Coming back online re-reads the report once, so a read that failed offline does not stay on its error.
+  const online = useOnline(view);
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnline.current) retry();
+    wasOnline.current = online;
+  }, [online, retry]);
   const clearSearch = useCallback(() => {
     setQuery('');
     setQ('');

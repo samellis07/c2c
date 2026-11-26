@@ -82,6 +82,21 @@ export function reportClickFilter(hash: string): ReportClickFilter {
   return '';
 }
 
+/** Whether the browser reports a network: false between its `offline` and `online` events. */
+export function useOnline(view: Window): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      view.addEventListener('online', notify);
+      view.addEventListener('offline', notify);
+      return () => {
+        view.removeEventListener('online', notify);
+        view.removeEventListener('offline', notify);
+      };
+    },
+    () => view.navigator?.onLine !== false,
+  );
+}
+
 /** The current hash. A query-only change still notifies, unlike `useRoute`. */
 export function useLocationHash(view: Window): string {
   return useSyncExternalStore(
