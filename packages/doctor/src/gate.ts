@@ -11,6 +11,7 @@
  * comparisons.
  */
 import { isSymlinkRefusedError } from '../../core/src/fs-kind.js';
+import { singleLine } from './sanitize.js';
 import { readRegularFile, type FileRead } from './read-file.js';
 import { loadMcpEvidence, mcpCarryRefusal } from './mcp-state.js';
 import { c2cVersion, doctorJsonPath } from './report.js';
@@ -224,7 +225,8 @@ export function gateRefusalMessage(verdict: GateVerdict, scope: GateScope): stri
       : verdict.reason
         ? `: ${verdict.reason}`
         : '';
-  return `c2c: doctor is not green for ${where} (run c2c doctor; last: ${last})${reason}`;
+  // The scope and reason can carry values read from c2c-deploy.json, flags or the environment: the refusal is one terminal line.
+  return singleLine(`c2c: doctor is not green for ${where} (run c2c doctor; last: ${last})${reason}`);
 }
 
 /** What `precheck`/`analyze`/`plan` stamp into reports. */
