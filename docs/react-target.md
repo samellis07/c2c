@@ -87,6 +87,7 @@ What the policy blocks:
   domain or an AppSail URL) leaves `connect-src` at `'self'`, so the browser
   blocks every API call. `c2c deploy` prints a warning when the `--api-base`
   host is not a function host, or is not the host the function deploy printed.
+- The Google Drive picker origins are added only by a deploy that has the picker settings and a `google_docs` browse field (`docs/doc-pickers.md`); the policy above is the default.
 - External images (`<img src="https://...">` in HTML pages) are blocked by
   `img-src 'self' data:`, and ZML `embed` frames on another site are blocked by
   `frame-src 'self'`. Such elements render empty.

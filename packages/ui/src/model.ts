@@ -130,6 +130,13 @@ export interface UiField {
   /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
   uploadSources?: string[];
   /**
+   * Remote document stores a file field's `browse` property names
+   * (`google_docs`, `zoho_docs`), in the export's order. Generated output only
+   * records them; the runtime offers a Google Drive picker beside the local
+   * upload when the deployer has configured one (docs/doc-pickers.md).
+   */
+  browseSources?: string[];
+  /**
    * `preview duration` (seconds) on an image field: the generated picker shows
    * the chosen photo next to the control and auto-confirms it after this many
    * seconds unless the user retakes first (client-runtime.js showCapturePreview).
@@ -2121,6 +2128,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       const tokens = unquote(browseProp.value).split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
       const uncarried = tokens.filter((t) => t !== 'local_drive');
       if (uncarried.length && uncarried.every((t) => BROWSE_REMOTE_SOURCES.has(t))) {
+        ui.browseSources = uncarried;
         ui.note = [
           ui.note,
           `Browse option(s) ${uncarried.join(', ')} have no Catalyst equivalent; file uploads are supported from local drive only.`,

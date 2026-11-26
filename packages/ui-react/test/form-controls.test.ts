@@ -600,6 +600,7 @@ test('no scan controls unless the field declares a scanner', async () => {
   assert.equal(doc.querySelector('.c2c-scan'), null);
 });
 
+<<<<<<< HEAD
 /** Browser stubs for media fields: a camera, a recorder that keeps what it is given, a canvas and DataTransfer. */
 function mediaStubs(options: { denied?: boolean; noApi?: boolean } = {}) {
   const requests: any[] = [];
@@ -748,4 +749,91 @@ test('Stop recording keeps the take once and a later pagehide does not remove it
   dom.flushSync(() => win.dispatchEvent(new win.Event('pagehide')));
   assert.equal(storedFile(doc), kept, 'the attached take survives');
   assert.equal(stubs.stopped(), 1);
+=======
+const PICKER_KEY = 'AIzaSyTestKeyTestKeyTestKeyTestKey123456';
+const PICKER_CLIENT = '123456789012-abcdefghijklmnop.apps.googleusercontent.com';
+
+function fakeGoogle(win: any, picked: Record<string, unknown> | 'cancel', calls: string[]): void {
+  win.C2C_DOC_PICKER = { google: { apiKey: PICKER_KEY, clientId: PICKER_CLIENT } };
+  win.gapi = { load: (_name: string, cb: () => void) => cb() };
+  win.google = {
+    accounts: {
+      oauth2: {
+        initTokenClient: (cfg: { client_id: string; scope: string; callback: (r: { access_token: string }) => void }) => {
+          calls.push(`token:${cfg.client_id}:${cfg.scope}`);
+          return { requestAccessToken: () => cfg.callback({ access_token: 'tok' }) };
+        },
+      },
+    },
+    picker: {
+      Action: { PICKED: 'picked', CANCEL: 'cancel' },
+      Response: { ACTION: 'action', DOCUMENTS: 'docs' },
+      Document: { ID: 'id', NAME: 'name', MIME_TYPE: 'mimeType', SIZE_BYTES: 'sizeBytes' },
+      DocsView: class {},
+      PickerBuilder: class {
+        cb: any;
+        setDeveloperKey(k: string) { calls.push(`key:${k}`); return this; }
+        setAppId(a: string) { calls.push(`app:${a}`); return this; }
+        setOAuthToken() { return this; }
+        addView() { return this; }
+        setCallback(cb: unknown) { this.cb = cb; return this; }
+        build() {
+          return { setVisible: () => this.cb(picked === 'cancel' ? { action: 'cancel' } : { action: 'picked', docs: [picked] }) };
+        }
+      },
+    },
+  };
+  win.fetch = async (url: string, init: { headers: Record<string, string> }) => {
+    calls.push(`fetch:${url}:${init.headers.Authorization}`);
+    return { ok: true, headers: { get: () => '5' }, blob: async () => new win.Blob(['hello'], { type: 'application/pdf' }) };
+  };
+}
+
+const DRIVE = 'Choose from Google Drive';
+const hasDriveButton = (doc: Document) => Array.from(doc.querySelectorAll('button')).some((b) => (b.textContent ?? '').includes(DRIVE));
+
+test('a google_docs browse field shows no Drive control without a configured key', async () => {
+  const { doc } = await render([field('Doc', 'file', { browseSources: ['google_docs', 'zoho_docs'] })]);
+  assert.equal(hasDriveButton(doc), false);
+  assert.ok(box(doc, 'Doc').querySelector('input[type="file"]'), 'the local upload stays');
+});
+
+test('with a configured key a google_docs field shows the Drive control beside the local upload; a zoho-only field does not', async () => {
+  const keyed = (win: any) => fakeGoogle(win, 'cancel', []);
+  const { doc } = await render([field('Doc', 'file', { browseSources: ['google_docs'] }), field('Z', 'file', { browseSources: ['zoho_docs'] })], {}, keyed);
+  assert.equal(Array.from(doc.querySelectorAll('button')).filter((b) => (b.textContent ?? '').includes(DRIVE)).length, 1);
+  assert.ok(box(doc, 'Doc').textContent!.includes(DRIVE));
+  assert.ok(!box(doc, 'Z').textContent!.includes(DRIVE));
+  assert.ok(box(doc, 'Doc').querySelector('input[type="file"]'));
+});
+
+test('choosing from Drive downloads the file with the drive.file scope and shows its name', async () => {
+  const calls: string[] = [];
+  const { doc, win } = await render(
+    [field('Doc', 'file', { browseSources: ['google_docs'] })],
+    {},
+    (w) => fakeGoogle(w, { id: 'AbC123_-xyz9876', name: 'a.pdf', mimeType: 'application/pdf', sizeBytes: '5' }, calls),
+  );
+  const button = Array.from(doc.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes(DRIVE))!;
+  button.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  for (let i = 0; i < 50 && !box(doc, 'Doc').textContent!.includes('a.pdf'); i++) await delay(10);
+  assert.ok(box(doc, 'Doc').textContent!.includes('a.pdf'));
+  assert.ok(calls.includes(`token:${PICKER_CLIENT}:https://www.googleapis.com/auth/drive.file`));
+  assert.ok(calls.includes('app:123456789012'));
+  assert.ok(calls.includes('fetch:https://www.googleapis.com/drive/v3/files/AbC123_-xyz9876?alt=media:Bearer tok'));
+});
+
+test('a Google-native document is refused with a visible message and nothing is downloaded', async () => {
+  const calls: string[] = [];
+  const { doc, win } = await render(
+    [field('Doc', 'file', { browseSources: ['google_docs'] })],
+    {},
+    (w) => fakeGoogle(w, { id: 'AbC123_-xyz9876', name: 'n', mimeType: 'application/vnd.google-apps.spreadsheet', sizeBytes: '0' }, calls),
+  );
+  const button = Array.from(doc.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes(DRIVE))!;
+  button.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  for (let i = 0; i < 50 && !box(doc, 'Doc').querySelector('[role="alert"]'); i++) await delay(10);
+  assert.match(box(doc, 'Doc').querySelector('[role="alert"]')!.textContent!, /Google-native/);
+  assert.ok(!calls.some((c) => c.startsWith('fetch:')));
+>>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
 });

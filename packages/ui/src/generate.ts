@@ -8,7 +8,12 @@
  * mode is "live" and a datastore adapter is installed.
  */
 
+<<<<<<< HEAD
 import { LOCATION_RECORD_COLUMNS, RECORD_STATUS_NOT_APPLICABLE, builtinRecordColumns, closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
+=======
+import type { DocPickerConfig } from './doc-picker.js';
+import { closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
+>>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
 import { compareEnUs } from '../../core/src/order.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
@@ -4279,13 +4284,16 @@ export const CATALYST_WEB_SDK = 'https://static.zohocdn.com/catalyst/sdk/js/4.6.
  * appTimeZone: the Creator app `time zone` setting, so a client `zoho.currentdate`
  * is the app-zone day, not the browser's. Absent when the app sets none.
  */
-export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; authBridge?: string; appTimeZone?: string; smokePlan?: readonly unknown[]; smokeProject?: string; sendsPush?: boolean }): string {
+export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; authBridge?: string; appTimeZone?: string; smokePlan?: readonly unknown[]; smokeProject?: string; sendsPush?: boolean; docPicker?: DocPickerConfig }): string {
   const lines = [
     '// c2c runtime config. Stable URL (not content-hashed). c2c deploy rewrites this file.',
     `globalThis.C2C_API_BASE = ${JSON.stringify(opts.apiBase ?? DEFAULT_API_BASE)};`,
   ];
   if (opts.appTimeZone) lines.push(`globalThis.C2C_APP_TIMEZONE = ${JSON.stringify(opts.appTimeZone)};`);
   if (opts.sendsPush) lines.push('globalThis.C2C_SENDS_PUSH = true;');
+  // Deploy-time opt-in only (docs/doc-pickers.md): `generateUi` never passes it, so
+  // generated output carries no key. `<` is escaped so the JSON cannot close the script.
+  if (opts.docPicker) lines.push(`globalThis.C2C_DOC_PICKER = ${JSON.stringify({ google: { apiKey: opts.docPicker.apiKey, clientId: opts.docPicker.clientId } }).replace(/</g, '\\u003c')};`);
   // The smoke plan the hidden #/admin/smoke page runs: form/field/route names
   // and canned fill values only — no credentials, no record data. `</` is
   // escaped so the JSON cannot close the inline script element.

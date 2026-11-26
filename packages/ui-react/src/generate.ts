@@ -110,6 +110,7 @@ function fieldSpec(field: UiField): FieldSpec {
   if (field.accept !== undefined) spec.accept = field.accept;
   if (field.uploadEndpoint !== undefined) spec.uploadEndpoint = field.uploadEndpoint;
   if (field.uploadSources !== undefined) spec.uploadSources = field.uploadSources;
+  if (field.browseSources !== undefined) spec.browseSources = field.browseSources;
   if (field.scan && field.scanner) spec.scanner = { camera: field.scanner.camera, formats: [...field.scanner.formats], gallery: field.scanner.gallery, onload: field.scanner.onload };
   if (field.scan && field.scanner && field.switchCamera) spec.switchCamera = true;
   if (field.media) spec.media = { camera: field.media.camera, ...(field.media.recordSeconds !== undefined ? { recordSeconds: field.media.recordSeconds } : {}), ...(field.media.annotate ? { annotate: true } : {}), ...(field.media.onload ? { onload: true } : {}) };

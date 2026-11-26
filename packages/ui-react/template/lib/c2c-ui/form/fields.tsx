@@ -24,7 +24,11 @@ import type { RichTextValue } from '../arc/components/rich-text-editor/rich-text
 import { FormContext } from './context';
 import { navigableUrl } from '../runtime/navigation';
 import { createScanner } from './scanner';
+<<<<<<< HEAD
 import { canvasToFile, createMedia, loadCanvas, MEDIA_PEN_COLORS, type MediaKind } from './media';
+=======
+import { googlePickerConfig, pickGoogleDoc } from './google-picker';
+>>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
 
 export { FormContext, type FormState } from './context';
 
@@ -1048,6 +1052,22 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
   const declared = (field.uploadSources ?? []).filter((s) => s === 'file' || s === 'camera' || s === 'public_url');
   const offers = new Set(declared.length ? declared : ['file']);
   const singleSource = offers.size === 1;
+  // Opt-in Google Drive control (docs/doc-pickers.md): only when the deployer's runtime
+  // config carries a key. Without one the field is the local upload alone.
+  const drive = offers.has('file') && field.widget === 'file' && field.browseSources?.includes('google_docs') === true && googlePickerConfig() !== null;
+  const [driveName, setDriveName] = useState('');
+  const [driveError, setDriveError] = useState('');
+  const chooseFromDrive = async () => {
+    const result = await pickGoogleDoc(field, window as unknown as Parameters<typeof pickGoogleDoc>[1]);
+    if (!result) return;
+    if ('error' in result) {
+      setDriveError(result.error);
+      return;
+    }
+    setDriveError('');
+    setDriveName(result.name);
+    sync([result]);
+  };
   return (
     <Box field={field}>
       {stored && !cleared ? (
@@ -1070,10 +1090,24 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
               <FileDropzone
                 label="Choose a file or drop it here"
                 accept={field.accept}
+<<<<<<< HEAD
                 onFilesChange={choose}
+=======
+                onFilesChange={(files) => {
+                  setDriveName('');
+                  sync(files);
+                }}
+>>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
               />
             ) : null}
           </Suspense>
+          {drive ? (
+            <>
+              <Button type="button" variant="secondary" size="sm" onClick={chooseFromDrive}>Choose from Google Drive</Button>
+              {driveName ? <span className="c2c-hint">{driveName}</span> : null}
+              {driveError ? <p className="c2c-error" role="alert">{driveError}</p> : null}
+            </>
+          ) : null}
           {offers.has('camera') ? (
             <input type="file" name={`${field.name}__camera`} accept={field.accept} capture onChange={(e) => choose([...(e.target.files ?? [])])} />
           ) : null}

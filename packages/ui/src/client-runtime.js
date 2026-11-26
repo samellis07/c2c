@@ -950,6 +950,11 @@ function fieldControl(field, id, describedBy) {
     if (sources.includes('file')) {
       inner += `<label class="filepick-btn" for="${id}">${verb}</label><input${idAttr} name="${name}" type="file"${accept}${nativeRequired}${described} data-upload="${escapeHtml(field.uploadEndpoint || '')}"${previewDuration} class="visually-hidden">`;
     }
+    // Opt-in Google Drive picker: only when the deployer's runtime config carries a key
+    // (docs/doc-pickers.md). Without one the field is the local upload alone.
+    if (sources.includes('file') && field.widget === 'file' && Array.isArray(field.browseSources) && field.browseSources.includes('google_docs') && googlePickerConfig(globalThis)) {
+      inner += `<button type="button" class="filepick-btn" data-doc-picker="google" data-pick-for="${id}" data-pick-field="${name}" data-pick-accept="${escapeHtml(field.accept || '')}">Choose from Google Drive</button>`;
+    }
     if (sources.includes('camera')) {
       inner += `<label class="filepick-btn" for="${id}-cam">Take Photo</label><input id="${id}-cam" name="${name}__camera" type="file"${accept} capture${previewDuration} class="visually-hidden">`;
     }
@@ -7764,6 +7769,126 @@ export function attachScanners(formEl) {
   }
 }
 
+const GOOGLE_API_SCRIPT = 'https://apis.google.com/js/api.js';
+const GOOGLE_IDENTITY_SCRIPT = 'https://accounts.google.com/gsi/client';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GOOGLE_NATIVE_PREFIX = 'application/vnd.google-apps.';
+const GOOGLE_FILE_ID = /^[A-Za-z0-9_-]{10,200}$/;
+
+/** The deployer's picker settings from the runtime config, or null when none are configured (the default). */
+function googlePickerConfig(view) {
+  const config = view && view.C2C_DOC_PICKER;
+  const google = config && config.google;
+  if (!google || typeof google.apiKey !== 'string' || typeof google.clientId !== 'string' || !google.apiKey || !google.clientId) return null;
+  return { apiKey: google.apiKey, clientId: google.clientId };
+}
+
+/** Load one of the two fixed Google scripts. The URLs are constants here; no configured or user value reaches `src`. */
+function loadGoogleScript(view, src) {
+  return new Promise((resolve, reject) => {
+    const doc = view.document;
+    const script = doc.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('script'));
+    doc.head.appendChild(script);
+  });
+}
+
+/**
+ * The opt-in Google Drive picker for a `browse = google_docs` file field. Asks for
+ * the `drive.file` scope only (the one chosen file), refuses Google-native
+ * documents, ids that are not plain Drive ids and anything over
+ * UPLOAD_SOURCE_MAX_BYTES, then downloads the bytes in the page so they take
+ * the same signed upload as a picked file. Resolves to a File, null when the
+ * user cancels, or { error } with a message the form can show.
+ */
+export async function pickGoogleDoc(field, view) {
+  const config = googlePickerConfig(view);
+  if (!config) return { error: 'The Google Drive picker is not configured; choose a file from this device.' };
+  try {
+    if (!view.gapi) await loadGoogleScript(view, GOOGLE_API_SCRIPT);
+    if (!(view.google && view.google.accounts && view.google.accounts.oauth2)) await loadGoogleScript(view, GOOGLE_IDENTITY_SCRIPT);
+    await new Promise((resolve) => view.gapi.load('picker', () => resolve()));
+    const token = await new Promise((resolve, reject) => {
+      const client = view.google.accounts.oauth2.initTokenClient({
+        client_id: config.clientId,
+        scope: GOOGLE_DRIVE_SCOPE,
+        callback: (response) => (response && response.access_token ? resolve(response.access_token) : reject(new Error('auth'))),
+        error_callback: () => reject(new Error('auth')),
+      });
+      client.requestAccessToken();
+    });
+    const picker = view.google.picker;
+    const chosen = await new Promise((resolve) => {
+      new picker.PickerBuilder()
+        .setDeveloperKey(config.apiKey)
+        .setAppId(config.clientId.split('-')[0])
+        .setOAuthToken(token)
+        .addView(new picker.DocsView())
+        .setCallback((response) => {
+          const action = response[picker.Response.ACTION];
+          if (action === picker.Action.PICKED) resolve((response[picker.Response.DOCUMENTS] || [])[0] || null);
+          else if (action === picker.Action.CANCEL) resolve(null);
+        })
+        .build()
+        .setVisible(true);
+    });
+    if (!chosen) return null;
+    const id = String(chosen[picker.Document.ID] || '');
+    const mime = String(chosen[picker.Document.MIME_TYPE] || '');
+    const size = Number(chosen[picker.Document.SIZE_BYTES]);
+    if (!GOOGLE_FILE_ID.test(id)) return { error: 'That Google Drive item could not be used.' };
+    if (mime.toLowerCase().startsWith(GOOGLE_NATIVE_PREFIX)) return { error: 'Google-native documents (Docs, Sheets, Slides) cannot be attached; download or export one first.' };
+    if (Number.isFinite(size) && size > UPLOAD_SOURCE_MAX_BYTES) return { error: `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.` };
+    const accept = field && field.accept;
+    if (accept && !uploadSourceTypeOk(mime, accept)) return { error: 'That file type is not accepted by this field.' };
+    const res = await view.fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res || !res.ok) return { error: 'Google Drive did not return the file.' };
+    const blob = await uploadSourceBlob(res, view);
+    const name = String(chosen[picker.Document.NAME] || 'file').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 255) || 'file';
+    return new view.File([blob], name, { type: mime });
+  } catch (cause) {
+    if (cause instanceof Error && /larger than/.test(cause.message)) return { error: `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.` };
+    return { error: 'Could not read the file from Google Drive.' };
+  }
+}
+
+/** Wire every Google Drive control in the form: the chosen File lands in the field's own file input, exactly as a picked file would. */
+export function attachDocPickers(formEl) {
+  if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
+  for (const button of formEl.querySelectorAll('[data-doc-picker="google"]')) {
+    if (button.getAttribute('data-doc-picker-bound') === 'true') continue;
+    button.setAttribute('data-doc-picker-bound', 'true');
+    button.addEventListener('click', async () => {
+      const view = viewOf(button);
+      const input = view.document.getElementById(button.getAttribute('data-pick-for') || '');
+      const fieldName = button.getAttribute('data-pick-field') || '';
+      const errorEl = Array.from(formEl.querySelectorAll('[data-error-for]')).find((el) => el.getAttribute('data-error-for') === fieldName) || null;
+      const result = await pickGoogleDoc({ widget: 'file', accept: button.getAttribute('data-pick-accept') || '' }, view);
+      if (!result || !input) return;
+      if (typeof result.error === 'string') {
+        if (errorEl) errorEl.textContent = result.error;
+        return;
+      }
+      if (errorEl) errorEl.textContent = '';
+      try {
+        const data = new view.DataTransfer();
+        data.items.add(result);
+        input.files = data.files;
+      } catch {
+        if (errorEl) errorEl.textContent = 'This browser cannot attach a file from Google Drive; choose a file from this device.';
+        return;
+      }
+      const nameEl = input.closest ? input.closest('.filepick') : null;
+      const label = nameEl && nameEl.querySelector ? nameEl.querySelector('.filepick-name') : null;
+      if (label) label.textContent = result.name;
+      input.dispatchEvent(new view.Event('change', { bubbles: true }));
+    });
+  }
+}
+
 /** Wire every `[data-preview-duration]` pick control in the form to its auto-dismiss preview, once each. */
 export function attachCapturePreviews(formEl) {
   if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
@@ -9828,6 +9953,7 @@ export function boot(appModel, doc) {
     fillLookups(form, formEl, viewRef).catch(() => {});
     attachLookupAddNew(model, formEl, viewRef);
     attachCapturePreviews(formEl);
+    attachDocPickers(formEl);
     attachScanners(formEl);
     attachMediaTools(formEl);
     const mode = open && open.mode === 'edit' ? 'edit' : 'add';

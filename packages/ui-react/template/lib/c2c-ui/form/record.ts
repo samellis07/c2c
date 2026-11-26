@@ -173,7 +173,7 @@ function uploadFileError(field: FieldSpec, file: File): string | null {
  * like the picker: any declared type is fine, but a missing or opaque
  * Content-Type is still a refusal.
  */
-function uploadSourceTypeOk(mime: string, accept?: string): boolean {
+export function uploadSourceTypeOk(mime: string, accept?: string): boolean {
   const wanted = (accept ?? '')
     .split(',')
     .map((token) => token.trim().toLowerCase())
@@ -184,7 +184,7 @@ function uploadSourceTypeOk(mime: string, accept?: string): boolean {
 }
 
 /** Read a fetched upload-source body under UPLOAD_SOURCE_MAX_BYTES: the declared length and the read length both must fit. */
-async function uploadSourceBlob(res: Response): Promise<Blob> {
+export async function uploadSourceBlob(res: Response): Promise<Blob> {
   const declared = Number(res.headers?.get('content-length'));
   if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
   const reader = res.body?.getReader?.();
