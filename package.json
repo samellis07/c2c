@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
-    "fast-check": "4.10.2"
+    "fast-check": "4.11.0"
   },
   "dependencies": {
     "lossless-json": "4.3.3",
