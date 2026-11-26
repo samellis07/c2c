@@ -21,7 +21,7 @@ Admission Management  findings 7  blockers 0  warnings 7
 ```
 
 Zero blockers: nothing has to be fixed in Creator before going on.
-The seven warnings are named in step 1.
+The five table-name warnings are named in step 1.
 
 The setup check (`c2c doctor`) reads your Catalyst sign-in and
 installed tools, so its output depends on your machine and account:
@@ -63,7 +63,7 @@ hidden. The two "slow pattern" warnings from
   fix: Keep running totals updated on write instead of re-reading other forms, ...
 ```
 
-The rest are four table-name warnings: a few generated table names are
+The rest are five table-name warnings: a few generated table names are
 longer than any name Catalyst has been seen to keep, so the plan asks
 you to shorten them or confirm they create.
 
@@ -76,7 +76,7 @@ $ c2c schema Admission_Management.ds
 # Schema migration report: Admission Management
 Dry run only. Project `c2c-Admission-Management`.
 ...
-Tables: 21 (NoSQL collections: 0)
+Tables: 21 (19 migrated tables plus the system tables `C2CJobCheckpoint` and `c2c_seq_claim`; NoSQL collections: 0)
 Columns: 207
 ...
 Mapped (supported + partial): 100.0%

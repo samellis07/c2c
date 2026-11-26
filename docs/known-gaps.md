@@ -15,6 +15,15 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - A lookup that holds several values is handled when it is stored as a list. A multi-value lookup stored as one comma-separated text value is not resolved or checked as a lookup.
 - The UI scorer refuses symlinked, hard-linked and out-of-bundle files, but it checks a directory and then reads through it. A process that swaps a folder inside the bundle for a symlink in that gap can still make it read an outside file. Run the scorer only on bundles that no other process is writing.
 - The status command's wording rules are slow (the time grows with the square of the length) on a single sentence of hundreds of kilobytes; a sentence of about 450 KB took several seconds in testing.
+- Rounding places of 1,000,000,000 or more takes about 10 seconds and then ends with a `RangeError`; a string longer than 17 digits loses precision when it goes through `Number()`.
+- The read-only sweep adapter passes non-function properties through; this is unreachable today because generated handlers expose functions only.
+- The sanitizer still leaves U+1D159, U+FFFC, U+E000, and noncharacters, and turns ZWJ and ZWNJ into `?`.
+- `NOT contains ''` matches a NULL row as well as a non-empty value.
+- G1's reduced-motion coverage parser does not model `not all` media queries, cascade order, or a non-`!important` universal reduce rule.
+- The delete-500 path in `generate.ts` (around line 3976) still returns `err.message` for `DELUGE_RUNTIME`, `CONVERSION`, and `ZOHO_CONNECTION_REFUSED`.
+- S6 caveats remain: the visitor `staff-boundary-submit` golden diverges; nested arrays through multi-lookup screening are not covered; autonumber gaps can occur after a failed insert, and numbering restarts if the claim table is emptied.
+- S4 did not measure 100k rows, and the CRM aggregate p95 is over budget.
+- Record view supports declared blocks only.
 
 ## Manual steps that come from broken references in the source app
 
