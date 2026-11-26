@@ -2735,6 +2735,12 @@ const ID_HOSTILE_VALUES = [
   'a'.repeat(200),
 ];
 
+function encodedIdLength(value: string): number {
+  let length = 0;
+  for (const ch of value) length += /[A-Za-z0-9-]/.test(ch) ? 1 : ch === '_' ? 2 : 2 + ch.codePointAt(0)!.toString(16).length;
+  return length;
+}
+
 function renderedIds(html: string): { ids: string[]; fors: string[] } {
   const ids = [...html.matchAll(/<[a-z0-9]+[^>]*?\sid="([^"]*)"/g)].map((m) => m[1] ?? '');
   const fors = [...html.matchAll(/<label[^>]*?\sfor="([^"]*)"/g)].map((m) => m[1] ?? '');
@@ -2761,8 +2767,10 @@ test('a computed id carries as a bounded token on a checkbox accordion, a row id
       for (const v of ID_HOSTILE_VALUES) {
         const out = await invoke(mod.default as never, { ...user, body: { input: { v } } });
         if (out.status !== 200) {
-          // A profile the page refuses renders nothing at all, never a loose id.
-          assert.notEqual(out.status, 500, JSON.stringify(out.body));
+          // A profile the page refuses renders nothing at all, never a loose id; a value whose
+          // encoded token is too long fails the render closed (500), never a shortened id.
+          if (out.status === 500) assert.ok(encodedIdLength(v) > 24, `${JSON.stringify(v)} failed the render with a short token: ${JSON.stringify(out.body)}`);
+          else assert.notEqual(out.status, 500, JSON.stringify(out.body));
           continue;
         }
         const html = String(out.body.html);
@@ -2780,6 +2788,29 @@ test('a computed id carries as a bounded token on a checkbox accordion, a row id
       }
       assert.ok(seen.size > 10, `${user.user.profile} rendered ${seen.size} distinct ids`);
     }
+  } finally {
+    live.restore();
+  }
+});
+
+test('two long values never share an id: a value whose token passes 24 characters fails the render, closed', async () => {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet('htmlpage hp1()\ncontent\n<span id="<%= input.v %>">x</span>')}`));
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore(SEEDED);
+  try {
+    const render = async (v: string) => invoke(mod.default as never, { ...USER, body: { input: { v } } });
+    const idOf = async (v: string) => {
+      const out = await render(v);
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      return /\sid="([^"]*)"/.exec(String(out.body.html))?.[1] ?? '';
+    };
+    for (const v of ['prefix_____________________EzIN+lKLMT]Lw', 'prefix_____________________7R-HedY\\[:s&w', 'a'.repeat(25)]) {
+      const out = await render(v);
+      assert.equal(out.status, 500, `a long token must fail closed, never print a shared id: ${JSON.stringify(v)}`);
+      assert.doesNotMatch(JSON.stringify(out.body), /\sid=/);
+    }
+    assert.equal(await idOf('a'.repeat(24)), `c2c-${'a'.repeat(24)}`, 'the longest value still renders its id');
+    assert.notEqual(await idOf('x_y'), await idOf('x__y'), 'the encoding stays injective for short values');
   } finally {
     live.restore();
   }
