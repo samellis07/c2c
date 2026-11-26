@@ -15,7 +15,8 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - A lookup that holds several values is handled when it is stored as a list. A multi-value lookup stored as one comma-separated text value is not resolved or checked as a lookup.
 - The UI scorer refuses symlinked, hard-linked and out-of-bundle files, but it checks a directory and then reads through it. A process that swaps a folder inside the bundle for a symlink in that gap can still make it read an outside file. Run the scorer only on bundles that no other process is writing.
 - The status command's wording rules are slow (the time grows with the square of the length) on a single sentence of hundreds of kilobytes; a sentence of about 450 KB took several seconds in testing.
-- Rounding places of 1,000,000,000 or more takes about 10 seconds and then ends with a `RangeError`; a string longer than 17 digits loses precision when it goes through `Number()`.
+- `round` with an extreme number of places is slow and then fails: rounding to tens of millions of places takes many seconds, and about 330 million places or more ends with a `RangeError`. A value with more than 17 significant digits loses precision, because it is read as a JavaScript number before it is rounded.
+- `doctor.json` is a plain file with no signature. `c2c doctor` writes it, but a hand-written file also passes the deploy gate, which compares only the named scope fields (data centre, organisation and project). Treat it as a note from your own machine, not as proof that the checks ran.
 - The read-only sweep adapter passes non-function properties through; this is unreachable today because generated handlers expose functions only.
 - The sanitizer still leaves U+1D159, U+FFFC, U+E000, and noncharacters, and turns ZWJ and ZWNJ into `?`.
 - `NOT contains ''` matches a NULL row as well as a non-empty value.
