@@ -31,7 +31,7 @@ TODO item per untranslated construct occurrence.
 | apps with no residual todos and no silent drops (deterministic) | 42/67 (62.7%) |
 | silent drops (total) | 0 |
 | residual TODO items | 50 |
-| distinct TODO kinds | 25 |
+| distinct TODO kinds | 24 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -43,6 +43,7 @@ TODO item per untranslated construct occurrence.
 | `openurl-unsupported-target` | 3 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 3 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 3 |
+| `Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.` | 2 |
 | `openurl-dropped-unrecognized-branch-shape` | 2 |
 | `openurl-dropped-with-server-logic` | 2 |
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
@@ -54,10 +55,9 @@ TODO item per untranslated construct occurrence.
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background-image` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background-image, background-image, background-image, background-image` | 1 |
-| `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
-| `Map report Today_Inspection_Map is shown as a list because Add_New_Inspection has no address field to plot.` | 1 |
 | `Report (app identifier) has a `customlayouts` settings block (template (app identifier)) that Catalyst generates no equivalent for.` | 1 |
 | `Report (app identifier) lists column Record_Status, a Creator built-in record column; the generated schema has no column for it.` | 1 |
+| `sendmail-attachment:view` | 1 |
 
 ## Top 0 silent-drop kinds
 
@@ -75,7 +75,7 @@ clears the app. The count is apps, not items.
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background-image` | 1 |
-| `Map report Map_View is shown as a list because Raise_Incident has no address field to plot.` | 1 |
+| `Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.` | 1 |
 | `openurl-unsupported-target` | 1 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
@@ -113,6 +113,10 @@ clears the app. The count is apps, not items.
     {
       "construct": "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)",
       "count": 3
+    },
+    {
+      "construct": "Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.",
+      "count": 2
     },
     {
       "construct": "openurl-dropped-unrecognized-branch-shape",
@@ -156,14 +160,6 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Inline style declarations not carried over (unsafe or unsupported CSS): background-image, background-image, background-image, background-image",
-      "count": 1
-    },
-    {
-      "construct": "Map report Map_View is shown as a list because Raise_Incident has no address field to plot.",
-      "count": 1
-    },
-    {
-      "construct": "Map report Today_Inspection_Map is shown as a list because Add_New_Inspection has no address field to plot.",
       "count": 1
     },
     {
@@ -228,7 +224,7 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "Field (app identifier) sets `duration = 150`; the generated video field hands recording off to the device camera app with no recording-length limit.",
-        "Map report Today_Inspection_Map is shown as a list because Add_New_Inspection has no address field to plot.",
+        "Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.",
         "Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it."
       ],
       "items": 4
@@ -262,7 +258,7 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "Map report Map_View is shown as a list because Raise_Incident has no address field to plot."
+        "Map report (app identifier) is shown as a list because (app identifier) has no address field to plot."
       ],
       "items": 1
     },
