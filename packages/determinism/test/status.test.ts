@@ -1250,3 +1250,17 @@ test('determinism:status on a gallery whose field name is 100000 characters exit
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('a 300000-character name made only of public words is redacted by scan and never thrown in an error', () => {
+  const words = 'Custom action ';
+  const name = words.repeat(Math.ceil(300_000 / words.length)).trim();
+  const lower = name.toLowerCase();
+  for (const colliding of [name, lower]) {
+    let out = '';
+    assert.doesNotThrow(() => {
+      out = publicConstruct(`Filter not migrated on report ${colliding}: uses ${colliding}`, [colliding]);
+    });
+    assert.equal(out.includes('Custom action Custom action'), false, 'the long name does not survive');
+    assert.equal(out.length < 1000, true, 'the sentence is short once the name is redacted');
+  }
+});

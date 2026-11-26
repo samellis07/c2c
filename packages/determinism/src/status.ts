@@ -236,6 +236,14 @@ function redactIdentifiers(text: string, identifiers: Iterable<string> | undefin
     // Whole token with Unicode letter/digit/underscore (and hyphen) boundaries: \b is ASCII-only, `Ünï_Rep` and `9lives` are names.
     text = text.replace(new RegExp(`(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'giu'), APP_ID);
   }
+  // A colliding name (one made only of public words) over the regex cap cannot be a template word: redact every occurrence by scan,
+  // never through a regular expression built from it (a name that long throws and the error would carry it).
+  for (const set of [collidingExact, collidingLower]) {
+    for (const name of [...set].filter((n) => n.length > MAX_REGEX_NAME).sort(byLength)) {
+      set.delete(name);
+      text = replaceTokenByScan(text, name, true, () => APP_ID);
+    }
+  }
   if (collidingExact.size) {
     const alternation = [...collidingExact].sort(byLength).map(escapeRe).join('|');
     text = text.replace(new RegExp(`(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'gu'), (match, offset: number) =>
