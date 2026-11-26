@@ -149,7 +149,6 @@ function table(group: string, cases: Case[]): void {
   }
 }
 
-const ROUND_BUG = 'BUG D2-1: shim round() multiplies a double (Math.round(1.005 * 100) / 100 = 1); Creator rounds the decimal 1.005 half away from zero to 1.01 (see NOTES.md)';
 const VALID = 'input.Valid_Till = input.ETA.addDay(input.Free_Days);';
 
 table('date arithmetic', [
@@ -168,8 +167,8 @@ table('date arithmetic', [
 table('decimal rounding and currency', [
   { name: 'round(2) is half up (2.675 -> 2.68, not the binary 2.67)', script: 'input.Rounded = input.Volume.round(2);', record: { Volume: 2.675 }, expect: { Rounded: '2.68' } },
   { name: 'round(2) of 0.125 -> 0.13', script: 'input.Rounded = input.Volume.round(2);', record: { Volume: 0.125 }, expect: { Rounded: '0.13' } },
-  { name: 'round(2) of the decimal literal 1.005 -> 1.01', script: 'x = 1.005;\ninput.Rounded = x.round(2);', expect: { Rounded: '1.01' }, skip: ROUND_BUG },
-  { name: 'round(2) of the decimal literal 1.255 -> 1.26', script: 'x = 1.255;\ninput.Rounded = x.round(2);', expect: { Rounded: '1.26' }, skip: ROUND_BUG },
+  { name: 'round(2) of the decimal literal 1.005 -> 1.01', script: 'x = 1.005;\ninput.Rounded = x.round(2);', expect: { Rounded: '1.01' } },
+  { name: 'round(2) of the decimal literal 1.255 -> 1.26', script: 'x = 1.255;\ninput.Rounded = x.round(2);', expect: { Rounded: '1.26' } },
   { name: 'round(2) of the decimal literal 8.345 -> 8.35', script: 'x = 8.345;\ninput.Rounded = x.round(2);', expect: { Rounded: '8.35' } },
   { name: 'round(0) of a negative half goes away from zero', script: 'input.Rounded = input.Volume.round(0);', record: { Volume: -2.5 }, expect: { Rounded: '-3' } },
   { name: 'round(2) keeps a value already at scale', script: 'input.Rounded = input.Volume.round(2);', record: { Volume: 12.34 }, expect: { Rounded: '12.34' } },

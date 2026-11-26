@@ -31,10 +31,16 @@ function bigintSqrt(value: bigint): bigint {
 
 export function round(value: unknown, places: unknown = 0): number | bigint {
   if (typeof value === 'bigint') return value;
-  const n = typeof value === 'number' ? value : Number(value);
+  const n = value instanceof Decimal ? Number(value.toString()) : typeof value === 'number' ? value : Number(value);
   const p = Number(places);
   if (!Number.isFinite(n)) return n;
-  const f = 10 ** (Number.isFinite(p) ? p : 0);
+  const digits = Number.isFinite(p) ? p : 0;
+  if (Number.isInteger(digits) && digits >= 0) {
+    // Creator rounds the decimal value, not its binary double: 1.005 -> 1.01.
+    const text = value instanceof Decimal ? value.toString() : String(n);
+    return Number(Decimal.from(text).quantize(digits).toString());
+  }
+  const f = 10 ** digits;
   const x = n * f;
   if (x < 0) return -Math.round(-x) / f;
   return Math.round(x) / f;
