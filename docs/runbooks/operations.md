@@ -86,6 +86,11 @@ Data Store schema, optional Slate web client — and that `<dc>`, `<org-id>`,
 - [ ] **[gap]** No scheduled or automatic row backup exists. Run
   `c2c rollback-export` yourself, and keep its output outside the repo,
   since it holds record values.
+- [ ] Upgrade a generated app to a newer c2c with `c2c upgrade <app>
+  --plan <plan-dir> --ui <react-dir>` (writes nothing without `--apply`; custom
+  files, the function environment and all rows are kept; source:
+  `packages/cli/src/upgrade.ts`). The step-by-step is in
+  [the go-live and after-go-live chapters](../guide/09-after-go-live.md).
 - [ ] **[gap]** No restore drill is defined. The export's `import/` folder
   reads back with `--source-csv`, and re-planning against the last
   checkpoint shows no changes when store and checkpoint agree. Re-running
