@@ -27,6 +27,8 @@ import { parseZml, zmlReferences, type ZmlElement, type ZmlReference } from './z
 import { detectDialect, normaliseDialect, type Dialect } from './dialect.js';
 import { compareEnUs } from './order.js';
 
+import type { RemoteAsset } from './remote-assets.js';
+
 export const IR_VERSION = 1 as const;
 
 export interface Span {
@@ -504,6 +506,11 @@ export interface App {
    * so an export that only has `.ds` files keeps the same IR.
    */
   widgets?: WidgetSidecar[];
+  /**
+   * Remote CSS background images recorded by `c2c fetch-assets` in
+   * `c2c-assets.lock.json` next to the export. Omitted when there is no lock.
+   */
+  remoteAssets?: RemoteAsset[];
 }
 
 // ---------------------------------------------------------------------------

@@ -76,6 +76,16 @@ const VECTORS: Array<[string, string, string | null, string[]]> = [
   ['escape in a second declaration', 'background:red;content:attr(data-x);background:u\\72 l(//example.test/?)', 'background:red', ['content', 'background']],
   // Fetches and script, plain or encoded: always dropped.
   ['url()', 'background:url(//example.test/x)', null, ['background']],
+  // A fetched background shipped under bg/ is the one url() an inline style keeps: background properties only, exact name shape.
+  ['fetched background image', 'background-image:url(bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)', 'background-image:url(bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)', []],
+  ['fetched background beside a size', 'background:url(bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp) no-repeat; width: 5px', 'background:url(bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp) no-repeat; width: 5px', []],
+  ['fetched background name on another property', 'list-style-image:url(bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)', null, ['list-style-image']],
+  ['bg/ with a short name', 'background:url(bg/abc.png)', null, ['background']],
+  ['bg/ with a svg extension', 'background:url(bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.svg)', null, ['background']],
+  ['bg/ with a traversal', 'background:url(bg/../aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)', null, ['background']],
+  ['bg/ with a host', 'background:url(//example.test/bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)', null, ['background']],
+  ['bg/ with a second url', 'background:url(bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png), url(//example.test/x)', null, ['background']],
+  ['bg/ with a quote', "background:url('bg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png')", null, ['background']],
   ['upper-case URL(', 'background:URL(//example.test/x)', null, ['background']],
   ['url with a space before the paren', 'background:url (//example.test/x)', null, ['background']],
   ['url with a tab before the paren', 'background:UrL\t(//example.test/x)', null, ['background']],
@@ -157,7 +167,8 @@ test('a style attribute keeps its safe declarations and names the dropped ones, 
     assert.deepEqual(fromRuntime, dropped, `${label}: runtime report`);
     assert.deepEqual(fromBuild, dropped, `${label}: build report`);
     assert.deepEqual(cleanPrintStyle(value), cleanStyle(value), `${label}: print template sanitizer agrees`);
-    if (out.style) assert.doesNotMatch(out.style, /url|image|expression|attr|var\(|\\|\/\*|@|behavior|binding/i, `${label}: no fetch survives`);
+    // The one url() that may survive is a fetched image under bg/ named by its sha256.
+    if (out.style) assert.doesNotMatch(out.style.replace(/url\(bg\/[0-9a-f]{64}\.(?:png|jpg|gif|webp)\)/g, '').replace(/background-image/g, 'background'), /url|image|expression|attr|var\(|\\|\/\*|@|behavior|binding/i, `${label}: no fetch survives`);
   }
 });
 

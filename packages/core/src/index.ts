@@ -10,3 +10,4 @@ export * from './zml.js';
 export * from './features.js';
 export * from './dialect.js';
 export * from './safe-write.js';
+export * from './remote-assets.js';

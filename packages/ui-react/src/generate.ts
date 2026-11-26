@@ -20,7 +20,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
 import { REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
-import { generateUi, serviceWorker, slateConfigSource, appTimeZone, clientRuntimeSource, stampUploadCap } from '../../ui/src/generate.js';
+import { backgroundBytes, generateUi, serviceWorker, slateConfigSource, appTimeZone, clientRuntimeSource, stampUploadCap } from '../../ui/src/generate.js';
 import { functionOriginFromApiBase, shellContentSecurityPolicy } from '../../ui/src/csp.js';
 import { solidPng } from '../../ui/src/build.js';
 import type { UiField, UiHandler, UiModel } from '../../ui/src/model.js';
@@ -554,6 +554,10 @@ export function generateReactApp(app: App, opts: ReactGenerateOptions = {}): Rea
   const rgb = iconColorRgb(ui.model.theme?.iconColor);
   gen('public/icons/icon-192.png', solidPng(192, rgb));
   gen('public/icons/icon-512.png', solidPng(512, rgb));
+  for (const path of ui.model.backgroundAssets ?? []) {
+    const bytes = backgroundBytes(app, path);
+    if (bytes) gen(`public/${path}`, bytes);
+  }
 
   // Creator client handlers reuse the same generated modules the vanilla
   // target emits (client/handlers/*.mjs), copied verbatim as lazy TS modules

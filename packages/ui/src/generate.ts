@@ -23,6 +23,7 @@ import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/s
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
+import { assetPublicPath } from '../../core/src/remote-assets.js';
 import { displayChoice, displayTerms, lookupFormats, lookupSorts, type DisplayTerm, type SortDir } from './decorations/lookups.js';
 import { actionDispatchTarget, buildModel, relatedSortKeys, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
 import type { UiElement } from './pages.js';
@@ -142,6 +143,11 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     }),
   );
   const sendsPush = deluge.files.some((file) => file.source.includes('shim.notification.send('));
+  // Fetched remote backgrounds ship as their own content-named files, never inline.
+  for (const path of model.backgroundAssets ?? []) {
+    const asset = backgroundBytes(app, path);
+    if (asset) files.push({ path: `slate/${path}`, data: asset });
+  }
   files.push({ path: 'slate/c2c-config.js', data: slateConfigSource({ appTimeZone: appTimeZone(app), ...(sendsPush ? { sendsPush: true } : {}) }) });
   files.push({ path: 'functions/access-policy.json', data: JSON.stringify(accessPolicyFor(app), null, 2) + '\n' });
   for (const file of authApplyFiles(authPlan(app), { ...(opts.dc !== undefined ? { dc: opts.dc } : {}) })) files.push(file);
@@ -197,6 +203,11 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
   if (manualSteps.length) files.push({ path: 'ui-manual-steps.json', data: JSON.stringify({ manualSteps }, null, 2) + '\n' });
   files.push({ path: 'c2c-build.txt', data: toolchainHeader() });
   return { model, summary, files };
+}
+
+/** The verified bytes behind a `bg/<sha256>.<ext>` public path, or undefined. */
+export function backgroundBytes(app: App, publicPath: string): Buffer | undefined {
+  return app.remoteAssets?.find((asset) => asset.status === 'fetched' && asset.bytes && asset.sha256 && asset.ext && assetPublicPath(asset.sha256, asset.ext) === publicPath)?.bytes;
 }
 
 export function buildUi(app: App, opts: UiGenerateOptions = {}): UiBundle {

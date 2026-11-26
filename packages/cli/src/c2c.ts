@@ -142,6 +142,8 @@
  *                                   lint, run the D3 and unit gates, and record the fill
  *   c2c fill-todos <file|dir> --lock <file> --report
  *                                   print stale lock keys. Does not rewrite output.
+ *   c2c fetch-assets <file|dir>     download the literal https images a CSS background names into c2c-assets/ and write
+ *                                   c2c-assets.lock.json (migration-time network input; generation stays offline; docs/known-gaps.md)
  *   c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]
  *                                   read-only project health: deployed functions with last
  *                                   deploy time, Slate URL, table count, recent function errors.
@@ -168,6 +170,7 @@ import {
   formatApps,
   formatFeatures,
   formatSummary,
+  isDirectoryPath,
   listDsFiles,
   LockedExportError,
   NotFileError,
@@ -189,6 +192,7 @@ import { cutoverCli } from './cutover.js';
 import { ARGV_SPEC, argvShapeProblems, seedArgsProblem } from './argv.js';
 import { GATE_EXIT, c2cVersion, defaultDoctorIo, terminalSafe, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
 import { FillTodoError, fillTodosMain } from '../../deluge/src/fill-todos.js';
+import { fetchAssetsInto } from './fetch-assets.js';
 import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
 import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
 import { DISPATCH_COMMANDS } from './commands.js';
@@ -260,6 +264,7 @@ const USAGE =
       '       c2c fill-todos <file|dir> --emit <dir>\n' +
       '       c2c fill-todos <file|dir> --accept <task-id> <fill-file> [--lock c2c.lock.json]\n' +
       '       c2c fill-todos <file|dir> --lock <file> --report\n' +
+      '       c2c fetch-assets <file|dir>\n' +
       // (No trailing `doctor [--local] [--quiet]` / `--verify-vendor` repeats:
       // both are already covered above. The census test fails repeats.)
       '       c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]\n' +
@@ -664,6 +669,43 @@ function main(argv: string[]): number {
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'fill-todos failed';
         process.stderr.write(`c2c: ${message}\n`);
+        process.exitCode = 1;
+      },
+    );
+    return 0;
+  }
+  if (cmd === 'fetch-assets') {
+    const target = restAll[0];
+    if (!target || restAll.length > 1) {
+      process.stderr.write('usage: c2c fetch-assets <file|dir>\n');
+      return 2;
+    }
+    let dir: string;
+    let sources: string[];
+    try {
+      const isDir = isDirectoryPath(target);
+      dir = isDir ? target : dirname(target);
+      sources = (isDir ? listDsFiles(target) : [target]).map((path) => readFileSync(path, 'utf8'));
+    } catch {
+      process.stderr.write(`c2c: cannot read ${target}\n`);
+      return CLI_EXIT.inputUnreadable;
+    }
+    fetchAssetsInto(dir, sources).then(
+      (summary) => {
+        for (const entry of summary.entries) {
+          let host = 'unparsed host';
+          try {
+            host = new URL(entry.url).host;
+          } catch {
+            // keep the placeholder
+          }
+          process.stdout.write(`${entry.status} ${host}${entry.reason ? ` (${entry.reason})` : ''}\n`);
+        }
+        process.stdout.write(`fetch-assets: fetched=${summary.fetched} reused=${summary.reused} refused=${summary.refused} failed=${summary.failed} over-cap=${summary.overCap}\n`);
+        process.exitCode = summary.refused + summary.failed + summary.overCap > 0 ? 1 : 0;
+      },
+      (err: unknown) => {
+        process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'fetch-assets failed'}\n`);
         process.exitCode = 1;
       },
     );

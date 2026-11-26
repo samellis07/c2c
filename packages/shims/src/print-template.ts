@@ -293,6 +293,8 @@ function safeStyleValue(raw: string, prop?: string): boolean {
   if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>{}]/.test(text) || text.includes('/*')) return false;
   if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
+  // The one url() an inline style may carry: a background image this app ships under bg/, named by its sha256.
+  if (prop === 'background' || prop === 'background-image') text = text.replace(/url\(bg\/[0-9a-f]{64}\.(?:png|jpg|gif|webp)\)/g, ' ');
   const flat = flatCss(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
   const rest = replaceStyleCalls(text, (name: string, args: string) => {

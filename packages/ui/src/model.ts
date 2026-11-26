@@ -28,6 +28,7 @@ import {
   droppedStyleStep,
   carriedStyleRules,
   droppedStyleRulesTodo,
+  remoteBackgroundNote,
   droppedStyles,
   droppedTagReason,
   droppedTagStep,
@@ -488,6 +489,8 @@ export interface UiModel {
    * table and stay manual steps.
    */
   i18n?: Record<string, Record<string, string>>;
+  /** Fetched remote CSS background images the pages point at, as `bg/<sha256>.<ext>` public paths, sorted. */
+  backgroundAssets?: string[];
   /**
    * The blocks' `Language_Settings.LANGAGUE_WITH_LOGIN` value — how the app
    * picks a language when the visitor has not chosen one. The client honors
@@ -1482,13 +1485,16 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
   const forms = app.forms.map((form) => buildForm(form, todos, app));
   const reports = app.reports.map((report) => buildReport(app, report, todos, delugeFiles));
   const snippetFiles: HtmlpageFile[] = [];
+  const backgroundPaths = new Set<string>();
   const componentViews = {
     forms: new Set(forms.filter((form) => formStatus(form) === 'generated').map((form) => form.name)),
     reports: new Set(reports.filter((report) => report.status === 'generated').map((report) => report.name)),
   };
   const pages = app.pages.map((page) => {
-    const env: ZmlEnv = { app, page: page.name, emit: (file) => snippetFiles.push(file), seq: { n: 0 }, components: componentViews };
-    return buildPage(page, todos, env);
+    const env: ZmlEnv = { app, page: page.name, emit: (file) => snippetFiles.push(file), seq: { n: 0 }, components: componentViews, remoteBg: { used: new Set(), unresolved: new Map() } };
+    const built = buildPage(page, todos, env);
+    for (const path of env.remoteBg?.used ?? []) backgroundPaths.add(path);
+    return built;
   });
   const handlers = handlersFrom(delugeFiles);
   for (const form of forms) {
@@ -1528,6 +1534,7 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
     ...(dateFormat ? { dateFormat: unquote(dateFormat.value) } : {}),
     ...(timeFormat ? { timeFormat: unquote(timeFormat.value) } : {}),
     ...(Object.keys(i18n).length ? { i18n } : {}),
+    ...(backgroundPaths.size ? { backgroundAssets: [...backgroundPaths].sort() } : {}),
     ...(languageWithLogin(app) !== undefined ? { languageWithLogin: languageWithLogin(app) } : {}),
   };
   Object.defineProperty(model, UI_SNIPPET_FILES, { value: snippetFiles, enumerable: false });
@@ -3204,6 +3211,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       : [];
   const pageLeaves = leaves(elements);
   const todoLeaves = pageLeaves.filter((el) => el.kind === 'todo');
+  const remoteNote = remoteBackgroundNote(env?.remoteBg?.unresolved ?? new Map());
   // Dropped `<style>` CSS is one counted manual step per page; the count stays off the generated element.
   let styleRules = 0;
   const styleDrops: string[] = [];
@@ -3276,11 +3284,11 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
         if (name === '?') dropped[n] = `"${refused[next++]}"`;
       });
     }
-    if (dropped.length) todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedStyleReason(dropped), manualStep: droppedStyleStep(`On page ${page.name}, the <${el.tag}> element`, dropped) });
+    if (dropped.length) todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedStyleReason(dropped), manualStep: droppedStyleStep(`On page ${page.name}, the <${el.tag}> element`, dropped) + remoteNote });
   }
   if (styleRules) {
     const lost = droppedStyleRulesTodo(page.name, styleRules, styleDrops, styleWhere);
-    todos.push({ area: 'zml', name: `${page.name}.style`, reason: lost.reason, manualReasons: ['sanitizer-loss'], manualStep: lost.step });
+    todos.push({ area: 'zml', name: `${page.name}.style`, reason: lost.reason, manualReasons: ['sanitizer-loss'], manualStep: lost.step + remoteNote });
   }
   const status = pageLeaves.length > 0 && todoLeaves.length === pageLeaves.length ? 'todo' : todoLeaves.length > 0 ? 'partial' : 'generated';
   return {

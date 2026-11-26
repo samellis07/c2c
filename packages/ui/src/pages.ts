@@ -30,6 +30,7 @@ import {
 import { serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 import { pcClickHref, pcClickParameters, reportFormFields } from './click-parameters.js';
 import { safeUrl } from './url-policy.js';
+import { rewriteRemoteBackgrounds } from './remote-backgrounds.js';
 
 const require = createRequire(import.meta.url);
 
@@ -166,6 +167,8 @@ export interface ZmlEnv {
   components?: { forms: Set<string>; reports: Set<string> };
   /** The deploy-time schema plan; generated endpoint modules match its store constraints. */
   schema?: SchemaPlan;
+  /** Remote CSS backgrounds this page pointed at a fetched copy, and the literal ones left remote with why. */
+  remoteBg?: { used: Set<string>; unresolved: Map<string, string> };
 }
 
 export interface UiElement {
@@ -1293,11 +1296,16 @@ function declarationLabel(prop: string): string {
  * `calc()`, and every other function (`url`, `image-set`, `attr`, `var`, …)
  * are refused.
  */
+/** A fetched background image as `c2c fetch-assets` names it: `bg/`, a 64-hex sha256, an image extension. Nothing else. */
+const LOCAL_BACKGROUND_URL = /url\(bg\/[0-9a-f]{64}\.(?:png|jpg|gif|webp)\)/g;
+
 function safeStyleValue(raw: string, prop?: string): boolean {
   let text = String(raw ?? '').trim();
   if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>{}]/.test(text) || text.includes('/*')) return false;
   if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
+  // The one url() an inline style may carry: a background image this app ships under bg/, named by its sha256.
+  if (prop === 'background' || prop === 'background-image') text = text.replace(LOCAL_BACKGROUND_URL, ' ');
   const flat = flatCss(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
   // Nested calls (a colour inside a gradient) resolve innermost first, one level per pass.
@@ -1916,6 +1924,21 @@ export function droppedStyleRulesTodo(page: string, rules: number, dropped: stri
   };
 }
 
+/** What to append to a dropped-style step when the page named literal remote backgrounds it could not point at a fetched copy. */
+export function remoteBackgroundNote(unresolved: ReadonlyMap<string, string>): string {
+  if (!unresolved.size) return '';
+  const shown = [...unresolved].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).slice(0, 5).map(([url, reason]) => {
+    let host = 'unparsed host';
+    try {
+      host = new URL(url).host;
+    } catch {
+      // keep the placeholder
+    }
+    return `${host}: ${reason}`;
+  });
+  return ` Remote background image not hosted with the app (${shown.join('; ')}${unresolved.size > shown.length ? `; and ${unresolved.size - shown.length} more` : ''}).`;
+}
+
 export function droppedTagReason(tag: string): string {
   return `The <${tag}> element is removed from this page snippet by the sanitizer`;
 }
@@ -2410,7 +2433,14 @@ export function elementFromZml(
     };
   }
   if (kind === 'html') {
-    const source = body ?? attr(attributes, ['value', 'content', 'html', 'text']) ?? '';
+    let source = body ?? attr(attributes, ['value', 'content', 'html', 'text']) ?? '';
+    if (env?.remoteBg && env.app.remoteAssets?.length) {
+      // Literal remote backgrounds with a verified same-origin copy are pointed at it before the sanitizer runs.
+      const rewritten = rewriteRemoteBackgrounds(source, env.app.remoteAssets);
+      source = rewritten.text;
+      for (const path of rewritten.used) env.remoteBg.used.add(path);
+      for (const [url, reason] of rewritten.unresolved) env.remoteBg.unresolved.set(url, reason);
+    }
     const decoded = decodeXmlEntities(source);
     const resolved = resolveStaticConditionals(decoded);
     const refused = malformedStyleDeclarations(resolved);
