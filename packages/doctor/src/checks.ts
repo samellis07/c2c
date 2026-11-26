@@ -77,7 +77,10 @@ export interface DoctorContext {
 
 /** Bidi controls, zero-width and invisible format characters: never echoed from an environment or file value (they reorder or hide text in a terminal). */
 const INVISIBLE_CHARS = /[\u00ad\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
-const hide = (text: string): string => text.replace(INVISIBLE_CHARS, '?');
+/** Terminal control characters (NUL..US including tab, newline and carriage return, DEL, C1): a check detail or fix is one line, so a value can never forge a second line. */
+const TERMINAL_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
+/** Applied to every check detail and fix: a value interpolated from the environment, a path, a file or a child process can never carry a terminal escape, carriage return or bidi control to the output, whichever check echoes it. */
+const hide = (text: string): string => text.replace(TERMINAL_CONTROLS, '?').replace(INVISIBLE_CHARS, '?');
 const hideFix = (fix: string | null): string | null => (fix === null ? null : hide(fix));
 
 const pass = (id: string, detail: string, extra: Partial<CheckResult> = {}): CheckResult => ({ id, status: 'pass', fix: null, ...extra, detail: hide(detail) });

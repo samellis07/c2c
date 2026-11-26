@@ -2454,3 +2454,15 @@ test('doctor react prerequisites: an npm cache path with terminal and bidi contr
   for (const code of [0x1b, 0x202e, 0x200b]) assert.ok(!shown.includes(String.fromCharCode(code)), `U+${code.toString(16)} must not reach the output`);
   assert.ok(shown.includes('cache-blocker'), 'the readable part of the path is kept');
 });
+
+test('doctor: every check detail and fix neutralises terminal controls whichever check echoes the value (D-E4 workspace path)', async () => {
+  const { dir, env } = greenWorkspace();
+  const hostileDir = join(dir, `ws${String.fromCharCode(0x0a)}${String.fromCharCode(0x0d)}${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x202e)}x`);
+  // A regular file where the output directory must go makes D-E4 fail and echo the workspace path.
+  mkdirSync(hostileDir, { recursive: true });
+  writeFileSync(join(hostileDir, 'c2c-out'), 'x');
+  const result = await runDoctorChecks({ io: hostIo(env, join(dir, 'npm-cache')).io, workspace: hostileDir, scope: resolveScope({ cwd: hostileDir, flags: {}, hooks: NO_HOOKS }), local: false });
+  const shown = result.checks.flatMap((check) => [check.detail, check.fix ?? '']);
+  for (const code of [0x0a, 0x0d, 0x1b, 0x202e]) assert.ok(!shown.some((text) => text.includes(String.fromCharCode(code))), `U+${code.toString(16)} must not reach the output`);
+  assert.ok(result.checks.some((check) => check.id === 'D-E4' && check.status === 'fail'), 'D-E4 fails and echoes the workspace');
+});
