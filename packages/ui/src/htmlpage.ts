@@ -2226,12 +2226,19 @@ function send(res, status, body) {
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
+// A date value prints the way Creator prints it: the day as dd-MMM-yyyy, then the time when it has one.
+function c2cDateText(v) {
+  const p = (n) => String(n).padStart(2, "0");
+  const day = p(v.d) + "-" + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][v.m - 1] + "-" + String(v.y).padStart(4, "0");
+  return v.hh || v.mm || v.ss ? day + " " + p(v.hh) + ":" + p(v.mm) + ":" + p(v.ss) : day;
+}
+
 function c2cStr(v) {
   if (v == null) return "";
   if (typeof v === "object") {
     if (typeof v.zoho === "string") return v.zoho === "appuri" ? "#" : "";
     if (Array.isArray(v)) return v.map(c2cStr).join(", ");
-    if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return v.toString();
+    if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return c2cDateText(v);
     if (typeof v.label === "string") return v.label;
     if (v.constructor && v.constructor.name === "Decimal") return v.toString();
 ${opts.composites || opts.lookupReads ? '    // A composite (a name, an address) prints its non-empty parts joined by spaces; a linked record prints as its id.\n    if (Object.prototype.hasOwnProperty.call(v, "toString")) return v.toString();\n' : ''}    try {
@@ -2786,6 +2793,48 @@ function removesLiteralFromText(server: string, open: number): boolean {
   return isStringShimText(server, server.slice(open + 1, comma).trim());
 }
 
+/**
+ * The initializer of every assignment to `name` in the generated script, when each one is a whole statement
+ * (`var name = <initializer>;` or `name = <initializer>;` on its own line). Null when the name is also a loop binding,
+ * is assigned any other way, or is never assigned.
+ */
+function assignmentsOf(code: string, name: string): string[] | null {
+  if (new RegExp(`\\bfor\\s*\\([^)]*(?<![\\w.$])${name}\\b`).test(code)) return null;
+  const any = [...code.matchAll(new RegExp(`(?<![\\w.$])${name}\\s*[-+*/%]?=(?!=)`, 'g'))];
+  const whole = [...code.matchAll(new RegExp(`^[ \\t]*(?:var |let |const )?${name} = ([^\\n]*);[ \\t]*$`, 'gm'))];
+  if (!any.length || any.length !== whole.length) return null;
+  return whole.map((m) => m[1] ?? '');
+}
+
+/** A system date-time column read of a fetched record, in either generated form. */
+const SYSTEM_READ = '(?:await shim\\.datastore\\.field\\(ctx, [A-Za-z_$][\\w$]*, "(?:Added_Time|Modified_Time)"\\)|shim\\.record\\.get\\([A-Za-z_$][\\w$]*, "(?:Added_Time|Modified_Time)"\\))';
+/** Creator's default text of a date-time: the format `translate` gives `Added_Time.toString()`. */
+const DATE_TIME_TEXT_CALL = new RegExp(`^shim\\.date\\.format\\(${SYSTEM_READ}, "dd-MMM-yyyy HH:mm:ss", ctx\\)$`);
+const DATE_OF_READ_CALL = new RegExp(`^shim\\.date\\.toDate\\(${SYSTEM_READ}, ctx\\)$`);
+
+/**
+ * True when the call whose `(` is at `open` is `str.remove(dt)` where every value `str` ever holds is the default text
+ * of a system date-time and every value `dt` ever holds is the default text of such a read's date
+ * (`dte = <read>.toDate(); dt = dte.toString()`). The date shims write both operands in the one format, so which rows
+ * they came from cannot change what is removed. Any other pair of operands is no proof.
+ */
+function removesOwnDateText(server: string, open: number): boolean {
+  const close = matchingParen(server, open);
+  if (close < 0) return false;
+  const operands = /^\s*([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*$/.exec(server.slice(open + 1, close));
+  if (!operands) return false;
+  // The `// Deluge:` comment above each statement quotes the source and is no assignment.
+  const code = server.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
+  const stamps = assignmentsOf(code, operands[1]!);
+  const days = assignmentsOf(code, operands[2]!);
+  if (!stamps || !days || !stamps.every((init) => DATE_TIME_TEXT_CALL.test(init))) return false;
+  return days.every((init) => {
+    const day = /^shim\.date\.text\(([A-Za-z_]\w*), ctx\)$/.exec(init);
+    const dates = day ? assignmentsOf(code, day[1]!) : null;
+    return !!dates && dates.every((date) => DATE_OF_READ_CALL.test(date));
+  });
+}
+
 /** A date or datetime shim call anywhere in an expression: a string shim wrapped around a date's text is still a date's text. */
 const DATE_SHIM = /\bshim\.date\w*\./i;
 
@@ -2854,7 +2903,8 @@ export function islandReadOnly(server: string, appCall?: (path: string[]) => boo
     // `zoho.encryption.urlEncode` is a pure local adapter: the runtime answers it without a Zoho call.
     if (name === 'zoho.task' && PURE_ZOHO_TASK.test(server.slice((match.index ?? 0) + match[0].length))) continue;
     // `text.remove("literal")` over a string shim's text is a pure text edit.
-    if (name === 'list.removeText' && removesLiteralFromText(server, (match.index ?? 0) + match[0].length - 1)) continue;
+    const at = (match.index ?? 0) + match[0].length - 1;
+    if (name === 'list.removeText' && (removesLiteralFromText(server, at) || removesOwnDateText(server, at))) continue;
     if (!readOnlyShim(name)) return false;
   }
   if (assignsDatastoreRead(server) || mutatesFetchedRead(server)) return false;

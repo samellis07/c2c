@@ -30,7 +30,7 @@ TODO item per untranslated construct occurrence.
 | apps with no residual todos | 42/67 |
 | apps with no residual todos and no silent drops (deterministic) | 42/67 (62.7%) |
 | silent drops (total) | 0 |
-| residual TODO items | 50 |
+| residual TODO items | 48 |
 | distinct TODO kinds | 24 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
@@ -38,7 +38,7 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 12 |
+| `Server-side Deluge snippet requires manual translation` | 10 |
 | `Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.` | 6 |
 | `openurl-unsupported-target` | 3 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 3 |
@@ -72,13 +72,13 @@ clears the app. The count is apps, not items.
 | construct | apps |
 |---|---:|
 | `Server-side Deluge snippet requires manual translation` | 3 |
+| `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 2 |
 | `ZML <pc> (app identifier) click parameters (app identifier) are not generated; wire them to the click handler by hand` | 2 |
 | `Field (app identifier) sets `duration = 30`; the generated video field hands recording off to the device camera app with no recording-length limit.` | 1 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS): background-image` | 1 |
 | `Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.` | 1 |
 | `openurl-unsupported-target` | 1 |
 | `Report (app identifier) lists column Added_Location, a Creator built-in record column; the generated schema has no column for it.` | 1 |
-| `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background-image declaration)` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 11 static style rules or declarations (CSS built by a Deluge tag x11)` | 1 |
 | `Static <style> CSS not carried over: the page sanitizer drops 7 static style rules or declarations (CSS built by a Deluge tag x7)` | 1 |
@@ -96,7 +96,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "Server-side Deluge snippet requires manual translation",
-      "count": 12
+      "count": 10
     },
     {
       "construct": "Custom action (app identifier) on report (app identifier) runs its workflow, but a navigation (openUrl) inside it is not carried over — the button reports success without taking the user anywhere.",
@@ -308,16 +308,15 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)"
       ],
-      "items": 4
+      "items": 1
     },
     {
       "constructs": [
         "Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (background declaration)"
       ],
-      "items": 1
+      "items": 2
     },
     {
       "constructs": [
@@ -358,7 +357,7 @@ clears the app. The count is apps, not items.
   ],
   "silentDropKinds": [],
   "silentDropTotal": 0,
-  "todoTotal": 50,
+  "todoTotal": 48,
   "totalApps": 67
 }
 ```

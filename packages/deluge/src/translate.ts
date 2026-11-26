@@ -6464,6 +6464,14 @@ const SYSTEM_FIELDS: { name: string; date: boolean }[] = [
   { name: 'Modified_Time', date: true },
 ];
 
+/** Creator's default text of a date-time value (`toString()` with no format). */
+const DATE_TIME_TEXT = 'dd-MMM-yyyy HH:mm:ss';
+
+/** A member read of a system date-time column (`rec.Added_Time`, `rec.Modified_Time`). */
+function isSystemDateTimeRead(e: Expr): boolean {
+  return e.kind === 'member' && !!systemField(e.property)?.date;
+}
+
 function systemField(name: string): { name: string; date: boolean } | null {
   const lower = name.toLowerCase();
   return SYSTEM_FIELDS.find((item) => item.name.toLowerCase() === lower) ?? null;
@@ -7217,6 +7225,9 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
     if (recv.todo) return untranslatedMethod(method, recv, args);
     if (args.length >= 1) return mergeFx(`shim.date.format(${recv.code}, ${args[0]!.code}, ctx)`, [recv, args[0]!], { shim: true });
     if (recv.date) return mergeFx(`shim.date.text(${recv.code}, ctx)`, [recv], { shim: true });
+    // `row.Added_Time.toString()`: the stored stamp is not Creator's text, so the text is the date-time in Creator's
+    // default format, the one `date.toString()` shares its day part with.
+    if (isSystemDateTimeRead(e.callee.object)) return mergeFx(`shim.date.format(${recv.code}, ${JSON.stringify(DATE_TIME_TEXT)}, ctx)`, [recv], { shim: true });
     return mergeFx(`String(${recv.code})`, [recv]);
   }
   const recv = expr(e.callee.object, scope);
