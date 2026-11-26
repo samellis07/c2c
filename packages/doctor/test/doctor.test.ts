@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2465,4 +2465,21 @@ test('doctor: every check detail and fix neutralises terminal controls whichever
   const shown = result.checks.flatMap((check) => [check.detail, check.fix ?? '']);
   for (const code of [0x0a, 0x0d, 0x1b, 0x202e]) assert.ok(!shown.some((text) => text.includes(String.fromCharCode(code))), `U+${code.toString(16)} must not reach the output`);
   assert.ok(result.checks.some((check) => check.id === 'D-E4' && check.status === 'fail'), 'D-E4 fails and echoes the workspace');
+});
+
+test('doctor CLI: values echoed in usage and error lines (unknown flag, evidence path) never reach the terminal raw', () => {
+  const { dir, env } = greenWorkspace();
+  const entry = join(process.cwd(), 'dist', 'cli', 'src', 'c2c.js');
+  const hostile = `x${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x0d)}${String.fromCharCode(0x202e)}${String.fromCharCode(0x200b)}y`;
+  const lockDir = mkdtempSync(join(tmpdir(), 'c2c-doctor-cli-lock-'));
+  try {
+    for (const args of [['doctor', `--${hostile}`], ['doctor', '--record-mcp', join(dir, hostile)]]) {
+      const run = spawnSync(process.execPath, [entry, ...args], { cwd: dir, env: { ...env, C2C_CLI_LOCK_DIR: lockDir }, encoding: 'utf8', timeout: 60000 });
+      const out = `${run.stdout}${run.stderr}`;
+      assert.ok(out.length > 0, `doctor printed something for ${args.join(' ').length} chars of args`);
+      for (const code of [0x1b, 0x0d, 0x202e, 0x200b]) assert.ok(!out.includes(String.fromCharCode(code)), `U+${code.toString(16)} must not reach the terminal`);
+    }
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true });
+  }
 });
