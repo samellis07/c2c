@@ -68,22 +68,13 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   // responses, so the table survives the error and the retry re-queries.
   // invalid also shipped: a field error is the control's description, marks
   // it aria-invalid, and an invalid submit moves focus to the first one.
-  for (const state of ['loading', 'empty', 'error', 'invalid', 'not-found', 'toast', 'server-field-error']) {
+  for (const state of ['loading', 'empty', 'error', 'invalid', 'not-found', 'toast', 'server-field-error', 'route-focus']) {
     const v = byState(verdicts, state)!;
     assert.equal(v.status, 'pass', `${state}: ${v.evidence}`);
   }
   // The string-render runtime carries a named waiver for the crash row.
   assert.equal(byState(verdicts, 'crash')!.status, 'waived');
-  // Everything a tracked issue owns reports an expected-fail naming the issue.
-  for (const [state, issue] of Object.entries({
-    'route-focus': 'ux-focus-motion',
-  })) {
-    const v = byState(verdicts, state);
-    assert.ok(v, `no verdict for ${state}`);
-    if (v.status === 'skip') continue;
-    assert.equal(v.status, 'fail', `${state}: ${v.evidence}`);
-    assert.equal(v.issue, issue, `${state}: issue`);
-  }
+  // Every state owned by a tracked issue now ships on vanilla; the rows below may only fail under their issue.
   // Rows vanilla may already satisfy: a pass is fine, a fail must still name
   // its issue.
   for (const [state, issue] of Object.entries({ 'reduced-motion': 'ux-focus-motion', 'empty-filtered': 'ux-loading-empty-not-found', 'row-rollback': 'ux-confirm-pending', submitting: 'ux-confirm-pending', pagination: 'ux-pagination-overflow', disabled: 'ux-pagination-overflow', 'long-text': 'ux-pagination-overflow' })) {
