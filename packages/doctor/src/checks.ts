@@ -333,12 +333,15 @@ function semverGte(a: string, b: string): boolean {
   return a1 !== b1 ? a1 > b1 : a2 !== b2 ? a2 > b2 : a3 >= b3;
 }
 
+/** Control characters, C1, and line/paragraph separators: never echoed from an environment-supplied path or its error. */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+
 function checkA(ctx: DoctorContext): CheckResult[] {
   const found = findCatalystSkill(ctx);
   const hit = found.hit;
   if (!hit) {
-    const note = found.error ? `; the plugin skills directories could not be read (${found.error}); set C2C_CATALYST_SKILLS_DIR to the installed Catalyst skills directory` : '';
-    const paths = found.searched.length > 0 ? ` (searched: ${found.searched.join('; ').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '?')})` : '';
+    const note = found.error ? `; the plugin skills directories could not be read (${found.error.replace(CONTROL_CHARS, '?')}); set C2C_CATALYST_SKILLS_DIR to the installed Catalyst skills directory` : '';
+    const paths = found.searched.length > 0 ? ` (searched: ${found.searched.join('; ').replace(CONTROL_CHARS, '?')})` : '';
     return [fail('D-A1', `the official Catalyst skills are not installed${note}${paths}`, D_A1_FIX)];
   }
   const out = [pass('D-A1', `catalyst skills found: ${hit.kind} v${hit.version ?? 'unknown'}`)];

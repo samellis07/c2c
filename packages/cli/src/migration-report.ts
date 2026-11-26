@@ -28,6 +28,11 @@ import { MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 
 export interface MigrationAppEntry {
   app: string;
+  /**
+   * Every name the app declares (forms, fields, reports, pages, workflows, functions, ...), in memory only: the status
+   * generator redacts these from construct sentences. Not serialised by `migrationReportAsJson`.
+   */
+  identifiers?: string[];
   deterministic: boolean;
   todoCount: number;
   fillLockEntries: number;
@@ -129,6 +134,45 @@ export function loadIr(target: string): App {
   return parseFileOrProjectWithSidecars(target).ir;
 }
 
+/** IR keys whose string value names something the app declares or refers to (a form, field, report, page, workflow, function, label...). */
+const NAME_KEY = /^(name|displayName|form|field|fields|relatedField|workflow|function|label|title|parent|table)$/;
+/** Subtrees that hold source text or positions, not declared names. */
+const SKIP_KEY = /^(span|text|source|body|script|content|json|data|permissions|files)$/i;
+
+/**
+ * Every identifier an analysed app declares or refers to, for name-aware redaction in the public status doc. Walks the
+ * IR for string values under name-like keys; a dotted path (`Parent.Field`) and a comma list contribute each part too.
+ * Sorted, so the result is deterministic.
+ */
+export function appIdentifiers(app: App): string[] {
+  const out = new Set<string>();
+  const add = (value: string): void => {
+    const text = value.trim();
+    if (!text || text.length > 200) return;
+    out.add(text);
+    for (const part of text.split(/[.,;]+/)) if (part.trim()) out.add(part.trim());
+  };
+  const seen = new Set<object>();
+  const walk = (node: unknown, named: boolean): void => {
+    if (typeof node === 'string') {
+      if (named) add(node);
+      return;
+    }
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, named);
+      return;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (SKIP_KEY.test(key)) continue;
+      walk(value, NAME_KEY.test(key));
+    }
+  };
+  walk(app, false);
+  return [...out].sort(compareEnUs);
+}
+
 const byKind = (a: TodoKind, b: TodoKind) => b.count - a.count || compareEnUs(a.construct, b.construct);
 
 export function buildMigrationReport(entries: { name: string; ir: App; lock?: FillLock }[], label: string): MigrationReport {
@@ -136,6 +180,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
     const report = analyze(entry.ir, entry.lock ? { lock: entry.lock } : undefined);
     return {
       app: entry.name,
+      identifiers: appIdentifiers(entry.ir),
       deterministic: report.determinism.deterministic,
       todoCount: report.determinism.todoCount,
       fillLockEntries: report.determinism.fillLockEntries,
@@ -220,7 +265,7 @@ export function migrationReportForDir(dir: string, label: string): MigrationRepo
 }
 
 export function migrationReportAsJson(report: MigrationReport): string {
-  return `${JSON.stringify(report, null, 2)}\n`;
+  return `${JSON.stringify(report, (key, value: unknown) => (key === 'identifiers' ? undefined : value), 2)}\n`;
 }
 
 export function migrationReportAsText(report: MigrationReport): string {

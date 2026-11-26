@@ -19,6 +19,7 @@ import {
   renderStatusDoc,
   resolveSitesPath,
   resolveStatusDir,
+  siteAttributionForDir,
   statusFromReport,
   type DeterminismStatus,
   type SiteAttribution,
@@ -495,7 +496,7 @@ test('--sites writes per-app attribution; the rendered doc is byte-identical wit
     assert.equal(app.fillLockEntries, entry.fillLockEntries);
     assert.equal(app.todos.length, entry.todoCount, app.app);
     for (const todo of app.todos) {
-      assert.equal(todo.signature, publicConstruct(todo.construct));
+      assert.equal(todo.signature, publicConstruct(todo.construct, entry.identifiers));
       assert.match(todo.location, /\S/);
       assert.ok(todo.scope === 'app' || todo.scope === 'unit' || todo.scope === 'ui', todo.scope);
     }
@@ -893,5 +894,83 @@ test('determinism:status refuses --help, a --sites parent that does not exist, a
     assert.equal(existsSync(doc), false, 'no doc written on a refusal');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------- name-aware redaction (fail closed) ----------
+
+const HOSTILE_NAMES = ['Salary_Form', 'Gehalt_Ünï', '9Secret_Form', '日本語フォーム', 'Ünï_Rep', '9lives_Rep'];
+
+/** The exact model.ts reason templates that interpolate a form name without quotes (named filter, chart click, sort). */
+const formSentences = (form: string, report: string): string[] => [
+  `Named filter "Broken" on report "${report}" is not migrated: manually translate its source criterion for ${form || 'the report form'} in the new app; selecting it returns no rows.`,
+  `Clicking a chart segment to view its underlying records is not generated: wire up a click handler that filters ${form} to the clicked category manually.`,
+  `Sort by "Missing_Col" is not migrated; the field is not a plain column of ${form}, so rows render in default (ROWID) order.`,
+  `Map report ${report} is shown as a list because ${form} has no address field to plot.`,
+];
+
+test('publicConstruct with the app identifiers redacts a form name in the named-filter, chart-click and sort sentences', () => {
+  for (const form of HOSTILE_NAMES) {
+    for (const sentence of formSentences(form, 'Rep_Q3')) {
+      const out = publicConstruct(sentence, [form, 'Rep_Q3']);
+      assert.equal(out.includes(form), false, `${form} must not survive in: ${out}`);
+      assert.equal(out.includes('Rep_Q3'), false, out);
+    }
+  }
+  assert.equal(
+    publicConstruct(formSentences('Salary_Form', 'R')[0]!, ['Salary_Form', 'R']),
+    'Named filter (app identifier) on report (app identifier) is not migrated: manually translate its source criterion for (app identifier) in the new app; selecting it returns no rows.',
+  );
+});
+
+test('publicConstruct redacts a name whole-token only: a name that is a substring of a public word is left alone', () => {
+  assert.equal(publicConstruct('criteria-dynamic', ['criteria']), 'criteria-dynamic');
+  const sort = 'Sort by "x" is not migrated; the field is not a plain column of Gehalt_Form, so rows render in default (ROWID) order.';
+  assert.equal(publicConstruct(sort, ['Gehalt_Form', 'ehalt', 'lain']).includes('Gehalt_Form'), false);
+  assert.ok(publicConstruct(sort, ['ehalt', 'lain']).includes('plain column of Gehalt_Form'), 'a substring of another token is not a match');
+});
+
+test('publicConstruct: an app identifier equal to a public word keeps the public buckets intact', () => {
+  // A form called "Report" (or "is", "not", "Field", "Map"): replacing every occurrence would turn every sentence into noise.
+  const words = ['Report', 'report', 'Field', 'Map', 'is', 'not', 'form', 'Named', 'filter', 'Sort', 'new', 'app', 'task', 'method', 'call'];
+  const sentence = formSentences('Salary_Form', 'Rep_Q3')[0]!;
+  const expected = publicConstruct(sentence, ['Salary_Form', 'Rep_Q3']);
+  assert.equal(publicConstruct(sentence, ['Salary_Form', 'Rep_Q3', ...words]), expected);
+  assert.equal(publicConstruct('task:if', ['if', 'task']), 'task:if');
+  assert.equal(publicConstruct('criteria-dynamic', ['criteria', 'dynamic']), 'criteria-dynamic');
+  // The slot-based layer still redacts the colliding name where the sentence names it.
+  assert.equal(
+    publicConstruct('Field Report has an `options` setting', ['Report']).startsWith('Field (app identifier)'),
+    true,
+  );
+});
+
+test('statusFromReport: a real app with non-ASCII, digit-leading and CJK form, report and field names leaks none of them', () => {
+  for (const form of ['Gehalt_Ünï', '9Secret_Form', '日本語フォーム']) {
+    const field = form === '日本語フォーム' ? '名前' : form === '9Secret_Form' ? '9Field' : 'Straße_Ünï';
+    const report = form === '日本語フォーム' ? '報告書' : form === '9Secret_Form' ? '9lives' : 'Ünï_Rep';
+    const src = `application "X"\n{\n\tforms\n\t{\n\t\tform ${form}\n\t\t{\n\t\t\t${field}\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t}\n\treports\n\t{\n\t\tlist ${report}\n\t\t{\n\t\t\tshow all rows from ${form}\n\t\t\t(\n\t\t\t\t${field}\n\t\t\t)\n\t\t\tfilters\n\t\t\t{\n\t\t\t\t"Broken" : Lookup.Field\n\t\t\t}\n\t\t}\n\t}\n}\n`;
+    const ir = deriveIr(parse(src));
+    const report0 = buildMigrationReport([{ name: 'a', ir }], 'x');
+    assert.ok(report0.apps[0]!.todoKinds.some((k) => k.construct.startsWith('Named filter')), 'the app must produce the named-filter sentence');
+    const status = statusFromReport(report0);
+    const text = renderStatusDoc(status) + canonicalStatusJson(status) + JSON.stringify(status);
+    for (const name of [form, field, report]) assert.equal(text.includes(name), false, `${name} leaked into the status doc`);
+    assert.ok(text.includes('Named filter (app identifier) on report (app identifier)'), 'the bucket stays a readable public sentence');
+  }
+});
+
+test('siteAttributionForDir signatures carry no app identifier of the attributed app', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-sites-names-'));
+  try {
+    const form = 'Gehalt_Ünï';
+    const src = `application "X"\n{\n\tforms\n\t{\n\t\tform ${form}\n\t\t{\n\t\t\tTitle\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t}\n\treports\n\t{\n\t\tlist Rep\n\t\t{\n\t\t\tshow all rows from ${form}\n\t\t\t(\n\t\t\t\tTitle\n\t\t\t)\n\t\t\tfilters\n\t\t\t{\n\t\t\t\t"Broken" : Lookup.Field\n\t\t\t}\n\t\t}\n\t}\n}\n`;
+    writeFileSync(join(dir, 'app.ds'), src);
+    const out = siteAttributionForDir(dir, 'x');
+    const sigs = out.apps.flatMap((a) => a.todos.map((t) => t.signature));
+    assert.ok(sigs.some((s) => s.startsWith('Named filter')), JSON.stringify(sigs));
+    for (const sig of sigs) assert.equal(sig.includes(form), false, sig);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
