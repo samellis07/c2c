@@ -30,6 +30,8 @@ import {
 import { serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 import { pcClickHref, pcClickParameters, reportFormFields } from './click-parameters.js';
 import { safeUrl } from './url-policy.js';
+import { listOf, flatCss, STYLE_FUNCTIONS, STYLE_ARGS, STYLE_TEXT_MAX, calcArgsSafe, stripStyleComments, replaceStyleCalls, cleanStyle, ieGradientFilterSafe, safeStyleValue, videoEmbedSrc, cleanNode, type DomNode, type DomDocument } from './sanitizer-core.js';
+export { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, SHELL_IDS, SHELL_OVERLAY_CLASSES, allowedAttr, calcArgsSafe, cleanStyle, replaceStyleCalls, stripStyleComments, videoEmbedSrc } from './sanitizer-core.js';
 
 const require = createRequire(import.meta.url);
 
@@ -295,106 +297,7 @@ const NAMED: Record<string, UiElement['kind']> = {
   htmlsnippet: 'html',
 };
 
-/** Ids the page shell owns: a snippet control may not take one (getElementById would find it first, or a label for it would click a shell button). */
-export const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title', 'nav', 'drawer', 'nav-drawer-open', 'offline', 'sign-out', 'install', 'menu-toggle', 'root', 'c2c-login', 'c2c-login-title', 'c2c-session-body', 'c2c-session-title', 'c2c-smoke-code', 'c2c-smoke-json']);
 
-/**
- * An id (or a label's `for`) a snippet may keep: one bounded token, a letter then letters, digits, `_` or `-`, at most 64 long, and
- * never a shell id. The generated render builds a computed id from an encoded token, so the same rule closes quote, space, `#` or URL text
- * in a value. The generator and the browser runtime keep identical copies.
- */
-const ID_TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-function idTokenOk(value: unknown): boolean {
-  const text = String(value ?? '');
-  return ID_TOKEN.test(text) && !SHELL_IDS.has(text.toLowerCase());
-}
-
-export const ALLOWED_TAGS = new Set([
-  'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt', 'input', 'label',
-  'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
-  'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
-  'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
-]);
-
-/** Dropped with their descendants. Unwrapping these would surface script or style text. */
-export const DROPPED_TAGS = new Set([
-  'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'frame', 'frameset', 'noscript',
-  'noembed', 'template', 'svg', 'math', 'title', 'head', 'html', 'body',
-]);
-
-export const ALLOWED_ATTRS: Record<string, Set<string>> = {
-  a: new Set(['href', 'title']),
-  input: new Set(['type', 'checked']),
-  label: new Set(['for']),
-  // A generated ExecuteFunction button carries its call route, encoded
-  // arguments, and success message; the runtime wires the click.
-  button: new Set(['type', 'data-fn-call', 'data-fn-args', 'data-fn-argc', 'data-fn-msg', 'data-fn-refresh']),
-  img: new Set(['src', 'alt', 'title', 'width', 'height']),
-  font: new Set(['color', 'face', 'size']),
-  td: new Set(['colspan', 'rowspan', 'title']),
-  th: new Set(['colspan', 'rowspan', 'title']),
-  ol: new Set(['start', 'title']),
-  '*': new Set(['class', 'title', 'id', 'data-style-dropped', 'data-zml']),
-};
-
-/**
- * Classes a shell stylesheet lifts out of flow (fixed, absolute or z-indexed):
- * page or data markup may not borrow one to paint over the app. The browser
- * runtime and the React template keep identical copies; a test derives the
- * list from both stylesheets.
- */
-export const SHELL_OVERLAY_CLASSES = new Set([
-  'c2c-modal-backdrop', 'c2c-sr-only', 'modal', 'modal-close', 'navitems', 'skip', 'skip-link', 'visually-hidden',
-]);
-const SHELL_OVERLAY_MODULE_CLASS = /^_overlay_[A-Za-z0-9_-]+$/i;
-
-/** Longest class attribute and token the sanitizers scan, and the most tokens they keep. */
-const CLASS_TEXT_MAX = 4096;
-const CLASS_TOKENS_MAX = 32;
-const CLASS_TOKEN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
-
-/**
- * A class attribute reduced to its plain identifier tokens, minus the shell's
- * overlay classes (compared without case: a quirks-mode page matches class
- * names case-insensitively). A carried `<style>` rule is scoped to the page
- * and selects by class, so the class has to survive the sanitizer; nothing
- * else in a token may.
- */
-function cleanClass(value: string): string {
-  const text = String(value ?? '');
-  if (text.length > CLASS_TEXT_MAX) return '';
-  const kept: string[] = [];
-  for (const token of text.split(/\s+/)) {
-    if (kept.length < CLASS_TOKENS_MAX && CLASS_TOKEN.test(token) && !SHELL_OVERLAY_CLASSES.has(token.toLowerCase()) && !SHELL_OVERLAY_MODULE_CLASS.test(token)) kept.push(token);
-  }
-  return kept.join(' ');
-}
-
-interface DomAttr {
-  name: string;
-  value: string;
-}
-
-interface DomNode {
-  nodeType: number;
-  tagName?: string;
-  textContent: string | null;
-  childNodes: ArrayLike<DomNode>;
-  attributes?: ArrayLike<DomAttr>;
-  innerHTML: string;
-  content?: { appendChild(node: DomNode): void };
-  setAttribute(name: string, value: string): void;
-  getAttribute(name: string): string | null;
-  appendChild(node: DomNode): void;
-}
-
-interface DomDocument {
-  documentElement: DomNode;
-  body: DomNode;
-  createElement(tag: string): DomNode;
-  createTextNode(text: string): DomNode;
-  createDocumentFragment(): DomNode;
-}
 
 interface DomWindow {
   DOMParser: new () => { parseFromString(html: string, type: string): DomDocument };
@@ -430,207 +333,6 @@ function domWindow(): DomWindow {
     cachedWindow = new loaded.JSDOM('<!doctype html><html><body></body></html>').window;
   }
   return cachedWindow;
-}
-
-function listOf<T>(items: ArrayLike<T> | undefined): T[] {
-  if (!items) return [];
-  const out: T[] = [];
-  for (let i = 0; i < items.length; i++) out.push(items[i]);
-  return out;
-}
-
-function flatCss(value: string): string {
-  return String(value ?? '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
-}
-
-/** CSS functions an inline style value may call: colour notations and numeric transforms and filters. None can fetch. */
-const STYLE_FUNCTIONS = new Set([
-  'rgb', 'rgba', 'hsl', 'hsla', 'rotate', 'rotatex', 'rotatey', 'rotatez', 'hue-rotate', 'scale', 'scalex', 'scaley',
-  'translate', 'translatex', 'translatey', 'translatez', 'translate3d', 'scalez', 'scale3d', 'skew', 'skewx', 'skewy',
-  'matrix', 'matrix3d', 'perspective', 'blur', 'brightness', 'contrast', 'drop-shadow', 'grayscale', 'invert', 'opacity', 'saturate', 'sepia',
-  'linear-gradient', 'radial-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient',
-]);
-
-/** Arguments of an allowed function: numbers with an optional unit, separated by spaces, commas or `/`. */
-const STYLE_ARGS = /^\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?(?:(?:\s*[,/]\s*|\s+)[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
-const STYLE_PAINT_ARGS = /^[\s,a-zA-Z0-9#.%+\-]+$/;
-const STYLE_PAINT_FUNCTIONS = new Set(['drop-shadow', 'linear-gradient', 'radial-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient']);
-
-/** Longest style attribute or declaration value the sanitizer scans; longer values are refused. */
-const STYLE_TEXT_MAX = 8192;
-
-/** Longest calc() argument list the sanitizer parses; longer values are refused. */
-const CALC_ARGS_MAX = 200;
-
-/** ASCII letter test for CSS units and function names (the regex [a-z] with the i flag). */
-function asciiLetter(ch: string): boolean {
-  const c = ch.charCodeAt(0) | 32;
-  return c >= 97 && c <= 122;
-}
-
-/**
- * One pass over a calc() argument list, the same decisions as the old
- * CALC_ARGS regex without the backtracking: a number is an optional sign,
- * digits with an optional fraction (or a bare fraction like .5), then an
- * optional unit (% or up to four letters); + - * / operators separate the
- * numbers and spaces may sit around them.
- */
-export function calcArgsSafe(args: string): boolean {
-  const text = String(args ?? '');
-  const n = text.length;
-  if (n === 0 || n > CALC_ARGS_MAX) return false;
-  let i = 0;
-  const spaces = (): void => {
-    while (i < n && /\s/.test(text[i])) i++;
-  };
-  const number = (): boolean => {
-    if (text[i] === '+' || text[i] === '-') i++;
-    let whole = 0;
-    while (i < n && text[i] >= '0' && text[i] <= '9') {
-      i++;
-      whole++;
-    }
-    let frac = 0;
-    if (text[i] === '.') {
-      i++;
-      while (i < n && text[i] >= '0' && text[i] <= '9') {
-        i++;
-        frac++;
-      }
-    }
-    return whole > 0 || frac > 0;
-  };
-  const unit = (): boolean => {
-    if (text[i] === '%') {
-      i++;
-      return true;
-    }
-    let letters = 0;
-    while (i < n && asciiLetter(text[i])) {
-      i++;
-      letters++;
-    }
-    return letters <= 4;
-  };
-  spaces();
-  if (!number() || !unit()) return false;
-  for (;;) {
-    spaces();
-    if (i >= n) return true;
-    const op = text[i];
-    if (op !== '+' && op !== '-' && op !== '*' && op !== '/') return false;
-    i++;
-    spaces();
-    if (!number() || !unit()) return false;
-  }
-}
-
-/**
- * Remove css comments in one pass — the same spans the old
- * /\/\*[\s\S]*?\*\//g replace dropped, pairing each opener with the next
- * closer. An unterminated opener is literal text, like the regex left it.
- */
-export function stripStyleComments(value: string): string {
-  const text = String(value ?? '');
-  let out = '';
-  let i = 0;
-  for (;;) {
-    const start = text.indexOf('/*', i);
-    if (start < 0) return out + text.slice(i);
-    const end = text.indexOf('*/', start + 2);
-    if (end < 0) return out + text.slice(i);
-    out += text.slice(i, start);
-    i = end + 2;
-  }
-}
-
-/**
- * Rewrite each name(args) call left to right — the same matches as the old
- * /([-a-z0-9]*)\(([^()]*)\)/gi replace, without the regex: a call's name is
- * the run of [-a-z0-9] characters ending at its '(' and its arguments are
- * everything up to the next ')' with no '(' inside. Text that is not a call,
- * or whose call never closes, is kept as is.
- */
-export function replaceStyleCalls(text: string, decide: (name: string, args: string) => string): string {
-  const nameChar = (ch: string): boolean => ch === '-' || (ch >= '0' && ch <= '9') || asciiLetter(ch);
-  let out = '';
-  let i = 0;
-  const n = text.length;
-  let from = 0;
-  while (from < n) {
-    const open = text.indexOf('(', from);
-    if (open < 0) break;
-    let nameStart = open;
-    while (nameStart > i && nameChar(text[nameStart - 1])) nameStart--;
-    let close = open + 1;
-    while (close < n && text[close] !== '(' && text[close] !== ')') close++;
-    if (close >= n || text[close] === '(') {
-      from = open + 1;
-      continue;
-    }
-    out += text.slice(i, nameStart) + decide(text.slice(nameStart, open), text.slice(open + 1, close));
-    i = close + 1;
-    from = i;
-  }
-  return out + text.slice(i);
-}
-
-/**
- * A declaration written `name=value`, as `width=3%` in a table cell. A browser's
- * CSS parser skips a declaration with no colon, so it styled nothing in Creator
- * either: there is nothing to carry and nothing lost.
- */
-const IGNORED_ASSIGNMENT = /^-?[a-z][-a-z]*\s*=\s*[-\w.%#\s]*$/i;
-/** `text-align:"center"`: no browser takes a quoted word for text-align, so it styled nothing in Creator either. */
-const IGNORED_QUOTED_ALIGN = /^(["'])[-a-z]+\1$/i;
-
-/**
- * Split an inline style into the declarations kept and the ones refused.
- * Each declaration is checked on its own: the property must be a plain CSS
- * name (never behavior or -moz-binding) and the value a safe style value, so
- * a refused declaration never takes the safe ones beside it. A trailing token
- * with no colon and no assignment, quote, escape, or call is not a declaration
- * and is left out, as is a plain `name=value` pair. The browser runtime keeps an identical copy.
- */
-export function cleanStyle(value: string): { style: string; dropped: string[] } {
-  const kept: string[] = [];
-  const dropped: string[] = [];
-  let rewrote = false;
-  const source = String(value ?? '');
-  if (source.length > STYLE_TEXT_MAX) return { style: '', dropped: ['?'] };
-  const hasComment = source.includes('/*');
-  const stripped = hasComment ? stripStyleComments(source) : source;
-  const rawPieces = stripped.split(';').map((piece) => piece.trim()).filter(Boolean);
-  for (const text of rawPieces) {
-    const colon = text.indexOf(':');
-    if (colon < 0) {
-      if (/[=@\\'"()]/.test(text) && !IGNORED_ASSIGNMENT.test(text)) dropped.push('?');
-      continue;
-    }
-    const prop = flatCss(text.slice(0, colon));
-    const body = text.slice(colon + 1).replace(/!\s*important\s*$/i, '');
-    const flat = flatCss(body);
-    if (prop === 'text-align' && IGNORED_QUOTED_ALIGN.test(body.trim())) continue;
-    const safe =
-      /^-?[-a-z]+$/.test(prop) &&
-      prop !== 'behavior' &&
-      prop !== '-moz-binding' &&
-      !flat.includes('javascript:') &&
-      !flat.includes('vbscript:') &&
-      safeStyleValue(body, prop);
-    if (safe) kept.push(text);
-    else if ((prop === 'filter' || prop === '-ms-filter') && ieGradientDeclaration(text.slice(colon + 1), prop)) { kept.push(`${prop}:${ieGradientDeclaration(text.slice(colon + 1), prop)!}`); rewrote = true; }
-    else dropped.push(/^-?[-a-z]+$/.test(prop) ? prop : '?');
-  }
-  const hasDebris = rawPieces.length !== kept.length + dropped.length;
-  return { style: dropped.length || rewrote ? kept.join('; ') : hasComment || hasDebris ? kept.join('; ') : source, dropped };
-}
-
-function ieGradientDeclaration(raw: string, prop: string): string | undefined {
-  const body = raw.trim().replace(/!\s*important\s*$/i, '');
-  const match = /^(?:progid:DXImageTransform\.Microsoft\.)?gradient\(([\s\S]*)\)$/i.exec(body);
-  const normalized = match && ieGradientFilterSafe(match[1]!);
-  return normalized ? normalized + (/!\s*important\s*$/i.test(raw) ? ' !important' : '') : undefined;
 }
 
 /**
@@ -943,75 +645,6 @@ const SHEET_KEYWORD_FUNCTIONS = new Set([
 const SHEET_STRING = /"(?:[^"\\<>;{}\r\n\f]|\\[0-9a-fA-F])*"|'(?:[^'\\<>;{}\r\n\f]|\\[0-9a-fA-F])*'/g;
 
 /**
- * One `startColorstr`/`endColorstr` argument of IE's gradient filter: a
- * `#hex` colour or an `rgb()`/`rgba()` call with numeric arguments, optionally
- * wrapped in a quote — `'`, `"`, or the `&apos;`/`&quot;` entity a `<style>`
- * raw-text element never decodes. The wrapper is stripped by shape only (its
- * two markers need not match), then the inner text may hold no quote,
- * backslash or angle bracket of its own.
- */
-function ieGradientColor(raw: string): string | undefined {
-  let text = raw.trim();
-  const wrapped = /^(?:'([\s\S]*)'|"([\s\S]*)"|&apos;([\s\S]*)&apos;|&quot;([\s\S]*)&quot;)$/.exec(text);
-  if (wrapped) text = (wrapped[1] ?? wrapped[2] ?? wrapped[3] ?? wrapped[4] ?? '').trim();
-  if (!text || /['"\\<>]/.test(text)) return undefined;
-  if (/^#[0-9a-fA-F]{3}$/.test(text) || /^#[0-9a-fA-F]{6}$/.test(text) || /^#[0-9a-fA-F]{8}$/.test(text)) return text.toLowerCase();
-  const call = /^(?:rgb|rgba)\(([^()]*)\)$/i.exec(text);
-  if (!call) return undefined;
-  const nums = call[1]!.split(',').map((v) => v.trim());
-  if ((nums.length !== 3 && nums.length !== 4) || nums.some((v, i) => !/^(?:\d+(?:\.\d+)?)$/.test(v) || (i < 3 ? Number(v) > 255 : Number(v) > 1))) return undefined;
-  if (nums.length === 4 && /^rgb\(/i.test(text)) return undefined;
-  return `${nums.length === 4 ? 'rgba' : 'rgb'}(${nums.join(',')})`;
-}
-
-/**
- * IE's `gradient()` filter paints a two-stop fallback background from plain
- * colour arguments and a boolean/0-1 flag — it never fetches and modern
- * browsers already ignore it, so a page carrying it loses nothing either way.
- * Only `startColorstr`, `endColorstr`, `GradientType` and `enabled` are
- * recognized; any other key, duplicate, or malformed argument list refuses
- * the whole filter the same as an unknown function would.
- */
-function ieGradientFilterSafe(args: string): string | undefined {
-  // Split on top-level commas only: a colour argument like
-  // `rgba(240, 173, 78, 0.54)` has commas of its own that must stay inside
-  // that one key=value pair rather than splitting it apart.
-  const parts: string[] = [];
-  let start = 0, depth = 0;
-  for (let n = 0; n <= args.length; n++) {
-    const ch = args[n] ?? ',';
-    if (ch === '(') depth++;
-    else if (ch === ')') { if (depth === 0) return undefined; depth--; }
-    else if (ch === ',' && depth === 0) { parts.push(args.slice(start, n)); start = n + 1; }
-  }
-  if (depth !== 0 || !parts.length) return undefined;
-  const values: Record<string, string> = {};
-  for (const raw of parts) {
-    const eq = raw.indexOf('=');
-    const key = raw.slice(0, eq).trim().toLowerCase();
-    if (eq < 0 || key in values) return undefined;
-    const value = raw.slice(eq + 1).trim();
-    if (key === 'gradienttype') { if (!/^[01]$/.test(value)) return undefined; values[key] = value; }
-    else if (key === 'enabled') { if (!/^(?:true|false)$/i.test(value)) return undefined; values[key] = value.toLowerCase(); }
-    else if (key === 'startcolorstr' || key === 'endcolorstr') { const color = ieGradientColor(value); if (!color) return undefined; values[key] = color; }
-    else return undefined;
-  }
-  // IE also emits a standalone enabled switch.  It has no colour payload to
-  // normalize, but is still safe when it is the sole recognized argument.
-  if (Object.hasOwn(values, 'enabled') && Object.keys(values).length === 1) {
-    return `progid:DXImageTransform.Microsoft.gradient(enabled=${values.enabled})`;
-  }
-  // Both colours are required; GradientType and enabled are optional and are
-  // re-emitted only when present, in one fixed order.
-  if (!values.startcolorstr || !values.endcolorstr) return undefined;
-  const tail = [
-    Object.hasOwn(values, 'gradienttype') ? `GradientType=${values.gradienttype}` : '',
-    Object.hasOwn(values, 'enabled') ? `enabled=${values.enabled}` : '',
-  ].filter(Boolean);
-  return `progid:DXImageTransform.Microsoft.gradient(${['startColorstr=' + values.startcolorstr, 'endColorstr=' + values.endcolorstr, ...tail].join(',')})`;
-}
-
-/**
  * One declaration of a page `<style>` sheet: kept when the inline-style
  * sanitizer keeps it, or when its value passes the sheet-only checks
  * (gradients, 3D transforms, filters, easing curves, quoted `font` names, and
@@ -1285,118 +918,6 @@ function declarationLabel(prop: string): string {
   return /^-?[-a-z0-9]{1,60}$/.test(name) ? `${name} declaration` : 'unparsed declaration';
 }
 
-/**
- * One inline-style or exported presentation value: keywords, numbers,
- * lengths, `#hex`, the allowed functions with numeric arguments, `calc()`
- * with numbers, units and + - * /, and in `font-family` quoted plain names.
- * Backslashes (CSS escapes like `u\72 l(`), comments, `@` rules, nested
- * `calc()`, and every other function (`url`, `image-set`, `attr`, `var`, …)
- * are refused.
- */
-function safeStyleValue(raw: string, prop?: string): boolean {
-  let text = String(raw ?? '').trim();
-  if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>{}]/.test(text) || text.includes('/*')) return false;
-  if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
-  if (/['"]/.test(text)) return false;
-  const flat = flatCss(text);
-  if (flat.includes('url(') || flat.includes('expression')) return false;
-  // Nested calls (a colour inside a gradient) resolve innermost first, one level per pass.
-  for (let pass = 0; pass < 4 && /[()]/.test(text); pass++) {
-    const next = replaceStyleCalls(text, (name: string, args: string) => {
-      const fn = name.toLowerCase();
-      if (STYLE_FUNCTIONS.has(fn) && (STYLE_ARGS.test(args) || (STYLE_PAINT_FUNCTIONS.has(fn) && STYLE_PAINT_ARGS.test(args)))) return ' ';
-      if (fn === 'calc' && calcArgsSafe(args)) return ' ';
-      return '(';
-    });
-    if (next === text) return false;
-    text = next;
-  }
-  return !/[()]/.test(text);
-}
-
-export function allowedAttr(tag: string, name: string): boolean {
-  if (name.startsWith('on') || name === 'srcdoc') return false;
-  if (name === 'style') return true;
-  const specific = ALLOWED_ATTRS[tag];
-  if (tag === 'button' && /^data-fn-arg-\d+$/.test(name)) return true;
-  if (specific?.has(name)) return true;
-  return ALLOWED_ATTRS['*'].has(name);
-}
-
-/**
- * The one frame a snippet may keep: a YouTube player, `https://www.youtube.com/embed/<11-character id>` and nothing else
- * (no query, userinfo, port, other host or path). It is rewritten to the privacy-enhanced host the shell CSP allows.
- * The runtime sanitizers carry the same rule.
- */
-export function videoEmbedSrc(value: string): string | undefined {
-  const match = /^https:\/\/(?:www\.)?youtube(?:-nocookie)?\.com\/embed\/([A-Za-z0-9_-]{11})$/.exec(value);
-  return match ? `https://www.youtube-nocookie.com/embed/${match[1]}` : undefined;
-}
-
-/** A kept video frame: only its address, size and title survive; the sandbox and the referrer policy are fixed here. */
-function videoFrame(node: DomNode, doc: DomDocument): DomNode | null {
-  const src = videoEmbedSrc(node.getAttribute('src') ?? '');
-  if (!src) return null;
-  const out = doc.createElement('iframe');
-  out.setAttribute('src', src);
-  for (const name of ['width', 'height']) {
-    const value = node.getAttribute(name) ?? '';
-    if (/^[0-9]{1,4}$/.test(value)) out.setAttribute(name, value);
-  }
-  const title = node.getAttribute('title');
-  if (title) out.setAttribute('title', title);
-  out.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
-  out.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-  out.setAttribute('loading', 'lazy');
-  out.setAttribute('allowfullscreen', '');
-  return out;
-}
-
-function cleanNode(node: DomNode, doc: DomDocument, dropped?: string[]): DomNode | null {
-  if (node.nodeType === 3) return doc.createTextNode(node.textContent ?? '');
-  if (node.nodeType !== 1) return null;
-  const tag = (node.tagName || '').toLowerCase();
-  if (tag === 'input' && node.getAttribute('type')?.toLowerCase() !== 'checkbox') return null;
-  if (tag === 'iframe') return videoFrame(node, doc);
-  if (DROPPED_TAGS.has(tag)) return null;
-  const fragment = doc.createDocumentFragment();
-  for (const child of listOf(node.childNodes)) {
-    const next = cleanNode(child, doc, dropped);
-    if (next) fragment.appendChild(next);
-  }
-  if (!ALLOWED_TAGS.has(tag)) return fragment;
-  const out = doc.createElement(tag);
-  for (const attr of listOf(node.attributes)) {
-    const name = attr.name.toLowerCase();
-    if (!allowedAttr(tag, name)) continue;
-    if ((name === 'id' || (tag === 'label' && name === 'for')) && !idTokenOk(attr.value)) continue;
-    if (name === 'checked') {
-      // A boolean: the initial state of a checkbox, whatever text the author gave it.
-      out.setAttribute('checked', '');
-      continue;
-    }
-    if ((name === 'href' || name === 'src') && !safeUrl(attr.value)) continue;
-    if (name === 'style') {
-      const style = cleanStyle(attr.value);
-      if (style.style || !style.dropped.length) out.setAttribute('style', style.style);
-      if (style.dropped.length) {
-        out.setAttribute('data-style-dropped', style.dropped.join(' '));
-        dropped?.push(...style.dropped);
-      }
-      continue;
-    }
-    if (name === 'class') {
-      const kept = cleanClass(attr.value);
-      if (kept) out.setAttribute('class', kept);
-      continue;
-    }
-    out.setAttribute(name, attr.value);
-  }
-  if (tag === 'a' && out.getAttribute('href')) out.setAttribute('rel', 'noopener noreferrer');
-  out.appendChild(fragment);
-  return out;
-}
-
 /** Embedding tags: the sanitizer removes them with whatever they showed (a video, a map, an external page). */
 const EMBED_DROPPED_TAGS = new Set(['embed', 'frame', 'iframe', 'object']);
 
@@ -1430,7 +951,12 @@ export function appHasNoScriptHook(app: object): boolean {
   return free;
 }
 
-export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[], hookFree = false): string {
+/**
+ * `slotUrls` is for markup that still carries island markers: a URL value is only part of the final value there, so
+ * the markers read as ordinary text and only the denied schemes refuse; the generated render checks the assembled
+ * value. Everything else takes the one strict snippet URL policy of the shared core.
+ */
+export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[], hookFree = false, slotUrls = false): string {
   const win = domWindow();
   const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
   const sink = parsed.createElement('template');
@@ -1453,7 +979,7 @@ export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: s
     if (parsed.documentElement) visit(parsed.documentElement);
   }
   for (const node of listOf(parsed.body.childNodes)) {
-    const next = cleanNode(node, parsed, dropped);
+    const next = cleanNode(node, parsed, dropped, slotUrls ? safeUrl : undefined);
     if (next) content.appendChild(next);
   }
   if (droppedTags) {

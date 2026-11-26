@@ -2022,9 +2022,12 @@ test('the browser runtime flattens the same characters and refuses the same sche
   const client = readFileSync(join(process.cwd(), 'packages/ui/src/client-runtime.js'), 'utf8');
   assert.match(policy, /\[\\u0000-\\u0020\]/);
   assert.match(client, /\[\\u0000-\\u0020\]/);
-  for (const scheme of ['javascript:', 'data:', 'vbscript:']) {
-    assert.equal(policy.includes(`'${scheme}'`), true, scheme);
-    assert.equal(client.includes(`'${scheme}'`), true, scheme);
+  // The runtime's snippet URL rule is the shared sanitizer core, which names the same refused schemes.
+  const core = readFileSync(join(process.cwd(), 'packages/ui/src/sanitizer-core.ts'), 'utf8');
+  for (const scheme of ['javascript', 'data', 'vbscript']) {
+    assert.equal(policy.includes(`'${scheme}:'`), true, scheme);
+    assert.match(core, new RegExp(`\\b${scheme}\\b`), scheme);
+    assert.match(client, new RegExp(`\\b${scheme}\\b`), scheme);
   }
   for (const scheme of ['http:', 'https:', 'mailto:']) {
     assert.equal(policy.includes(`'${scheme}'`), true, scheme);
