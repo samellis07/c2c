@@ -107,7 +107,15 @@ test('publicConstruct keeps a UI TODO reason sentence whole when its own content
 
   const reportFilter =
     'Filter not migrated on report Holidays_Employee: manually translate the source criterion for Employee in the new app; until then this report returns no rows.';
-  assert.equal(publicConstruct(reportFilter), reportFilter);
+  assert.equal(
+    publicConstruct(reportFilter),
+    'Filter not migrated on report (app identifier):(app identifier)',
+  );
+  // The quoted form model.ts writes lands in the same bucket.
+  assert.equal(publicConstruct(reportFilter.replace('Holidays_Employee', '"Holidays_Employee"')), publicConstruct(reportFilter));
+  for (const name of ['Ünï_Rep', '9lives']) {
+    assert.ok(!publicConstruct(reportFilter.replace('Holidays_Employee', name)).includes(name), `${name} must not survive`);
+  }
 });
 
 test('publicConstruct redacts an unquoted field or report name naming model.ts builds its reason sentences with', () => {
