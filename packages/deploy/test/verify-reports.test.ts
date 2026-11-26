@@ -510,7 +510,6 @@ test('expectedBuckets folds date-time category values by calendar day, like the 
   assert.deepEqual(expectedBuckets(rows, chart), { '2020-01-26': 2, '2020-01-27': 1 });
 });
 
-<<<<<<< HEAD
 test('the expected CSV neutralises formula cells and keeps a plain negative number', () => {
   const want = expectedCsv(['A'], [['=1+1'], ['-5'], ['- Name'], ['@x'], ['+1'], ['plain']]);
   assert.equal(want, "A\r\n'=1+1\r\n-5\r\n'- Name\r\n'@x\r\n'+1\r\nplain\r\n");
@@ -521,7 +520,8 @@ test('readTable reads the nth cell for the nth column that shares a label', () =
   const doc = dom('<table><tbody><tr><td data-th="Email">a@x</td><td data-th="Email">b@x</td></tr></tbody></table>');
   const table = readTable(doc.getElementById('root')!, [{ key: 'Email', label: 'Email' }, { key: 'Corp.Email', label: 'Email' }]);
   assert.deepEqual(table.rows, [['a@x', 'b@x']]);
-=======
+});
+
 const RESERVED_LOOKUP = `application "ReservedLookup"
 {
 	date format = "dd-MMM-yyyy"
@@ -636,5 +636,4 @@ test('a report criteria on a reserved-name lookup selects the same seeded rows o
   const moved = result.screens.find((s) => s.screen === 'Moved')!;
   const rows = moved.checks.find((c) => c.check === 'rows')!;
   assert.equal(rows.status, 'pass', rows.detail);
->>>>>>> aee288a (Filter report criteria on reserved-name lookups by the stored column, and compare the D9 oracle by field name)
 });

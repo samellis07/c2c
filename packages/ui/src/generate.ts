@@ -3277,7 +3277,8 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
     }
     // A multi select initial value is already the stored JSON list text (model.ts).
     const initial = field.widget === 'multiselect' ? field.initialValue : staticDisplayDefault(field.initialValue);
-    if (initial !== undefined) node.defaultValue = initial;
+    // A decision box default is the boolean a validate script compares with `== false`, not its text.
+    if (initial !== undefined) node.defaultValue = input === 'boolean' && (initial === 'true' || initial === 'false') ? initial === 'true' : initial;
   }
   return node;
 }

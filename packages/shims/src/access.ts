@@ -219,7 +219,7 @@ export interface WriteField {
    * submit handler to fields absent from the request on insert.
    * Absent when the field has no initial value or a dynamic one.
    */
-  defaultValue?: string;
+  defaultValue?: string | boolean;
   /**
    * Creator `alloweddays` on a date or datetime leaf: the weekdays (0 =
    * Sunday … 6 = Saturday) a value may fall on. A posted date on another

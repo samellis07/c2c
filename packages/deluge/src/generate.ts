@@ -6439,7 +6439,8 @@ function writeField(field: Field, app?: App): WriteField {
   const choices = closedChoices(field);
   if (choices) node.choices = choices;
   const initial = isMultiChoiceField(field) ? multiValueDefault(field.initialValue) : staticDefault(field.initialValue);
-  if (initial !== undefined) node.defaultValue = initial;
+  // A decision box default is the boolean a validate script compares with `== false`, not its text.
+  if (initial !== undefined) node.defaultValue = row?.id === 'decision-box' && (initial === 'true' || initial === 'false') ? initial === 'true' : initial;
   return node;
 }
 
