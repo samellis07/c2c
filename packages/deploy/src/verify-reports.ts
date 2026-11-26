@@ -464,7 +464,8 @@ function expectedReportRows(model: UiModel, app: App, seeded: SeededApp, reportN
     seeded,
     zone: comparisonZone(process.env.C2C_APP_TIMEZONE?.trim() || appTimeZone(app)) ?? '',
     userId: 'admin@example.test',
-    renames: columnRenamesOf(generateSchema(app)),
+    // The seeded rows are keyed by Creator field name (fieldKeyedStored), so the oracle compares field names, not store columns.
+    renames: {},
   };
   const resolved = oracleCriteria(criteria, oracle, form!);
   if (resolved === REFUSED) return REFUSED;

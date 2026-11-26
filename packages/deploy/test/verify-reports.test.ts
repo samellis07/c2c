@@ -510,6 +510,7 @@ test('expectedBuckets folds date-time category values by calendar day, like the 
   assert.deepEqual(expectedBuckets(rows, chart), { '2020-01-26': 2, '2020-01-27': 1 });
 });
 
+<<<<<<< HEAD
 test('the expected CSV neutralises formula cells and keeps a plain negative number', () => {
   const want = expectedCsv(['A'], [['=1+1'], ['-5'], ['- Name'], ['@x'], ['+1'], ['plain']]);
   assert.equal(want, "A\r\n'=1+1\r\n-5\r\n'- Name\r\n'@x\r\n'+1\r\nplain\r\n");
@@ -520,4 +521,120 @@ test('readTable reads the nth cell for the nth column that shares a label', () =
   const doc = dom('<table><tbody><tr><td data-th="Email">a@x</td><td data-th="Email">b@x</td></tr></tbody></table>');
   const table = readTable(doc.getElementById('root')!, [{ key: 'Email', label: 'Email' }, { key: 'Corp.Email', label: 'Email' }]);
   assert.deepEqual(table.rows, [['a@x', 'b@x']]);
+=======
+const RESERVED_LOOKUP = `application "ReservedLookup"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+	forms
+	{
+		form Account
+		{
+			Name
+			(
+				type = text
+			)
+			Status
+			(
+				type = picklist
+				values = {"Active","Archive"}
+			)
+		}
+		form Transfer
+		{
+			Label
+			(
+				type = text
+			)
+			Note
+			(
+				type = text
+			)
+			From
+			(
+				type = picklist
+				values = Account[ID != 0].ID
+				displayformat = [Name]
+			)
+		}
+	}
+	reports
+	{
+		list Account_All
+		{
+			show all rows from Account
+			(
+				Name
+				Status
+			)
+		}
+		list Moved
+		{
+			displayName = "Moved"
+			show all rows from Transfer [From.Status == "Active"]
+			(
+				Label
+				From
+				Note
+			)
+		}
+	}
+	share_settings
+	{
+		"Administrator"
+		{
+			name = "Administrator"
+			type = Users_Permissions
+			permissions = {Chat:true, Predefined:true, ApiAccess:true, PIIAccess:true, ePHIAccess:true}
+		}
+	}
+	web
+	{
+		reports
+		{
+			report Moved
+			{
+				detailview
+				(
+					layout
+					(
+						datablock1
+						(
+							title = "Overview"
+							fields
+							(
+								Label
+								From
+							)
+						)
+					)
+				)
+			}
+		}
+		menu
+		{
+			section Main
+			{
+				displayname = "Main"
+				list Account_All
+				{
+				}
+				list Moved
+				{
+				}
+			}
+		}
+	}
+}
+`;
+
+test('a report criteria on a reserved-name lookup selects the same seeded rows on the served read and in the oracle', { skip: SKIP }, async () => {
+  const app = deriveIr(parse(RESERVED_LOOKUP));
+  const result = await runReportChecks(app, 'inline', { n: 6 });
+  assert.equal(result.error, undefined);
+  const moved = result.screens.find((s) => s.screen === 'Moved')!;
+  const rows = moved.checks.find((c) => c.check === 'rows')!;
+  assert.equal(rows.status, 'pass', rows.detail);
+>>>>>>> aee288a (Filter report criteria on reserved-name lookups by the stored column, and compare the D9 oracle by field name)
 });

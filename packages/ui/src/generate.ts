@@ -704,7 +704,12 @@ async function lookupParentIds(datastore, form, field, leaf, principal) {
 // the positive ops, NOT (Call_Owner IN (ids)) for !=. A leaf on a parent
 // composite part (Owner.Name.first_name) reads its stored column through
 // parentParts. A path the maps do not know, or a parent read that is refused,
-// fails closed to neverRows.
+// fails closed to neverRows. A field stored under a reserved-name column
+// (From -> From_col) compares on that column, plain leaf or lookup head.
+function storeColumn(field) {
+  return Object.prototype.hasOwnProperty.call(columnRenames, field) ? columnRenames[field] : field;
+}
+
 async function resolveLookupCriteria(datastore, criteria, principal) {
   if (!criteria || typeof criteria !== "object") return criteria;
   if (criteria.op === "and" || criteria.op === "or") {
@@ -725,8 +730,12 @@ async function resolveLookupCriteria(datastore, criteria, principal) {
   }
   const field = typeof criteria.field === "string" ? criteria.field : "";
   const dot = field.indexOf(".");
-  if (dot <= 0 || dot === field.length - 1) return criteria;
+  if (dot <= 0 || dot === field.length - 1) {
+    const column = storeColumn(field);
+    return column === field ? criteria : { ...criteria, field: column };
+  }
   const head = field.slice(0, dot);
+  const headColumn = storeColumn(head);
   let rest = field.slice(dot + 1);
   const parent = Object.prototype.hasOwnProperty.call(lookupParents, head) ? lookupParents[head] : "";
   if (!parent) return neverRows();
@@ -738,12 +747,12 @@ async function resolveLookupCriteria(datastore, criteria, principal) {
   if (criteria.op === "!=") {
     const excluded = await lookupParentIds(datastore, parent, rest, { op: "==", field: rest, value: criteria.value }, principal);
     if (excluded === null) return neverRows();
-    return excluded.length ? { op: "not", arg: { op: "in", field: head, value: excluded } } : alwaysRows();
+    return excluded.length ? { op: "not", arg: { op: "in", field: headColumn, value: excluded } } : alwaysRows();
   }
   if (!LOOKUP_POSITIVE_OPS.has(criteria.op)) return neverRows();
   const ids = await lookupParentIds(datastore, parent, rest, { op: criteria.op, field: rest, value: criteria.value }, principal);
   if (ids === null) return neverRows();
-  return ids.length ? { op: "in", field: head, value: ids } : neverRows();
+  return ids.length ? { op: "in", field: headColumn, value: ids } : neverRows();
 }
 `;
 }
@@ -2530,6 +2539,8 @@ export const columnFields = ${JSON.stringify(columns)};
 export const lookupColumns = ${JSON.stringify(lookups)};
 ${filtersByDisplay ? `/** Lookup field -> the parent field it reads and the terms its text is composed from: a \`display\` filter leaf compares a value with that text. */\nconst lookupDisplays = ${JSON.stringify(displaySpecs)};\n` : ''}/** Parent form of each lookup field on this form. A criteria leaf on a lookup display path resolves against it, and a staged display is checked against it. */
 export const lookupParents = ${JSON.stringify(parents)};
+/** Stored column of each field kept under another name because its own name is reserved. */
+const columnRenames = ${JSON.stringify(renames)};
 /** Stored part column of each lookup parent's composite parts: "Name.first_name" -> "Name_first_name". */
 export const parentParts = ${JSON.stringify(parentParts)};
 /** Lookup field map of every form: a record-query Form[..].Lookup.ID path resolves only through a lookup hop. */
@@ -3774,7 +3785,7 @@ function boundCriteria(criteria) {
   const parentDecimals = Object.fromEntries(parentForms.flatMap((form) => (Object.hasOwn(appDecimals, form) ? [[form, appDecimals[form]!]] : [])));
   const resolveImport = needsResolve ? SCOPED_READ_IMPORT : '';
   const resolveConst = needsResolve
-    ? `/** Parent form of each lookup field on this form; a report-scope leaf on a lookup display path resolves against it. */\nconst lookupParents = ${JSON.stringify(parents)};\n/** Stored part column of each lookup parent's composite parts. */\nconst parentParts = ${JSON.stringify(compositePartsOfParents(app, parents, schemaOf(app)))};\nconst parentDecimals = ${JSON.stringify(parentDecimals)};\n/** Lookup field map of every form: a record-query \`Form[..].Lookup.ID\` path resolves only through a lookup hop. */\nconst lookupParentsByForm = ${JSON.stringify(lookupParentsByFormOf(app))};\n`
+    ? `/** Parent form of each lookup field on this form; a report-scope leaf on a lookup display path resolves against it. */\nconst lookupParents = ${JSON.stringify(parents)};\n/** Stored column of each field kept under another name because its own name is reserved. */\nconst columnRenames = ${JSON.stringify(columnRenamesOf(schemaOf(app))[form.name] ?? {})};\n/** Stored part column of each lookup parent's composite parts. */\nconst parentParts = ${JSON.stringify(compositePartsOfParents(app, parents, schemaOf(app)))};\nconst parentDecimals = ${JSON.stringify(parentDecimals)};\n/** Lookup field map of every form: a record-query \`Form[..].Lookup.ID\` path resolves only through a lookup hop. */\nconst lookupParentsByForm = ${JSON.stringify(lookupParentsByFormOf(app))};\n`
     : '';
   const resolveSource = needsResolve
     ? `\n// ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.\nfunction zcqlPredicate(where) {\n  const text = typeof where === "string" ? where.trim() : "";\n  return text === "true" ? "" : text;\n}\n\n${scopedReadSource()}\n${lookupCriteriaSource()}`
