@@ -14,6 +14,7 @@ import { flag, loadApp } from '../../deploy/src/cli.js';
 import { rollbackBackupProblem } from '../../deploy/src/rollback.js';
 import { buildOfflinePlan, c2cVersion, resolveDc, sha256, type PlanFile } from '../../deploy/src/offline-plan.js';
 import { generateReactApp, planReactWrite, writeReactApp, type WritePlan } from '../../ui-react/src/index.js';
+import { terminalSafe, singleLine } from '../../doctor/src/sanitize.js';
 
 export const UPGRADE_SCHEMA = 'c2c-upgrade/1';
 
@@ -196,7 +197,10 @@ function planTreeChanges(dir: string, files: readonly PlanFile[]): PlanTreeChang
   for (const [path, digest] of Object.entries(recorded)) {
     const file = insidePlanDir(dir, path);
     if ((PRESERVED_PLAN_FILES as readonly string[]).includes(path)) continue;
-    if (existsSync(file) && `sha256:${sha256(readFileSync(file))}` !== digest) changes.handEdited.push(path);
+    if (existsSync(file) && `sha256:${sha256(readFileSync(file))}` !== digest) {
+      const next = files.find((f) => f.path === path);
+      if (!next || `sha256:${sha256(next.bytes ?? next.data)}` !== `sha256:${sha256(readFileSync(file))}`) changes.handEdited.push(path);
+    }
   }
   const next = new Set<string>();
   for (const file of files) {
@@ -256,6 +260,8 @@ export function planUpgrade(input: UpgradeInput): { report: UpgradeReport; planF
   }
   if (input.uiDir !== undefined) {
     const files = generateReactApp(input.app, { ...(input.apiBase ? { apiBase: input.apiBase } : {}), auth: input.auth !== false });
+    const manifest = readJson<{ spec?: unknown }>(join(input.uiDir, 'c2c-generated.json'));
+    if (manifest?.spec !== undefined && manifest.spec !== 1) report.blocked.push(`React app spec ${String(manifest.spec)} is newer than this c2c`);
     report.ui = { dir: input.uiDir, changes: planReactWrite(input.uiDir, files, { upgradePlatform: true }) };
   }
   if (report.direction === 'downgrade') report.blocked.push(`the folder was made by c2c ${report.from}, which is newer than this c2c ${to}: install the newer c2c, never downgrade a generated app`);
@@ -331,7 +337,7 @@ export function upgradeAsText(report: UpgradeReport): string {
     lines.push(`plan folder ${report.plan.dir}:`);
     lines.push(...list('  regenerated', report.plan.regenerated));
     lines.push(`  unchanged ${report.plan.unchanged.length}, new ${report.plan.added.length}, removed ${report.plan.removed.length}`);
-    lines.push(...list('  new', report.plan.added), ...list('  removed', report.plan.removed));
+    lines.push(...list('  new', report.plan.added.map(singleLine)), ...list('  removed', report.plan.removed.map(singleLine)));
     lines.push(...list('  kept (you edit these)', report.plan.preserved));
     lines.push(...list('  edited by hand', report.plan.handEdited));
   }
@@ -342,12 +348,12 @@ export function upgradeAsText(report: UpgradeReport): string {
   if (report.ui) {
     const c = report.ui.changes;
     lines.push(`React app ${report.ui.dir}: replaced ${c.replaced.length}, new ${c.added.length}, removed ${c.removed.length}, unchanged ${c.unchanged.length}, kept ${c.kept.length}`);
-    lines.push(...list('  replaced', c.replaced), ...list('  kept (custom files)', c.kept.filter((path) => path.startsWith('src/custom/'))), ...list('  edited by hand', c.edited));
+    lines.push(...list('  replaced', c.replaced.map(singleLine)), ...list('  kept (custom files)', c.kept.filter((path) => path.startsWith('src/custom/')).map(singleLine)), ...list('  edited by hand', c.edited.map(singleLine)));
   }
   lines.push('data: no row is read or changed by the upgrade');
   lines.push(...list('always kept', report.preserved));
   lines.push(...list('blocked', report.blocked), ...list('next', report.next));
-  return `${lines.join('\n')}\n`;
+  return `${terminalSafe(lines.join('\n'))}\n`;
 }
 
 export const UPGRADE_USAGE =

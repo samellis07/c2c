@@ -16,7 +16,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
 import { REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
@@ -620,20 +620,28 @@ export interface WritePlan {
   edited: string[];
 }
 
+function safeGeneratedPath(out: string, path: string): string {
+  if (!path || isAbsolute(path) || /[\\\u0000-\u001f\u007f]/.test(path) || path.split('/').some((p) => !p || p === '.' || p === '..')) throw new Error('React app manifest names an unsafe path');
+  const dest = join(out, ...path.split('/'));
+  const rel = relative(out, dest);
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('React app manifest names a path outside the app');
+  return dest;
+}
+
 export function planReactWrite(out: string, files: readonly ReactFile[], opts: { upgradePlatform?: boolean } = {}): WritePlan {
   const plan: WritePlan = { added: [], replaced: [], unchanged: [], kept: [], removed: [], edited: [] };
   const manifestPath = join(out, GENERATED_MANIFEST);
   const previous: Record<string, string> = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> }).files : {};
   plan.edited = Object.entries(previous)
-    .filter(([path, hash]) => existsSync(join(out, path)) && sha256(readFileSync(join(out, path))) !== hash)
+    .filter(([path, hash]) => existsSync(safeGeneratedPath(out, path)) && sha256(readFileSync(safeGeneratedPath(out, path))) !== hash)
     .map(([path]) => path)
     .sort();
   const next = new Set(files.map((f) => f.path));
   plan.removed = Object.keys(previous)
-    .filter((path) => !next.has(path) && existsSync(join(out, path)))
+    .filter((path) => !next.has(path) && existsSync(safeGeneratedPath(out, path)))
     .sort();
   for (const file of files) {
-    const dest = join(out, file.path);
+    const dest = safeGeneratedPath(out, file.path);
     if (!existsSync(dest)) plan.added.push(file.path);
     else if (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform)) plan.kept.push(file.path);
     else if (Buffer.compare(readFileSync(dest), Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data)) === 0) plan.unchanged.push(file.path);
@@ -655,18 +663,19 @@ export function writeReactApp(out: string, files: readonly ReactFile[], opts: { 
   const manifestPath = join(out, GENERATED_MANIFEST);
   const previous: Record<string, string> = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> }).files : {};
   const edited = Object.entries(previous)
-    .filter(([path, hash]) => existsSync(join(out, path)) && sha256(readFileSync(join(out, path))) !== hash)
+    .filter(([path, hash]) => existsSync(safeGeneratedPath(out, path)) && sha256(readFileSync(safeGeneratedPath(out, path))) !== hash && !files.some((f) => f.path === path && sha256(f.data) === sha256(readFileSync(safeGeneratedPath(out, path)))))
     .map(([path]) => path)
     .sort();
   if (edited.length && !opts.force) throw new HandEditedError(edited);
   const next = new Set(files.map((f) => f.path));
   for (const path of Object.keys(previous).sort()) {
-    if (next.has(path) || !existsSync(join(out, path))) continue;
-    rmSync(join(out, path));
+    if (next.has(path) || !existsSync(safeGeneratedPath(out, path))) continue;
+    rmSync(safeGeneratedPath(out, path));
     result.removed.push(path);
   }
   for (const file of files) {
-    const dest = join(out, file.path);
+    const dest = safeGeneratedPath(out, file.path);
+    if (file.path === 'package.json' && existsSync(dest) && file.owner === 'platform') throw new HandEditedError([file.path]);
     mkdirSync(dirname(dest), { recursive: true });
     if (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform)) {
       // Create-only: a file present here must have existed when this write
