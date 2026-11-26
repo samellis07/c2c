@@ -16,7 +16,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, sep, isAbsolute } from 'node:path';
+import { dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
 import { REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
@@ -620,7 +620,9 @@ export interface WritePlan {
   edited: string[];
 }
 
-function safeGeneratedPath(out: string, path: string): string {
+function safeGeneratedPath(rawOut: string, path: string): string {
+  // Normalise first: './ui5' and 'ui5//' must be walked exactly like 'ui5'.
+  const out = resolve(rawOut);
   if (!path || isAbsolute(path) || /[\\\u0000-\u001f\u007f]/.test(path) || path.split('/').some((p) => !p || p === '.' || p === '..')) throw new Error('React app manifest names an unsafe path');
   const dest = join(out, ...path.split('/'));
   // Ancestors above the output root may be aliases (for example macOS /tmp);
@@ -629,7 +631,7 @@ function safeGeneratedPath(out: string, path: string): string {
   try { if (lstatSync(probe).isSymbolicLink()) throw new Error('React app output path must not contain a symbolic link'); }
   catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
   let ancestor = dirname(dest);
-  while (ancestor !== out && ancestor.startsWith(out)) {
+  while (ancestor !== out && ancestor.startsWith(out + sep)) {
     try { if (lstatSync(ancestor).isSymbolicLink()) throw new Error('React app manifest names a path through a symbolic link'); }
     catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
     const parent = dirname(ancestor); if (parent === ancestor) break; ancestor = parent;
