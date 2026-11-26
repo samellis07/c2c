@@ -239,12 +239,15 @@ export interface DoctorStamp {
 }
 
 /** doctor.json is hand-editable: every stored string copied into a report goes through singleLine. */
-const stampText = (value: string): string => (typeof value === 'string' ? singleLine(value) : value);
+const stampText = (value: unknown): string | undefined => (typeof value === 'string' ? singleLine(value) : undefined);
 function stampScope(scope: { dc?: string; org?: string; project?: string }): NonNullable<DoctorStamp['scope']> {
+  const dc = stampText(scope.dc);
+  const org = stampText(scope.org);
+  const project = stampText(scope.project);
   return {
-    ...(scope.dc !== undefined ? { dc: stampText(scope.dc) } : {}),
-    ...(scope.org !== undefined ? { org: stampText(scope.org) } : {}),
-    ...(scope.project !== undefined ? { project: stampText(scope.project) } : {}),
+    ...(dc !== undefined ? { dc } : {}),
+    ...(org !== undefined ? { org } : {}),
+    ...(project !== undefined ? { project } : {}),
   };
 }
 
