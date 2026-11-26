@@ -55,7 +55,7 @@ const CSP_META = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")([^"
 export function applyDocPickerCsp(html: string): string {
   return html.replace(CSP_META, (_all, open: string, policy: string, close: string) => {
     const directives = policy.split(';').map((d) => d.trim()).filter(Boolean);
-    for (const [name, origins] of Object.entries(GOOGLE_PICKER_CSP)) {
+    for (const [name, origins] of Object.entries(GOOGLE_PICKER_CSP).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       const at = directives.findIndex((d) => d.startsWith(`${name} `));
       if (at < 0) continue;
       const have = directives[at]!.split(/\s+/);
