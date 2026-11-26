@@ -710,3 +710,42 @@ test('no media tools unless the field declares them', async () => {
   const { doc } = await render([field('Clip', 'image', { accept: 'image/*', uploadEndpoint: '/u' })]);
   assert.equal(doc.querySelector('.c2c-media'), null);
 });
+
+const clickLabel = (dom: any, doc: Document, win: any, label: string) => dom.flushSync(() => buttonLabelled(doc, label)!.dispatchEvent(new win.MouseEvent('click', { bubbles: true })));
+const storedFile = (doc: Document) => (doc.querySelector('input[name="Clip"]') as HTMLInputElement).files?.[0] as File | undefined;
+
+test('Cancel while recording discards the recording and stops the camera', async () => {
+  const stubs = mediaStubs();
+  const { dom } = await bundle();
+  const { doc, win } = await render([mediaField('video', { camera: 'primary', recordSeconds: 30 })], {}, stubs.prepare);
+  clickLabel(dom, doc, win, 'Record video');
+  await until(() => stubs.recorders.length === 1, 'recorder started');
+  clickLabel(dom, doc, win, 'Cancel');
+  assert.equal(storedFile(doc), undefined, 'a cancelled recording is not stored');
+  assert.equal(stubs.stopped(), 1, 'camera released');
+});
+
+test('leaving the page while recording audio discards the recording', async () => {
+  const stubs = mediaStubs();
+  const { dom } = await bundle();
+  const { doc, win } = await render([mediaField('audio', { camera: 'primary', recordSeconds: 10 })], {}, stubs.prepare);
+  clickLabel(dom, doc, win, 'Record audio');
+  await until(() => stubs.recorders.length === 1, 'recorder started');
+  dom.flushSync(() => win.dispatchEvent(new win.Event('pagehide')));
+  assert.equal(storedFile(doc), undefined, 'an abandoned recording is not stored');
+  assert.equal(stubs.stopped(), 1, 'microphone released');
+});
+
+test('Stop recording keeps the take once and a later pagehide does not remove it', async () => {
+  const stubs = mediaStubs();
+  const { dom } = await bundle();
+  const { doc, win } = await render([mediaField('audio', { camera: 'primary', recordSeconds: 10 })], {}, stubs.prepare);
+  clickLabel(dom, doc, win, 'Record audio');
+  await until(() => stubs.recorders.length === 1, 'recorder started');
+  clickLabel(dom, doc, win, 'Stop recording');
+  const kept = storedFile(doc);
+  assert.equal(kept?.name, 'recording.webm');
+  dom.flushSync(() => win.dispatchEvent(new win.Event('pagehide')));
+  assert.equal(storedFile(doc), kept, 'the attached take survives');
+  assert.equal(stubs.stopped(), 1);
+});
