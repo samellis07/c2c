@@ -498,6 +498,43 @@ async function readScoped(datastore, form, criteria, offset, limit, sort) {
 function sortOrderOf(sort) {
   return sort && typeof sort.orderBy === "string" && /^ORDER BY [A-Za-z_][A-Za-z0-9_]* (ASC|DESC), ROWID$/.test(sort.orderBy) ? sort.orderBy : "ORDER BY ROWID";
 }
+
+// The scoped parent rows behind a set of lookup ids: one ROWID IN read per
+// chunk of at most ZCQL's row cap, the same authorizeRead scope as a lookup
+// display. A request-scoped cache (form + display field) keeps each parent
+// read once, so columns that share a parent form, and the lookup path,
+// scope and display passes of one aggregate, do not read it again. Returns
+// null when the caller may not read the display; a failed chunk is left
+// unread (empty cells), not cached.
+async function readParents(datastore, principal, form, display, ids, cache) {
+  const key = form + "|" + display;
+  const entry = (cache && cache[key]) || { fields: undefined, byId: {}, asked: {} };
+  if (cache) cache[key] = entry;
+  const want = ids.filter((id) => !entry.asked[id]);
+  for (let at = 0; at < want.length; at += ${LIMITS.zcqlRowsPerQuery}) {
+    const chunk = want.slice(at, at + ${LIMITS.zcqlRowsPerQuery});
+    const scoped = lookupDisplayScope(principal, form, display, { op: "in", field: "ROWID", value: chunk });
+    if (!scoped) return null;
+    entry.fields = scoped.fields;
+    let parents;
+    try {
+      parents = await readScoped(datastore, form, scoped.criteria, 0, chunk.length);
+    } catch (err) {
+      continue;
+    }
+    for (const parent of Array.isArray(parents) ? parents : []) {
+      if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
+      entry.byId[String(parent.ROWID)] = parent;
+    }
+    for (const id of chunk) entry.asked[id] = true;
+  }
+  if (want.length === 0 && entry.fields === undefined) {
+    const scoped = lookupDisplayScope(principal, form, display, { op: "in", field: "ROWID", value: ids });
+    if (!scoped) return null;
+    entry.fields = scoped.fields;
+  }
+  return entry;
+}
 `;
 }
 
@@ -555,15 +592,15 @@ function composeDisplay(row, terms, parts, readable) {
  */
 function lookupDisplaysSource(): string {
   return `// A lookup column stores the parent ROWID (a multi lookup a list of them); the
-// report shows the parent display value instead. ROWID IN queries per lookup
-// column (chunked at ZCQL's row cap), through the same authorizeRead scope as the lookup endpoint: the
+// report shows the parent display value instead. One ROWID IN query per lookup
+// column, through the same authorizeRead scope as the lookup endpoint: the
 // caller's record filter is ANDed into the parent query and the display field
 // must be readable. A display format over several fields is composed from the
 // parent row, and every field it reads must be readable too. A parent the
 // caller cannot read, a hidden parent form or display field, or a field
 // allowlist without the display shows an empty cell: neither the hidden value
 // nor the ROWID reaches the report.
-async function resolveLookupDisplays(datastore, rows, columns, principal) {
+async function resolveLookupDisplays(datastore, rows, columns, principal, cache = {}) {
   // A composite display field (name, address) reads as an object; the cell
   // text joins its non-empty scalar parts with a space.
   const displayText = (value) => {
@@ -609,24 +646,14 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
     const terms = Array.isArray(column.format) ? column.format : null;
     const parts = Object.prototype.hasOwnProperty.call(parentParts, column.form) ? parentParts[column.form] : {};
     const names = {};
-    const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
-    let parents = [];
-    if (scoped) {
-      // One read returns at most ZCQL's row cap, so read the ids in chunks.
-      const chunk = ${LIMITS.zcqlRowsPerQuery};
-      try {
-        for (let at = 0; at < ids.length; at += chunk) {
-          const part = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids.slice(at, at + chunk) });
-          parents = parents.concat(await readScoped(datastore, column.form, part.criteria, 0, chunk));
-        }
-      } catch (err) {
-        parents = [];
+    const read = await readParents(datastore, principal, column.form, display, ids, cache);
+    if (read) {
+      for (const id of ids) {
+        if (!Object.prototype.hasOwnProperty.call(read.byId, id)) continue;
+        const parent = read.byId[id];
+        const text = terms ? composeDisplay(parent, terms, parts, read.fields) : displayText(parent[display]);
+        names[id] = text === undefined ? "" : text;
       }
-    }
-    for (const parent of Array.isArray(parents) ? parents : []) {
-      if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
-      const text = terms ? composeDisplay(parent, terms, parts, scoped.fields) : displayText(parent[display]);
-      names[String(parent.ROWID)] = text === undefined ? "" : text;
     }
     const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
     for (let index = 0; index < originals.length; index += 1) {
@@ -2037,7 +2064,7 @@ function aggregateFieldRef(raw, readable, principal) {
 // nested cell (row.Book.Genre or row["Book.Genre"]) is read without a query;
 // an unresolvable or unreadable path leaves the key empty, like a display
 // column the caller may not read.
-async function resolveLookupPaths(datastore, rows, paths, principal) {
+async function resolveLookupPaths(datastore, rows, paths, principal, cache) {
   // Authorize the parent leaf before trusting any representation of it. In
   // particular, a caller-supplied expanded lookup object is not proof that
   // the caller may read that field.
@@ -2075,19 +2102,10 @@ async function resolveLookupPaths(datastore, rows, paths, principal) {
     }
     if (!ids.length) continue;
     for (const p of specs) {
-      const scoped = lookupDisplayScope(principal, form, p.field, { op: "in", field: "ROWID", value: ids });
-      if (!scoped) continue;
-      let parents;
-      try {
-        parents = await readScoped(datastore, form, scoped.criteria, 0, ids.length);
-      } catch (err) {
-        continue;
-      }
+      const read = await readParents(datastore, principal, form, p.field, ids, cache);
+      if (!read) continue;
       const values = {};
-      for (const parent of Array.isArray(parents) ? parents : []) {
-        if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
-        values[String(parent.ROWID)] = parent[p.field];
-      }
+      for (const id of Object.keys(read.byId)) values[id] = read.byId[id][p.field];
       for (const row of rows) {
         if (!row || row[p.key] !== undefined) continue;
         const cell = row[head];
@@ -2722,28 +2740,15 @@ ${filtersByDisplay ? lookupDisplayFilterSource() : ''}${lookupDisplaysSource()}
 // A parent row the caller cannot read (recordFilter, owner scope, hidden form)
 // must not surface its ROWID as a bucket key or measure value: blank it, the
 // way a plain read does.
-async function scopeLookupIds(datastore, rows, columns, principal) {
+async function scopeLookupIds(datastore, rows, columns, principal, cache) {
   const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
   for (const column of columns || []) {
     if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
     const ids = [...new Set(rows.flatMap((row) => (Array.isArray(row[column.column]) ? row[column.column] : [row[column.column]])).filter(isId))];
     if (!ids.length) continue;
     const allowed = new Set();
-    const scoped = lookupDisplayScope(principal, column.form, column.field, { op: "in", field: "ROWID", value: ids });
-    if (scoped) {
-      // One read returns at most ZCQL's row cap, so read the ids in chunks.
-      const chunk = ${LIMITS.zcqlRowsPerQuery};
-      try {
-        for (let at = 0; at < ids.length; at += chunk) {
-          const part = lookupDisplayScope(principal, column.form, column.field, { op: "in", field: "ROWID", value: ids.slice(at, at + chunk) });
-          for (const parent of await readScoped(datastore, column.form, part.criteria, 0, chunk)) {
-            if (parent && parent.ROWID != null) allowed.add(String(parent.ROWID));
-          }
-        }
-      } catch (err) {
-        allowed.clear();
-      }
-    }
+    const read = await readParents(datastore, principal, column.form, column.field, ids, cache);
+    if (read) for (const id of ids) if (Object.prototype.hasOwnProperty.call(read.byId, id)) allowed.add(id);
     for (const row of rows) {
       const value = row[column.column];
       if (Array.isArray(value)) row[column.column] = value.filter((item) => !isId(item) || allowed.has(item));
@@ -2838,12 +2843,13 @@ ${stageLoad('        ')}        ${wantsRelative ? 'let' : 'const'} aggRows = [];
             break;
           }
         }
-${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => matchRow(row, aggResolved, decimalColumns));\n' : ''}        await resolveLookupPaths(datastore, aggRows, spec.paths, principal);
+${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => matchRow(row, aggResolved, decimalColumns));\n' : ''}        const lookupCache = {};
+        await resolveLookupPaths(datastore, aggRows, spec.paths, principal, lookupCache);
         // The fold groups a lookup field by its stored parent ROWID: resolving
         // the display first would merge distinct parents that share a display
         // value into one bucket.
-        await scopeLookupIds(datastore, aggRows, lookupColumns.filter((column) => column.column === spec.group || spec.measures.some((measure) => measure.field === column.column)), principal);
-        await resolveLookupDisplays(datastore, aggRows, lookupColumns.filter((column) => column.column !== spec.group), principal);
+        await scopeLookupIds(datastore, aggRows, lookupColumns.filter((column) => column.column === spec.group || spec.measures.some((measure) => measure.field === column.column)), principal, lookupCache);
+        await resolveLookupDisplays(datastore, aggRows, lookupColumns.filter((column) => column.column !== spec.group), principal, lookupCache);
         const agg = aggregateRows(aggRows, spec);
         send(res, 200, {
           dryRun: false,
