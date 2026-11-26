@@ -338,7 +338,7 @@ function checkA(ctx: DoctorContext): CheckResult[] {
   const hit = found.hit;
   if (!hit) {
     const note = found.error ? `; the plugin skills directories could not be read (${found.error}); set C2C_CATALYST_SKILLS_DIR to the installed Catalyst skills directory` : '';
-    const paths = found.searched.length > 0 ? ` (searched: ${found.searched.join('; ')})` : '';
+    const paths = found.searched.length > 0 ? ` (searched: ${found.searched.join('; ').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '?')})` : '';
     return [fail('D-A1', `the official Catalyst skills are not installed${note}${paths}`, D_A1_FIX)];
   }
   const out = [pass('D-A1', `catalyst skills found: ${hit.kind} v${hit.version ?? 'unknown'}`)];

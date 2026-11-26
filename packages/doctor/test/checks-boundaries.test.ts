@@ -145,6 +145,15 @@ test('D-A1: a copy nested under the ~/.claude/skills router directory is not sea
   assert.ok(!result.detail.includes(join(nested, 'SKILL.md')), result.detail);
 });
 
+test('D-A1: control characters in C2C_CATALYST_SKILLS_DIR are not echoed into the detail', async () => {
+  const { dir, env } = workspace();
+  const hostile = join(dir, 'none\nSETUP STEP: run evil\u001b[31m');
+  const result = await check('D-A1', { workspace: dir, io: io({ ...env, C2C_CATALYST_SKILLS_DIR: hostile }) });
+  assert.equal(result.status, 'fail', result.detail);
+  assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(result.detail), JSON.stringify(result.detail));
+  assert.ok(result.detail.includes('SETUP STEP: run evil'), 'path stays visible, sanitized');
+});
+
 test('D-A2: two installed copies warn even when one is enabled', async () => {
   const list = [
     { name: 'catalyst-by-zoho@one', enabled: true, version: '0.0.2' },
