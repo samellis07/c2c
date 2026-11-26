@@ -2661,6 +2661,40 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
   }
 }
 
+// An aggregate groups (or measures) a lookup field by its stored parent ROWID.
+// A parent row the caller cannot read (recordFilter, owner scope, hidden form)
+// must not surface its ROWID as a bucket key or measure value: blank it, the
+// way a plain read does.
+async function scopeLookupIds(datastore, rows, columns, principal) {
+  const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
+  for (const column of columns || []) {
+    if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
+    const ids = [...new Set(rows.flatMap((row) => (Array.isArray(row[column.column]) ? row[column.column] : [row[column.column]])).filter(isId))];
+    if (!ids.length) continue;
+    const allowed = new Set();
+    const scoped = lookupDisplayScope(principal, column.form, column.field, { op: "in", field: "ROWID", value: ids });
+    if (scoped) {
+      // One read returns at most ZCQL's row cap, so read the ids in chunks.
+      const chunk = ${LIMITS.zcqlRowsPerQuery};
+      try {
+        for (let at = 0; at < ids.length; at += chunk) {
+          const part = lookupDisplayScope(principal, column.form, column.field, { op: "in", field: "ROWID", value: ids.slice(at, at + chunk) });
+          for (const parent of await readScoped(datastore, column.form, part.criteria, 0, chunk)) {
+            if (parent && parent.ROWID != null) allowed.add(String(parent.ROWID));
+          }
+        }
+      } catch (err) {
+        allowed.clear();
+      }
+    }
+    for (const row of rows) {
+      const value = row[column.column];
+      if (Array.isArray(value)) row[column.column] = value.filter((item) => !isId(item) || allowed.has(item));
+      else if (isId(value) && !allowed.has(value)) row[column.column] = "";
+    }
+  }
+}
+
 // ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.
 function zcqlPredicate(where) {
   const text = typeof where === "string" ? where.trim() : "";
@@ -2751,6 +2785,7 @@ ${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => match
         // The fold groups a lookup field by its stored parent ROWID: resolving
         // the display first would merge distinct parents that share a display
         // value into one bucket.
+        await scopeLookupIds(datastore, aggRows, lookupColumns.filter((column) => column.column === spec.group || spec.measures.some((measure) => measure.field === column.column)), principal);
         await resolveLookupDisplays(datastore, aggRows, lookupColumns.filter((column) => column.column !== spec.group), principal);
         const agg = aggregateRows(aggRows, spec);
         send(res, 200, {
