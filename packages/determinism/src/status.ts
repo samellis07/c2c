@@ -124,6 +124,9 @@ const QUOTED_NAME = /"[^"]*"/g;
  */
 const UNQUOTED_FIELD_OR_REPORT_NAME = /^(Field|Report) ([A-Za-z_][A-Za-z0-9_]*)\b/;
 
+/** `Map report <report> is shown as a list because <form> has no address field to plot.` names two unquoted identifiers. */
+const MAP_AS_LIST = /^Map report ([A-Za-z_][A-Za-z0-9_]*) is shown as a list because ([A-Za-z_][A-Za-z0-9_]*) has no address field to plot\.$/;
+
 /**
  * The construct name as it may appear in a committed doc. Translator kinds
  * (`criteria-dynamic`) and catalogue builtins / keywords pass through; any
@@ -141,6 +144,7 @@ const UNQUOTED_FIELD_OR_REPORT_NAME = /^(Field|Report) ([A-Za-z_][A-Za-z0-9_]*)\
  */
 export function publicConstruct(construct: string): string {
   let text = construct.replace(QUOTED_NAME, '(app identifier)');
+  text = text.replace(MAP_AS_LIST, 'Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.');
   const named = UNQUOTED_FIELD_OR_REPORT_NAME.exec(text);
   if (named) {
     const name = named[2]!;

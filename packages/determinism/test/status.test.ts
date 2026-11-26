@@ -83,6 +83,13 @@ test('publicConstruct keeps builtins, keywords and translator kinds, and buckets
   assert.equal(publicConstruct('method:Line_Items'), 'method:(app identifier)');
 });
 
+test('publicConstruct redacts both names in a map-report-as-list sentence', () => {
+  assert.equal(
+    publicConstruct('Map report Some_Map is shown as a list because Some_Form has no address field to plot.'),
+    'Map report (app identifier) is shown as a list because (app identifier) has no address field to plot.',
+  );
+});
+
 test('publicConstruct keeps a UI TODO reason sentence whole when its own content has a colon', () => {
   // A reason sentence is not a `prefix:name` key: a colon inside a quoted property
   // value (`timedisplayoptions = hh:mm:ss`) must not be mistaken for that separator.
