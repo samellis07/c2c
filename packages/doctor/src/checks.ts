@@ -15,6 +15,7 @@
  *   D-F6 rows    plan.json holds no planned row counts and the Dev row cap is
  *                [UNVERIFIED]
  */
+import { singleLine } from './sanitize.js';
 import { constants, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, type Dirent } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -75,12 +76,7 @@ export interface DoctorContext {
   nodeVersion?: string;
 }
 
-/** Bidi controls, zero-width and invisible format characters: never echoed from an environment or file value (they reorder or hide text in a terminal). */
-const INVISIBLE_CHARS = /[\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
-/** Terminal control characters (NUL..US including tab, newline and carriage return, DEL, C1): a check detail or fix is one line, so a value can never forge a second line. */
-const TERMINAL_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
-/** Applied to every check detail and fix: a value interpolated from the environment, a path, a file or a child process can never carry a terminal escape, carriage return or bidi control to the output, whichever check echoes it. */
-const hide = (text: string): string => text.replace(TERMINAL_CONTROLS, '?').replace(INVISIBLE_CHARS, '?');
+const hide = singleLine;
 const hideFix = (fix: string | null): string | null => (fix === null ? null : hide(fix));
 
 const pass = (id: string, detail: string, extra: Partial<CheckResult> = {}): CheckResult => ({ id, status: 'pass', fix: null, ...extra, detail: hide(detail) });
@@ -341,16 +337,14 @@ function semverGte(a: string, b: string): boolean {
   return a1 !== b1 ? a1 > b1 : a2 !== b2 ? a2 > b2 : a3 >= b3;
 }
 
-/** Control characters, C1, line/paragraph separators and the invisible/bidi set: never echoed from an environment-supplied path, file value or error. */
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
-const clean = (text: string): string => text.replace(CONTROL_CHARS, '?');
+const clean = singleLine;
 
 function checkA(ctx: DoctorContext): CheckResult[] {
   const found = findCatalystSkill(ctx);
   const hit = found.hit;
   if (!hit) {
-    const note = found.error ? `; the plugin skills directories could not be read (${found.error.replace(CONTROL_CHARS, '?')}); set C2C_CATALYST_SKILLS_DIR to the installed Catalyst skills directory` : '';
-    const paths = found.searched.length > 0 ? ` (searched: ${found.searched.join('; ').replace(CONTROL_CHARS, '?')})` : '';
+    const note = found.error ? `; the plugin skills directories could not be read (${singleLine(found.error)}); set C2C_CATALYST_SKILLS_DIR to the installed Catalyst skills directory` : '';
+    const paths = found.searched.length > 0 ? ` (searched: ${singleLine(found.searched.join('; '))})` : '';
     return [fail('D-A1', `the official Catalyst skills are not installed${note}${paths}`, D_A1_FIX)];
   }
   const out = [pass('D-A1', `catalyst skills found: ${hit.kind} v${hit.version === undefined ? 'unknown' : clean(hit.version)}`)];
