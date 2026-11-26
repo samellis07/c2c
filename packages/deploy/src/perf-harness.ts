@@ -159,6 +159,8 @@ export async function runPerf(app: App, opts: PerfOptions): Promise<PerfRun> {
     const routes = require(join(dir, 'functions/c2c_api/routes.json')) as Record<string, string>;
     const entry = require(join(dir, 'functions/c2c_api/index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
     server = createServer((rq, rs) => void entry(rq, rs));
+    // The deferred fill-back and seeding block the loop for minutes at 100k; a pooled keep-alive socket idle that long is reset by the default 5 s server timeout.
+    server.keepAliveTimeout = 0;
     await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
     const callCount = () => sdk.state().calls.length;
