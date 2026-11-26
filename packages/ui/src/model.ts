@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App, Field, Form, FunctionDef, Page, Property, PropertyBlock, Report, ReportCustomAction } from '../../core/src/ir.js';
-import { hasOthersOption, PRIVACY_PROPERTY_KEYS, privacyFlagsOf, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
+import { builtinRecordColumns, hasOthersOption, PRIVACY_PROPERTY_KEYS, privacyFlagsOf, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { actionNavigationDropReason, actionNavigationLifted, blueprintFieldSpecs, navScriptOnly, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
@@ -485,6 +485,8 @@ export interface UiForm {
   section?: string;
   fields: UiField[];
   submitEndpoint: string;
+  /** A report on this form lists Added_Location or Modified_Location: the client asks the browser for its position on submit and posts it as `geo`. */
+  capturesLocation?: boolean;
   /** Where an edit-mode submit posts. Falls back to `submitEndpoint`. */
   editSubmitEndpoint?: string;
   /** Scoped single-row read used to prefill the edit screen. */
@@ -1632,6 +1634,7 @@ function buildForm(form: Form, todos: UiTodo[], app: App): UiForm {
     ...(form.section ? { section: form.section } : {}),
     fields: form.fields.map((field) => buildField(field, todos, form.name, 0, app, new Set(form.fields.map((item) => item.name)))),
     submitEndpoint: plainSubmitEndpoint(form.name),
+    ...(builtinRecordColumns(app, form).location ? { capturesLocation: true } : {}),
     recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record`,
     deleteEndpoint: `/forms/${encodeURIComponent(form.name)}/delete`,
     ...(success ? { successMessage: success } : {}),
@@ -2385,6 +2388,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   for (const column of report.columns) {
     if (knownColumnHead(form, column.field) || !UNSUPPORTED_RECORD_COLUMNS.has(column.field)) continue;
     if (column.field === 'Record_Status' && recordStatusColumn(app, form)) continue;
+    if (storedBuiltinColumn(app, form, column.field)) continue;
     const name = `${report.name} column ${column.field}`;
     if (!todos.some((t) => t.area === 'report' && t.name === name)) {
       todos.push({
@@ -2985,6 +2989,12 @@ const RECORD_COLUMNS = new Set([
   'Modified_User_IP_Address',
 ]);
 
+/** True when the schema stores this built-in record column for the form (see `builtinRecordColumns`). */
+function storedBuiltinColumn(app: App, form: Form | undefined, name: string): boolean {
+  const stored = builtinRecordColumns(app, form);
+  return name === 'Record_Status' ? stored.status : GEO_RECORD_COLUMNS.has(name) && stored.location;
+}
+
 /**
  * Creator system columns a report may list that the generated schema stores
  * no column for at all — distinct from `RECORD_COLUMNS`, which the schema
@@ -3039,6 +3049,9 @@ function reportViewColumns(app: App, form: Form | undefined, column: Report['col
     if (path === 'Record_Status' && recordStatusColumn(app, form)) {
       return [{ field: path, label: column.label || path }];
     }
+    // A built-in record column the schema now stores (location stamps, a plain
+    // Record_Status): the report endpoint fills the cell from the stored parts.
+    if (storedBuiltinColumn(app, form, path)) return [{ field: path, label: column.label || path }];
     return [];
   }
   const out: ReportViewColumn[] = [

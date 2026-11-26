@@ -432,7 +432,7 @@ export interface FieldValueReader {
 
 /** Fields `Runtime.context` takes; `form` names the record's form for {@link RuntimeOptions.fieldValues}. */
 export type ContextInput = Partial<
-  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent'>
+  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent' | 'stamps'>
 > & { form?: string };
 
 /** A client action the server run answers with: a field `:ui` task, an `openUrl`, a field value, the rows to insert into a subform, an alert or a field's visibility. */
@@ -513,6 +513,18 @@ export interface ShimContext {
    * A client `body.op` is not copied here.
    */
   writeOp?: 'insert' | 'update';
+  /**
+   * Built-in record columns the generated submit endpoint stamps on `form`
+   * (Creator's Added_Location / Modified_Location and Record_Status). Set by
+   * the endpoint, never read from the request body: `location` is the
+   * validated browser position (absent when denied or malformed) and
+   * `recordStatus` the value a new row stores. Ignored for any other form.
+   */
+  stamps?: {
+    form: string;
+    location?: { latitude: number; longitude: number };
+    recordStatus?: string;
+  };
   /**
    * Request ROWID (`body.ROWID` or `body.rowid` only). Not read from `record`.
    * Empty means on add or edit is an insert.
@@ -1354,7 +1366,7 @@ function labelledIdentity(value: string | undefined, sentinel: string): { value:
  * Caller copies of these columns are dropped. `authorizeWrite` already rejects
  * them; this is the server write that follows that rejection.
  */
-function applySystemColumns(values: Record<string, unknown>, op: 'insert' | 'update', ctx: ShimContext): Record<string, unknown> {
+function applySystemColumns(values: Record<string, unknown>, op: 'insert' | 'update', ctx: ShimContext, form?: string): Record<string, unknown> {
   const out = { ...values };
   for (const key of Object.keys(out)) {
     const lower = key.toLowerCase();
@@ -1369,6 +1381,19 @@ function applySystemColumns(values: Record<string, unknown>, op: 'insert' | 'upd
   } else {
     out.Modified_User = user;
     out.Modified_Time = time;
+  }
+  const stamps = ctx.stamps;
+  if (stamps && form === stamps.form) {
+    // The endpoint owns these columns: a caller copy is dropped first.
+    for (const key of Object.keys(out)) {
+      if (/^(added|modified)_location_(latitude|longitude)$/i.test(key) || key.toLowerCase() === 'record_status') delete out[key];
+    }
+    const stamp = op === 'insert' ? 'Added_Location' : 'Modified_Location';
+    if (stamps.location) {
+      out[`${stamp}_latitude`] = stamps.location.latitude;
+      out[`${stamp}_longitude`] = stamps.location.longitude;
+    }
+    if (op === 'insert' && stamps.recordStatus !== undefined) out.Record_Status = stamps.recordStatus;
   }
   return out;
 }
@@ -3805,7 +3830,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             throw err;
           }
         }
-        const stamped = applySystemColumns(storedValues, 'insert', ctx);
+        const stamped = applySystemColumns(storedValues, 'insert', ctx, form);
         warnLongStrings(form, stamped);
         // authorizeWrite keeps composite nesting (Name: { first_name }); the
         // store has one flat column per part, so expand before the check.
@@ -3849,7 +3874,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             throw err;
           }
         }
-        const expandedUpdate = flatComposites(form, expandCompositeWrites(form, stringifyValues(applySystemColumns(storedValues, 'update', ctx)), rulesOf(form)));
+        const expandedUpdate = flatComposites(form, expandCompositeWrites(form, stringifyValues(applySystemColumns(storedValues, 'update', ctx, form)), rulesOf(form)));
         const stored = checkedWrite(form, shadowsForWrite(form, expandedUpdate), false);
         // The read that finds ROWIDs is the same scoped read as rows/column/count/field.
         // Without the profile record filter, a criteria update writes rows the principal cannot see.
@@ -4101,7 +4126,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       async writeRow(ctx, form, rowId, values) {
         const criteria: Criteria = { op: '==', field: 'ROWID', value: rowId };
-        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'update', ctx))), false);
+        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'update', ctx, form))), false);
         const where = whereOf(form, criteria);
         if (dryRun) {
           note({ op: 'store', form, where, values: stored, dryRun, performed: true });
@@ -4117,7 +4142,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return { values: stored, criteria };
       },
       async insertRow(ctx, form, values) {
-        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'insert', ctx))), true);
+        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'insert', ctx, form))), true);
         if (dryRun) {
           note({ op: 'store', form, criteria: null, values: stored, dryRun, performed: true });
           return { values: stored };
@@ -4770,6 +4795,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       if (partial.principal) ctx.principal = partial.principal;
       if (partial.formNonce) ctx.formNonce = partial.formNonce;
       if (partial.writeOp) ctx.writeOp = partial.writeOp;
+      if (partial.stamps) ctx.stamps = partial.stamps;
       if (partial.rowId !== undefined) ctx.rowId = partial.rowId;
       if (partial.subformRow) ctx.subformRow = partial.subformRow;
       if (Array.isArray(partial.args)) ctx.args = partial.args;

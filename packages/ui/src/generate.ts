@@ -8,7 +8,7 @@
  * mode is "live" and a datastore adapter is installed.
  */
 
-import { closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
+import { LOCATION_RECORD_COLUMNS, RECORD_STATUS_NOT_APPLICABLE, builtinRecordColumns, closedChoices, recordStatusColumn, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
@@ -2200,6 +2200,26 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const statusColumn = columns.includes('Record_Status')
     ? recordStatusColumn(app, app.forms.find((item) => item.name === report.form))
     : undefined;
+  // Built-in record columns the schema stores (location stamps, a plain
+  // Record_Status): the cell is filled from the stored parts after projection.
+  const ownBuiltin = builtinRecordColumns(app, app.forms.find((item) => item.name === report.form));
+  const geoColumns = LOCATION_RECORD_COLUMNS.filter((name) => ownBuiltin.location && columns.includes(name));
+  const plainStatus = ownBuiltin.status && columns.includes('Record_Status');
+  const builtinFill = `${plainStatus ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row.Record_Status ?? ${JSON.stringify(RECORD_STATUS_NOT_APPLICABLE)};` : ''}${geoColumns
+    .map((name) => ` if (row && typeof row === "object") projected.${name} = geoCell(row, ${JSON.stringify(name)});`)
+    .join('')}`;
+  const builtinHelper = geoColumns.length
+    ? `// A location stamp is two stored Double parts; the cell is Creator's object shape, null until a position was captured.
+function geoCell(row, stamp) {
+  const lat = row[stamp + "_latitude"];
+  const lng = row[stamp + "_longitude"];
+  if (lat === null || lat === undefined || lat === "" || lng === null || lng === undefined || lng === "") return null;
+  const latitude = String(lat);
+  const longitude = String(lng);
+  return { latitude, longitude, display_value: latitude + ", " + longitude };
+}
+`
+    : '';
   // Charts and metrics send Creator field names; the projection names store
   // columns, so a renamed column (Priority -> Priority_col) is allowed under
   // both names.
@@ -2284,7 +2304,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const relatedPlan = relatedSortPlan(app, report, projection);
   const sortKeys = relatedPlan && 'keys' in relatedPlan ? relatedPlan.keys : undefined;
   const sortPathConst = sortKeys ? `const sortKeys = ${JSON.stringify(sortKeys)};\n${relatedSortHelper}` : '';
-  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\nconst navPaths = ${JSON.stringify(navPaths)};\n${sortPathConst}`;
+  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\n${builtinHelper}const navPaths = ${JSON.stringify(navPaths)};\n${sortPathConst}`;
   const attachRows = subformLinks.length ? `\n      if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried);` : '';
   // The related sort replaces the paged read only when the caller did not
   // pick a sort and may read the lookup column; the scan is bounded (see
@@ -2809,7 +2829,7 @@ ${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => match
       ${liveQuery}${attachRows}
 ${stageLoad('      ')}      ${rowWord} = (Array.isArray(queried) ? queried : []).map((row) => {
         ${stageApply ? 'let' : 'const'} projected = projectFields(row && typeof row === "object" ? row : {}, scoped.fields);${stageApply ? `\n        ${stageApply}` : ''}
-        if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}
+        if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}${builtinFill}
         return projected;
       });
 ${wantsRelative ? '      if (relative) rows = rows.filter((row) => matchRow(row, resolved, decimalColumns));\n' : ''}      await resolveLookupPaths(datastore, rows, navPaths, principal);
@@ -2846,7 +2866,7 @@ ${dryBind}    const where = zcqlPredicate(compileCriteria(${criteriaRef}${exact 
       : "not emitted: the form name is not a bare ZCQL identifier";
 ${stageLoad('    ')}    ${rowWord} = suppliedRows(req).map((row) => {
       ${stageApply ? 'let' : 'const'} projected = projectFields(row && typeof row === "object" ? row : {}, scoped.fields);${stageApply ? `\n      ${stageApply}` : ''}
-      if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}
+      if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;${statusColumn ? ` if (projected.Record_Status === undefined && row && typeof row === "object") projected.Record_Status = row[${JSON.stringify(statusColumn)}] ?? null;` : ''}${builtinFill}
       return projected;
     });
 ${wantsRelative ? '    if (relative) rows = rows.filter((row) => matchRow(row, applied, decimalColumns));\n' : ''}    if (body.op === "aggregate") {
@@ -3241,6 +3261,31 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
 
 function submitStub(app: App, form: UiModel['forms'][number], path: string, delugeFiles: GeneratedFile[], schema?: SchemaPlan, deferSuccess = false): string {
   const fields = fieldNamesOf(form.fields, closedChoicesOf(app, form.name));
+  // Built-in record columns the schema stores for this form. The endpoint
+  // stamps them from the request's validated position and its own constants;
+  // a client copy under the record is refused like any unknown field.
+  const builtin = builtinRecordColumns(app, app.forms.find((item) => item.name === form.name));
+  const stampParts = [
+    builtin.location ? 'location: capturedPosition(req)' : '',
+    builtin.status ? `recordStatus: ${JSON.stringify(RECORD_STATUS_NOT_APPLICABLE)}` : '',
+  ].filter(Boolean);
+  const stampsLine = stampParts.length ? `\n      stamps: { form: formName, ${stampParts.join(', ')} },` : '';
+  const positionHelper = builtin.location
+    ? `// The position the browser captured on submit (navigator.geolocation).
+// It rides beside the record, never in it; anything but two finite numbers in
+// range is treated as no position (the columns stay null), never an error.
+function capturedPosition(req) {
+  const geo = req && req.body && req.body.geo;
+  if (!geo || typeof geo !== "object" || Array.isArray(geo)) return undefined;
+  const { latitude, longitude } = geo;
+  if (typeof latitude !== "number" || typeof longitude !== "number") return undefined;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return undefined;
+  return { latitude: Math.round(latitude * 1e6) / 1e6, longitude: Math.round(longitude * 1e6) / 1e6 };
+}
+
+`
+    : '';
   const ruleDenied = fieldRuleDenials(app, form.name);
   const zone = appTimeZone(app);
   const validate = siblingSpecs(delugeFiles, form.name, 'validate');
@@ -3489,7 +3534,7 @@ function mergeInserted(record, result) {
 
 ${writeLiveSource(form.name, storeShape)}
 
-export default async function handler(req, res) {
+${positionHelper}export default async function handler(req, res) {
   const deploy = deployConfig();
   const live = deploy.mode === "live";
   if (isHidden(formName)) {
@@ -3532,7 +3577,7 @@ ${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so th
       old: { __c2c: "dry-run-old", loaded: false },
       principal,
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,
-      rowId: requestRowId(req),
+      rowId: requestRowId(req),${stampsLine}
     });
 ${editLoad}${stageCheck}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.

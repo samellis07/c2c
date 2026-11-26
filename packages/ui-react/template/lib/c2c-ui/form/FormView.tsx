@@ -51,6 +51,36 @@ export const DEFAULT_ADD_MESSAGE = 'Data Added Successfully!';
 export const DEFAULT_UPDATE_MESSAGE = 'Data Updated Successfully!';
 
 /** The banner for a submit the server refused or failed. */
+/**
+ * The browser position for the Added_Location / Modified_Location stamps,
+ * asked for once per submit (the browser shows its own permission prompt).
+ * Denied, unavailable, timed out or not finite resolves undefined: the
+ * stamped columns then stay null and the submit goes ahead.
+ */
+function capturePosition(): Promise<{ latitude: number; longitude: number } | undefined> {
+  return new Promise((resolve) => {
+    const geolocation = typeof navigator === 'undefined' ? undefined : navigator.geolocation;
+    if (!geolocation || typeof geolocation.getCurrentPosition !== 'function') {
+      resolve(undefined);
+      return;
+    }
+    const timer = setTimeout(() => resolve(undefined), 12000);
+    const done = (value: { latitude: number; longitude: number } | undefined) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      geolocation.getCurrentPosition(
+        ({ coords }) => done(Number.isFinite(coords.latitude) && Number.isFinite(coords.longitude) ? { latitude: coords.latitude, longitude: coords.longitude } : undefined),
+        () => done(undefined),
+        { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 },
+      );
+    } catch {
+      done(undefined);
+    }
+  });
+}
+
 export function submitFailure(status: number, body: { error?: unknown; message?: unknown; wrote?: unknown } | undefined): string {
   const server = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : typeof body?.error === 'string' ? body.error.trim() : '';
   // The row is stored; only a step after the write failed. A resubmit would add it twice.
@@ -492,7 +522,8 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
         next = changed as FormRecord;
       }
       const endpoint = mode === 'edit' && form.editSubmitEndpoint ? form.editSubmitEndpoint : form.submitEndpoint;
-      const reply = await api.post<WriteReply>(endpoint, { record: next, ...(edit ? { ROWID: edit } : {}), idempotencyKey: submitKey.current });
+      const geo = form.capturesLocation ? await capturePosition() : undefined;
+      const reply = await api.post<WriteReply>(endpoint, { record: next, ...(geo ? { geo } : {}), ...(edit ? { ROWID: edit } : {}), idempotencyKey: submitKey.current });
       // wrote true is a stored row even when a step after the save failed.
       const committed = reply.ok || reply.body?.wrote === true;
       const dryRun = committed && reply.body?.wrote === true ? false : reply.body?.dryRun !== false;

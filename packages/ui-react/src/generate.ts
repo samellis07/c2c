@@ -183,6 +183,7 @@ export function reactAppSpec(app: App, model: UiModel = generateUi(app).model, f
       ...(form.phoneLayout ? { phoneLayout: form.phoneLayout } : {}),
       fields: form.fields.map(fieldSpec),
       submitEndpoint: form.submitEndpoint,
+      ...(form.capturesLocation ? { capturesLocation: true } : {}),
       ...(form.editSubmitEndpoint ? { editSubmitEndpoint: form.editSubmitEndpoint } : {}),
       recordEndpoint: form.recordEndpoint,
       deleteEndpoint: form.deleteEndpoint,

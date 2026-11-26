@@ -904,3 +904,48 @@ test('a refused or failed submit always says so, with the server\'s words for a 
     assert.match(banner(rendered), expected, `${reply.status} ${JSON.stringify(reply.body)}`);
   }
 });
+
+const GEO_APP = `\tform Visit
+\t{
+${field('Name', 'text')}
+\t}
+\tform Plain
+\t{
+${field('Title', 'text')}
+\t}
+\tlist Visit_All
+\t{
+\t\tshow all rows from Visit
+\t\t(
+\t\t\tName
+\t\t\tAdded_Location as "Added Location"
+\t\t)
+\t}
+\tlist Plain_All
+\t{
+\t\tshow all rows from Plain
+\t\t(
+\t\t\tTitle
+\t\t)
+\t}`;
+
+test('a form whose report lists Added_Location posts the browser position as geo; denial leaves it out', async () => {
+  const app = appOf(GEO_APP);
+  const { spec, handlers } = generated(app);
+  assert.equal(spec.forms['Visit']!.capturesLocation, true);
+  assert.equal(spec.forms['Plain']!.capturesLocation, undefined);
+  const outcomes: { form: string; geolocation: unknown; expected: unknown }[] = [
+    { form: 'Visit', geolocation: { getCurrentPosition: (ok: (p: unknown) => void) => ok({ coords: { latitude: 12.5, longitude: 77.25 } }) }, expected: { latitude: 12.5, longitude: 77.25 } },
+    { form: 'Visit', geolocation: { getCurrentPosition: (_ok: unknown, fail: (e: unknown) => void) => fail({ code: 1 }) }, expected: undefined },
+    { form: 'Visit', geolocation: undefined, expected: undefined },
+    { form: 'Plain', geolocation: { getCurrentPosition: (ok: (p: unknown) => void) => ok({ coords: { latitude: 1, longitude: 2 } }) }, expected: undefined },
+  ];
+  for (const { form, geolocation, expected } of outcomes) {
+    const rendered = await renderForm(spec.forms[form]!, handlers);
+    Object.defineProperty(rendered.win.navigator, 'geolocation', { value: geolocation, configurable: true });
+    await submit(rendered);
+    const posted = rendered.posts.filter((p) => p.endpoint === spec.forms[form]!.submitEndpoint);
+    assert.equal(posted.length, 1, `${form} posted once`);
+    assert.deepEqual((posted[0]!.body as Record<string, unknown>).geo, expected, `${form} geo`);
+  }
+});

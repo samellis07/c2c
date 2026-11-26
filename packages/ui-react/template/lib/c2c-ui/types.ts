@@ -134,6 +134,8 @@ export interface FormSpec {
   phoneLayout?: DeviceLayout;
   fields: FieldSpec[];
   submitEndpoint: string;
+  /** Ask the browser for its position on submit and post it as `geo` (Added/Modified_Location). */
+  capturesLocation?: boolean;
   editSubmitEndpoint?: string;
   recordEndpoint: string;
   /** Record delete posted by report row affordances. */

@@ -7397,6 +7397,40 @@ export function attachCapturePreviews(formEl) {
 }
 
 /** Values the submit POST sends. Read-only fields are left out. File widgets are references, or omitted when empty. */
+/**
+ * The browser position for the Added_Location / Modified_Location stamps,
+ * asked for once per submit (the browser shows its own permission prompt).
+ * Denied, unavailable, timed out or not finite resolves undefined: the
+ * stamped columns then stay null and the submit goes ahead.
+ */
+function capturePosition(viewRef) {
+  return new Promise((resolve) => {
+    const nav = viewRef && viewRef.navigator ? viewRef.navigator : typeof navigator === 'undefined' ? undefined : navigator;
+    const geolocation = nav && nav.geolocation;
+    if (!geolocation || typeof geolocation.getCurrentPosition !== 'function') {
+      resolve(undefined);
+      return;
+    }
+    const timer = setTimeout(() => resolve(undefined), 12000);
+    const done = (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      geolocation.getCurrentPosition(
+        (position) => {
+          const coords = position && position.coords;
+          done(coords && Number.isFinite(coords.latitude) && Number.isFinite(coords.longitude) ? { latitude: coords.latitude, longitude: coords.longitude } : undefined);
+        },
+        () => done(undefined),
+        { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 },
+      );
+    } catch {
+      done(undefined);
+    }
+  });
+}
+
 export async function submitRecord(formEl, form, upload) {
   const raw = readValues(formEl);
   const record = {};
@@ -9512,10 +9546,11 @@ export function boot(appModel, doc) {
         if (banner) banner.textContent = 'Upload failed. The form was not submitted.';
         return;
       }
+      const geo = form.capturesLocation ? await capturePosition(viewRef) : undefined;
       const res = await apiCall(call, viewRef, endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ record, ...(rowId ? { ROWID: rowId } : {}), idempotencyKey: submitKey }, jsonReplacer),
+        body: JSON.stringify({ record, ...(geo ? { geo } : {}), ...(rowId ? { ROWID: rowId } : {}), idempotencyKey: submitKey }, jsonReplacer),
       }).catch(() => null);
       const banner = formEl.querySelector('[data-banner]');
       const formDoc = formEl.ownerDocument || (typeof document !== 'undefined' ? document : null);

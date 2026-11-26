@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { flowStatusColumn, formLink, formScheduleSweepGap, isApprovalWorkflow, isBlueprintWorkflow, isFormScheduleWorkflow, type App, type Field, type Form } from '../../core/src/ir.js';
+import { LOCATION_PARTS, LOCATION_RECORD_COLUMNS, RECORD_STATUS_NOT_APPLICABLE, builtinRecordColumns, flowStatusColumn, formLink, formScheduleSweepGap, isApprovalWorkflow, isBlueprintWorkflow, isFormScheduleWorkflow, type App, type Field, type Form } from '../../core/src/ir.js';
 import { toolchain } from '../../core/src/toolchain.js';
 import { quantizeDecimal } from '../../shims/src/decimal.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
@@ -289,6 +289,52 @@ function pushSystemColumns(columns: SchemaColumn[], groups: ColumnGroups): void 
     };
     groups.set(column, ANCHOR_GROUP);
     columns.push(column);
+  }
+}
+
+/**
+ * Creator's built-in record columns that reports list: the geo stamps as
+ * latitude / longitude Double parts (the Address part shape the map pin
+ * reader already uses) and `Record_Status` as a plain VarChar. The generated
+ * submit endpoint stamps them; the client cannot write them.
+ */
+function pushBuiltinRecordColumns(columns: SchemaColumn[], groups: ColumnGroups, wanted: { location: boolean; status: boolean }): void {
+  const present = new Set<string>();
+  for (const column of columns) present.add(column.name);
+  const add = (column: SchemaColumn): void => {
+    if (present.has(column.name)) return;
+    groups.set(column, ANCHOR_GROUP);
+    columns.push(column);
+  };
+  if (wanted.location) {
+    for (const stamp of LOCATION_RECORD_COLUMNS) {
+      for (const part of LOCATION_PARTS) {
+        add({
+          name: `${stamp}_${part}`,
+          creatorType: 'system',
+          matrixId: 'c2c-builtin-record',
+          status: 'supported',
+          dataType: 'Double',
+          precision: 6,
+          mandatory: false,
+          unique: false,
+          note: `${stamp} ${part}: the browser position captured on ${stamp === 'Added_Location' ? 'add' : 'edit'}. Null when the user denied or the browser lacks geolocation.`,
+        });
+      }
+    }
+  }
+  if (wanted.status) {
+    add({
+      name: 'Record_Status',
+      creatorType: 'system',
+      matrixId: 'c2c-builtin-record',
+      status: 'supported',
+      dataType: 'VarChar',
+      length: 255,
+      mandatory: false,
+      unique: false,
+      note: `Creator's Record_Status. A form no approval or blueprint machine governs stores "${RECORD_STATUS_NOT_APPLICABLE}". The generated submit endpoint writes it; the client cannot.`,
+    });
   }
 }
 
@@ -1070,6 +1116,7 @@ export function generateSchema(app: App, opts?: { source?: readonly SourceTableD
       groups.set(column, ANCHOR_GROUP);
       columns.push(column);
     }
+    pushBuiltinRecordColumns(columns, groups, builtinRecordColumns(app, form));
     pushSystemColumns(columns, groups);
     pushSourceId(columns, groups);
     tables.push(table);

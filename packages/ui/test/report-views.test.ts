@@ -2000,7 +2000,7 @@ test('a column naming nothing the form stores stays out of the generated view', 
   assert.deepEqual(fields, ['Phone_Number', 'Phone_Number']);
 });
 
-test('a geo-stamp column the schema does not store stays off the quick view and is a counted manual step', () => {
+test('a geo-stamp column the schema now stores is a report column, not a counted manual step', () => {
   const model = buildUi(
     appOf(`
 	form Check_In
@@ -2045,8 +2045,7 @@ test('a geo-stamp column the schema does not store stays off the quick view and 
 `),
   ).model;
   const report = model.reports.find((item) => item.name === 'Requested_Helps');
-  assert.deepEqual(report?.columns.map((column) => column.field), ['Need']);
+  assert.deepEqual(report?.columns.map((column) => column.field), ['Need', 'Added_Location']);
   const todo = model.todos.find((item) => item.area === 'report' && item.name === 'Requested_Helps column Added_Location');
-  assert.ok(todo, 'Added_Location is counted, not silently blank');
-  assert.match(todo.manualStep ?? '', /Added_Location/);
+  assert.equal(todo, undefined, 'the stored location stamp is generated, not counted');
 });
