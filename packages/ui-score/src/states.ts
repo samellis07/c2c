@@ -552,8 +552,8 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
             const reached = api.matching('/submit').length > postsBefore;
             const marker = el.querySelector(`[data-error-for="${target.name}"]`);
             const box = el.querySelector(`[data-field="${target.name}"]`);
-            // A rich-text field leads with toolbar buttons; the control to fix is the entry area, so it comes first.
-            const control = (box?.querySelector('textarea, input:not([type="hidden"]), select') ?? box?.querySelector(FOCUS_TARGET)) as HTMLElement | null;
+            // A rich-text field leads with toolbar buttons; the control to fix is the entry area, so toolbar buttons are passed over.
+            const control = Array.from(box?.querySelectorAll(FOCUS_TARGET) ?? []).find((c) => !c.closest('[role="toolbar"]')) as HTMLElement | undefined ?? null;
             const focused = !!control && (s.doc.activeElement === control || control.contains(s.doc.activeElement));
             if (!reached) run.skip('server-field-error', form.name, 'the filled form was refused client-side before it posted: this script cannot synthesize a value for it');
             else run.add('server-field-error', `${form.name}.${target.name}`, !!marker && text(marker) !== '' && focused, `400 {field:${target.name}} → marker ${marker ? `"${text(marker).slice(0, 40)}"` : 'missing'}, focus ${focused ? 'on the field' : 'not moved'}`);
