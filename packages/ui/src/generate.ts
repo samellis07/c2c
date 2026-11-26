@@ -1908,6 +1908,9 @@ function aggregateFieldRef(raw, readable, principal) {
     return path ? { name: path.key, path } : null;
   }
   if (!AGG_IDENT.test(field) || !aggregateFields.includes(field) || !readableField(field, readable)) return null;
+  // A lookup column stores the parent ROWID, and the plain read blanks it when the display is unreadable: a bucket key must not show it either.
+  const lookup = lookupColumns.find((item) => item && item.column === field);
+  if (lookup && !lookupDisplayScope(principal, lookup.form, lookup.field, { op: "true" })) return null;
   return { name: field, path: null };
 }
 
