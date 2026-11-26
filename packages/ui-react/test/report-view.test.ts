@@ -924,7 +924,6 @@ test('the React conditional format matcher numerically coerces a row-vs-row comp
   }
 });
 
-<<<<<<< HEAD
 const TIMELINE_SOURCE = `application "Rooms"
 {
 date format = "dd-MMM-yyyy"
@@ -1023,7 +1022,6 @@ test('timelineLaneKey: an impossible calendar day is no lane, with or without a 
   assert.equal(timelineLaneKey('2026-10-14 09:00:00'), '2026-10-14');
   assert.equal(timelineLaneKey('2024-02-29'), '2024-02-29', 'a real leap day stays');
   assert.equal(timelineLaneKey('14-Oct-2026', 'monday'), '2026-10-12');
-=======
 function captureDownloads(win: Record<string, unknown>): { files: { name: string; mime: string; parts: unknown[] }[]; printed: number } {
   const seen = { files: [] as { name: string; mime: string; parts: unknown[] }[], printed: 0 };
   const blobs = new Map<string, { mime: string; parts: unknown[] }>();
@@ -1127,5 +1125,4 @@ test('show export = false draws no export buttons but keeps Print', { skip: SKIP
   const view = await mount(out, { ...spec.reports.Orders!, showExport: false }, ROWS, new Set(['Total']));
   assert.equal(view.container.querySelector('[data-export]'), null);
   assert.ok(view.container.querySelector('[data-print]'));
->>>>>>> 5dc1012 (React reports: Export CSV/XLSX and a print view that prints)
 });
