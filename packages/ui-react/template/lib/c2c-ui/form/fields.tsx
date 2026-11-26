@@ -24,11 +24,8 @@ import type { RichTextValue } from '../arc/components/rich-text-editor/rich-text
 import { FormContext } from './context';
 import { navigableUrl } from '../runtime/navigation';
 import { createScanner } from './scanner';
-<<<<<<< HEAD
 import { canvasToFile, createMedia, loadCanvas, MEDIA_PEN_COLORS, type MediaKind } from './media';
-=======
 import { googlePickerConfig, pickGoogleDoc } from './google-picker';
->>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
 
 export { FormContext, type FormState } from './context';
 
@@ -1090,14 +1087,10 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
               <FileDropzone
                 label="Choose a file or drop it here"
                 accept={field.accept}
-<<<<<<< HEAD
-                onFilesChange={choose}
-=======
                 onFilesChange={(files) => {
                   setDriveName('');
-                  sync(files);
+                  choose(files);
                 }}
->>>>>>> 0c84487 (Opt-in Google Drive picker for file fields with browse = google_docs)
               />
             ) : null}
           </Suspense>
