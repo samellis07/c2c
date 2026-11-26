@@ -1326,7 +1326,7 @@ test('an index.html edit changes sw.js and activate keeps foreign caches', () =>
   assert.match(index1, /http-equiv="Content-Security-Policy"/);
   assert.notEqual(sw1, sw2);
   assert.match(indexOf(second), /only-index/);
-  const indexHash = createHash('sha256').update(indexOf(second)).digest('hex').slice(0, 10);
+  const indexHash = shortHashId(createHash('sha256').update(indexOf(second)).digest('hex'));
   assert.match(sw2, new RegExp(indexHash));
 
   const cssChanged = bundle.files.map((file) =>
