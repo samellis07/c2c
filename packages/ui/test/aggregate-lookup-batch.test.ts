@@ -20,6 +20,13 @@ form People
     type = text
   )
 }
+form Places
+{
+  Name
+  (
+    type = text
+  )
+}
 form Calls
 {
   Subject
@@ -38,6 +45,12 @@ form Calls
     values = People.ID
     displayformat = [Name]
   )
+  Place
+  (
+    type = picklist
+    values = Places.ID
+    displayformat = [Name]
+  )
 }
 report All_Calls
 {
@@ -46,6 +59,7 @@ report All_Calls
     Subject
     Person
     Backup
+    Place
   )
 }
 	}
@@ -61,6 +75,8 @@ test('an aggregate reads each lookup parent form in chunks of 300 ids, never one
   try {
     const total = 600;
     for (let at = 0; at < total; at += 100) await datastore.insert('People', Array.from({ length: 100 }, (_, i) => ({ Name: `P${at + i}` })));
+    await datastore.insert('Places', [{ Name: 'Home' }]);
+    const place = String((await datastore.query('Places', 'true', 1))[0]!.ROWID);
     const ids: string[] = [];
     for (let at = 0; ids.length < total; at += 300) {
       const page = await datastore.query('People', 'true', 300, at);
@@ -68,7 +84,7 @@ test('an aggregate reads each lookup parent form in chunks of 300 ids, never one
       ids.push(...page.map((p) => String(p.ROWID)));
     }
     for (let at = 0; at < ids.length; at += 100) {
-      await datastore.insert('Calls', ids.slice(at, at + 100).map((id, i) => ({ Subject_field: `s${(at + i) % 5}`, Person: id, Backup: ids[(at + i + 1) % ids.length] })));
+      await datastore.insert('Calls', ids.slice(at, at + 100).map((id, i) => ({ Subject_field: `s${(at + i) % 5}`, Person: id, Backup: ids[(at + i + 1) % ids.length], Place: place })));
     }
     const reads: { form: string; limit: number }[] = [];
     const query = datastore.query.bind(datastore) as (form: string, ...rest: any[]) => Promise<unknown>;
@@ -84,6 +100,8 @@ test('an aggregate reads each lookup parent form in chunks of 300 ids, never one
     assert.ok(people.length <= 2, `parent reads: ${people.length} (${JSON.stringify(people.map((r) => r.limit))})`);
     const buckets = (out.body.buckets as { key: string; count?: number }[]) ?? [];
     assert.equal(buckets.length, total);
+    // The fold reads only its group and measure columns: the Place display is not resolved for it.
+    assert.equal(reads.filter((r) => r.form === 'Places').length, 0, 'an unused lookup column was resolved');
   } finally {
     restore();
   }

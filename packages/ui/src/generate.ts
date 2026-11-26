@@ -2849,7 +2849,7 @@ ${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => match
         // the display first would merge distinct parents that share a display
         // value into one bucket.
         await scopeLookupIds(datastore, aggRows, lookupColumns.filter((column) => column.column === spec.group || spec.measures.some((measure) => measure.field === column.column)), principal, lookupCache);
-        await resolveLookupDisplays(datastore, aggRows, lookupColumns.filter((column) => column.column !== spec.group), principal, lookupCache);
+        await resolveLookupDisplays(datastore, aggRows, lookupColumns.filter((column) => column.column !== spec.group && spec.measures.some((measure) => measure.field === column.column)), principal, lookupCache);
         const agg = aggregateRows(aggRows, spec);
         send(res, 200, {
           dryRun: false,
