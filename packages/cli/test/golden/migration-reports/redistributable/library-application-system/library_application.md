@@ -105,13 +105,13 @@ App: Library_System_Application
 6. [ ] `page DashBoard.Book_Report` — ZML <search> "Book_Report" criteria "Title.contains(input.searchString)" is not generated; wire the search filter by hand
    - Step: Finish this by hand in the generated app: ZML <search> "Book_Report" criteria "Title.contains(input.searchString)" is not generated; wire the search filter by hand
 7. [ ] `page DashBoard.Book_Report` — ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
-   - Step: On page "DashBoard", wire click parameters "View all Books" to the generated <button> "Book_Report" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+   - Step: On page "DashBoard", the <button> "Book_Report" opens without its values "View all Books". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 8. [ ] `page DashBoard.All_Book_Transactions` — ZML <text> "All_Book_Transactions" click parameters "Borrowed Book" are not generated; wire them to the click handler by hand
-   - Step: On page "DashBoard", wire click parameters "Borrowed Book" to the generated <text> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+   - Step: On page "DashBoard", the <text> "All_Book_Transactions" opens without its values "Borrowed Book". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 9. [ ] `page DashBoard.All_Book_Transactions` — ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
-   - Step: On page "DashBoard", wire click parameters "Overdue transactions" to the generated <button> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+   - Step: On page "DashBoard", the <button> "All_Book_Transactions" opens without its values "Overdue transactions". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 10. [ ] `field-property:Staff_Members.Phone_Number property defaultcountry` — property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-   - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.
+   - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, open Staff_Members.Phone_Number and set its property defaultcountry setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.
 
 ## Not converted
 

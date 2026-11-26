@@ -80,7 +80,7 @@ App: Kitchen_Sink_Studio
 ## Review checklist
 
 1. [ ] `field-property:Media_Kit.Total_Hours property value` — property value is not carried by the generated formula field. The value is computed, not entered. A text column holds the result until expression translation knows the result type. It is not dropped and it is not a ROWID.
-   - Step: The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, configure that setting for Media_Kit.Total_Hours, then preview the form or report and confirm the field behaves as expected.
+   - Step: The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, open Media_Kit.Total_Hours and set its property value setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.
 
 ## Not converted
 
