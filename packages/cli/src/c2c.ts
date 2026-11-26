@@ -192,7 +192,7 @@ import { generateReactApp, HandEditedError, writeReactApp } from '../../ui-react
 import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyBehaviorCli, verifyCli } from '../../deploy/src/index.js';
 import { cutoverCli } from './cutover.js';
 import { ARGV_SPEC, argvShapeProblems, seedArgsProblem } from './argv.js';
-import { GATE_EXIT, c2cVersion, defaultDoctorIo, terminalSafe, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
+import { GATE_EXIT, c2cVersion, defaultDoctorIo, terminalSafe, singleLine, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
 import { FillTodoError, fillTodosMain } from '../../deluge/src/fill-todos.js';
 import { fetchAssetsInto } from './fetch-assets.js';
 import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
@@ -343,6 +343,9 @@ function summarize(ir: App): string {
     `unknown nodes: ${ir.unknown.length} of ${ir.statementCount} statements`,
   ].join('\n');
 }
+
+/** Commands whose first argument is an input path: a flag there is a usage error, a missing path one line. */
+const PATH_ARG_COMMANDS = new Set(['analyze', 'parse', 'corpus', 'features', 'schema', 'schema-corpus', 'deluge', 'ui', 'score-ui', 'ui-react', 'auth', 'ui-corpus']);
 
 function loadIr(target: string): App | undefined {
   try {
@@ -777,6 +780,16 @@ function main(argv: string[]): number {
   if (!target) {
     process.stderr.write(`c2c ${cmd}: an input file or directory is required (run c2c ${cmd} --help)\n`);
     return 2;
+  }
+  if (PATH_ARG_COMMANDS.has(cmd)) {
+    if (target.startsWith('--')) {
+      process.stderr.write(`c2c ${cmd}: unknown flag ${singleLine(target)} (run c2c ${cmd} --help)\n`);
+      return 2;
+    }
+    if (!existsSync(target)) {
+      process.stderr.write(`c2c: no such file or directory: ${singleLine(target)}\n`);
+      return CLI_EXIT.inputMissing;
+    }
   }
   const flag = (name: string) => {
     const i = rest.indexOf(name);
