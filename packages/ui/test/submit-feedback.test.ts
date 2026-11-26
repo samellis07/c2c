@@ -285,3 +285,52 @@ test('the client draws a dispatchable action enabled and turns off only the stub
   assert.equal(calls.filter((c) => c.url.includes('/actions/archive')).length, 0, 'a turned-off action posts nothing');
   assert.equal(doc.querySelector('[data-action-preview]')?.textContent, 'Not available yet, so turned off: Archive.');
 });
+
+const toastsOf = (doc: Document): Element[] => Array.from(doc.querySelectorAll('#toasts > *'));
+
+test('a failure toast is an alert with a close and stays; a success toast is a status and clears itself', async () => {
+  const runtime = await loadRuntime();
+  const { win, doc } = setup('#/form/F', { status: 400, body: { error: 'Name is taken' } });
+  await runtime.boot(modelWith(), doc);
+  await submitForm(win, doc);
+  const [failure] = toastsOf(doc);
+  assert.equal(failure?.getAttribute('role'), 'alert');
+  assert.ok(failure?.querySelector('button[aria-label="Dismiss"]'), 'the toast can be dismissed');
+  (failure!.querySelector('button') as HTMLElement).dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  assert.equal(toastsOf(doc).length, 0);
+  const ok = setup('#/form/F', live);
+  await runtime.boot(modelWith(), ok.doc);
+  await submitForm(ok.win, ok.doc);
+  const [success] = toastsOf(ok.doc);
+  assert.equal(success?.getAttribute('role'), 'status');
+  await new Promise((resolve) => setTimeout(resolve, 5300));
+  assert.equal(toastsOf(ok.doc).length, 0, 'a success toast clears itself');
+});
+
+test('a 400 naming a field lands on that field: text, aria-describedby, aria-invalid and focus', async () => {
+  const runtime = await loadRuntime();
+  const { win, doc } = setup('#/form/F', { status: 400, body: { error: 'Name is taken', field: 'Item_Name' } });
+  await runtime.boot(modelWith(), doc);
+  await submitForm(win, doc);
+  const slot = doc.querySelector('[data-error-for="Item_Name"]');
+  const control = doc.querySelector('input[name="Item_Name"]');
+  assert.equal(slot?.textContent, 'Name is taken');
+  assert.ok(slot?.id && (control?.getAttribute('aria-describedby') ?? '').split(/\s+/).includes(slot.id), 'the control is described by its error');
+  assert.equal(control?.getAttribute('aria-invalid'), 'true');
+  assert.equal(doc.activeElement, control, 'focus moves to the field');
+});
+
+test('server text shown to the user is plain text with control and direction characters removed and a length cap', async () => {
+  const runtime = await loadRuntime();
+  const hostile = `<img src=x onerror=alert(1)>\u0007‮evil${'x'.repeat(2000)}`;
+  const { win, doc } = setup('#/form/F', { status: 400, body: { error: hostile, field: 'Item_Name' } });
+  await runtime.boot(modelWith(), doc);
+  await submitForm(win, doc);
+  assert.equal(doc.querySelector('#main img, #toasts img'), null, 'no markup is built from server text');
+  for (const el of [doc.querySelector('[data-banner]'), doc.querySelector('[data-error-for="Item_Name"]'), toastsOf(doc)[0]]) {
+    const text = el?.textContent ?? '';
+    assert.ok(!/[\u0000-\u0008\u000B-\u001F\u007F‪-‮⁦-⁩]/.test(text), 'no control or direction characters');
+    assert.ok(text.length <= 320, `capped (${text.length})`);
+    assert.ok(text.includes('<img src=x'), 'shown as text');
+  }
+});
