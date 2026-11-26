@@ -623,19 +623,11 @@ export interface WritePlan {
 function safeGeneratedPath(out: string, path: string): string {
   if (!path || isAbsolute(path) || /[\\\u0000-\u001f\u007f]/.test(path) || path.split('/').some((p) => !p || p === '.' || p === '..')) throw new Error('React app manifest names an unsafe path');
   const dest = join(out, ...path.split('/'));
-  // Neither the output root nor any existing ancestor may redirect writes.
+  // Ancestors above the output root may be aliases (for example macOS /tmp);
+  // only the output tree itself must not redirect writes.
   let probe = out;
-  while (true) {
-    try { if (lstatSync(probe).isSymbolicLink()) throw new Error('React app output path must not contain a symbolic link'); }
-    catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
-    const parent = dirname(probe);
-    if (parent === probe) break;
-    probe = parent;
-    if (!existsSync(probe)) continue;
-  }
-  for (const part of path.split('/').slice(0, -1)) {
-    probe = join(probe === out ? out : out, part);
-  }
+  try { if (lstatSync(probe).isSymbolicLink()) throw new Error('React app output path must not contain a symbolic link'); }
+  catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
   let ancestor = dirname(dest);
   while (ancestor !== out && ancestor.startsWith(out)) {
     try { if (lstatSync(ancestor).isSymbolicLink()) throw new Error('React app manifest names a path through a symbolic link'); }
@@ -644,6 +636,10 @@ function safeGeneratedPath(out: string, path: string): string {
   }
   const rel = relative(out, dest);
   if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('React app manifest names a path outside the app');
+  try {
+    const leaf = lstatSync(dest);
+    if (leaf.isSymbolicLink() || (leaf.isFile() && leaf.nlink > 1)) throw new Error('React app generated path must not be a symbolic link or hard link');
+  } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
   return dest;
 }
 
