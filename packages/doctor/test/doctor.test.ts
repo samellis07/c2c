@@ -2504,3 +2504,11 @@ test('doctor: every write to the terminal or to doctor.json goes through the one
   const report = readFileSync(join(src, 'report.ts'), 'utf8');
   assert.match(report, /singleLine\(value\)/, 'doctor.json strings are sanitised when written');
 });
+
+test('doctor gate: the refusal line neutralises hostile scope values', () => {
+  const hostile = `p${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x0d)}${String.fromCharCode(0x202e)}${String.fromCharCode(0x2060)}${String.fromCodePoint(0xe0041)}q`;
+  const verdict = evaluateGate({ workspace: mkdtempSync(join(tmpdir(), 'c2c-gate-hostile-')), scope: { dc: 'in', org: '1', project: hostile } });
+  const line = gateRefusalMessage(verdict, { dc: 'in', org: '1', project: hostile });
+  for (const code of [0x1b, 0x0d, 0x202e, 0x2060, 0xe0041]) assert.ok(!line.includes(String.fromCodePoint(code)), `U+${code.toString(16)} must not reach the refusal line`);
+  assert.ok(line.includes('c2c: doctor is not green'), 'the refusal still reads');
+});
