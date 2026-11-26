@@ -1009,3 +1009,17 @@ test('a timeline report draws every column in lanes keyed by the start date', { 
   const day = await mount(out, spec.reports.Daily!, TIMELINE_ROWS, new Set(), {}, undefined, undefined, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
   assert.deepEqual([...day.container.querySelectorAll('[data-group]')].map((g) => g.getAttribute('data-group')), ['14-Oct-2026', '15-Oct-2026', '21-Oct-2026'], 'without a week start the lane is the day');
 });
+
+test('timelineLaneKey: an impossible calendar day is no lane, with or without a week start', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'lanekey');
+  const { timelineLaneKey } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/report/ReportView.js')).href)) as {
+    timelineLaneKey: (value: unknown, weekStartDay?: 'monday' | 'sunday') => string;
+  };
+  for (const bad of ['2026-02-30', '2026-13-01', '2026-00-00', '2026-04-31 09:00:00', '2025-02-29', '31-Feb-2026', '5-Foo-2026']) {
+    assert.equal(timelineLaneKey(bad), '', `${bad} without a week start`);
+    assert.equal(timelineLaneKey(bad, 'monday'), '', `${bad} with a week start`);
+  }
+  assert.equal(timelineLaneKey('2026-10-14 09:00:00'), '2026-10-14');
+  assert.equal(timelineLaneKey('2024-02-29'), '2024-02-29', 'a real leap day stays');
+  assert.equal(timelineLaneKey('14-Oct-2026', 'monday'), '2026-10-12');
+});

@@ -134,9 +134,10 @@ export function timelineLaneKey(value: unknown, weekStartDay?: 'monday' | 'sunda
   const named = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(day);
   const iso = named ? `${named[3]}-${String(MONTHS.indexOf(named[2]!) + 1).padStart(2, '0')}-${named[1]!.padStart(2, '0')}` : day;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
-  if (!weekStartDay) return iso;
   const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return '';
+  // An impossible day (2026-02-30, month 13, day 00) is no lane: the date must round-trip to the same ISO day.
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return '';
+  if (!weekStartDay) return iso;
   const dow = date.getUTCDay();
   date.setUTCDate(date.getUTCDate() - (weekStartDay === 'sunday' ? dow : dow === 0 ? 6 : dow - 1));
   return date.toISOString().slice(0, 10);
