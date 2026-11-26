@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -1158,4 +1158,95 @@ test('publicConstruct F1/F4: lowercase colliders in list joins and backticked bl
   assert.equal(publicConstruct('Static <style> CSS drops 7 rules (CSS built by a tag x7)', ['css']), 'Static <style> CSS drops 7 rules (CSS built by a tag x7)');
   // Template words elsewhere stay.
   assert.equal(publicConstruct('Static <style> CSS not carried over: the page sanitizer drops 1 static style rule', ['style']), 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
+});
+
+// A name of tens of thousands of characters used to overflow the regular-expression engine while the status doc was built,
+// and the error text printed the name. Names are redacted whatever their length and no error text carries one.
+test('a 100000-character field name is redacted and never printed by statusFromReport or determinism:status', () => {
+  const name = `Big${'x'.repeat(100_000)}`;
+  const sentences = [
+    `Field ${name} is flagged \`bidirectional = true\`; Catalyst only creates the reverse column from a linked grid side, and neither ${name} nor its target is one.`,
+    `Report ${name} lists ${name} twice.`,
+  ];
+  const apps = sentences.map((construct, i) => ({
+    app: `folder-${i}`,
+    deterministic: false,
+    todoCount: 1,
+    fillLockEntries: 0,
+    todoKinds: [{ construct, count: 1 }],
+    uiTodoCount: 0,
+    readiness: 0,
+    band: 'blocked',
+    identifiers: [name],
+  }));
+  const report = {
+    schema: 'c2c-migration-report/1',
+    label: 'unit',
+    apps,
+    aggregate: {
+      totalApps: apps.length,
+      deterministicApps: 0,
+      deterministicShare: 0,
+      targets: { p95: { required: apps.length, met: false }, p100: { required: apps.length, met: false } },
+      todoTotal: apps.length,
+      distinctTodoKinds: sentences.length,
+      todoKinds: sentences.map((construct) => ({ construct, count: 1 })),
+      deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+      noTodoApps: 0,
+      silentDrops: 0,
+      silentDropKinds: [],
+    },
+  } as unknown as MigrationReport;
+  const status = statusFromReport(report);
+  const text = renderStatusDoc(status) + canonicalStatusJson(status);
+  assert.equal(text.includes(name), false);
+  assert.equal(text.includes('x'.repeat(50)), false);
+  assert.match(text, /\(app identifier\)/);
+});
+
+test('determinism:status on a gallery whose field name is 100000 characters exits 0 and prints no name', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-bigname-'));
+  try {
+    const name = `Big${'x'.repeat(100_000)}`;
+    const app = join(tmp, 'gallery', 'big');
+    mkdirSync(app, { recursive: true });
+    writeFileSync(
+      join(app, 'Big.ds'),
+      [
+        ' application "Big"',
+        ' {',
+        ' \tdate format = "dd-MMM-yyyy"',
+        ' \ttime zone = "Asia/Kolkata"',
+        ' \ttime format = "24-hr"',
+        ' \tforms',
+        '\t{',
+        '\t\tform Main_Form',
+        '\t\t{',
+        '\t\t\tdisplayname = "Main"',
+        '\t\t\tsuccess message = "ok"',
+        `\t\t\t${name}`,
+        '\t\t\t(',
+        '\t\t\t\ttype = text',
+        '\t\t\t\tdisplayname = "N"',
+        '\t\t\t\tbidirectional = true',
+        '\t\t\t)',
+        '\t\t}',
+        '\t}',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const out = join(tmp, 'doc.md');
+    const child = spawnSync(process.execPath, [join(root, 'dist/determinism/src/status.js'), '--dir', join(tmp, 'gallery'), '--out', out], {
+      encoding: 'utf8',
+      cwd: root,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    assert.equal(child.status, 0, child.stderr.slice(0, 300));
+    assert.equal(child.stdout.includes('x'.repeat(50)), false);
+    assert.equal(child.stderr.includes('x'.repeat(50)), false);
+    assert.equal(readFileSync(out, 'utf8').includes('x'.repeat(50)), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

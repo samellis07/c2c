@@ -159,6 +159,34 @@ const SENTENCE_INITIAL_WORDS = new Set([
 ]);
 const LOWERCASE_WORD = /^[a-z]+$/;
 const escapeRe = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Names longer than this are redacted by substring scan: a regular expression built from one can exceed the engine's size limit. */
+const MAX_REGEX_NAME = 256;
+const TOKEN_CHAR = /^[\p{L}\p{N}_]$/u;
+/**
+ * Whole-token occurrences of `name` replaced without a regular expression, matching the `(?<!B)name(?!B)` lookarounds of the
+ * regex path. `fold` matches case-insensitively, as the `i` flag does.
+ */
+function replaceTokenByScan(text: string, name: string, fold: boolean, replace: (match: string, offset: number) => string): string {
+  const hay = fold ? text.toLowerCase() : text;
+  const needle = fold ? name.toLowerCase() : name;
+  // Case folding that changes the length would shift offsets: redact the whole sentence rather than risk a leak.
+  if (hay.length !== text.length) return hay.includes(needle) ? APP_ID : text;
+  let out = '';
+  let from = 0;
+  for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, from)) {
+    const end = at + needle.length;
+    const before = [...text.slice(Math.max(0, at - 2), at)].pop();
+    const after = [...text.slice(end, end + 2)][0];
+    if ((before !== undefined && TOKEN_CHAR.test(before)) || (after !== undefined && TOKEN_CHAR.test(after))) {
+      out += text.slice(from, at + 1);
+      from = at + 1;
+      continue;
+    }
+    out += text.slice(from, at) + replace(text.slice(at, end), at);
+    from = end;
+  }
+  return out + text.slice(from);
+}
 /**
  * The word (or `=`) that immediately precedes an interpolated identifier in every reason template (grepped from the
  * `${...}` slots of `packages/ui/src`; the status test re-derives them from model.ts and fails on a new one).
@@ -199,6 +227,10 @@ function redactIdentifiers(text: string, identifiers: Iterable<string> | undefin
     else if (!isSystemColumn(name)) collidingExact.add(name);
   }
   const byLength = (a: string, b: string) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0);
+  for (const name of [...present].filter((n) => n.length > MAX_REGEX_NAME).sort(byLength)) {
+    present.delete(name);
+    text = replaceTokenByScan(text, name, true, () => APP_ID);
+  }
   if (present.size) {
     const alternation = [...present].sort(byLength).map(escapeRe).join('|');
     // Whole token with Unicode letter/digit/underscore (and hyphen) boundaries: \b is ASCII-only, `Ünï_Rep` and `9lives` are names.
@@ -266,9 +298,13 @@ export function publicConstruct(construct: string, identifiers?: Iterable<string
   const named = UNQUOTED_FIELD_OR_REPORT_NAME.exec(text);
   if (named && named[2] !== '(app' && !(named[1] === 'Report' && named[2] === 'type')) {
     const name = named[2]!.replace(/[.,;:)]+$/u, '');
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // \b is ASCII-only: use Unicode letter/digit lookarounds so `Ünï_Rep` and `9lives` match whole.
-    text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'gu'), (match, offset: number) => (offset === 0 ? match : '(app identifier)'));
+    const keepFirst = (match: string, offset: number) => (offset === 0 ? match : '(app identifier)');
+    if (name.length > MAX_REGEX_NAME) text = replaceTokenByScan(text, name, false, keepFirst);
+    else {
+      const escaped = escapeRe(name);
+      // \b is ASCII-only: use Unicode letter/digit lookarounds so `Ünï_Rep` and `9lives` match whole.
+      text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'gu'), keepFirst);
+    }
   }
   const blueprint = BLUEPRINT_SUFFIX.exec(text);
   if (blueprint) {
@@ -976,7 +1012,14 @@ export function main(argv: string[]): number {
       process.stderr.write('determinism:status: gallery not found; pass --dir or set C2C_FIXTURES_DIR or C2C_GALLERY_DIR\n');
       return 1;
     }
-    const status = computeDeterminismStatus(dir);
+    let status: DeterminismStatus;
+    try {
+      status = computeDeterminismStatus(dir);
+    } catch {
+      // Never forward the error: its text can quote an app identifier.
+      process.stderr.write('determinism:status: could not build the status document from this gallery\n');
+      return 1;
+    }
     if (status.totalApps === 0) {
       process.stderr.write('determinism:status: no apps in the gallery directory\n');
       return 1;
