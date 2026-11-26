@@ -3960,6 +3960,10 @@ ${requirePrincipal()}
       send(res, 404, { dryRun: false, error: "no such row" });
       return;
     }
+    // Record-detail replies use the same scoped lookup display resolver as
+    // report rows so a parent ROWID never leaks when its display is readable
+    // only through the caller's grant.
+    await resolveLookupDisplays(datastore, [row], lookupColumns, principal);
 ${relatedSource}    for (const [field, declared] of Object.entries(${childFields})) {
       const grant = access.profiles && access.profiles[principal.profile] && access.profiles[principal.profile][formName];
       const nestedGrant = Array.isArray(grant && grant.fields) ? grant.fields.filter((name) => name.startsWith(field + ".")) : [];
