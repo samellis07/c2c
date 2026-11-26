@@ -625,10 +625,24 @@ export function recordDeployedModel(dir: string, target: string): string | undef
   return copy;
 }
 
+/** A model to compare against must have something in it: a previous export that parses to no tables would plan every column as an add and make a deleted field invisible. */
+export function requireComparableModel(app: App, label: string): App {
+  if (app.forms.length === 0) {
+    throw new Error(`${label} holds no forms to compare against; a missing or unreadable previous model is refused (nothing was planned)`);
+  }
+  return app;
+}
+
 /** `--previous` may name a deploy folder: the model it recorded stands in for the old export. */
 export function deployedModelPath(previous: string): string {
   const folder = join(previous, DEPLOYED_MODEL_DIR);
-  if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) return previous;
+  if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) {
+    // A deploy folder without its recorded model cannot stand in for the old export: an empty comparison would read every column as new and hide a delete. Fail closed.
+    if (statSync(join(previous, STATE_FILE), { throwIfNoEntry: false })?.isFile()) {
+      throw new Error(`${previous} is a deploy folder with no recorded deployed model (${DEPLOYED_MODEL_DIR}); pass the previous .ds export as --previous instead, or deploy once more to record it`);
+    }
+    return previous;
+  }
   const ds = readdirSync(folder).filter((name) => name.toLowerCase().endsWith('.ds'));
   if (ds.length !== 1) throw new Error(`${folder} must hold exactly one .ds (found ${ds.length})`);
   return join(folder, ds[0]!);
@@ -1018,7 +1032,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const previousFlag = flag(rest, '--previous');
     const deployedSource = previousFlag === undefined ? undefined : deployedModelPath(previousFlag);
     if (deployedSource !== undefined) {
-      const blocked = unsupportedSchemaOps(generateSchema(loadSource(deployedSource)), generateSchema(app), renameFlags(rest), !rest.includes('--no-detect-renames'));
+      const blocked = unsupportedSchemaOps(generateSchema(requireComparableModel(loadSource(deployedSource), 'the previous model')), generateSchema(app), renameFlags(rest), !rest.includes('--no-detect-renames'));
       if (blocked.length > 0) {
         const review = reviewSchemaChange(loadSource(deployedSource), app, 'in', renameFlags(rest), { detect: !rest.includes('--no-detect-renames') });
         const lost = review.losses.length ? `would lose:\n${review.losses.map((l) => `  - ${l}`).join('\n')}\n` : '';

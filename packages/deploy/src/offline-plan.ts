@@ -27,7 +27,7 @@ import { JOB_TARGET, sweeperCron, SWEEPER_CRON, type CronDefinition } from '../.
 import { schedulePlansFor } from '../../deluge/src/generate.js';
 import { buildUi } from '../../ui/src/generate.js';
 import { principalRoleMap } from '../../auth/src/apply.js';
-import { deployedModelPath, flag, hasReportJson, loadApp, type Io } from './cli.js';
+import { deployedModelPath, flag, hasReportJson, loadApp, requireComparableModel, type Io } from './cli.js';
 import { ZCQL_IN_LIMIT } from '../../data/src/migrate.js';
 import { cyclicForeignKeys, foreignKeyId, tableCreatePlan } from './tables.js';
 import { readSourceCsv, readSourceJson } from './csv.js';
@@ -2032,7 +2032,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
     const previousFlag = flag(args, '--previous');
     const previous = previousFlag === undefined ? undefined : deployedModelPath(previousFlag);
     if (previous !== undefined) {
-      const review = reviewSchemaChange(loadApp(previous), app, dc.dc, renameFlags(args), { detect: !args.includes('--no-detect-renames') });
+      const review = reviewSchemaChange(requireComparableModel(loadApp(previous), 'the previous model'), app, dc.dc, renameFlags(args), { detect: !args.includes('--no-detect-renames') });
       writeDeltaTree(join(out, 'schema-change'), [
         { path: 'delta.json', data: `${JSON.stringify(review.delta, null, 2)}\n` },
         { path: 'delta.md', data: formatDelta(review.delta) },

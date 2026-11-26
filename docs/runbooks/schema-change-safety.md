@@ -48,10 +48,20 @@ and the steps to go on. Nothing is planned until you act on it.
    the backup belongs to this app before it accepts it.
 3. When the store applies a rename it **copies** the values into the new
    column, checks every value arrived, and keeps the old column. The old column
-   is dropped only when the drop is confirmed too. A wrong guess therefore costs
-   you an extra column, not data.
-4. A type change or a shorter length is refused while any row holds a value in
-   that column. The message names how many rows are affected.
+   is dropped only when the drop is confirmed too. Read the detected pairs in the
+   plan before you confirm: c2c pairs a removed field with an added field of the
+   same shape in the same position, so an unrelated field of the same shape
+   (for example one text field replaced by another) can be paired by mistake,
+   and the old values would then be copied into the new field. If a pair is
+   wrong, pass `--no-detect-renames` and name the real renames yourself.
+4. A type change or a shorter length is refused without `--confirm`, even when
+   the column holds no value yet, and is refused while any row holds a value in
+   the column unless a backup is verified. The message names how many rows are
+   affected. A new mandatory column without a default is refused without
+   `--confirm` when the table already has rows.
+5. A deploy folder whose recorded model is missing, or a previous model that holds
+   no forms, is refused: c2c never plans against an empty old model, because that
+   would show every column as new and hide a deleted field.
 
 ## What is not covered yet
 

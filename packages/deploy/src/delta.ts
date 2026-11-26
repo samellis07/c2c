@@ -29,7 +29,7 @@ export interface ModelPlan {
 }
 
 export type ColumnChange =
-  | { op: 'add'; table: string; column: string; dataType: string }
+  | { op: 'add'; table: string; column: string; dataType: string; /** A mandatory column with no default: existing rows would hold no value for it. */ needsDefault?: true }
   | { op: 'rename'; table: string; from: string; to: string; /** Paired by the change detector, not by an edit or --rename. */ detected?: true }
   | { op: 'alter'; table: string; column: string; changes: string[] }
   | { op: 'drop'; table: string; column: string };
@@ -195,7 +195,7 @@ function tableColumns(before: SchemaTable, after: SchemaTable, renames: readonly
     if (pairedNew.has(column.name)) continue;
     const old = oldByName.get(column.name);
     if (!old || pairedOld.has(column.name)) {
-      out.push({ op: 'add', table: after.name, column: column.name, dataType: column.dataType });
+      out.push({ op: 'add', table: after.name, column: column.name, dataType: column.dataType, ...(column.mandatory && column.defaultValue === undefined ? { needsDefault: true as const } : {}) });
       continue;
     }
     const changes = alterations(old, column);
@@ -253,7 +253,7 @@ export function planDelta(before: ModelPlan, after: ModelPlan, opts: { app: stri
     columns,
     roles,
     files,
-    needsConfirm: tables.some((t) => t.op === 'drop') || columns.some((c) => c.op === 'drop' || (c.op === 'alter' && narrows(c.changes))),
+    needsConfirm: tables.some((t) => t.op === 'drop') || columns.some((c) => c.op === 'drop' || (c.op === 'alter' && narrows(c.changes)) || (c.op === 'add' && c.needsDefault === true)),
   };
 }
 
@@ -499,6 +499,14 @@ export async function applySchemaDelta(
     const what = drops.map((d) => (d.column !== undefined ? `${d.table}.${d.column}` : `table ${d.table}`)).join(', ');
     throw new DeltaRefused(`the delta drops ${what}; pass --confirm to drop`);
   }
+  // A mandatory column with no default added to a table that already has rows leaves those rows without a value: refused without --confirm.
+  for (const change of delta.columns) {
+    if (change.op !== 'add' || change.needsDefault !== true) continue;
+    const present = await driver.columns(change.table);
+    if (!present) continue;
+    const rows = await driver.rowCount(change.table);
+    if (rows > 0 && !opts.confirm) throw new DeltaRefused(`add of ${change.table}.${change.column} refused: the column is mandatory with no default and ${rows} row(s) exist; pass --confirm to add it`);
+  }
   // A narrowing alter (a type change, a shorter length) can cut or refuse stored
   // values: refused up front, like a drop, while the column holds any.
   for (const change of delta.columns) {
@@ -506,7 +514,11 @@ export async function applySchemaDelta(
     const present = await driver.columns(change.table);
     if (!present?.includes(change.column)) continue;
     const n = await driver.valueCount(change.table, change.column);
-    if (n === 0) continue;
+    // A type change or a shorter length is never applied silently, even on a column that holds no value today: the primitive enforces the same confirm the plan announces.
+    if (n === 0) {
+      if (!opts.confirm) throw new DeltaRefused(`alter of ${change.table}.${change.column} (${change.changes.join('; ')}) refused: it narrows the column; pass --confirm to apply`);
+      continue;
+    }
     if (!opts.confirm) throw new DeltaRefused(`alter of ${change.table}.${change.column} (${change.changes.join('; ')}) refused: ${n} row(s) hold a value that could be cut or lost; pass --confirm after exporting them`);
     if (!opts.backedUp?.has(change.table)) throw new DeltaRefused(`alter of ${change.table}.${change.column} refused: ${n} row(s) hold a value; export or clear them first`);
   }

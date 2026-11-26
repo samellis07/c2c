@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,6 +93,48 @@ test('a type change or a shorter length on a column that holds values is refused
   assert.deepEqual(calls, ['alter']);
 });
 
+test('a narrowing alter is refused without confirm even when the column holds no value, and applies with confirm', async () => {
+  const before = model(col('Title'), col('Notes', { length: 500 }));
+  const after = model(col('Title'), col('Notes', { length: 50 }));
+  const delta = planDelta(before, after, OPTS);
+  const calls: string[] = [];
+  const driver = {
+    columns: async () => ['Title', 'Notes'],
+    rowCount: async () => 0,
+    valueCount: async () => 0,
+    alterColumn: async () => void calls.push('alter'),
+  } as unknown as StoreDriver;
+  await assert.rejects(applySchemaDelta(delta, after.schema, driver, { confirm: false }), (e: unknown) => e instanceof DeltaRefused && /Book\.Notes/.test(e.message) && /--confirm/.test(e.message));
+  assert.deepEqual(calls, [], 'nothing was altered');
+  await applySchemaDelta(delta, after.schema, driver, { confirm: true });
+  assert.deepEqual(calls, ['alter']);
+  // A direct type change on the primitive behaves the same.
+  const typeDelta = { ...delta, columns: [{ op: 'alter' as const, table: 'Book', column: 'Notes', changes: ['type VARCHAR -> INT'] }] };
+  await assert.rejects(applySchemaDelta(typeDelta, after.schema, driver, {}), DeltaRefused);
+});
+
+test('a mandatory column with no default added to a table that has rows needs confirm, in the plan and in the primitive', async () => {
+  const before = model(col('Title'));
+  const after = model(col('Title'), col('Isbn', { mandatory: true }));
+  const delta = planDelta(before, after, OPTS);
+  assert.equal(delta.needsConfirm, true, 'a required add without a default needs confirm');
+  const added: string[] = [];
+  const driver = {
+    columns: async () => ['Title'],
+    rowCount: async () => 3,
+    valueCount: async () => 3,
+    addColumn: async (_t: string, c: { name: string }) => void added.push(c.name),
+  } as unknown as StoreDriver;
+  await assert.rejects(applySchemaDelta(delta, after.schema, driver, {}), (e: unknown) => e instanceof DeltaRefused && /Book\.Isbn/.test(e.message) && /3 row\(s\)/.test(e.message));
+  assert.deepEqual(added, []);
+  await applySchemaDelta(delta, after.schema, driver, { confirm: true });
+  assert.deepEqual(added, ['Isbn']);
+  // With a default, or an empty table, the add is additive and needs no confirm.
+  const withDefault = planDelta(before, model(col('Title'), col('Isbn', { mandatory: true, defaultValue: 'n/a' })), OPTS);
+  assert.equal(withDefault.needsConfirm, false);
+  await applySchemaDelta(delta, after.schema, { ...driver, rowCount: async () => 0 } as unknown as StoreDriver, {});
+});
+
 test('widening a length is additive: it needs no confirm', async () => {
   const delta = planDelta(model(col('Notes', { length: 50 })), model(col('Notes', { length: 500 })), OPTS);
   assert.equal(delta.needsConfirm, false);
@@ -161,6 +203,34 @@ test('the deployed model is recorded beside the deploy and --previous accepts th
   assert.equal(await planCli([next, '--out', join(dir, 'p2'), '--dc', 'in', '--previous', LIBRARY, '--allow-budget-fail'], viaFile), 1);
   assert.match(viaFolder.err.join(''), /detected rename Book\.Author -> Author_Renamed/);
   assert.equal(readFileSync(join(dir, 'p1/schema-change/delta.json'), 'utf8'), readFileSync(join(dir, 'p2/schema-change/delta.json'), 'utf8'));
+});
+
+test('a deploy folder with no recorded model, a garbage record or an empty previous model is refused, never planned as all-new', async (t) => {
+  const dir = scratch(t);
+  const text = readFileSync(LIBRARY, 'utf8');
+  const next = join(dir, 'next.ds');
+  writeFileSync(next, deriveScenarios(loadApp(LIBRARY), text).changes.find((c) => c.id === 'rename-field')!.apply(text));
+  // 1. A deploy folder (it has the state file) whose recorded model is missing.
+  const bare = join(dir, 'bare');
+  mkdirSync(bare, { recursive: true });
+  writeFileSync(join(bare, '.c2c-deploy-state.json'), '{}');
+  assert.throws(() => deployedModelPath(bare), /no recorded deployed model/);
+  const r1 = io();
+  assert.notEqual(await planCli([next, '--out', join(dir, 'p1'), '--dc', 'in', '--previous', bare, '--allow-budget-fail'], r1), 0, 'a deploy folder without its model is refused');
+  assert.match(r1.err.join(''), /no recorded deployed model/);
+  // 2. A record that is garbage parses to no forms: refused, nothing planned.
+  const garbage = join(dir, 'garbage');
+  mkdirSync(join(garbage, '.c2c-deployed-model'), { recursive: true });
+  writeFileSync(join(garbage, '.c2c-deployed-model', 'x.ds'), 'this is not a model');
+  const r2 = io();
+  assert.notEqual(await planCli([next, '--out', join(dir, 'p2'), '--dc', 'in', '--previous', garbage, '--allow-budget-fail'], r2), 0, 'a garbage record is refused');
+  assert.match(r2.err.join(''), /holds no forms to compare against/);
+  // 3. A plain garbage .ds as --previous is refused the same way.
+  const junk = join(dir, 'junk.ds');
+  writeFileSync(junk, 'not a model either');
+  const r3 = io();
+  assert.notEqual(await planCli([next, '--out', join(dir, 'p3'), '--dc', 'in', '--previous', junk, '--allow-budget-fail'], r3), 0, 'a garbage previous export is refused');
+  assert.match(r3.err.join(''), /holds no forms to compare against|parse|unexpected|cannot|invalid/i);
 });
 
 test('a project folder target is not recorded: nothing is written', (t) => {
