@@ -29,7 +29,7 @@ function fixturesDir(): string | undefined {
 const FIXTURES = fixturesDir();
 
 const APPS: { app: string; ds: string; open: string[]; skipped: number }[] = [
-  { app: 'bill-of-materials', ds: 'Bill_Of_Materials.ds', open: ['bom-lookup-nonexistent-parent', 'bom-mandatory-grid-absent', 'user-email-format'], skipped: 0 },
+  { app: 'bill-of-materials', ds: 'Bill_Of_Materials.ds', open: ['bom-lookup-nonexistent-parent', 'user-email-format'], skipped: 0 },
   { app: 'bug-tracker', ds: 'Bug_Tracker.ds', open: ['user-email-format'], skipped: 1 },
   { app: 'business-finance-tracker', ds: 'Business_Finance_Tracker.ds', open: ['income-lookup-criteria'], skipped: 0 },
   { app: 'call-logs', ds: 'Call_Logs.ds', open: [], skipped: 0 },

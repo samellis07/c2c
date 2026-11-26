@@ -127,3 +127,21 @@ for (const route of ['success', 'submit'] as const) {
     assert.equal(rows.length, 1);
   });
 }
+
+for (const route of ['success', 'submit'] as const) {
+  test(`${route}: an absent or empty must-have grid is a 422 and nothing is stored`, async () => {
+    for (const record of [{ Name: 'Frame' }, { Name: 'Frame', Items: [] }, { Name: 'Frame', Items: null }]) {
+      const { reply, rows } = await post('Bom', route, record);
+      assert.equal(reply.status, 422, JSON.stringify(reply.body));
+      assert.equal((reply.body as { code?: string; field?: string }).code, 'MANDATORY_MISSING');
+      assert.equal((reply.body as { field?: string }).field, 'Items');
+      assert.equal(rows.length, 0);
+    }
+  });
+
+  test(`${route}: a grid with a row still saves`, async () => {
+    const { reply, rows } = await post('Bom', route, { Name: 'Frame', Items: [{ Item: 'Bolt', Qty: 2 }] });
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    assert.equal(rows.length, 1);
+  });
+}
