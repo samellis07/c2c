@@ -2409,3 +2409,33 @@ test('scope: --config that is a directory or a FIFO is not a file; an absent or 
   symlinkSync(target, linked);
   assert.equal(resolveScope({ cwd: dir, flags: { config: linked }, hooks: NO_HOOKS }).configPath, linked);
 });
+
+const CATALYST_ADD = 'claude plugin marketplace add catalystbyzoho/claude-plugin';
+const CATALYST_INSTALL = 'claude plugin install catalyst-by-zoho@catalyst-by-zoho';
+
+test('D-A1: a missing Catalyst plugin prints the exact install commands as a guided setup step', async () => {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  mkdirSync(home, { recursive: true });
+  writeConfig(dir);
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+  const code = await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.equal(code, 1);
+  const text = out();
+  assert.match(text, /SETUP STEP/);
+  assert.match(text, /not a c2c fault/);
+  assert.ok(text.includes(`  ${CATALYST_ADD}\n`), text);
+  assert.ok(text.includes(`  ${CATALYST_INSTALL}\n`), text);
+  assert.ok(text.indexOf(CATALYST_ADD) < text.indexOf(CATALYST_INSTALL.replace('claude plugin install', 'claude plugin install')), 'add before install');
+});
+
+test('D-A1: no guided setup step when the Catalyst skills are installed', async () => {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  mkdirSync(home, { recursive: true });
+  writeSkills(join(home, '.codex'));
+  writeConfig(dir);
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+  await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.doesNotMatch(out(), /SETUP STEP/);
+});

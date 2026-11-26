@@ -39,6 +39,13 @@ the AI never types your passwords or tokens**
   same organisation and data centre.
 - Node.js 20 or 22 on the machine where the AI runs (20.20.1 recommended).
 
+**First-time setup of the Catalyst plugin (Claude Code).** c2c loads without it; the doctor tells you when it is missing and prints a `SETUP STEP`. Run these two commands once, then restart the session and sign in to its connector in `/mcp`:
+
+```sh
+claude plugin marketplace add catalystbyzoho/claude-plugin
+claude plugin install catalyst-by-zoho@catalyst-by-zoho
+```
+
 If a sign-in opened the wrong account or data centre, the doctor
 (see below) catches it — the AI will ask you to sign out and sign
 back in with the owning account.

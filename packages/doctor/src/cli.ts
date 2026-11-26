@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
-import { runDoctorChecks, type DoctorContext } from './checks.js';
+import { CATALYST_PLUGIN_INSTALL_COMMANDS, runDoctorChecks, type DoctorContext } from './checks.js';
 import { scrubCatalystEnv } from '../../deploy/src/scope.js';
 import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { withCliLock } from '../../deploy/src/cli-lock.js';
@@ -193,6 +193,13 @@ function formatTable(checks: CheckResult[], file: DoctorFile, note?: string): st
     lines.push(`NOTE ${d.id}: deferred — ${d.reason}`);
   }
   if (note) lines.push(`NOTE ${note}`);
+  if (checks.some((c) => c.id === 'D-A1' && c.status === 'fail')) {
+    lines.push(
+      'SETUP STEP (one-time, not a c2c fault): the official Catalyst plugin is not installed. In Claude Code run:',
+      ...CATALYST_PLUGIN_INSTALL_COMMANDS.map((c) => `  ${c}`),
+      '  then sign in to its connector (/mcp), restart the session and re-run c2c doctor',
+    );
+  }
   lines.push(`doctor: ${file.green ? 'green' : 'red'}`);
   return `${lines.join('\n')}\n`;
 }
