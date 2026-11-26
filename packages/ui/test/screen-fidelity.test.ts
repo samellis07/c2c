@@ -1349,3 +1349,64 @@ test('G18: a non-icon <image value> stays a non-icon with its no-generated-compo
   assert.equal(home.status, 'todo');
   assert.ok(todos.some((t) => /ZML <image> has no generated component/.test(t.reason)));
 });
+
+test('G12: a popup that closes any way leaves no key listener behind, and a later Escape moves nothing', async () => {
+  interface RealDoc {
+    addEventListener: (type: string, fn: unknown, opts?: unknown) => void;
+    removeEventListener: (type: string, fn: unknown, opts?: unknown) => void;
+    querySelector(selector: string): { remove(): void; click(): void } | null;
+    createElement(tag: string): { focus(): void };
+    body: { appendChild(node: unknown): void };
+    activeElement: unknown;
+    dispatchEvent(event: unknown): boolean;
+  }
+  const open = async () => {
+    const client = await loadClient();
+    const model = INV_MODEL();
+    const view = dom(shell('#/page/Dashboard'), 'http://127.0.0.1/slate/index.html#/page/Dashboard');
+    const win = view.window as unknown as { document: Doc; fetch: unknown; C2C_APP_TIMEZONE: string };
+    win.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+    win.fetch = async (target: string) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ rows: target.includes('Firm_Details') ? [] : [{ ROWID: '1', Qty_Purchased: '7' }] }),
+    });
+    let live = 0;
+    const real = win.document as unknown as RealDoc;
+    const add = real.addEventListener.bind(real);
+    const remove = real.removeEventListener.bind(real);
+    real.addEventListener = (type: string, fn: unknown, opts?: unknown) => {
+      if (type === 'keydown' && opts === true) live += 1;
+      return add(type, fn, opts);
+    };
+    real.removeEventListener = (type: string, fn: unknown, opts?: unknown) => {
+      if (type === 'keydown' && opts === true) live -= 1;
+      return remove(type, fn, opts);
+    };
+    await client.boot(model, win.document);
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    return { win, live: () => live };
+  };
+  const settle = async () => { for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+
+  // Closed with the X.
+  const byButton = await open();
+  assert.equal(byButton.live(), 1, 'the open popup holds one key listener');
+  (byButton.win.document as unknown as RealDoc).querySelector('[data-modal-close]')!.click();
+  assert.equal(byButton.live(), 0, 'the X releases the key listener');
+
+  // Removed by something else (a route sweep, closeDialog).
+  const byRemoval = await open();
+  assert.equal(byRemoval.live(), 1);
+  (byRemoval.win.document as unknown as RealDoc).querySelector('[data-modal-form]')!.remove();
+  await settle();
+  assert.equal(byRemoval.live(), 0, 'a removal from outside releases the key listener');
+  const realDoc = byRemoval.win.document as unknown as RealDoc;
+  const heading = realDoc.createElement('button');
+  realDoc.body.appendChild(heading);
+  heading.focus();
+  const escape = new (byRemoval.win as unknown as { KeyboardEvent: new (t: string, i: object) => Event }).KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  realDoc.dispatchEvent(escape);
+  assert.equal(escape.defaultPrevented, false, 'a later Escape is not swallowed by the gone popup');
+  assert.equal(realDoc.activeElement, heading, 'a later Escape does not move focus');
+});

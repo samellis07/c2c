@@ -9449,10 +9449,19 @@ export function boot(appModel, doc) {
     const closeButton = wrap.querySelector('[data-modal-close]');
     const opener = docRef.activeElement;
     const dialog = wrap.querySelector('.modal-card');
-    const closePopup = () => { wrap.remove(); if (opener && opener.isConnected && opener.focus) opener.focus(); };
+    // The key handler lives exactly as long as the popup: every way the popup can go (the close
+    // button, Escape, closeDialog, a route sweep, any other removal) detaches it, so it never leaks
+    // and never steals focus from a later screen.
+    let removalWatch = null;
+    const detach = () => {
+      docRef.removeEventListener('keydown', onKey, true);
+      if (removalWatch) { removalWatch.disconnect(); removalWatch = null; }
+    };
+    const closePopup = () => { wrap.remove(); detach(); if (opener && opener.isConnected && opener.focus) opener.focus(); };
     if (closeButton) closeButton.addEventListener('click', closePopup);
     const onKey = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); closePopup(); docRef.removeEventListener('keydown', onKey, true); }
+      if (!wrap.isConnected) { detach(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); closePopup(); }
       else if (event.key === 'Tab' && dialog) {
         const focusable = Array.from(dialog.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'));
         if (!focusable.length) return;
@@ -9462,6 +9471,11 @@ export function boot(appModel, doc) {
       }
     };
     docRef.addEventListener('keydown', onKey, true);
+    const Watcher = docRef.defaultView && docRef.defaultView.MutationObserver;
+    if (Watcher) {
+      removalWatch = new Watcher(() => { if (!wrap.isConnected) detach(); });
+      removalWatch.observe(docRef.body, { childList: true });
+    }
     const first = dialog && dialog.querySelector('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
     if (first && first.focus) first.focus();
   };
