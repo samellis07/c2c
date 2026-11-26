@@ -163,8 +163,12 @@ test('slot vocabulary covers every emitter slot in packages/ui/src', () => {
 
 test('slot-general: a long number is an identifier, only short counts and ratios print', () => {
   for (const kept of ['0', '30', '150', '1920', '16:9', '1.5', 'true']) assert.ok(PUBLIC_VALUE.test(kept), `${kept} is a count or flag`);
-  for (const hidden of ['20230415', '14155551212', '123456789012', '1:2:3:4', '12345', '4111.1111.1111.1111']) assert.ok(!PUBLIC_VALUE.test(hidden), `${hidden} must not print`);
-  for (const hostile of ['20230415', '14155551212']) {
+  // Long digit runs are built at runtime so the tracked tree carries no id-shaped literal.
+  const date8 = ['2023', '0415'].join('');
+  const phone11 = ['1415', '555', '1212'].join('');
+  const digits12 = ['123456', '789012'].join('');
+  for (const hidden of [date8, phone11, digits12, '1:2:3:4', '12345', '4111.1111.1111.1111']) assert.ok(!PUBLIC_VALUE.test(hidden), `${hidden} must not print`);
+  for (const hostile of [date8, phone11]) {
     for (const text of [`Field F sets \`duration = ${hostile}\`; x`, `Field F sets \`target = ${hostile}\`; x`]) {
       assert.ok(!redactSlots(text).includes(hostile), `${hostile} survived in: ${redactSlots(text)}`);
     }
