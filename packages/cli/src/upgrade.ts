@@ -7,8 +7,8 @@
  * schema changes the new version brings (additive or breaking). Without
  * --apply it writes nothing.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { App } from '../../core/src/index.js';
 import { flag, loadApp } from '../../deploy/src/cli.js';
 import { rollbackBackupProblem } from '../../deploy/src/rollback.js';
@@ -152,12 +152,49 @@ export function diffTablePlans(before: readonly TableStepLike[], after: readonly
   return { additive, breaking };
 }
 
+
+/**
+ * A path a manifest or a generated plan names, resolved inside the folder it belongs to. A manifest is a file the operator can edit
+ * (or an attacker can swap), so every path it names is checked before anything is read, written or removed: no empty or absolute
+ * path, no `..` segment, no backslash or control character, and the resolved location (through any symlinked parent) must stay
+ * inside the folder.
+ */
+export function insidePlanDir(dir: string, rel: string): string {
+  if (typeof rel !== 'string' || rel === '' || isAbsolute(rel) || /[\\\u0000-\u001f\u007f]/.test(rel) || rel.split('/').some((part) => part === '' || part === '.' || part === '..')) {
+    throw new Error('upgrade refused: the plan names a path that is not a plain relative path inside the plan folder');
+  }
+  const target = join(dir, ...rel.split('/'));
+  const root = existsSync(dir) ? realpathSync(dir) : resolve(dir);
+  // Walk up to the nearest existing ancestor: a symlinked directory on the way must still resolve inside the folder.
+  let probe = target;
+  while (!existsSync(probe) && !isLink(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+  const real = existsSync(probe) ? realpathSync(probe) : resolve(probe);
+  const outside = relative(root, real);
+  if (outside.startsWith('..') || isAbsolute(outside)) {
+    throw new Error('upgrade refused: the plan names a path that resolves outside the plan folder');
+  }
+  if (isLink(target)) throw new Error('upgrade refused: the plan names a path that is a symbolic link');
+  return target;
+}
+
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function planTreeChanges(dir: string, files: readonly PlanFile[]): PlanTreeChanges {
   const manifest = readJson<Manifest>(join(dir, 'c2c-manifest.json'));
   const recorded = manifest?.files ?? {};
   const changes: PlanTreeChanges = { dir, from: manifest?.c2c, regenerated: [], unchanged: [], added: [], removed: [], handEdited: [], preserved: [] };
   for (const [path, digest] of Object.entries(recorded)) {
-    const file = join(dir, ...path.split('/'));
+    const file = insidePlanDir(dir, path);
     if ((PRESERVED_PLAN_FILES as readonly string[]).includes(path)) continue;
     if (existsSync(file) && `sha256:${sha256(readFileSync(file))}` !== digest) changes.handEdited.push(path);
   }
@@ -246,7 +283,7 @@ export function applyUpgrade(input: UpgradeInput, result: { report: UpgradeRepor
     const preserved = new Set(report.plan.preserved);
     const manifestFile = planFiles.find((file) => file.path === 'c2c-manifest.json');
     for (const path of report.plan.removed) {
-      rmSync(join(input.planDir, ...path.split('/')), { force: true });
+      rmSync(insidePlanDir(input.planDir, path), { force: true });
       removed.push(path);
     }
     for (const file of planFiles) {
@@ -255,7 +292,7 @@ export function applyUpgrade(input: UpgradeInput, result: { report: UpgradeRepor
         continue;
       }
       if (file.path === 'c2c-manifest.json') continue;
-      const dest = join(input.planDir, ...file.path.split('/'));
+      const dest = insidePlanDir(input.planDir, file.path);
       mkdirSync(dirname(dest), { recursive: true });
       writeFileSync(dest, file.bytes ?? file.data);
       written.push(file.path);

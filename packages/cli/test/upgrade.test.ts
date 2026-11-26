@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -105,6 +105,43 @@ test('a plan folder from an older version: regenerated files are listed, the cus
   const again = planUpgrade(input({ planDir: dir }));
   assert.deepEqual(again.report.plan!.regenerated, []);
   assert.equal(again.report.direction, 'same');
+});
+
+test('a manifest or plan that names a path outside the plan folder is refused before anything is read, written or removed', () => {
+  const root = mkdtempSync(join(tmpdir(), 'c2c-upgrade-escape-'));
+  const victim = join(root, 'victim.txt');
+  writeFileSync(victim, 'keep me');
+  const attempts: Record<string, string> = {
+    '../victim.txt': 'a parent segment',
+    '/abs/victim.txt': 'an absolute path',
+    'a/../../victim.txt': 'a nested parent segment',
+    'back\\slash': 'a backslash',
+    'with\u0000nul': 'a control character',
+    '': 'an empty path',
+    'a//b': 'an empty segment',
+  };
+  for (const [path, why] of Object.entries(attempts)) {
+    const dir = oldPlan();
+    const manifestPath = join(dir, 'c2c-manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> };
+    manifest.files[path] = `sha256:${sha('keep me')}`;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    assert.throws(() => planUpgrade(input({ planDir: dir })), /upgrade refused: the plan names a path/, `${why} is refused at plan time`);
+    assert.equal(readFileSync(victim, 'utf8'), 'keep me', `${why}: the victim is untouched`);
+  }
+  // A manifest path through a symlinked directory that leads outside the folder is refused too.
+  const dir = oldPlan();
+  const outside = join(root, 'outside');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'victim.txt'), 'keep me');
+  symlinkSync(outside, join(dir, 'link'));
+  const manifestPath = join(dir, 'c2c-manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> };
+  manifest.files['link/victim.txt'] = `sha256:${sha('keep me')}`;
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  assert.throws(() => planUpgrade(input({ planDir: dir })), /upgrade refused/);
+  assert.equal(readFileSync(join(outside, 'victim.txt'), 'utf8'), 'keep me');
+  assert.equal(existsSync(victim), true);
 });
 
 test('a hand-edited generated file blocks the upgrade; --force discards it', () => {
