@@ -134,6 +134,14 @@ function localSlug(value: string): string {
  */
 const CREATOR_HOST_BEFORE_APPURI = /(?<![\w./:@-])https:\/\/(?:app\.zohocreator\.(?:com|in|eu|com\.au|jp|ca|sa|com\.cn)|creator\.zoho\.(?:com|in|eu|com\.au|jp|ca|sa|com\.cn))(?=<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>)/gi;
 
+/**
+ * The same app address written out from its two parts: a Creator host, then `/<%=zoho.adminuser%>/<%=zoho.appname%>/`. That
+ * path is `zoho.appuri`, so the whole text is the app address and is rewritten to the island the own-app grammar already reads.
+ * Both islands must be exactly those two names, in that order, with the slashes and nothing else between them; any other
+ * host, a host with a user part, or a name that is not one of the two keeps the text as written.
+ */
+const CREATOR_HOST_APP_PATH = /(?<![\w./:@-])https:\/\/(?:app\.zohocreator\.(?:com|in|eu|com\.au|jp|ca|sa|com\.cn)|creator\.zoho\.(?:com|in|eu|com\.au|jp|ca|sa|com\.cn))\/<%=[ \t]*zoho[ \t]*\.[ \t]*adminuser[ \t]*%>\/<%=[ \t]*zoho[ \t]*\.[ \t]*appname[ \t]*%>\//gi;
+
 /** The `htmlpage <name>(<params>)` header, optional property lines, then `content`. */
 function splitTemplate(decoded: string): { name: string; params: string[]; template: string } {
   const head = /^[ \t]*htmlpage\b[ \t]*([A-Za-z_]\w*)?[ \t]*(\(([^)]*)\))?/i.exec(decoded);
@@ -909,6 +917,8 @@ interface ComponentParam {
 /** The field keys a parameterised embed may name: top-level fields of the form (or the report's form). */
 interface EmbedLookup {
   name: string;
+  /** The form the lookup picks a row of. */
+  form?: string;
   /** `Lookup.Target`: set only when one stored target field holds the display text. */
   path?: string;
   /** Set when the text the report shows is composed from stored fields of the target form: the key is `Lookup:display`. */
@@ -941,7 +951,7 @@ function embedLookupFields(app: App, kind: string, name: string): EmbedLookup[] 
     const shown = terms.length === 0 ? lookup.field : terms.length === 1 && 'ref' in terms[0] ? terms[0].ref : undefined;
     const target = shown && field.subfields.length === 0 ? app.forms.find((item) => item.name === lookup.form)?.fields.find((item) => item.name === shown) : undefined;
     const path = target && target.subfields.length === 0 && !target.lookup ? `${field.name}.${target.name}` : undefined;
-    out.push({ name: field.name, ...(path ? { path } : displayComposable(app, field) ? { display: true as const } : {}) });
+    out.push({ name: field.name, form: lookup.form, ...(path ? { path } : displayComposable(app, field) ? { display: true as const } : {}) });
   }
   return out;
 }
@@ -1009,6 +1019,7 @@ function componentParams(
   own: ReadonlySet<string> = new Set(),
   lookups: readonly EmbedLookup[] = [],
   idNames: ReadonlySet<string> = new Set(),
+  idForms: ReadonlyMap<string, string> = new Map(),
 ): { untitled: boolean; hidden: string[]; params: ComponentParam[]; border?: string; message?: string } | null {
   // A reference without its `;` still reads as `&` where an `&` follows, as the browser reads an attribute value.
   const text = raw.replace(/&amp;|&amp(?=&)/gi, '&').trim();
@@ -1079,7 +1090,7 @@ function componentParams(
     // The caller's own page input is no such text: Creator hands the URL value to the lookup as it came, a row id, and
     // the prefill sets the select to the option with that value, so the input passes through unchanged.
     // A name set once to `input.<own param>.toLong()` is that same row id after the conversion.
-    const idPass = kind === 'form' && looked.length === 1 && slot !== null && ((read) => /^input\.[A-Za-z_]\w*$/.test(read) || idNames.has(read))((slots[Number(slot[1])] ?? '').trim());
+    const idPass = kind === 'form' && looked.length === 1 && slot !== null && ((read) => /^input\.[A-Za-z_]\w*$/.test(read) || idNames.has(read) || (idForms.has(read.toLowerCase()) && idForms.get(read.toLowerCase()) === looked[0].form))((slots[Number(slot[1])] ?? '').trim());
     if (looked.length && !idPass && (kind === 'form' || (!looked[0].path && !looked[0].display))) return null;
     // A report filter on a key that is no field would show more records than Creator does; a form prefill of one fills nothing.
     if (matches.length + looked.length > 1 || (matches.length + looked.length === 0 && kind !== 'form') || seenKeys.has(key)) return null;
@@ -1152,6 +1163,252 @@ function literalChoices(template: string, name: string): string[] | null {
   };
   visit(script.body);
   return clean && values.size > 0 ? [...values].sort() : null;
+}
+
+/** The values one name is assigned across a template's statement islands, and whether anything but a plain `=` binds it. */
+interface AssignedName {
+  values: Expr[];
+  clean: boolean;
+}
+
+function assignmentTable(template: string): Map<string, AssignedName> | null {
+  const chunks = splitChunks(template);
+  if (!chunks) return null;
+  let script: Script;
+  try {
+    script = parse(chunks.filter((c) => c.kind === 'stmts').map((c) => c.text).join('\n'));
+  } catch {
+    return null;
+  }
+  const table = new Map<string, AssignedName>();
+  const row = (name: string): AssignedName => {
+    const key = name.toLowerCase();
+    const found = table.get(key);
+    if (found) return found;
+    const made: AssignedName = { values: [], clean: true };
+    table.set(key, made);
+    return made;
+  };
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    const rec = node as Record<string, unknown>;
+    const target = rec.target as { kind?: string; name?: string } | undefined;
+    if (rec.kind === 'assign' && target?.kind === 'name' && typeof target.name === 'string') {
+      if (rec.op === '=') row(target.name).values.push(rec.value as Expr);
+      else row(target.name).clean = false;
+    }
+    if (rec.kind === 'forEach' && typeof rec.name === 'string') row(rec.name).clean = false;
+    for (const key of Object.keys(rec).sort()) if (key !== 'span') visit(rec[key]);
+  };
+  visit(script.body);
+  return table;
+}
+
+/** `a.b.c` written as a bare name or member chain, or null for any other expression. */
+function readChain(expr: Expr): string | null {
+  const parts: string[] = [];
+  let cur: Expr = expr;
+  while (cur.kind === 'member') {
+    parts.unshift(cur.property);
+    cur = cur.object;
+  }
+  if (cur.kind !== 'name') return null;
+  parts.unshift(cur.name);
+  return parts.join('.');
+}
+
+/**
+ * Text a name may hold in a link: letters, digits and the punctuation of a route and its query, never a space, a quote, an angle
+ * bracket, a percent island or a line break, so it reads the same quoted, unquoted or inside a `params` value.
+ */
+const LINK_TEXT = /^[\w&=.:#?%+-]*$/;
+/** A hash route to one of this app's reports or forms, with an optional literal query. */
+const OWN_ROUTE = /^#(View|Form):([A-Za-z_]\w*)(?:\?[\w&=.%+-]*)?$/;
+/** The same route cut off after a query key, where one encoded read follows. */
+const OWN_ROUTE_KEY = /^#(View|Form):([A-Za-z_]\w*)\?(?:[\w&.%+-]*[&?])?[A-Za-z_]\w*=$/;
+
+/** What a name holds across the template: string literals, and at most one literal followed by one read. */
+interface ClosedValues {
+  lits: string[];
+  cat?: { prefix: string; read: string; encoded: boolean };
+}
+
+/**
+ * The closed set of values a name can hold: every assignment is `"text"` or `"text" + read` / `"text" + encodeUrl(read)`, the read
+ * is a record read whose record is assigned once and not by a loop, and nothing else binds the name. Any other binding, a second
+ * read or prefix, a loop in the page, or a name never assigned is not closed.
+ */
+function closedValues(template: string, table: Map<string, AssignedName>, name: string): ClosedValues | null {
+  const row = table.get(name.toLowerCase());
+  if (!row || !row.clean || row.values.length === 0) return null;
+  const lits = new Set<string>();
+  let cat: ClosedValues['cat'];
+  for (const value of row.values) {
+    if (value.kind === 'string') {
+      if (!LINK_TEXT.test(value.value)) return null;
+      lits.add(value.value);
+      continue;
+    }
+    if (value.kind !== 'binary' || value.op !== '+' || value.left.kind !== 'string' || !LINK_TEXT.test(value.left.value)) return null;
+    const right = value.right;
+    const callee = right.kind === 'call' ? readChain(right.callee) : null;
+    const wrapped = right.kind === 'call' && right.args.length === 1 && (callee === 'encodeUrl' || callee === 'zoho.encryption.urlEncode');
+    const inner = right.kind === 'call' ? (wrapped ? right.args[0]! : null) : right;
+    const read = inner ? readChain(inner) : null;
+    if (!read || !PARAM_READ.test(read)) return null;
+    const segments = read.split('.');
+    const root = table.get(segments[0]!.toLowerCase());
+    if (segments.length < 2 || ['input', 'zoho', 'thisapp'].includes(segments[0]!.toLowerCase()) || segments.some((s) => PARAM_RESERVED.has(s.toLowerCase()))) return null;
+    if (!root || !root.clean || root.values.length !== 1) return null;
+    if (cat && (cat.prefix !== value.left.value || cat.read !== read)) return null;
+    cat = { prefix: value.left.value, read, encoded: wrapped && (cat?.encoded ?? true) };
+  }
+  // A read taken when the name was set must be the read the page makes where the name is used: no loop re-sets the record.
+  if (cat && /(?<![\w.$])(?:for|while)(?![\w$])/.test(islandCode(template))) return null;
+  return { lits: [...lits].sort(), ...(cat ? { cat } : {}) };
+}
+
+/** The test, and the text the name stands for, of each value in a closed set: literals first, the read last. */
+function valueArms(name: string, closed: ClosedValues): { test: string; text: string }[] {
+  const arms = closed.lits.map((lit) => ({ test: `${name} == ${JSON.stringify(lit)}`, text: lit }));
+  if (closed.cat) arms.push({ test: `${name} != null && ${name}.startsWith(${JSON.stringify(closed.cat.prefix)})`, text: `${closed.cat.prefix}<%=${closed.cat.read}%>` });
+  return arms;
+}
+
+/**
+ * A zc-component embed whose `params` print a name the script sets only to literals or to one literal and a record read
+ * (`params='zc_Header=false<%=extra%>'`, `extra = "&Account=" + acc.Company_Name`) is written once per value under an `if` on that
+ * name, with the value written into `params`. Each arm is then a plain embed, read as any other: a read in `params` is applied as
+ * the filter or prefill and is encoded. A name that can hold anything else, or a tag with another island, keeps its tag.
+ */
+function rewriteParamChoices(template: string): string {
+  if (!/\belname\s*=\s*['"]zc-component['"]/i.test(template) || !template.includes('<%=')) return template;
+  const table = assignmentTable(template);
+  if (!table) return template;
+  const commented = htmlCommentRanges(template);
+  const choiceLink = /\b(?:form|view|report)linkname[ \t\r\n]*=[ \t\r\n]*(["'])<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>\1/i;
+  const paramsAttr = /(\bparams[ \t\r\n]*=[ \t\r\n]*)(["'])((?:(?!\2)[^<>%]|<%=[^%<>]*%>)*)\2/i;
+  return template.replace(/<div\b((?:[^<>%]|<%=[^%<>]*%>)*)>([^<>%]*)<\/div[ \t\r\n]*>/gi, (whole: string, inner: string, body: string, offset: number) => {
+    if (inRanges(commented, offset) || !ZC_COMPONENT_ELNAME.test(inner)) return whole;
+    const attr = paramsAttr.exec(inner);
+    if (!attr) return whole;
+    const linkName = choiceLink.exec(inner)?.[2]?.toLowerCase();
+    const found = [...attr[3]!.matchAll(/<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>/g)].map((m) => m[1]!).sort();
+    const names = found.filter((n, i) => found.indexOf(n) === i && n.toLowerCase() !== linkName);
+    if (names.length === 0 || names.length > 2) return whole;
+    // A name whose values are not closed keeps the tag; so does a tag whose arms would be too many.
+    const choices = names.map((n) => {
+      const closed = closedValues(template, table, n);
+      return { name: n, arms: closed ? valueArms(n, closed) : null };
+    });
+    if (choices.some((v) => v.arms === null) || choices.reduce((n, v) => n * (v.arms?.length ?? 1), 1) > 8) return whole;
+    let combos: { test: string[]; text: Map<string, string> }[] = [{ test: [], text: new Map() }];
+    for (const choice of choices) {
+      combos = combos.flatMap((c) => choice.arms!.map((arm) => ({ test: [...c.test, arm.test], text: new Map([...c.text.entries()].sort().concat([[choice.name, arm.text]])) })));
+    }
+    const arms = combos.map((c) => {
+      const value = attr[3]!.replace(/<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>/g, (island: string, n: string) => c.text.get(n) ?? island);
+      const open = inner.replace(attr[0], `${attr[1]}${attr[2]}${value}${attr[2]}`);
+      return `if (${c.test.join(' && ')}) { %><div${open}>${body}</div><% }`;
+    });
+    return `<% ${arms.join(' else ')} %>`;
+  });
+}
+
+/**
+ * `<a href=<%=route%>>` with the island unquoted is read through the quoted form when every value the name can hold is one of this
+ * app's own hash routes, written out (`#View:Report`, `#Form:Name?zc_LoadIn=dialog`), or such a route cut off after a query key
+ * and one encoded read. The values hold no space or quote, so the quoted value is the one the browser would take from the unquoted
+ * one. The link then goes through the same URL check as any quoted link island. A name that can hold anything else keeps its tag.
+ */
+function quoteRouteHrefs(template: string, app: App): string {
+  if (!/\bhref[ \t\r\n]*=[ \t\r\n]*<%=/i.test(template)) return template;
+  const table = assignmentTable(template);
+  if (!table) return template;
+  const commented = htmlCommentRanges(template);
+  const own = (route: string, whole: boolean): boolean => {
+    const m = (whole ? OWN_ROUTE : OWN_ROUTE_KEY).exec(route);
+    return !!m && (m[1] === 'View' ? app.reports.some((r) => r.name === m[2]) : app.forms.some((f) => f.name === m[2]));
+  };
+  const attr = /(^|[ \t\r\n"'])(href[ \t\r\n]*=[ \t\r\n]*)<%=[ \t]*([A-Za-z_]\w*)[ \t]*%>(?=[ \t\r\n]|$)/i;
+  return template.replace(/<a\b((?:[^<>%]|<%=[^%<>]*%>)*)>/gi, (tag: string, inner: string, offset: number) => {
+    if (inRanges(commented, offset)) return tag;
+    const found = attr.exec(inner);
+    if (!found) return tag;
+    const closed = closedValues(template, table, found[3]!);
+    if (!closed || !closed.lits.every((lit) => own(lit, true))) return tag;
+    if (closed.cat && (!closed.cat.encoded || !own(closed.cat.prefix, false))) return tag;
+    return `<a${inner.replace(found[0], `${found[1]}href="<%=${found[3]}%>"`)}>`;
+  });
+}
+
+/**
+ * The form whose row ids an app function returns: every `return` names one variable, and every value that variable is given is a
+ * whole number written out, the `ID` of a record fetched from one form, or a lookup field of such a record whose target is that
+ * same form. A function with any other return or binding has no such form.
+ */
+function rowIdFunctionForm(app: App, fn: App['functions'][number]): string | null {
+  let script: Script;
+  try {
+    script = parse(fn.deluge.map((d) => d.text).join('\n'));
+  } catch {
+    return null;
+  }
+  const stmts = allStmts(script.body);
+  const returnNames = new Set<string>();
+  for (const s of stmts) {
+    if (s.kind !== 'return') continue;
+    if (!s.value || s.value.kind !== 'name') return null;
+    returnNames.add(s.value.name);
+  }
+  if (returnNames.size !== 1) return null;
+  const [name] = [...returnNames].sort() as [string];
+  const targets = new Set<string>();
+  let assigned = 0;
+  for (const s of stmts) {
+    if (s.kind === 'forEach' && s.name === name) return null;
+    if (s.kind !== 'assign' || s.target.kind !== 'name' || s.target.name !== name) continue;
+    if (s.op !== '=') return null;
+    assigned++;
+    const value = s.value;
+    if (value.kind === 'number' && /^\d+$/.test(value.text)) continue;
+    if (value.kind !== 'member' || value.object.kind !== 'criteria' || value.object.object.kind !== 'name') return null;
+    const fetched = value.object.object.name;
+    const form = app.forms.find((item) => item.name === fetched);
+    if (!form) return null;
+    if (value.property === 'ID') {
+      targets.add(form.name);
+      continue;
+    }
+    const target = form.fields.find((field) => field.name === value.property)?.lookup?.form;
+    if (!target) return null;
+    targets.add(target);
+  }
+  return assigned > 0 && targets.size === 1 ? [...targets].sort()[0]! : null;
+}
+
+/**
+ * Names the script sets once to the result of an app function that returns row ids of one form, with that form. The name is a row
+ * id of that form wherever it is read, so a lookup prefill to that form may carry it as it carries a page input's row id.
+ */
+function functionRowIdNames(template: string, app: App): Map<string, string> {
+  const out = new Map<string, string>();
+  const table = assignmentTable(template);
+  if (!table) return out;
+  for (const name of [...table.keys()].sort()) {
+    const row = table.get(name)!;
+    const value = row.values[0];
+    if (!row.clean || row.values.length !== 1 || !value || value.kind !== 'call') continue;
+    const path = thisappPath(value.callee);
+    const fn = path ? appFunction(app, path) : undefined;
+    const form = fn ? rowIdFunctionForm(app, fn) : null;
+    if (form) out.set(name, form);
+  }
+  return out;
 }
 
 /**
@@ -1257,10 +1514,12 @@ function embeddedComponents(
   app: App,
   own: ReadonlySet<string> = new Set(),
 ): { template: string; components: EmbeddedComponent[]; markers: string[]; todos: { target: string; step?: string }[] } {
+  template = rewriteParamChoices(template);
   const components: EmbeddedComponent[] = [];
   const markers: string[] = [];
   const todos: { target: string; step?: string }[] = [];
   const idNames = pageInputIdNames(template, own);
+  const idForms = functionRowIdNames(template, app);
   const embed = (tag: string, slots: readonly string[]): string | null => {
     if (!/\belname\s*=/i.test(tag)) return tag;
     const attrs = componentAttributes(tag);
@@ -1302,7 +1561,7 @@ function embeddedComponents(
     const rawParams = attrs.get('params');
     // A token outside `params` is an island in another attribute: not an embed.
     if (slots.length && attrKeys.some((key) => key !== 'params' && (attrs.get(key) ?? '').includes('\u0001'))) return null;
-    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupFields(app, kind, name), idNames) : null;
+    const params = rawParams === undefined ? { untitled: false, hidden: [], params: [] } : known ? componentParams(rawParams, kind, name, embedFieldNames(app, kind, name), slots, own, embedLookupFields(app, kind, name), idNames, idForms) : null;
     if (known && !hostile && params) {
       const applied = shownFieldKeys(app, kind, name, params.params);
       const keys = applied.map((item) => item.key);
@@ -4159,9 +4418,11 @@ export function compileHtmlpage(
   });
   const head = splitTemplate(decoded);
   head.template = inlineConstantStyleCalls(head.template, app);
+  head.template = head.template.replace(CREATOR_HOST_APP_PATH, '<%=zoho.appuri%>');
   head.template = head.template.replace(CREATOR_HOST_BEFORE_APPURI, '');
   head.template = dropCutOffEndTag(head.template);
   head.template = rewriteConditionalAttributes(head.template);
+  head.template = quoteRouteHrefs(head.template, app);
   head.template = rewriteRecordSummaryFrames(inlineSummaryUrlVariable(head.template), app, decoded);
   head.template = rewriteBlankFrames(head.template);
   head.template = rewriteMapFrames(head.template);
