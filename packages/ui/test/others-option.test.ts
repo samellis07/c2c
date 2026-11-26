@@ -79,7 +79,7 @@ test('the generated form draws an Others entry and its free-text box', async () 
   const html = renderForm(form);
   const select = /<select[^>]*name="Priority"[^>]*>([\s\S]*?)<\/select>/.exec(html)![1]!;
   assert.match(select, /<option value="__c2c_others__">Others<\/option>/);
-  assert.match(html, /<input type="text" data-others-text maxlength="40" hidden>/);
+  assert.match(html, /<input type="text" data-others-text aria-label="Priority \(other\)" maxlength="40" hidden>/);
   const radios = html.match(/<input[^>]*type="radio"[^>]*name="Size"[^>]*>/g) ?? [];
   assert.equal(radios.length, 3, 'two listed choices plus the Others radio');
   assert.match(radios[2]!, /value="__c2c_others__"/);
