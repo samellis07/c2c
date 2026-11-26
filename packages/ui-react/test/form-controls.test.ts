@@ -748,6 +748,7 @@ test('Stop recording keeps the take once and a later pagehide does not remove it
   dom.flushSync(() => win.dispatchEvent(new win.Event('pagehide')));
   assert.equal(storedFile(doc), kept, 'the attached take survives');
   assert.equal(stubs.stopped(), 1);
+});
 const PICKER_KEY = 'AIzaSyTestKeyTestKeyTestKeyTestKey123456';
 const PICKER_CLIENT = '123456789012-abcdefghijklmnop.apps.googleusercontent.com';
 
