@@ -154,6 +154,9 @@ function sampleValue(control: HTMLInputElement | HTMLTextAreaElement): string {
   if (/^(number|decimal|percentage|percent|currency|money)$/.test(widget)) return '12';
   if (widget === 'email') return 'gate@example.com';
   if (widget === 'url') return 'https://example.com';
+  // A text control that shows a date pattern as its hint takes a date written that way.
+  const hint = control.getAttribute('placeholder') ?? '';
+  if (/^(dd|MM{1,3}|yyyy)[-/ .](dd|MM{1,3}|yyyy)/.test(hint)) return hint.replace('yyyy', '2024').replace('MMM', 'Jan').replace('MM', '01').replace('dd', '15').replace('HH', '10').replace('mm', '30').replace('ss', '00');
   const type = (control.getAttribute('type') ?? 'text').toLowerCase();
   const mode = (control.getAttribute('inputmode') ?? '').toLowerCase();
   if (type === 'email') return 'gate@example.com';
@@ -428,10 +431,18 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         let how = '';
         const report = tableReports[0];
         if (report) await driveReport(s, report);
-        const action = mainOf(s.doc).querySelector('[data-action]') as HTMLElement | null;
+        const action = mainOf(s.doc).querySelector('[data-action]:not([disabled])') as HTMLElement | null;
         if (action) {
+          // An action that asks first (a native confirm, or a dialog) is answered yes: this row is about the result's toast.
+          (s.win as unknown as { confirm: () => boolean }).confirm = () => true;
           click(s.win, action);
           await settle(s.win);
+          const asked = s.doc.querySelector('[role="alertdialog"], [role="dialog"], [data-confirm-dialog]');
+          const yes = asked && Array.from(asked.querySelectorAll('button')).find((b) => /run|send|continue|confirm|yes|ok|delete|remove/i.test(text(b)));
+          if (yes) {
+            click(s.win, yes);
+            await settle(s.win);
+          }
           toasted = true;
           how = 'custom action';
         } else if (pickForm(exp)) {
@@ -439,11 +450,15 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
           await goFresh(`#/form/${encodeURIComponent(form.name)}`);
           const el = s.doc.querySelector('#main form');
           if (el) {
+            const postsBefore = api.matching('/submit').length;
             fillForm(s, form);
             fire(s.win, el, 'submit');
             await settle(s.win);
-            toasted = true;
-            how = 'submit';
+            // A form this script could not fill past the client checks posted nothing, so there is no write to toast.
+            if (api.matching('/submit').length > postsBefore || toastOf(s.doc)) {
+              toasted = true;
+              how = 'submit';
+            }
           }
         }
         if (!toasted) run.skip('toast', 'app', 'no write action to toast');
@@ -537,7 +552,8 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
             const reached = api.matching('/submit').length > postsBefore;
             const marker = el.querySelector(`[data-error-for="${target.name}"]`);
             const box = el.querySelector(`[data-field="${target.name}"]`);
-            const control = box?.querySelector(FOCUS_TARGET) as HTMLElement | null;
+            // A rich-text field leads with toolbar buttons; the control to fix is the entry area, so it comes first.
+            const control = (box?.querySelector('textarea, input:not([type="hidden"]), select') ?? box?.querySelector(FOCUS_TARGET)) as HTMLElement | null;
             const focused = !!control && (s.doc.activeElement === control || control.contains(s.doc.activeElement));
             if (!reached) run.skip('server-field-error', form.name, 'the filled form was refused client-side before it posted: this script cannot synthesize a value for it');
             else run.add('server-field-error', `${form.name}.${target.name}`, !!marker && text(marker) !== '' && focused, `400 {field:${target.name}} → marker ${marker ? `"${text(marker).slice(0, 40)}"` : 'missing'}, focus ${focused ? 'on the field' : 'not moved'}`);

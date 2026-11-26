@@ -757,7 +757,8 @@ export function validateField(field, value) {
   if (field.choices && field.choices.length && !field.othersOption && field.widget !== 'lookup' && field.widget !== 'lookup-multi') {
     const items = Array.isArray(value) ? value.map(String) : [text];
     for (const item of items) {
-      if (!field.choices.includes(item)) return 'Choose a listed value.';
+      // A stored choice may carry trailing blanks the control's value drops.
+      if (!field.choices.includes(item) && !field.choices.some((choice) => String(choice).trim() === item)) return 'Choose a listed value.';
     }
   }
   return null;
@@ -1386,6 +1387,18 @@ export function submitCommitted(res, body) {
   return !!(res && (res.ok || (body && body.wrote === true)));
 }
 
+/**
+ * Server text shown to the user: control and direction-override characters
+ * removed, whitespace collapsed, length capped. It is only ever set as text.
+ */
+export function cleanServerText(value) {
+  const text = String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 300 ? `${text.slice(0, 299)}\u2026` : text;
+}
+
 /** Append a success or failure toast to the live region (or the body without one). */
 export function showToast(doc, kind, text) {
   const documentRef = doc || (typeof document !== 'undefined' ? document : null);
@@ -1395,9 +1408,22 @@ export function showToast(doc, kind, text) {
   const el = documentRef.createElement('div');
   el.className = 'toast';
   el.setAttribute('data-kind', kind);
-  el.setAttribute('role', 'status');
-  el.textContent = String(text ?? '');
+  // A failure interrupts; a success waits its turn.
+  el.setAttribute('role', kind === 'failure' ? 'alert' : 'status');
+  const message = documentRef.createElement('span');
+  message.textContent = cleanServerText(text);
+  el.appendChild(message);
+  const close = documentRef.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '\u00d7';
+  close.addEventListener('click', () => el.remove());
+  el.appendChild(close);
   host.appendChild(el);
+  // A success clears itself; a failure stays until dismissed.
+  const view = documentRef.defaultView;
+  if (kind !== 'failure' && view && typeof view.setTimeout === 'function') view.setTimeout(() => el.remove(), 5000);
   return el;
 }
 
@@ -3267,8 +3293,11 @@ export function submitFailureText(body) {
   const server = body && (typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : '');
   // The row is stored; only a step after the write failed. A resubmit would add it twice.
   // The generic "request failed" adds nothing; a Deluge runtime error's text does.
-  if (body && body.wrote === true) return `The record was saved, but a step after saving failed${server && server.trim() && server.trim() !== 'request failed' ? `: ${server.trim()}` : '.'}`;
-  return server && server.trim() ? server : 'The record was not saved.';
+  if (body && body.wrote === true) {
+    const said = cleanServerText(server);
+    return `The record was saved, but a step after saving failed${said && said !== 'request failed' ? `: ${said}` : '.'}`;
+  }
+  return server && cleanServerText(server) ? cleanServerText(server) : 'The record was not saved.';
 }
 
 /**
@@ -9666,6 +9695,12 @@ export function boot(appModel, doc) {
           failure = submitFailureText(body);
         }
         if (banner) banner.textContent = failure;
+        // A 400 that names a field lands on that field and takes focus.
+        const named = res && answer && typeof answer.field === 'string' ? (form.fields || []).find((item) => item.name === answer.field) : null;
+        if (named) {
+          const control = showErrors(formEl, form, { [named.name]: failure });
+          if (control && typeof control.focus === 'function') control.focus();
+        }
         if (formDoc) showToast(formDoc, 'failure', submitNotice({ ok: false, dryRun: !live, message: failure }));
         return;
       }

@@ -334,3 +334,16 @@ test('server text shown to the user is plain text with control and direction cha
     assert.ok(text.includes('<img src=x'), 'shown as text');
   }
 });
+
+test('a choice stored with a trailing blank can be picked and submitted', async () => {
+  const runtime = await loadRuntime();
+  const { win, doc, calls } = setup('#/form/F', live);
+  const model = modelWith();
+  (model.forms[0]!.fields as unknown as Record<string, unknown>[]).push({ name: 'Slot', ...field, widget: 'select', required: true, choices: ['00:00 ', '00:15'] });
+  await runtime.boot(model, doc);
+  const form = doc.querySelector('form[data-form="F"]') as HTMLFormElement;
+  (form.querySelector('select[name="Slot"]') as HTMLSelectElement).value = '00:00 ';
+  await submitForm(win, doc);
+  assert.equal(doc.querySelector('[data-error-for="Slot"]')?.textContent, '', 'the listed value is accepted');
+  assert.equal(calls.filter((c) => c.url === '/forms/F/submit').length, 1);
+});
