@@ -70,6 +70,14 @@ export interface ReportRow {
   searchBroad: Timing;
   searchSelective: Timing;
   searchNone: Timing;
+  /** body.sort on a report column, first page. Null when the report has no usable column. */
+  sort: Timing | null;
+  /** body.filters equality leaf on a seeded value, first page. */
+  filter: Timing | null;
+  /** body.op aggregate (count by the lowest-cardinality column). */
+  aggregate: (Timing & { group: string; buckets: number | null; truncated: boolean | null }) | null;
+  /** The form's record route (edit screen read) for evenly spaced rows. */
+  detail: Timing | null;
 }
 
 export interface PerfRun {
@@ -289,7 +297,49 @@ export async function runPerf(app: App, opts: PerfOptions): Promise<PerfRun> {
         for (let i = 0; i < repeats; i++) out.push(await query({ page: 0, q }));
         return timing(out);
       };
+      const seedTable = seed.result.tables.find((t) => t.form === report.form);
+      const columnKeys = Object.keys(seedTable?.rows[0]?.columns ?? {});
+      const reportFields = report.columns.map((c) => c.field).filter((f) => columnKeys.includes(f));
+      const usable = reportFields.length ? reportFields : columnKeys;
+      const timed = async (extra: Record<string, unknown>, n = repeats) => {
+        const out = [];
+        for (let i = 0; i < n; i++) out.push(await query({ page: 0, ...extra }));
+        return out;
+      };
+      const sortField = usable[0];
+      const filterField = usable.find((f) => (seedTable?.rows.at(-1)?.columns[f] ?? '') !== '');
+      const filterValue = filterField ? seedTable?.rows.at(-1)?.columns[filterField] : undefined;
+      const distinct = (f: string) => new Set((seedTable?.rows ?? []).slice(0, 2000).map((r) => r.columns[f])).size;
+      const groupField = [...usable].sort((a, b) => distinct(a) - distinct(b))[0];
+      const sortT = sortField ? timing([...(await timed({ sort: [{ field: sortField, order: 'asc' }] })), ...(await timed({ sort: [{ field: sortField, order: 'desc' }] }))]) : null;
+      const filterT = filterField && filterValue !== undefined ? timing(await timed({ filters: [{ field: filterField, op: '==', value: filterValue }] })) : null;
+      let aggregate: ReportRow['aggregate'] = null;
+      if (groupField) {
+        const agg = [];
+        let last: { buckets?: unknown[]; truncated?: boolean } = {};
+        for (let i = 0; i < repeats; i++) {
+          const res = await post(path, { op: 'aggregate', group: groupField, measures: [{ fn: 'count', field: '' }] });
+          agg.push({ ms: res.ms, calls: res.calls, status: res.status });
+          if (res.status === 200) last = JSON.parse(res.text) as typeof last;
+        }
+        aggregate = { ...timing(agg), group: groupField, buckets: Array.isArray(last.buckets) ? last.buckets.length : null, truncated: typeof last.truncated === 'boolean' ? last.truncated : null };
+      }
+      const recordPath = `/forms/${report.form}/record`;
+      let detailT: Timing | null = null;
+      if (routes[`POST ${recordPath}`]) {
+        const ids = (sdk.state().tables[report.form] ?? []).map((r) => String(r.ROWID ?? '')).filter(Boolean);
+        const detail = [];
+        for (let i = 0; i < samples && ids.length; i++) {
+          const res = await post(recordPath, { ROWID: ids[Math.floor((i * (ids.length - 1)) / Math.max(1, samples - 1))] });
+          detail.push({ ms: res.ms, calls: res.calls, status: res.status });
+        }
+        detailT = timing(detail);
+      }
       const result: ReportRow = {
+        sort: sortT,
+        filter: filterT,
+        aggregate,
+        detail: detailT,
         report: report.name,
         form: report.form,
         rows,

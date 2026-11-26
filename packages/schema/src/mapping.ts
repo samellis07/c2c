@@ -338,7 +338,7 @@ export const FIELD_TYPES: readonly FieldTypeRow[] = [
     kind: 'column',
     dataType: 'BigInt',
     reason:
-      'ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.',
+      'Claim-table counters allocate the next value on a live insert with the field blank (start index from the .ds). A failed insert can leave a gap; if the claim table is emptied, numbering restarts.',
   },
   {
     id: 'name',

@@ -18,10 +18,14 @@ import { OFFLINE_NOTE, runPerf } from '../dist/deploy/src/perf-harness.js';
 import { estimateQuota } from '../dist/deploy/src/perf-estimate.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const APPS = {
+// C2C_PERF_APP_FILES=<a.ds>,<b.ds> runs those apps (keyed by their directory name) instead of the two built-in fixtures.
+const BUILTIN = {
   library: 'fixtures/redistributable/library-application-system/library_application.ds',
   'kitchen-sink': 'fixtures/synthetic/kitchen-sink/kitchen_sink.ds',
 };
+const APPS = process.env.C2C_PERF_APP_FILES
+  ? Object.fromEntries(process.env.C2C_PERF_APP_FILES.split(',').map((p) => [p.split('/').slice(-2)[0], p]))
+  : BUILTIN;
 
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
@@ -47,7 +51,7 @@ const profile = {
 const runs = [];
 for (const [name, path] of Object.entries(APPS)) {
   if (only && only !== name) continue;
-  const app = deriveIr(parse(readFileSync(join(root, path), 'utf8')));
+  const app = deriveIr(parse(readFileSync(resolve(root, path), 'utf8')));
   const run = await runPerf(app, {
     size,
     seed: flag('--seed', undefined),

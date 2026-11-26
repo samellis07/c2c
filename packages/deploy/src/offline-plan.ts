@@ -734,7 +734,7 @@ function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTable
     if (rows > AGGREGATE_ROW_CAP) truncated.push(table.name);
   }
   const body = parts.length ? parts.join('; ') : 'no measured rows';
-  const base = `${body}; each page is one Data Store call of up to ${page} rows; ${NO_PRICE}; per-request cap ${timeout}, latency per call unknown`;
+  const base = `${body}; this is the count for a plain group + count request, not an upper bound; each page is one Data Store call of up to ${page} rows; ${NO_PRICE}; per-request cap ${timeout}, latency per call unknown`;
   if (truncated.length) {
     return {
       id: 'runtime-calls',

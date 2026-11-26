@@ -183,8 +183,12 @@ test('the runtime call estimate is within 10% of the aggregate calls observed on
   const estimateOf = (form: string) => Number(new RegExp(`${form} \\d+ list page requests?[^;]*= (\\d+) \\(`).exec(budget?.detail ?? '')?.[1]);
   const run = await runPerf(library, { size: '10k', apiRowsPerTable: 5, pageSamples: 1, searchRepeats: 1 });
   // All_Book_Transactions has two lookup columns (a 30-call aggregate); the other reports have none.
+  const lookups = run.reports.find((r) => r.report === 'All_Book_Transactions')!;
+  assert.equal(lookups.aggregate!.maxStoreCalls, 30);
   for (const report of run.reports) {
     const estimate = estimateOf(report.form);
+    const observed = report.aggregate!.maxStoreCalls;
     assert.ok(estimate > 0, budget?.detail ?? 'no budget');
+    assert.ok(Math.abs(estimate - observed) <= observed * 0.1, `${report.report}: estimate ${estimate} vs observed ${observed}`);
   }
 });

@@ -19,10 +19,9 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - The read-only sweep adapter passes non-function properties through; this is unreachable today because generated handlers expose functions only.
 - The sanitizer still leaves U+1D159, U+FFFC, U+E000, and noncharacters, and turns ZWJ and ZWNJ into `?`.
 - `NOT contains ''` matches a NULL row as well as a non-empty value.
-- G1's reduced-motion coverage parser does not model `not all` media queries, cascade order, or a non-`!important` universal reduce rule.
-- The delete-500 path in `generate.ts` (around line 3976) still returns `err.message` for `DELUGE_RUNTIME`, `CONVERSION`, and `ZOHO_CONNECTION_REFUSED`.
-- S6 caveats remain: the visitor `staff-boundary-submit` golden diverges; nested arrays through multi-lookup screening are not covered; autonumber gaps can occur after a failed insert, and numbering restarts if the claim table is emptied.
-- S4 did not measure 100k rows, and the CRM aggregate p95 is over budget.
+- Reduced-motion media-query handling does not model `not all` queries, cascade order, or a non-`!important` universal reduce rule.
+- The delete-500 path still returns `err.message` for `DELUGE_RUNTIME`, `CONVERSION`, and `ZOHO_CONNECTION_REFUSED` errors.
+- Nested arrays through multi-lookup screening are not covered; autonumber gaps can occur after a failed insert, and numbering restarts if the claim table is emptied.
 - Record view supports declared blocks only.
 
 ## Manual steps that come from broken references in the source app
