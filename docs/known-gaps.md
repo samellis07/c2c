@@ -14,7 +14,7 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - A report grouped or measured by a lookup field blanks the id of a parent row the caller cannot read, in batches of 300 parent ids per read. The display text a plain report shows for a lookup is still resolved in one read per field, so a report whose rows reference more than 300 distinct parent rows can show empty display cells for the rest.
 - A lookup that holds several values is handled when it is stored as a list. A multi-value lookup stored as one comma-separated text value is not resolved or checked as a lookup.
 - The UI scorer reads the bundle you give it. A symlinked directory inside that bundle, or a `./name/../..` import path in its entry module, can make it read a file outside the bundle. Run the scorer only on bundles you built yourself.
-- A field or form name of tens of thousands of characters (about 40,000 or more) makes the status command stop with a regular-expression error that prints the name in its error output, and no status document is written. Keep names short, and do not share that error output if the name is private.
+- A field name of tens of thousands of characters (about 40,000 or more) makes the status command stop with a regular-expression error that prints the name in its error output, and no status document is written. Keep names short, and do not share that error output if the name is private.
 - The status command's wording rules are slow (the time grows with the square of the length) on a single sentence of hundreds of kilobytes; a sentence of about 450 KB took several seconds in testing.
 
 ## Manual steps that come from broken references in the source app
