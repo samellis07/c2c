@@ -1,0 +1,650 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Call Logs",
+  "source": {
+    "file": "Call_Logs.ds",
+    "origin": "local gallery fixture corpus, not redistributable",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "completed-call-no-followup",
+      "name": "Add_Call: valid completed call; On Validate clears Follow_up_Time and Follow_up_Notes when Follow_up_Required is No; datetime stored as yyyy-MM-dd HH:mm:ss",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "No",
+            "Call_Start_Time": "01-Jan-2020 10:00:00",
+            "Call_End_Time": "01-Jan-2020 10:30:00",
+            "Call_Owner": "<ref:rep>",
+            "Follow_up_Notes": "stale note"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Call": [
+            {
+              "Follow_up_Required": "No",
+              "Follow_up_Notes": "",
+              "Call_Start_Time": "2020-01-01 10:00:00",
+              "Call_End_Time": "2020-01-01 10:30:00",
+              "Type": "Completed Call"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "initial-values-when-omitted",
+      "name": "Add_Call: initial values Type=Completed Call, Call_Direction=Inbound, Follow_up_Required=No, Duration=00:00:00, End_Call=false apply when omitted",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Call_Start_Time": "01-Jan-2020 10:00:00",
+            "Call_End_Time": "01-Jan-2020 10:30:00",
+            "Call_Owner": "<ref:rep>"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Call": [
+            {
+              "Type": "Completed Call",
+              "Call_Direction": "Inbound",
+              "Follow_up_Required": "No",
+              "Duration": "00:00:00",
+              "End_Call": "false"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "validate-end-before-start",
+      "name": "Add_Call On Validate: Call_Start_Time >= Call_End_Time alerts and cancels (end before start)",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "No",
+            "Call_Start_Time": "01-Jan-2020 10:30:00",
+            "Call_End_Time": "01-Jan-2020 10:00:00",
+            "Call_Owner": "<ref:rep>"
+          },
+          "expect": {
+            "status": "4xx",
+            "partial": true,
+            "body": {
+              "message": "Please check the call time"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Call": []
+        }
+      }
+    },
+    {
+      "id": "validate-end-equals-start",
+      "name": "Add_Call On Validate: the comparison is >= so equal start and end are refused",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "No",
+            "Call_Start_Time": "01-Jan-2020 10:00:00",
+            "Call_End_Time": "01-Jan-2020 10:00:00",
+            "Call_Owner": "<ref:rep>"
+          },
+          "expect": {
+            "status": "4xx",
+            "partial": true,
+            "body": {
+              "message": "Please check the call time"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Call": []
+        }
+      }
+    },
+    {
+      "id": "validate-future-start",
+      "name": "Add_Call On Validate: Call_Start_Time > zoho.currenttime is refused with the call-time alert",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "No",
+            "Call_Start_Time": "01-Jan-2099 10:00:00",
+            "Call_End_Time": "01-Jan-2099 10:30:00",
+            "Call_Owner": "<ref:rep>"
+          },
+          "expect": {
+            "status": "4xx",
+            "partial": true,
+            "body": {
+              "message": "Please check the call time"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Call": []
+        }
+      }
+    },
+    {
+      "id": "validate-followup-yes-missing-time",
+      "name": "Add_Call On Validate: Follow_up_Required Yes without Follow_up_Time alerts the follow-up message",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "Yes",
+            "Call_Start_Time": "01-Jan-2020 10:00:00",
+            "Call_End_Time": "01-Jan-2020 10:30:00",
+            "Call_Owner": "<ref:rep>"
+          },
+          "expect": {
+            "status": "4xx",
+            "partial": true,
+            "body": {
+              "message": "Please specify/check the follow-up time"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Call": []
+        }
+      }
+    },
+    {
+      "id": "validate-followup-yes-past-time",
+      "name": "Add_Call On Validate: Follow_up_Time <= zoho.currenttime is refused (past follow-up)",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "Yes",
+            "Call_Start_Time": "01-Jan-2020 10:00:00",
+            "Call_End_Time": "01-Jan-2020 10:30:00",
+            "Call_Owner": "<ref:rep>",
+            "Follow_up_Time": "01-Jan-2020 11:00:00"
+          },
+          "expect": {
+            "status": "4xx",
+            "partial": true,
+            "body": {
+              "message": "Please specify/check the follow-up time"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Call": []
+        }
+      }
+    },
+    {
+      "id": "followup-yes-future-time-kept",
+      "name": "Add_Call: Follow_up_Required Yes with a future Follow_up_Time is saved and the time and notes are kept",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "Yes",
+            "Call_Start_Time": "01-Jan-2020 10:00:00",
+            "Call_End_Time": "01-Jan-2020 10:30:00",
+            "Call_Owner": "<ref:rep>",
+            "Follow_up_Time": "01-Jan-2099 11:00:00",
+            "Follow_up_Notes": "ring back"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Call": [
+            {
+              "Follow_up_Required": "Yes",
+              "Follow_up_Time": "2099-01-01 11:00:00",
+              "Follow_up_Notes": "ring back"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "validate-order-time-before-followup",
+      "name": "Add_Call On Validate order: the call-time check runs before the follow-up check, so both faults report the call-time alert",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Purpose_Of_Call": "Intro",
+            "Follow_up_Required": "Yes",
+            "Call_Start_Time": "01-Jan-2020 10:30:00",
+            "Call_End_Time": "01-Jan-2020 10:00:00",
+            "Call_Owner": "<ref:rep>"
+          },
+          "expect": {
+            "status": "4xx",
+            "partial": true,
+            "body": {
+              "message": "Please check the call time"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Call": []
+        }
+      }
+    },
+    {
+      "id": "customer-radio-and-mandatory",
+      "name": "Add_Call: must have Purpose_Of_Call refuses a write without it",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Sales_Rep",
+          "record": {
+            "Name": {
+              "first_name": "Rae",
+              "last_name": "Sol"
+            },
+            "Email": "rae.sol@example.com"
+          },
+          "setup": true,
+          "bind": {
+            "rep": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Name": {
+              "first_name": "Cy",
+              "last_name": "Dune"
+            },
+            "Phone": "+1555010003",
+            "Country": "Choice 1"
+          },
+          "setup": true,
+          "bind": {
+            "cust": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Call",
+          "record": {
+            "Type": "Completed Call",
+            "Call_Direction": "Inbound",
+            "Customer": "<ref:cust>",
+            "Follow_up_Required": "No",
+            "Call_Start_Time": "01-Jan-2020 10:00:00",
+            "Call_End_Time": "01-Jan-2020 10:30:00",
+            "Call_Owner": "<ref:rep>"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Call": []
+        }
+      }
+    }
+  ]
+}

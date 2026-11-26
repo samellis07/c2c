@@ -1,0 +1,589 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Conference Room Booking",
+  "source": {
+    "file": "Conference_Room_Booking.ds",
+    "origin": "local gallery fixture corpus, not redistributable",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "room-radio-initial-and-size-others",
+      "name": "Add_Room: Available radio initial value Active applies; Size picklist has others option so Huge is accepted",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Orion",
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Huge",
+            "Number_Of_Seats": 12
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Room": [
+            {
+              "Room_Name": "Orion",
+              "Size": "Huge",
+              "Available": "Active",
+              "Number_Of_Seats": "12",
+              "Location_district_city": "Delta"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "room-seats-not-a-number",
+      "name": "Add_Room: Number_Of_Seats is type = number, a non-numeric value is refused",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Orion",
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": "twelve"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Room": []
+        }
+      }
+    },
+    {
+      "id": "room-mandatory-name",
+      "name": "Add_Room: must have Room_Name refuses a write without it",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 12
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Room": []
+        }
+      }
+    },
+    {
+      "id": "user-unique-email",
+      "name": "Add_User: must have unique Email refuses a second user with the same Email",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010004",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010005",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Email": "uma.vale@example.com"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "user-status-initial-active",
+      "name": "Add_User: Status radio initial value Active applies when omitted",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010004",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Status": "Active",
+              "Address_district_city": "Delta",
+              "Name_first_name": "Uma"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "booking-defaults-and-datetime-format",
+      "name": "Booking_Form: Status initial value Reserved; dd-MMM-yyyy HH:mm:ss inputs stored as yyyy-MM-dd HH:mm:ss",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Orion",
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 12
+          },
+          "setup": true,
+          "bind": {
+            "room": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010004",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "setup": true,
+          "bind": {
+            "user": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:user>",
+            "Official_Email": "uma.vale@example.com",
+            "From_Time_With_Date": "17-Oct-2026 10:00:00",
+            "To_Time_With_Date": "17-Oct-2026 11:00:00",
+            "Choose_Room": "<ref:room>"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "From_Time_With_Date": "2026-10-17 10:00:00",
+              "To_Time_With_Date": "2026-10-17 11:00:00",
+              "User": "<ref:user>",
+              "Choose_Room": "<ref:room>"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "booking-mandatory-room",
+      "name": "Booking_Form: must have Choose_Room refuses a booking without a room",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Orion",
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 12
+          },
+          "setup": true,
+          "bind": {
+            "room": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010004",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "setup": true,
+          "bind": {
+            "user": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:user>",
+            "Official_Email": "uma.vale@example.com",
+            "From_Time_With_Date": "17-Oct-2026 10:00:00",
+            "To_Time_With_Date": "17-Oct-2026 11:00:00"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Booking_Form": []
+        }
+      }
+    },
+    {
+      "id": "booking-overlap-rule-needs-registered",
+      "name": "Booking_Form On Validate: the overlap rule also requires Status == \"Registered\", a value no booking can hold (choices are Reserved..), so an overlapping booking by the same email is saved (matches the Creator capture in tests/behavior/conference-room-booking r4 cases)",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Orion",
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 12
+          },
+          "setup": true,
+          "bind": {
+            "room": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010004",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "setup": true,
+          "bind": {
+            "user": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:user>",
+            "Official_Email": "uma.vale@example.com",
+            "From_Time_With_Date": "17-Oct-2026 10:00:00",
+            "To_Time_With_Date": "17-Oct-2026 11:00:00",
+            "Choose_Room": "<ref:room>"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:user>",
+            "Official_Email": "uma.vale@example.com",
+            "From_Time_With_Date": "17-Oct-2026 10:30:00",
+            "To_Time_With_Date": "17-Oct-2026 11:30:00",
+            "Choose_Room": "<ref:room>"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved"
+            },
+            {
+              "Status": "Reserved"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "booking-no-time-order-check-on-validate",
+      "name": "Booking_Form On Validate only holds the overlap script; the To-before-From guard lives in On User Input handlers the REST API does not run, so To < From is stored",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Orion",
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 12
+          },
+          "setup": true,
+          "bind": {
+            "room": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010004",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "setup": true,
+          "bind": {
+            "user": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:user>",
+            "Official_Email": "uma.vale@example.com",
+            "From_Time_With_Date": "20-Oct-2026 12:00:00",
+            "To_Time_With_Date": "20-Oct-2026 11:00:00",
+            "Choose_Room": "<ref:room>"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "From_Time_With_Date": "2026-10-20 12:00:00",
+              "To_Time_With_Date": "2026-10-20 11:00:00"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "booking-email-format",
+      "name": "[UNVERIFIED] Booking_Form: Official_Email is type = email; a value without @ is refused (exact Creator rule unpublished)",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Orion",
+            "Building_Floor": "Floor 2",
+            "Location": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 12
+          },
+          "setup": true,
+          "bind": {
+            "room": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Uma",
+              "last_name": "Vale"
+            },
+            "Email": "uma.vale@example.com",
+            "Phone_Number": "+1555010004",
+            "Address": {
+              "address_line_1": "1 Test Way",
+              "district_city": "Delta",
+              "state_province": "Ridge",
+              "postal_Code": "10001",
+              "country": "United States"
+            }
+          },
+          "setup": true,
+          "bind": {
+            "user": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:user>",
+            "Official_Email": "bad",
+            "From_Time_With_Date": "17-Oct-2026 10:00:00",
+            "To_Time_With_Date": "17-Oct-2026 11:00:00",
+            "Choose_Room": "<ref:room>"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Booking_Form": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,450 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Bill Of Materials",
+  "source": {
+    "file": "Bill_Of_Materials.ds",
+    "origin": "local gallery fixture corpus, not redistributable",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "material-picklist-initial-value",
+      "name": "Add_Material: Measurement_Unit initial value Pieces applies when omitted",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Material",
+          "record": {
+            "Material_Name": "Bolt",
+            "Unit_Price": "12.50"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Material": [
+            {
+              "Material_Name": "Bolt",
+              "Unit_Price": "12.50",
+              "Measurement_Unit": "Pieces"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "material-picklist-others-option",
+      "name": "Add_Material: picklist has others option = true so a value outside the list is accepted",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Material",
+          "record": {
+            "Material_Name": "Rivet",
+            "Unit_Price": "12.50",
+            "Measurement_Unit": "Bundle"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Material": [
+            {
+              "Material_Name": "Rivet",
+              "Measurement_Unit": "Bundle"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "material-unique-name",
+      "name": "Add_Material: must have unique Material_Name refuses the second write",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Material",
+          "record": {
+            "Material_Name": "Bolt",
+            "Unit_Price": "12.50"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Material",
+          "record": {
+            "Material_Name": "Bolt",
+            "Unit_Price": "12.50"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Material": [
+            {
+              "Material_Name": "Bolt"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "material-mandatory-price",
+      "name": "Add_Material: must have Unit_Price refuses a write without it, nothing stored",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Material",
+          "record": {
+            "Material_Name": "Nut"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Material": []
+        }
+      }
+    },
+    {
+      "id": "product-checkbox-initial-false",
+      "name": "Add_Product: checkbox initial value false and Measurement_Unit initial Pieces",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Name": "Gadget",
+            "Unit_Price": "5"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Product": [
+            {
+              "Product_Name": "Gadget",
+              "This_is_also_the_subassembly": "false",
+              "Measurement_Unit": "Pieces"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "batch-date-format-and-radio-default",
+      "name": "Add_Production_Batch: dd-MMM-yyyy dates are stored as ISO dates, radio initial value Active",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Production_Batch",
+          "record": {
+            "Batch_No": "B-1",
+            "Start_Date": "05-Jan-2027",
+            "Expiry_Date": "05-Jan-2028"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Production_Batch": [
+            {
+              "Batch_No": "B-1",
+              "Start_Date": "2027-01-05",
+              "Expiry_Date": "2028-01-05",
+              "Production_Batch_Status": "Active"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "batch-radio-rejects-unlisted",
+      "name": "Add_Production_Batch: radiobuttons (no others option) refuse an unlisted value",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Production_Batch",
+          "record": {
+            "Batch_No": "B-2",
+            "Start_Date": "05-Jan-2027",
+            "Expiry_Date": "05-Jan-2028",
+            "Production_Batch_Status": "Retired"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Production_Batch": []
+        }
+      }
+    },
+    {
+      "id": "user-picklist-rejects-unlisted",
+      "name": "Add_User: Role picklist has no others option, unlisted Role refused",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Bee"
+            },
+            "Mail_ID": "ann.bee@example.com",
+            "Phone": "+1555010001",
+            "Role": "Janitor"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_User": []
+        }
+      }
+    },
+    {
+      "id": "user-email-format",
+      "name": "[UNVERIFIED] Add_User: type = email field refuses a value without @ (Creator email-field validation; exact rule unpublished per docs/schema-mapping.md)",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Ann",
+              "last_name": "Bee"
+            },
+            "Mail_ID": "not-an-email",
+            "Phone": "+1555010002",
+            "Role": "Admin"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_User": []
+        }
+      }
+    },
+    {
+      "id": "bom-mandatory-grid-absent",
+      "name": "Create_BOM: must have List_Of_Materials (grid) refuses a record with no rows",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Name": "Gadget",
+            "Unit_Price": "5"
+          },
+          "setup": true,
+          "bind": {
+            "prod": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Production_Batch",
+          "record": {
+            "Batch_No": "B-3",
+            "Start_Date": "05-Jan-2027",
+            "Expiry_Date": "05-Jan-2028"
+          },
+          "setup": true,
+          "bind": {
+            "batch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_BOM",
+          "record": {
+            "Product": "<ref:prod>",
+            "Created_Date": "06-Jan-2027",
+            "Production_Batch": "<ref:batch>",
+            "Subtotal_Price_Raw_Materials_Subassemblies": "10"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Create_BOM": []
+        }
+      }
+    },
+    {
+      "id": "bom-subform-row-write",
+      "name": "Create_BOM: grid rows are written to the subform table with the lookup bound",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Name": "Gadget",
+            "Unit_Price": "5"
+          },
+          "setup": true,
+          "bind": {
+            "prod": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Production_Batch",
+          "record": {
+            "Batch_No": "B-4",
+            "Start_Date": "05-Jan-2027",
+            "Expiry_Date": "05-Jan-2028"
+          },
+          "setup": true,
+          "bind": {
+            "batch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Material",
+          "record": {
+            "Material_Name": "Bolt",
+            "Unit_Price": "12.50"
+          },
+          "setup": true,
+          "bind": {
+            "mat": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_BOM",
+          "record": {
+            "Product": "<ref:prod>",
+            "Created_Date": "06-Jan-2027",
+            "Production_Batch": "<ref:batch>",
+            "List_Of_Materials": [
+              {
+                "Material": "<ref:mat>",
+                "Quantity": 4
+              }
+            ],
+            "Subtotal_Price_Raw_Materials_Subassemblies": "10"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_BOM": [
+            {
+              "Product": "<ref:prod>",
+              "Created_Date": "2027-01-06",
+              "BOM_Status": "Active",
+              "Production_Batch": "<ref:batch>"
+            }
+          ],
+          "Create_BOM__List_Of_Materials": [
+            {
+              "Material": "<ref:mat>",
+              "Quantity": 4,
+              "row_order": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bom-lookup-nonexistent-parent",
+      "name": "[UNVERIFIED] Create_BOM: a lookup value naming no Add_Product record is refused (Creator rejects a non-existent lookup id)",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Production_Batch",
+          "record": {
+            "Batch_No": "B-5",
+            "Start_Date": "05-Jan-2027",
+            "Expiry_Date": "05-Jan-2028"
+          },
+          "setup": true,
+          "bind": {
+            "batch": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Material",
+          "record": {
+            "Material_Name": "Bolt",
+            "Unit_Price": "12.50"
+          },
+          "setup": true,
+          "bind": {
+            "mat": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Create_BOM",
+          "record": {
+            "Product": "1234",
+            "Created_Date": "06-Jan-2027",
+            "Production_Batch": "<ref:batch>",
+            "List_Of_Materials": [
+              {
+                "Material": "<ref:mat>",
+                "Quantity": 1
+              }
+            ],
+            "Subtotal_Price_Raw_Materials_Subassemblies": "1"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Create_BOM": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,470 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Business Finance Tracker",
+  "source": {
+    "file": "Business_Finance_Tracker.ds",
+    "origin": "local gallery fixture corpus, not redistributable",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "account-unique-code",
+      "name": "Add_Account_Details: must have unique Account_Code refuses a duplicate code",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Currency",
+          "record": {
+            "Currency_Code": "Choice 1",
+            "Currency": "Dollar"
+          },
+          "setup": true,
+          "bind": {
+            "cur": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Account_Types",
+          "record": {
+            "Account_Type": "Bank",
+            "Description": "Bank accounts"
+          },
+          "setup": true,
+          "bind": {
+            "atype": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Main",
+            "Account_Code": "AC-1",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "100.25",
+            "Description": "Main account"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Other",
+            "Account_Code": "AC-1",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "100.25",
+            "Description": "Main account"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Account_Details": [
+            {
+              "Account_Code": "AC-1",
+              "Account_Name": "Main"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "account-radio-initial-values",
+      "name": "Add_Account_Details: Transaction_Type initial value \"Payable & Receivable\" and Account_Status Active apply when omitted",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Currency",
+          "record": {
+            "Currency_Code": "Choice 1",
+            "Currency": "Dollar"
+          },
+          "setup": true,
+          "bind": {
+            "cur": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Account_Types",
+          "record": {
+            "Account_Type": "Bank",
+            "Description": "Bank accounts"
+          },
+          "setup": true,
+          "bind": {
+            "atype": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Main",
+            "Account_Code": "AC-2",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "100.25",
+            "Description": "Main account"
+          },
+          "expect": {
+            "status": "2xx"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Account_Details": [
+            {
+              "Account_Code": "AC-2",
+              "Transaction_Type": "Payable & Receivable",
+              "Account_Status": "Active",
+              "Open_Balance": "100.25"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "account-mandatory-description",
+      "name": "Add_Account_Details: must have Description refuses a write without it",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Currency",
+          "record": {
+            "Currency_Code": "Choice 1",
+            "Currency": "Dollar"
+          },
+          "setup": true,
+          "bind": {
+            "cur": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Account_Types",
+          "record": {
+            "Account_Type": "Bank",
+            "Description": "Bank accounts"
+          },
+          "setup": true,
+          "bind": {
+            "atype": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Main",
+            "Account_Code": "AC-3",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "100.25"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Account_Details": []
+        }
+      }
+    },
+    {
+      "id": "account-open-balance-not-decimal",
+      "name": "Add_Account_Details: Open_Balance is type = decimal, a non-numeric value is refused",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Currency",
+          "record": {
+            "Currency_Code": "Choice 1",
+            "Currency": "Dollar"
+          },
+          "setup": true,
+          "bind": {
+            "cur": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Account_Types",
+          "record": {
+            "Account_Type": "Bank",
+            "Description": "Bank accounts"
+          },
+          "setup": true,
+          "bind": {
+            "atype": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Main",
+            "Account_Code": "AC-4",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "lots",
+            "Description": "Main account"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Account_Details": []
+        }
+      }
+    },
+    {
+      "id": "income-checkbox-and-datetime",
+      "name": "Add_Income: Debt checkbox initial value false; Transaction_Date datetime stored as yyyy-MM-dd HH:mm:ss",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Currency",
+          "record": {
+            "Currency_Code": "Choice 1",
+            "Currency": "Dollar"
+          },
+          "setup": true,
+          "bind": {
+            "cur": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Account_Types",
+          "record": {
+            "Account_Type": "Bank",
+            "Description": "Bank accounts"
+          },
+          "setup": true,
+          "bind": {
+            "atype": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Main",
+            "Account_Code": "AC-5",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "100.25",
+            "Description": "Main account"
+          },
+          "setup": true,
+          "bind": {
+            "acct": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Income",
+          "record": {
+            "Account": "<ref:acct>",
+            "Income_Amount": "5.50",
+            "Transaction_Date": "05-Mar-2027 14:30:00",
+            "Notes": "First income"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Income": [
+            {
+              "Debt": "false",
+              "Transaction_Date": "2027-03-05 14:30:00",
+              "Income_Amount": "5.50",
+              "Notes": "First income"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "income-lookup-criteria",
+      "name": "[UNVERIFIED] Add_Income: the Account lookup is filtered to Transaction_Type Receivable or Payable & Receivable, so a Payable-only account is refused",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Currency",
+          "record": {
+            "Currency_Code": "Choice 1",
+            "Currency": "Dollar"
+          },
+          "setup": true,
+          "bind": {
+            "cur": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Account_Types",
+          "record": {
+            "Account_Type": "Bank",
+            "Description": "Bank accounts"
+          },
+          "setup": true,
+          "bind": {
+            "atype": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Main",
+            "Account_Code": "AC-6",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "100.25",
+            "Description": "Main account",
+            "Transaction_Type": "Payable"
+          },
+          "setup": true,
+          "bind": {
+            "acct": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Income",
+          "record": {
+            "Account": "<ref:acct>",
+            "Income_Amount": "5.50",
+            "Transaction_Date": "05-Mar-2027 14:30:00",
+            "Notes": "Wrong account"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Income": []
+        }
+      }
+    },
+    {
+      "id": "income-mandatory-notes",
+      "name": "Add_Income: must have Notes refuses a write without it",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Currency",
+          "record": {
+            "Currency_Code": "Choice 1",
+            "Currency": "Dollar"
+          },
+          "setup": true,
+          "bind": {
+            "cur": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Account_Types",
+          "record": {
+            "Account_Type": "Bank",
+            "Description": "Bank accounts"
+          },
+          "setup": true,
+          "bind": {
+            "atype": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Account_Details",
+          "record": {
+            "Account_Name": "Main",
+            "Account_Code": "AC-7",
+            "Account_Type": "<ref:atype>",
+            "Currency": "<ref:cur>",
+            "Open_Balance": "100.25",
+            "Description": "Main account"
+          },
+          "setup": true,
+          "bind": {
+            "acct": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Income",
+          "record": {
+            "Account": "<ref:acct>",
+            "Income_Amount": "5.50",
+            "Transaction_Date": "05-Mar-2027 14:30:00"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Income": []
+        }
+      }
+    },
+    {
+      "id": "tax-rate-unique-name",
+      "name": "Add_Tax_Rates: must have unique Tax_Name refuses a duplicate",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Tax_Rates",
+          "record": {
+            "Tax_Name": "VAT",
+            "Tax_Rate": "5"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tax_Rates",
+          "record": {
+            "Tax_Name": "VAT",
+            "Tax_Rate": "7"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Tax_Rates": [
+            {
+              "Tax_Name": "VAT"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
