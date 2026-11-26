@@ -4,7 +4,7 @@
  * harness (the UI scorer, a smoke test) may call it again for another
  * document. The first render commits synchronously.
  */
-import { StrictMode, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
+import { StrictMode, Suspense, useEffect, useRef, type ComponentType, type LazyExoticComponent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { AppSpec, NavSection } from './types';
@@ -45,6 +45,58 @@ export function navSections(spec: AppSpec, custom: Customization): NavSection[] 
   return custom.nav ? custom.nav(sections) : sections;
 }
 
+/**
+ * After a route change: retitle the document to the open screen and move focus
+ * to its heading, so a keyboard or screen-reader user lands on the new screen
+ * instead of the control they used to leave the old one. The first paint keeps
+ * the page's own title and focus. A lazy screen draws after the route changes,
+ * so the heading may not exist yet; wait for it once.
+ */
+function useRouteAnnounce(doc: Document, appName: string, label: string, hash: string): void {
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    doc.title = label ? `${label} - ${appName}` : appName;
+    const focusHeading = (): boolean => {
+      const heading = doc.querySelector<HTMLElement>('#main h1, #main h2, main h1, main h2');
+      if (!heading) return false;
+      if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+      heading.focus();
+      return true;
+    };
+    if (focusHeading()) return;
+    const root = doc.getElementById('main') ?? doc.body;
+    const Observer = doc.defaultView?.MutationObserver;
+    if (!Observer) return;
+    const watch = new Observer(() => {
+      if (focusHeading()) watch.disconnect();
+    });
+    watch.observe(root, { childList: true, subtree: true });
+    return () => watch.disconnect();
+  }, [doc, appName, label, hash]);
+}
+
+function NotFound() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), []);
+  return (
+    <section className="c2c-card" data-state="not-found">
+      <h1 ref={heading} tabIndex={-1}>
+        Not found
+      </h1>
+      <p>This screen is not part of the app. Choose a screen from the menu.</p>
+      <p>
+        <a className="c2c-link" href="#/">
+          Go to home
+        </a>
+      </p>
+    </section>
+  );
+}
+
 function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; custom: Customization }) {
   const env = useEnv();
   const route = useRoute(env.view);
@@ -54,6 +106,8 @@ function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; cust
   const first = sections.flatMap((s) => s.items)[0];
   const key = routeKey(route) || (first ? `${first.kind}/${first.name}` : '');
   const Screen = table[key];
+  const labelOf = sections.flatMap((s) => s.items).find((item) => `${item.kind}/${item.name}` === key)?.label ?? '';
+  useRouteAnnounce(env.doc, spec.name, labelOf, env.view.location.hash);
   // The smoke page checks access itself through POST /admin/smoke {op:status}:
   // a signed-out visit must paint not-signed-in, not wait at the sign-in gate.
   if (route.name === 'smoke') {
@@ -84,10 +138,7 @@ function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; cust
             />
           </Suspense>
         ) : (
-          <section className="c2c-card">
-            <h1>Not found</h1>
-            <p>This screen is not part of the app. Choose a screen from the menu.</p>
-          </section>
+          <NotFound />
         )}
       </AppShell>
     </AuthGate>

@@ -443,8 +443,22 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
     if (el && typeof el.name === 'string' && el.name !== '') notify(el.name);
   }
 
+  // Set on the first submit event and held until it settles: the checks before
+  // the write are asynchronous, so a second event in that window would pass the
+  // in-flight guard below and post twice.
+  const entering = useRef(false);
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (entering.current) return;
+    entering.current = true;
+    try {
+      await submitNow(event);
+    } finally {
+      entering.current = false;
+    }
+  }
+
+  async function submitNow(event: FormEvent<HTMLFormElement>) {
     if (edit && !loaded) return;
     const formEl = event.currentTarget;
     let next = readRecord(formEl, form);
@@ -501,7 +515,13 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
         deny();
         return;
       }
-      if (!reply.ok) {
+      const named = reply.status === 400 && typeof (reply.body as { field?: unknown } | undefined)?.field === 'string' ? ((reply.body as { field: string }).field) : '';
+      if (!reply.ok && named && form.fields.some((f) => f.name === named)) {
+        // A refused value names its field: the message lands on that control, as a client check's would.
+        setErrors({ [named]: submitFailure(reply.status, reply.body) });
+        setBanner({ tone: 'danger', title: 'Check the highlighted fields.' });
+        firstErrorControl(formEl, { [named]: '' })?.focus();
+      } else if (!reply.ok) {
         // A stored row whose after-save step failed (`wrote: true`) still lands here:
         // it is committed for idempotency, but the banner must not claim a clean save.
         setBanner({ tone: 'danger', title: submitFailure(reply.status, reply.body) });
@@ -578,7 +598,7 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
           <div className="form-grid" key={loaded}>
             {children}
           </div>
-          {banner ? <Alert className="c2c-banner" tone={banner.tone} title={banner.title} /> : null}
+          {banner ? <Alert className="c2c-banner" tone={banner.tone} title={banner.title} data-toast="" data-kind={banner.tone} onDismiss={() => setBanner(null)} /> : null}
           {notes.map((note, index) => (
             <p key={`${index}-${note}`} className="fidelity-note">
               {note}
