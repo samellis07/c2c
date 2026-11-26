@@ -924,6 +924,7 @@ test('the React conditional format matcher numerically coerces a row-vs-row comp
   }
 });
 
+<<<<<<< HEAD
 const TIMELINE_SOURCE = `application "Rooms"
 {
 date format = "dd-MMM-yyyy"
@@ -1022,4 +1023,109 @@ test('timelineLaneKey: an impossible calendar day is no lane, with or without a 
   assert.equal(timelineLaneKey('2026-10-14 09:00:00'), '2026-10-14');
   assert.equal(timelineLaneKey('2024-02-29'), '2024-02-29', 'a real leap day stays');
   assert.equal(timelineLaneKey('14-Oct-2026', 'monday'), '2026-10-12');
+=======
+function captureDownloads(win: Record<string, unknown>): { files: { name: string; mime: string; parts: unknown[] }[]; printed: number } {
+  const seen = { files: [] as { name: string; mime: string; parts: unknown[] }[], printed: 0 };
+  const blobs = new Map<string, { mime: string; parts: unknown[] }>();
+  win.Blob = class {
+    constructor(public parts: unknown[], init?: { type?: string }) {
+      this.mime = init?.type ?? '';
+    }
+    mime: string;
+  };
+  win.URL = {
+    createObjectURL: (blob: { mime: string; parts: unknown[] }) => {
+      const url = `blob:test/${blobs.size}`;
+      blobs.set(url, blob);
+      return url;
+    },
+    revokeObjectURL: () => undefined,
+  };
+  win.print = () => {
+    seen.printed += 1;
+  };
+  (win.document as Document).addEventListener(
+    'click',
+    (event) => {
+      const link = (event.target as Element).closest?.('a[download]') as HTMLAnchorElement | null;
+      if (!link) return;
+      event.preventDefault();
+      const blob = blobs.get(link.getAttribute('href') ?? '');
+      seen.files.push({ name: link.download, mime: blob?.mime ?? '', parts: blob?.parts ?? [] });
+    },
+    true,
+  );
+  return seen;
+}
+
+test('Export CSV carries the on-screen columns, rows, order and filter, with formulas neutralised', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-csv');
+  const spec = reactAppSpec(appOf());
+  const rows: Row[] = [
+    { ROWID: '1', Title: '=HYPERLINK("http://x")', Total: '10.5' },
+    { ROWID: '2', Title: 'Alpha, Inc', Total: '10.25' },
+    { ROWID: '3', Title: '@cmd', Total: '-3' },
+  ];
+  const view = await mount(out, spec.reports.Orders!, rows, new Set(['Total']));
+  const seen = captureDownloads(view.win);
+  await view.click(view.headerButton('Title'));
+  const button = view.container.querySelector('[data-export="csv"]');
+  assert.ok(button, 'the toolbar offers Export CSV');
+  await view.click(button);
+  assert.equal(seen.files.length, 1);
+  assert.equal(seen.files[0]!.name, 'Orders.csv');
+  const csv = String(seen.files[0]!.parts[0]);
+  const header = csv.replace(/^﻿/, '').split('\r\n')[0];
+  assert.equal(header, 'Title,Total', 'data columns only: no action column');
+  const onScreen = view.textOf('Title');
+  const body = csv.split('\r\n').slice(1, -1);
+  assert.equal(body.length, onScreen.length, 'same row count as the screen');
+  body.forEach((line, i) => assert.ok(line.replace(/^"/, '').replace(/^'/, '').startsWith(onScreen[i]!.slice(0, 5)), `row ${i} follows the screen order`));
+  assert.ok(body.every((line) => !/^[=+@]/.test(line)), 'no line starts with a formula character');
+  assert.ok(body.some((line) => line.startsWith('"\'=HYPERLINK')));
+  assert.ok(body.some((line) => line.startsWith('"Alpha, Inc"')));
+  assert.ok(view.container.querySelector('.c2c-notice')?.textContent?.includes('Orders.csv'), 'the export says what it wrote');
+});
+
+test('Export XLSX downloads a workbook and Print opens the print dialog', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-xlsx');
+  const spec = reactAppSpec(appOf());
+  const view = await mount(out, spec.reports.Orders!, ROWS, new Set(['Total']));
+  const seen = captureDownloads(view.win);
+  await view.click(view.container.querySelector('[data-export="xlsx"]'));
+  assert.equal(seen.files[0]?.name, 'Orders.xlsx');
+  assert.match(seen.files[0]!.mime, /spreadsheetml\.sheet$/);
+  const zip = seen.files[0]!.parts[0] as Uint8Array;
+  assert.equal(zip[0], 0x50);
+  assert.equal(zip[1], 0x4b);
+  await view.click(view.container.querySelector('[data-print]'));
+  assert.ok(view.container.querySelector('[data-print-view]'), 'Print opens the print view');
+  await view.click(view.container.querySelector('[data-print-now]'));
+  assert.equal(seen.printed, 1);
+  await view.click(view.container.querySelector('[data-print-close]'));
+  assert.equal(view.container.querySelector('[data-print-view]'), null, 'Close leaves the print view');
+});
+
+test('an empty report offers no export', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-empty');
+  const spec = reactAppSpec(appOf());
+  const view = await mount(out, spec.reports.Orders!, [], new Set(['Total']));
+  assert.equal(view.container.querySelector('[data-export]'), null);
+});
+
+test('the print stylesheet hides the chrome, shows the whole table and no longer blanks the app', () => {
+  const css = readFileSync(join(TEMPLATE_DIR, 'lib', 'c2c-ui', 'report', 'print.css'), 'utf8');
+  const print = css.slice(css.indexOf('@media print'));
+  assert.doesNotMatch(print, /body\s*>\s*\*:not\(\[data-print-sheet\]\)/, 'the sheet lives inside #root, so hiding every body child prints nothing');
+  for (const chrome of ['.c2c-topbar', '#nav', '#tabbar', '.c2c-report-tools', '.c2c-pages', 'td[data-key="__actions"]', 'td[data-key="__bulkSelect"]']) assert.ok(print.includes(chrome), `${chrome} is hidden in print`);
+  assert.match(print, /\.table-wrap\s*\{[^}]*overflow:\s*visible/);
+});
+
+test('show export = false draws no export buttons but keeps Print', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'export-hidden');
+  const spec = reactAppSpec(appOf());
+  const view = await mount(out, { ...spec.reports.Orders!, showExport: false }, ROWS, new Set(['Total']));
+  assert.equal(view.container.querySelector('[data-export]'), null);
+  assert.ok(view.container.querySelector('[data-print]'));
+>>>>>>> 5dc1012 (React reports: Export CSV/XLSX and a print view that prints)
 });

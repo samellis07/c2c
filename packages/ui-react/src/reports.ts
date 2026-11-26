@@ -143,6 +143,7 @@ export function reportSpec(app: App, ui: UiReport, forms: UiForm[] = []): Report
     ...(ui.recordsPerRow ? { recordsPerRow: ui.recordsPerRow } : {}),
     ...(ui.labelWidth ? { labelWidth: ui.labelWidth } : {}),
     ...(ui.showRecordCount ? { showRecordCount: true } : {}),
+    ...(ui.showExport === false ? { showExport: false as const } : {}),
     conditionalFormats: (ui.conditionalFormats ?? []).map((f) => ({ name: f.name, fields: f.fields, criteria: f.criteria, format: f.format })),
     ...(ui.view === 'chart' ? { chart: reportChart(app, ui) } : {}),
     ...(form?.recordEndpoint ? { recordEndpoint: form.recordEndpoint } : {}),

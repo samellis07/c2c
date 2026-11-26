@@ -334,6 +334,8 @@ export interface UiReport {
   labelWidth?: string;
   /** `options { record count = enable }`: the list header shows how many rows are shown. */
   showRecordCount?: boolean;
+  /** `toolbar { show export = false }`: the list draws no Export CSV / XLSX buttons. */
+  showExport?: false;
   queryEndpoint: string;
   /** Scoped single-row endpoint used by this report's detail route. */
   recordEndpoint?: string;
@@ -2494,8 +2496,9 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
         : blockName === 'toolbar'
           ? block.properties.filter((property) => {
               const key = property.key.trim().toLowerCase().replace(/\s+/g, ' ');
-              // The generated report chrome draws no export button and no add
-              // button; an explicit Creator false for either is therefore
+              // The generated report chrome draws Export CSV / XLSX unless
+              // `show export = false` (carried as showExport: false), and no
+              // add button; an explicit Creator false for the add button is
               // faithfully represented by its absence.
               if (property.value.trim().toLowerCase() !== 'false') return true;
               return key !== 'show export' && key !== 'show add button';
@@ -2512,6 +2515,11 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
       manualStep: `In the Catalyst console, apply the \`${block.name}\` settings by hand on report ${report.name}: ${settings}.`,
     });
   }
+  const hideExport = report.blocks.some(
+    (block) =>
+      block.name.trim().toLowerCase() === 'toolbar' &&
+      block.properties.some((p) => p.key.trim().toLowerCase().replace(/\s+/g, ' ') === 'show export' && p.value.trim().toLowerCase() === 'false'),
+  );
   const displayField = options.get('display field');
   const pageSize = reportPageSizeOption(options.get('display rows')) ?? LIMITS.zcqlRowsPerQuery;
   let groupField = groupBy[0]?.field;
@@ -2828,6 +2836,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     ...(recordsPerRow !== undefined ? { recordsPerRow } : {}),
     ...(labelWidth ? { labelWidth } : {}),
     ...(showRecordCount ? { showRecordCount: true } : {}),
+    ...(hideExport ? { showExport: false as const } : {}),
     queryEndpoint: `/reports/${encodeURIComponent(report.name)}`,
     ...(form ? { recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record` } : {}),
     ...(view === 'spreadsheet' ? { editEndpoint: `/reports/${encodeURIComponent(report.name)}/rows` } : {}),

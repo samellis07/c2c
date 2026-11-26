@@ -1656,15 +1656,14 @@ function blockProved(built: UiReport, block: PropertyBlock): boolean {
     return block.properties.every((property) => reportPropertyProved(built, property));
   }
   if (name === 'toolbar') {
-    // The generated toolbar draws no export button and no add button; an
-    // explicit Creator `show export = false` or `show add button = false` is
-    // faithfully represented by that absence.
+    // The generated toolbar draws no add button, so `show add button = false`
+    // is faithfully represented by that absence. It draws Export CSV / XLSX,
+    // so `show export = false` must be carried as showExport: false.
     return block.properties.every((property) => {
       const key = property.key.trim().toLowerCase().replace(/\s+/g, ' ');
-      return (
-        (key === 'show export' || key === 'show add button') &&
-        unquote(property.value).trim().toLowerCase() === 'false'
-      );
+      if (unquote(property.value).trim().toLowerCase() !== 'false') return false;
+      if (key === 'show export') return built.showExport === false;
+      return key === 'show add button';
     });
   }
   if (name === 'permission') {

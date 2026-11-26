@@ -38,6 +38,7 @@ import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreen
 import { matchCriteria } from './criteria';
 import { MapPlot } from './MapView';
 import { PrintSheet } from './PrintSheet';
+import { MAX_EXPORT_ROWS, boundRows, buildCsv, buildXlsx, downloadFile, exportFilename, type DownloadWindow } from './export';
 import { multiValueItems } from '../form/value';
 import { isSafeStyleProperty, isSafeStyleValue, STYLE_TEXT_MAX } from '../style-allowlist';
 import { displayDateValue, type DateKind } from '../form/dates';
@@ -291,6 +292,7 @@ function ReportList({ report }: { report: ReportSpec }) {
   const [attempt, setAttempt] = useState(0);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const [printView, setPrintView] = useState(false);
   const [selectedRows, setSelectedRows] = useState<ReadonlySet<string>>(new Set());
   const [bulkField, setBulkField] = useState('');
   const [bulkValue, setBulkValue] = useState('');
@@ -556,6 +558,28 @@ function ReportList({ report }: { report: ReportSpec }) {
   const showPages = load.state === 'ready' && (page > 0 || live.length >= report.pageSize);
   const headerActions = report.customActions.filter((a) => a.header === true && !(a.navigate && navNeedsRow(a.navigate)));
 
+  // Export and print carry what the table shows: the same columns (action and
+  // select columns are not data), the same rows in the same order after the
+  // search and filter, and the same cell text. A blank cell exports as the table's own blank mark.
+  const exportRows = groups ? groups.flatMap((group) => group.rows) : shown;
+  const exportColumns = report.columns.filter((c) => !c.action).map((c) => ({ key: c.field, label: c.label }));
+  const exportCell = (row: Row, field: string): string => {
+    const value = row[field];
+    const column = report.columns.find((c) => c.field === field);
+    const custom = own?.cells?.[field]?.(value, row);
+    if (typeof custom === 'string' || typeof custom === 'number') return String(custom);
+    return column?.multiValue ? formatValue(multiValueItems(value)) : fieldText(field, value);
+  };
+  const runExport = (kind: 'csv' | 'xlsx') => {
+    const bound = boundRows(exportRows.map((row) => exportColumns.map((c) => exportCell(row, c.key))));
+    const name = exportFilename(report.label, kind);
+    if (kind === 'csv') downloadFile(view as unknown as DownloadWindow, name, 'text/csv;charset=utf-8', buildCsv(exportColumns, bound.rows));
+    else downloadFile(view as unknown as DownloadWindow, name, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buildXlsx(report.label, exportColumns, bound.rows));
+    const more = showPages ? ` This is page ${page + 1}; other pages are not included.` : '';
+    setActionNote(bound.truncated ? `Exported the first ${MAX_EXPORT_ROWS} rows; ${bound.truncated} more were left out.${more}` : `Exported ${bound.rows.length} ${bound.rows.length === 1 ? 'row' : 'rows'} to ${name}.${more}`);
+  };
+  const canExport = load.state === 'ready' && exportRows.length > 0 && report.view !== 'map';
+
   const table = (rows: Row[], caption: string) =>
     Table ? (
       <Table report={report} rows={rows} />
@@ -605,8 +629,39 @@ function ReportList({ report }: { report: ReportSpec }) {
           </Button>
           ),
         )}
+        {canExport ? (
+          <>
+            {report.showExport === false ? null : (
+              <>
+                <Button type="button" variant="secondary" size="sm" data-export="csv" onClick={() => runExport('csv')}>
+                  Export CSV
+                </Button>
+                <Button type="button" variant="secondary" size="sm" data-export="xlsx" onClick={() => runExport('xlsx')}>
+                  Export XLSX
+                </Button>
+              </>
+            )}
+            <Button type="button" variant="secondary" size="sm" data-print="" onClick={() => setPrintView(true)}>
+              Print
+            </Button>
+          </>
+        ) : null}
         <Slot>{own?.slots?.toolbar}</Slot>
       </div>
+      {printView ? (
+        <div className="c2c-report-tools" data-print-view="">
+          <Button type="button" variant="secondary" size="sm" data-print-now="" onClick={() => view.print()}>
+            Print now
+          </Button>
+          <Button type="button" variant="secondary" size="sm" data-print-close="" onClick={() => setPrintView(false)}>
+            Close
+          </Button>
+          <p data-print-hint="">Use the print dialog to save a PDF.</p>
+        </div>
+      ) : null}
+      <p data-print-only="" data-print-filters="">
+        {[report.label, chosen ? `Filter: ${chosen}` : '', q ? `Search: ${q}` : ''].filter(Boolean).join(' | ')}
+      </p>
       {canBulkEdit ? (
         <div className="c2c-report-tools" data-bulk-edit>
           <label>

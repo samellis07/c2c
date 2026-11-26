@@ -2463,7 +2463,10 @@ test('a toolbar with export explicitly disabled is carried by the generated repo
   const out = collectOutputs(source);
   assert.equal(rowStatus(source, out, 'All_Orders block toolbar'), 'emitted');
   assert.equal(out.model.todos.some((todo) => todo.name === 'All_Orders block toolbar'), false);
-
+  assert.equal(out.model.reports.find((r) => r.name === 'All_Orders')?.showExport, false, 'the hidden export is carried, not implied');
+  const mutated = cloneOutputs(out);
+  for (const r of mutated.model.reports) delete r.showExport;
+  assert.equal(rowStatus(source, mutated, 'All_Orders block toolbar'), 'dropped', 'without the flag the generated Export buttons would contradict show export = false');
 });
 
 test('a toolbar with the add button explicitly hidden is carried by the generated report chrome', () => {

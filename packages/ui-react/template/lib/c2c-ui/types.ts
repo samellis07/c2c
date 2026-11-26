@@ -297,6 +297,8 @@ export interface ReportSpec {
   labelWidth?: string;
   /** `options { record count = enable }`: show how many rows the list is displaying. */
   showRecordCount?: boolean;
+  /** `toolbar { show export = false }`: no Export CSV / XLSX buttons. */
+  showExport?: false;
   conditionalFormats: ConditionalFormatSpec[];
   /** Single-row read of the report's form, for the detail view. */
   recordEndpoint?: string;
