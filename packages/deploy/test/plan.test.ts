@@ -623,7 +623,7 @@ test('the runtime call estimate counts the lookup columns of the report, printin
     'application "Calls"', '{', '\ttime zone = "Asia/Kolkata"',
     '\tform Parent\n\t{\n\t\tLabel\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}',
     `\tform Child\n\t{\n\t\tLabel\n\t\t(\n\t\t\ttype = text\n\t\t)\n${lookups.map(field).join('\n')}\n\t}`,
-    `\tlist Child_Report\n\t{\n\t\tshow all rows from Child\n\t\t(\n\t\t\tLabel\n${lookups.map((name) => `\t\t\t${name}`).join('\n')}\n\t\t)\n\t}`,
+    `\tlist Child_Report\n\t{\n\t\tshow all rows from Child\n\t\t(\n\t\t\tLabel\n${lookups.map((name) => `\t\t\t${name}`).join('\n')}\n\t\t)\n\t\tgroup by Type_Ref\n\t}`,
     '}', '',
   ].join('\n');
   const app = deriveIr(parse(text));
@@ -631,8 +631,8 @@ test('the runtime call estimate counts the lookup columns of the report, printin
   const rows = (table: string, count: number) => ({ table, rows: Array.from({ length: count }, () => ({ columns: {} })) });
   const budget = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows('Parent', page), rows('Child', page * 10)] }).plan.budgets.find((item) => item.id === 'runtime-calls');
   assert.ok(budget);
-  // 10 scanned pages x (1 row select + 3 lookup selects) = 40 aggregate calls.
-  assert.match(budget.detail ?? '', /Child 10 list page requests \(3000 rows\), aggregate calls = \(row selects \+ lookup selects\) x scanned pages = \(1 \+ 3 \[3 lookup columns of Child_Report\]\) x 10 = 40 /);
+  // Plain group + count has no measured lookup form: 10 x (1 + 0) = 10.
+  assert.match(budget.detail ?? '', /Child 10 list page requests \(3000 rows\), aggregate calls = \(row selects \+ lookup selects\) x scanned pages = \(1 \+ 0\) x 10 = 10 /);
   assert.match(budget.detail ?? '', /Parent 1 list page request \(300 rows\), aggregate calls = \(row selects \+ lookup selects\) x scanned pages = \(1 \+ 0\) x 1 = 1 /);
 });
 

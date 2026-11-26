@@ -683,17 +683,11 @@ const NO_PRICE = 'no Catalyst price is recorded in the repo, so no cost is estim
  * (one ZCQL page of zcqlRowsPerQuery rows per call; aggregate stops at
  * AGGREGATE_ROW_CAP rows). Aggregate lookup display/scope resolution reads
  * are included too: the generated handler (packages/ui/src/generate.ts, op
- * "aggregate") resolves every lookup column of the report (a relation column
- * and each Lookup.Part subcolumn count separately) once per chunk of
- * zcqlRowsPerQuery distinct ids (at most one chunk per scanned page), and each
- * read of a parent is one ZCQL statement per zcql.select_columns stage of that
- * parent, and the row read is itself staged for a table past
- * zcql.select_columns, so calls = (row selects + lookup selects) x scanned
- * pages, for the report with the most lookup selects. A group/measure lookup column is read
- * by scopeLookupIds instead of resolveLookupDisplays, which adds no call. It
- * assumes at least a page of distinct parent ids, so it is the count for a
- * plain group + count aggregate, not a bound: a request that names a dotted
- * lookup path adds resolveLookupPaths reads.
+ * "aggregate") reads only lookup columns used as the group or a measure. A
+ * plain group + count has no lookup reads. A grouped/measured lookup adds one
+ * read per distinct parent form per scanned page, multiplied by that form's
+ * staged-read count; ids are chunked and displays cached per request. This is
+ * a measured count, not an upper bound: dotted lookup paths may add reads.
  * Only documented limits are used: the repo records no price and no per-call
  * latency, so cost and time stay unknown. Warns when an aggregate would be
  * truncated. Without --source-* counts it says unknown.
@@ -726,10 +720,11 @@ function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTable
     const pages = Math.ceil(rows / page);
     const scanned = Math.min(pages, Math.ceil(AGGREGATE_ROW_CAP / page));
     const lookup = lookupColumns?.get(table.name) ?? { report: '', parents: [] };
-    const stages = lookup.parents.reduce((sum, parent) => sum + stagesOf(tables.find((item) => item.name === parent)), 0);
+    const parentForms = [...new Set(lookup.parents)];
+    const stages = parentForms.reduce((sum, parent) => sum + stagesOf(tables.find((item) => item.name === parent)), 0);
     const own = stagesOf(table);
     const aggregateCalls = (own + stages) * scanned;
-    const formula = `(${own} + ${stages}${stages ? ` [${lookup.parents.length} lookup column${lookup.parents.length === 1 ? '' : 's'} of ${lookup.report}]` : ''}) x ${scanned}`;
+    const formula = `(${own} + ${stages}${stages ? ` [${parentForms.length} grouped/measured lookup form${parentForms.length === 1 ? '' : 's'} of ${lookup.report}]` : ''}) x ${scanned}`;
     parts.push(`${table.name} ${pages} list page request${pages === 1 ? '' : 's'} (${rows} rows), aggregate calls = (row selects + lookup selects) x scanned pages = ${formula} = ${aggregateCalls} (${page}-row/${page}-id chunks)`);
     if (rows > AGGREGATE_ROW_CAP) truncated.push(table.name);
   }
@@ -1722,7 +1717,8 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
   const stageCount = (forms: readonly string[]) => forms.reduce((sum, form) => sum + stagesOf(schema.tables.find((item) => item.name === form)), 0);
   for (const report of ui.model.reports) {
     if (!report.form) continue;
-    const parents = report.columns.flatMap((column) => (column.lookup ? [column.lookup.form] : []));
+    const grouped = new Set(report.groupBy.map((item) => item.field));
+    const parents = report.columns.flatMap((column) => (grouped.has(column.field) && column.lookup ? [column.lookup.form] : []));
     if (stageCount(parents) > stageCount(lookupColumns.get(report.form)?.parents ?? [])) lookupColumns.set(report.form, { report: report.name, parents });
   }
   const { budgets, ok } = buildBudgets(schema.tables, opts.source, lookupColumns);

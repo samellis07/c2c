@@ -182,9 +182,9 @@ test('the runtime call estimate is within 10% of the aggregate calls observed on
   const budget = buildOfflinePlan(library, { dc: 'in', dcSource: '--dc', mail: false, source }).plan.budgets.find((item) => item.id === 'runtime-calls');
   const estimateOf = (form: string) => Number(new RegExp(`${form} \\d+ list page requests?[^;]*= (\\d+) \\(`).exec(budget?.detail ?? '')?.[1]);
   const run = await runPerf(library, { size: '10k', apiRowsPerTable: 5, pageSamples: 1, searchRepeats: 1 });
-  // All_Book_Transactions has two lookup columns (a 30-call aggregate); the other reports have none.
+  // The plain group + count does not measure either lookup column.
   const lookups = run.reports.find((r) => r.report === 'All_Book_Transactions')!;
-  assert.equal(lookups.aggregate!.maxStoreCalls, 30);
+  assert.equal(lookups.aggregate!.maxStoreCalls, 10);
   for (const report of run.reports) {
     const estimate = estimateOf(report.form);
     const observed = report.aggregate!.maxStoreCalls;
