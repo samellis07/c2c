@@ -1272,8 +1272,19 @@ test('vanilla detail loads an off-page row from the authorized record endpoint',
   assert.ok(form?.recordEndpoint);
   assert.equal(recordReads.length, 1);
   assert.equal(recordReads[0]?.url.endsWith(form.recordEndpoint), true);
-  assert.deepEqual(recordReads[0]?.body, { ROWID: '907' });
+  assert.deepEqual(recordReads[0]?.body, { ROWID: '907', REPORT: 'Active_BOM' });
   assert.match(doc.body.textContent ?? '', /Off page record/);
+});
+
+test('vanilla detail draws the declared blocks from the record reply: the lookup text, not the ROWID, and no undeclared field', async () => {
+  const { doc } = await bootDecorated('Active_BOM', [], 'report', '907', async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ record: { ROWID: '907', Product: 'Widget', Serial_Number: 'SN-undeclared', Secret: 'hush' } }),
+  }));
+  const text = doc.querySelector('section[data-detail]')?.textContent ?? '';
+  assert.match(text, /Widget/);
+  assert.doesNotMatch(text, /[0-9]{12,}|SN-undeclared|hush/);
 });
 
 test('vanilla detail shows denied and missing record errors and clears loading', async () => {

@@ -435,7 +435,7 @@ function drawDetail(doc, section, report, id, row) {
       apiCall(call, view, endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ROWID: id }),
+        body: JSON.stringify({ ROWID: id, REPORT: report.name }),
       }).then(async (res) => ({ res, body: res && res.ok && typeof readJson === 'function' ? await readJson(res) : null }))
         .then(({ res, body }) => {
           const route = hashRoute(doc);

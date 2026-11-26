@@ -531,6 +531,22 @@ test('record detail draws configured sections and related rows from the authoriz
   assert.deepEqual([...view.container.querySelectorAll('[data-detail-block="Items"] tbody td')].map((el) => el.textContent), ['Bolt', '3']);
 });
 
+test('record detail draws the lookup display text from the record reply, never the ROWID, and no undeclared or hidden field', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'record-detail-lookup');
+  const base = reactAppSpec(appOf()).reports.Orders!;
+  const report = {
+    ...base,
+    detail: true,
+    recordEndpoint: '/forms/Order/record',
+    detailBlocks: [{ title: 'Overview', fields: [{ field: 'Product', label: 'Product' }, { field: 'Secret', label: 'Secret' }] }],
+  };
+  const reply = async () => ({ ok: true, status: 200, body: { record: { ROWID: '1', Product: 'Widget', Serial_Number: 'SN-undeclared' } } });
+  const view = await mount(out, report, [], new Set(), {}, '1', reply);
+  const text = view.container.querySelector('[data-detail-block="Overview"]')?.textContent ?? '';
+  assert.match(text, /Widget/);
+  assert.doesNotMatch(text, /[0-9]{12,}|SN-undeclared|hush/);
+});
+
 test('record detail gives a clear error for denied and missing records', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'record-errors');
   const base = reactAppSpec(appOf()).reports.Orders!;
