@@ -2583,8 +2583,8 @@ ${scopedReadSource()}
 ${composeDisplaySource()}
 ${lookupCriteriaSource()}
 ${filtersByDisplay ? lookupDisplayFilterSource() : ''}// A lookup column stores the parent ROWID (a multi lookup a list of them); the
-// report shows the parent display value instead. One ROWID IN query per lookup
-// column, through the same authorizeRead scope as the lookup endpoint: the
+// report shows the parent display value instead. ROWID IN queries per lookup
+// column (chunked at ZCQL's row cap), through the same authorizeRead scope as the lookup endpoint: the
 // caller's record filter is ANDed into the parent query and the display field
 // must be readable. A display format over several fields is composed from the
 // parent row, and every field it reads must be readable too. A parent the
@@ -2640,8 +2640,13 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
     const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
     let parents = [];
     if (scoped) {
+      // One read returns at most ZCQL's row cap, so read the ids in chunks.
+      const chunk = ${LIMITS.zcqlRowsPerQuery};
       try {
-        parents = await readScoped(datastore, column.form, scoped.criteria, 0, ids.length);
+        for (let at = 0; at < ids.length; at += chunk) {
+          const part = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids.slice(at, at + chunk) });
+          parents = parents.concat(await readScoped(datastore, column.form, part.criteria, 0, chunk));
+        }
       } catch (err) {
         parents = [];
       }
