@@ -6791,7 +6791,7 @@ ${opts.systemWrite ? `  let loadedStore = null;
       return;
     }
     accepted = ${writeCall}.values;
-  } catch (err) {
+  } catch (err) {${opts.systemWrite ? '\n    // A value the form refuses (a radio outside its list) is a 4xx, as on /submit.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;' : ''}
     const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
     send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed" });
     return;
