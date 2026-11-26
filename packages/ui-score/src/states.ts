@@ -61,6 +61,7 @@ export const STATE_OWNER_ISSUES: ReadonlySet<string> = new Set([
   'ux-offline-session',
   'ux-focus-motion',
   'react-error-boundary',
+  'ux-pagination-overflow',
 ]);
 
 /** The issue owning each state row. */
@@ -85,7 +86,13 @@ export const OWNER: Record<string, string> = {
   crash: 'react-error-boundary',
   'route-focus': 'ux-focus-motion',
   'reduced-motion': 'ux-focus-motion',
+  pagination: 'ux-pagination-overflow',
+  disabled: 'ux-pagination-overflow',
+  'long-text': 'ux-pagination-overflow',
 };
+
+/** Where focus belongs in a field: a control a user can tab to, not a hidden mirror. */
+const FOCUS_TARGET = 'input:not([type="hidden"]):not([hidden]):not([aria-hidden="true"]), textarea, select, button:not([disabled]), [role="radio"][tabindex="0"]';
 
 const mainOf = (doc: Document): Element => doc.getElementById('main') ?? doc.body;
 
@@ -102,6 +109,18 @@ function homeLink(root: Element | null | undefined): Element | null {
 
 function click(win: Session['win'], el: Element): void {
   (el as HTMLElement).click();
+}
+
+/**
+ * Set a control's value the way a user's edit does: through the prototype's
+ * setter, so a framework that tracks the last value it rendered (React) sees
+ * the change on the next input event.
+ */
+function setValue(control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string): void {
+  const proto = Object.getPrototypeOf(control) as object;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  if (setter) setter.call(control, value);
+  else control.value = value;
 }
 
 function fire(win: Session['win'], el: Element, type: string): void {
@@ -129,6 +148,25 @@ function runner(opts: StatesOptions): Run {
   };
 }
 
+/** A value the control's own type accepts, so a client format check does not refuse the fill. */
+function sampleValue(control: HTMLInputElement | HTMLTextAreaElement): string {
+  const widget = (control.closest('[data-widget]')?.getAttribute('data-widget') ?? '').toLowerCase();
+  if (/^(number|decimal|percentage|percent|currency|money)$/.test(widget)) return '12';
+  if (widget === 'email') return 'gate@example.com';
+  if (widget === 'url') return 'https://example.com';
+  const type = (control.getAttribute('type') ?? 'text').toLowerCase();
+  const mode = (control.getAttribute('inputmode') ?? '').toLowerCase();
+  if (type === 'email') return 'gate@example.com';
+  if (type === 'number' || mode === 'numeric' || mode === 'decimal') return '12';
+  if (type === 'date') return '2024-01-15';
+  if (type === 'datetime-local') return '2024-01-15T10:30';
+  if (type === 'time') return '10:30';
+  if (type === 'tel') return '5551234567';
+  if (type === 'url') return 'https://example.com';
+  if (type === 'month') return '2024-01';
+  return 'gate';
+}
+
 /** Fill every fillable required control so a submit passes client validation. */
 function fillForm(s: Session, form: Expected['forms'][number]): void {
   for (const field of form.fields) {
@@ -142,21 +180,24 @@ function fillForm(s: Session, form: Expected['forms'][number]): void {
     if (field.kind === 'decision') {
       const cb = box.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
       if (cb && !cb.checked) {
-        cb.checked = true;
-        fire(s.win, cb, 'change');
+        // A click, as a user's tick: it flips the box and fires the click and
+        // change events a framework's onChange listens for.
+        cb.click();
       }
       continue;
     }
     for (const control of Array.from(box.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea')) as HTMLInputElement[]) {
-      control.value = 'gate';
+      setValue(control, sampleValue(control));
       fire(s.win, control, 'input');
       fire(s.win, control, 'change');
     }
+    const radio = box.querySelector('input[type="radio"]') as HTMLInputElement | null;
+    if (radio && !box.querySelector('input[type="radio"]:checked')) radio.click();
     const select = box.querySelector('select') as HTMLSelectElement | null;
     if (select) {
       const option = Array.from(select.options).find((o) => o.value !== '');
       if (option && !select.value) {
-        select.value = option.value;
+        setValue(select, option.value);
         fire(s.win, select, 'change');
       }
     }
@@ -204,7 +245,7 @@ async function firstQueryingReport(s: Session, api: FakeApi, reports: Expected['
 }
 
 /**
- * The full 17-row run against one built bundle. `exp` is the scorer's
+ * The full 20-row run against one built bundle. `exp` is the scorer's
  * Creator-side expectation; `ui` picks the named waivers.
  */
 export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOptions): Promise<StateVerdict[]> {
@@ -271,7 +312,7 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
           const input = main.querySelector('input[type="search"], [data-report-search] input, .c2c-search input') as HTMLInputElement | null;
           if (!input) run.add('empty-filtered', report.name, false, 'no search control on the report');
           else {
-            input.value = 'zzz-no-such-row';
+            setValue(input, 'zzz-no-such-row');
             fire(s.win, input, 'input');
             const form = input.closest('form');
             if (form) fire(s.win, form, 'submit');
@@ -318,6 +359,8 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
               if (cancel) {
                 click(s.win, cancel);
                 await settle(s.win);
+                // A dialog may animate out before it unmounts; give it a moment, not a tick count.
+                await waitGone(s, dialog, 1500);
                 cancelled = api.matching('/delete').length === postsBefore && !s.doc.querySelector('[role="alertdialog"]');
                 focusBack = s.doc.activeElement === deletable.button;
               }
@@ -398,12 +441,13 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
       // submitting: slow submit marks the button busy; two submits post once.
       if (run.wants('submitting')) {
         const form = pickForm(exp, { fillableOnly: true });
-        if (!form) run.skip('submitting', 'app', 'no fillable form');
+        if (!form || !form.fields.filter((x) => x.required).every((x) => FILLABLE.has(x.kind))) run.skip('submitting', 'app', 'no form whose mandatory fields a script can fill (every form needs a file, subform or composite)');
         else {
           await goFresh(`#/form/${encodeURIComponent(form.name)}`);
           const el = s.doc.querySelector('#main form') as HTMLFormElement | null;
           if (!el) run.add('submitting', form.name, false, 'no form rendered');
           else {
+            const postsBefore = api.matching('/submit').length;
             api.lane.submit = 'slow';
             fillForm(s, form);
             fire(s.win, el, 'submit');
@@ -413,9 +457,11 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
             const busy = !!submit && (submit.getAttribute('aria-busy') === 'true' || submit.hasAttribute('disabled') || submit.getAttribute('aria-disabled') === 'true');
             api.release('submit');
             await settle(s.win);
-            const posts = api.matching('/submit').length;
+            const posts = api.matching('/submit').length - postsBefore;
             api.lane.submit = 'ok';
-            run.add('submitting', form.name, busy && posts === 1, `busy ${busy ? 'marked' : 'unmarked'}; two rapid submits → ${posts} POST(s)`);
+            const refused = Array.from(el.querySelectorAll('[data-error-for]')).find((m) => text(m) !== '');
+            if (posts === 0) run.skip('submitting', form.name, `the filled form never posted${refused ? ` (${refused.getAttribute('data-error-for')} "${text(refused).slice(0, 40)}" refused client-side)` : ''}: this script cannot synthesize values it accepts`);
+            else run.add('submitting', form.name, busy && posts === 1, `busy ${busy ? 'marked' : 'unmarked'}; two rapid submits → ${posts} POST(s)${posts === 0 && refused ? `; the filled form was refused client-side: ${refused.getAttribute('data-error-for')} "${text(refused).slice(0, 40)}"` : ''}`);
           }
         }
       }
@@ -435,13 +481,16 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
             // querySelector returns the first match in document order, which
             // can be an earlier field's empty slot; prefer the submitted
             // field's own slot, else any slot with text.
-            const own = el.querySelector(`[data-error-for="${first.name}"]`);
+            // The first invalid field in page order is where focus belongs.
+            const firstBox = Array.from(el.querySelectorAll('[data-field]')).find((b) => text(b.querySelector('[data-error-for]')) !== '');
+            const firstName = firstBox?.getAttribute('data-field') ?? first.name;
+            const own = el.querySelector(`[data-error-for="${firstName}"]`);
             const marker = own && text(own) !== '' ? own : Array.from(el.querySelectorAll('[data-error-for], .error, [role="alert"]')).find((m) => text(m) !== '') ?? own;
-            const box = el.querySelector(`[data-field="${first.name}"]`);
+            const box = el.querySelector(`[data-field="${firstName}"]`);
             const invalid = (box?.querySelector('[aria-invalid="true"]') ?? el.querySelector('[aria-invalid="true"]')) !== null;
-            const control = (box ?? el).querySelector('input, textarea, select') as HTMLElement | null;
+            const control = (box ?? el).querySelector(FOCUS_TARGET) as HTMLElement | null;
             const focused = s.doc.activeElement === control || (control ? control.contains(s.doc.activeElement) : false);
-            run.add('invalid', form.name, !!marker && text(marker) !== '' && invalid && focused, `marker ${marker ? `"${text(marker).slice(0, 40)}"` : 'missing'}, aria-invalid ${invalid ? 'set' : 'missing'}, focus ${focused ? 'on the field' : 'not moved'}`);
+            run.add('invalid', form.name, !!marker && text(marker) !== '' && invalid && focused, `marker ${marker ? `"${text(marker).slice(0, 40)}"` : 'missing'}, aria-invalid ${invalid ? 'set' : 'missing'}, focus ${focused ? 'on the field' : `not moved (on ${s.doc.activeElement?.outerHTML.slice(0, 120) ?? 'none'}, wanted <${control?.tagName.toLowerCase() ?? 'none'}>; field box ${box ? box.outerHTML.slice(0, 160) : 'missing'})`}`);
           }
         }
       }
@@ -449,24 +498,29 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
       // server-field-error: a 400 {error, field} lands on that field with focus.
       if (run.wants('server-field-error')) {
         const form = pickForm(exp, { fillableOnly: true });
-        if (!form) run.skip('server-field-error', 'app', 'no fillable form');
+        if (!form || !form.fields.filter((x) => x.required).every((x) => FILLABLE.has(x.kind))) run.skip('server-field-error', 'app', 'no form whose mandatory fields a script can fill (every form needs a file, subform or composite)');
         else {
-          const target = form.fields.find((f) => !f.required) ?? form.fields[0];
-          api.fieldError = { field: target?.name ?? '', message: 'Server says no' };
           api.lane.submit = 'field';
           await goFresh(`#/form/${encodeURIComponent(form.name)}`);
           const el = s.doc.querySelector('#main form');
+          // A field that draws a control: a section heading or a computed field has no slot for a message.
+          const drawn = (name: string): boolean => !!el?.querySelector(`[data-field="${name}"] input:not([type="hidden"]), [data-field="${name}"] select, [data-field="${name}"] textarea`);
+          const target = form.fields.find((f) => !f.required && drawn(f.name)) ?? form.fields.find((f) => drawn(f.name));
+          api.fieldError = { field: target?.name ?? '', message: 'Server says no' };
           if (!el || !target) run.add('server-field-error', form.name, false, 'no form or field to drive');
           else {
+            const postsBefore = api.matching('/submit').length;
             fillForm(s, form);
             fire(s.win, el, 'submit');
             await settle(s.win);
             api.lane.submit = 'ok';
+            const reached = api.matching('/submit').length > postsBefore;
             const marker = el.querySelector(`[data-error-for="${target.name}"]`);
             const box = el.querySelector(`[data-field="${target.name}"]`);
-            const control = box?.querySelector('input, textarea, select') as HTMLElement | null;
+            const control = box?.querySelector(FOCUS_TARGET) as HTMLElement | null;
             const focused = !!control && (s.doc.activeElement === control || control.contains(s.doc.activeElement));
-            run.add('server-field-error', `${form.name}.${target.name}`, !!marker && text(marker) !== '' && focused, `400 {field:${target.name}} → marker ${marker ? `"${text(marker).slice(0, 40)}"` : 'missing'}, focus ${focused ? 'on the field' : 'not moved'}`);
+            if (!reached) run.skip('server-field-error', form.name, 'the filled form was refused client-side before it posted: this script cannot synthesize a value for it');
+            else run.add('server-field-error', `${form.name}.${target.name}`, !!marker && text(marker) !== '' && focused, `400 {field:${target.name}} → marker ${marker ? `"${text(marker).slice(0, 40)}"` : 'missing'}, focus ${focused ? 'on the field' : 'not moved'}`);
           }
         }
       }
@@ -637,13 +691,15 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
       // redeploy-purged chunk would fail in the browser.
       let patched: UiBundle | undefined;
       let which = '';
-      for (const [key, source] of Object.entries(bundle.modules)) {
-        const m = /import\(\s*(["'`])(\.[^"'`]+)\1\s*\)/.exec(source);
-        if (m && bundle.modules[key] !== undefined) {
-          patched = { ...bundle, modules: { ...bundle.modules, [key]: source.replace(m[0], `Promise.reject(new Error("c2c-states: simulated chunk failure"))`) } };
-          which = `${key} → ${m[2]}`;
-          break;
-        }
+      // The route table is the module with the most dynamic imports: a screen's own
+      // chunk is demanded when its route opens, a field widget's only on some forms.
+      const importCount = (source: string): number => (source.match(/import\(\s*(["'`])\.[^"'`]+\1\s*\)/g) ?? []).length;
+      const [key, source] = Object.entries(bundle.modules).sort((x, y) => importCount(y[1]) - importCount(x[1]))[0] ?? ['', ''];
+      const m = /import\(\s*(["'`])(\.[^"'`]+)\1\s*\)/.exec(source);
+      if (m && bundle.modules[key] !== undefined) {
+        // Every screen chunk of the route table fails, so whichever screen opens first demands one.
+        patched = { ...bundle, modules: { ...bundle.modules, [key]: source.replace(/import\(\s*(["'`])(\.[^"'`]+)\1\s*\)/g, `Promise.reject(new Error("c2c-states: simulated chunk failure"))`) } };
+        which = `${key} → ${m[2]}`;
       }
       if (!patched) run.skip('crash', 'app', 'no lazy chunk to reject');
       else {
@@ -667,6 +723,140 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
     }
   }
 
+  // ---- session H: pagination + disabled — a report with more than a page of rows
+  if (run.wants('pagination') || run.wants('disabled')) {
+    const base = createFakeApi(sample, allRows);
+    const pageRows = (report: string, size: number, page: number): Record<string, string>[] => {
+      const template = sample.get(report) ?? allRows[0] ?? { ROWID: '1' };
+      const total = size * 2 + 3;
+      return Array.from({ length: total }, (_, i) => ({ ...template, ROWID: String(2000 + i) })).slice(page * size, (page + 1) * size);
+    };
+    const queries: { report: string; page: number; size: number }[] = [];
+    const paged = async (url: unknown, init: { method?: string; body?: unknown } = {}): Promise<unknown> => {
+      const answer = await base.fetch(url, init);
+      const path = String(url);
+      const named = /\/reports\/([^/?]+)/.exec(path);
+      if (!named || path.includes('/actions/') || path.includes('/delete')) return answer;
+      let body: { page?: unknown; pageSize?: unknown; offset?: unknown; limit?: unknown } = {};
+      try {
+        body = typeof init.body === 'string' ? JSON.parse(init.body) : ((init.body as typeof body) ?? {});
+      } catch {
+        body = {};
+      }
+      const size = Number(body.pageSize ?? body.limit) || 25;
+      const page = body.page !== undefined ? Number(body.page) || 0 : Math.floor((Number(body.offset) || 0) / size);
+      const report = decodeURIComponent(named[1] ?? '');
+      queries.push({ report, page, size });
+      const data = { rows: pageRows(report, size, page) };
+      return { ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(data), json: async () => data };
+    };
+    const s = await openSession(bundle, loaded, paged, sample, widthCss);
+    try {
+      const report = await firstQueryingReport(s, base, tableReports);
+      if (!report) {
+        if (run.wants('pagination')) run.skip('pagination', 'app', 'no report that queries');
+        if (run.wants('disabled')) run.skip('disabled', 'app', 'no report that queries');
+      } else {
+        await s.go('#/report/__reset__');
+        await driveReport(s, report);
+        const control = (re: RegExp): HTMLElement | null =>
+          (Array.from(mainOf(s.doc).querySelectorAll('button, a[role="button"], a[href]')).find((b) => re.test(`${b.getAttribute('aria-label') ?? ''} ${text(b)}`)) as HTMLElement | undefined) ?? null;
+        const stopped = (el: HTMLElement | null): boolean => !!el && (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true');
+        const next1 = control(/\bnext\b/i);
+        const prev1 = control(/\b(prev|previous)\b/i);
+        const prev1Stopped = stopped(prev1);
+        const firstSize = queries.at(-1)?.size ?? 25;
+        const q0 = queries.length;
+        let advanced = false;
+        let wentBack = false;
+        let lastStop = false;
+        if (next1 && !stopped(next1)) {
+          click(s.win, next1);
+          await settle(s.win);
+          advanced = queries.length > q0 && queries.at(-1)!.page === 1;
+          const prev2 = control(/\b(prev|previous)\b/i);
+          const next2 = control(/\bnext\b/i);
+          if (next2 && !stopped(next2)) {
+            click(s.win, next2);
+            await settle(s.win);
+          }
+          const lastRows = mainOf(s.doc).querySelectorAll('tbody tr, [data-row], [data-row-link]').length;
+          const next3 = control(/\bnext\b/i);
+          lastStop = queries.at(-1)?.page === 2 && (!next3 || stopped(next3)) && lastRows > 0 && lastRows < firstSize;
+          const back = control(/\b(prev|previous)\b/i);
+          if (prev2 && back && !stopped(back)) {
+            click(s.win, back);
+            await settle(s.win);
+            wentBack = queries.at(-1)?.page === 1;
+          }
+        }
+        if (run.wants('pagination')) {
+          run.add('pagination', report.name, !!next1 && advanced && lastStop && wentBack, !next1 ? `${firstSize} rows of ${firstSize * 2 + 3} returned and no Next control` : `Next ${advanced ? 'asks page 1' : 'does not ask page 1'}; last page ${lastStop ? 'stops Next on a short page' : 'still offers Next or shows no short page'}; Previous ${wentBack ? 'goes back' : 'does not go back'}`);
+        }
+        if (run.wants('disabled')) {
+          // End stops are disabled, not just inert; a disabled control says why (title/aria-label) when it is not a pager step.
+          const firstStop = !!prev1 && prev1Stopped;
+          const unexplained = Array.from(mainOf(s.doc).querySelectorAll('button[disabled], button[aria-disabled="true"]')).filter((b) => !/\b(next|prev|previous)\b/i.test(`${b.getAttribute('aria-label') ?? ''} ${text(b)}`) && !b.getAttribute('title') && !b.getAttribute('aria-describedby') && !text(b));
+          run.add('disabled', report.name, firstStop && !unexplained.length, `Previous ${!prev1 ? 'missing' : firstStop ? 'disabled on the first page' : `<${prev1.tagName.toLowerCase()} "${(prev1.getAttribute('aria-label') ?? text(prev1)).slice(0, 30)}"> still enabled on the first page`}; ${unexplained.length} unlabelled disabled control(s)`);
+        }
+      }
+    } finally {
+      s.close();
+    }
+  }
+
+  // ---- session I: long text — a very long cell must wrap or scroll, never push the page wider
+  if (run.wants('long-text')) {
+    const long = 'LongValue' + 'x'.repeat(240) + ' ' + 'word '.repeat(60).trim();
+    const fields = tableReports.flatMap((r) => r.columns.map((c) => ({ r, c }))).find(({ r }) => r.columns.length > 0);
+    const wide = new Map(sample);
+    if (fields) wide.set(fields.r.name, { ...(sample.get(fields.r.name) ?? { ROWID: '1001' }), [fields.c.field]: long });
+    const api = createFakeApi(wide, [...wide.values()]);
+    const s = await openSession(bundle, loaded, api.fetch, wide, widthCss);
+    try {
+      const report = fields ? await firstQueryingReport(s, api, [fields.r]) : undefined;
+      if (!report || !fields) run.skip('long-text', 'app', 'no report that queries');
+      else {
+        await s.go('#/report/__reset__');
+        const main = await driveReport(s, report);
+        const cell = Array.from(main.querySelectorAll('td, [data-th], .c2c-cell, [data-cell]')).find((el) => text(el).startsWith('LongValue'));
+        if (!cell) run.add('long-text', report.name, false, 'the long value is not drawn in any cell');
+        else {
+          const kept = text(cell).includes(long.slice(0, 200)) && text(cell).replace(/\s+/g, '').includes('xxxxxxxxxxxxxxxxxxxx') && text(cell).endsWith('word');
+          const verdicts: string[] = [];
+          let ok = kept;
+          for (const vp of ['desktop', 'phone'] as const) {
+            const rules = parseCss(widthCss[vp]);
+            const props = new Map<string, string>();
+            const wrapped = new Map<string, string>();
+            for (let el: Element | null = cell; el && el !== s.doc.body; el = el.parentElement) {
+              for (const rule of rules) {
+                let hit = false;
+                try {
+                  hit = rule.selectors.some((sel) => el!.matches(sel));
+                } catch {
+                  hit = false;
+                }
+                if (!hit) continue;
+                for (const [k, v] of rule.decls) (el === cell ? props : wrapped).set(k, v.replace(/\s*!important/i, '').trim());
+              }
+            }
+            const breaks = /^(anywhere|break-word)$/.test(props.get('overflow-wrap') ?? props.get('word-wrap') ?? '') || /^(break-all|break-word)$/.test(props.get('word-break') ?? '') || props.get('text-overflow') === 'ellipsis' || /^(hidden|auto|scroll)$/.test(props.get('overflow') ?? props.get('overflow-x') ?? '');
+            // Inline children (a link, a span) carry the text in some cells.
+            const inner = Array.from(cell.querySelectorAll('*')).some((child) => rules.some((rule) => rule.selectors.some((sel) => { try { return child.matches(sel) && /^(anywhere|break-word)$/.test(rule.decls.get('overflow-wrap') ?? rule.decls.get('word-break') ?? ''); } catch { return false; } })));
+            const scrolls = [...wrapped.entries()].some(([k, v]) => /^overflow(-x)?$/.test(k) && /^(auto|scroll)$/.test(v));
+            const fine = breaks || inner || scrolls;
+            ok = ok && fine;
+            verdicts.push(`${vp}: ${fine ? (breaks || inner ? 'cell wraps' : 'container scrolls') : 'no wrap and no scroll'}`);
+          }
+          run.add('long-text', report.name, ok, `${verdicts.join('; ')}; full text ${kept ? 'kept' : 'cut or dropped'}`);
+        }
+      }
+    } finally {
+      s.close();
+    }
+  }
+
   // ---- reduced motion: the media query stubbed to reduce kills motion
   if (run.wants('reduced-motion')) {
     const api = createFakeApi(sample, allRows);
@@ -686,12 +876,14 @@ export async function checkUiStates(app: App, bundle: UiBundle, opts: StatesOpti
       if (firstItem) await s.go(`#/${firstItem.kind}/${encodeURIComponent(firstItem.name)}`);
       const moved = Array.from(s.doc.querySelectorAll('[style]')).filter((el) => {
         const style = el.getAttribute('style') ?? '';
-        return /transform\s*:\s*(?!none\b)/.test(style) || /animation\s*:/.test(style);
+        // An element that is not painted (visibility hidden, display none, fully transparent) is parked, not moving.
+        if (/visibility\s*:\s*hidden|display\s*:\s*none|(^|;)\s*opacity\s*:\s*0\s*(;|$)/.test(style)) return false;
+        return /transform\s*:\s*(?!\s|none\b)/.test(style) || /animation\s*:/.test(style);
       });
       // The stylesheet must carry a reduce rule that kills animation AND transition.
       const reduceBlocks = [...bundle.css.matchAll(/@media[^{]*prefers-reduced-motion\s*:\s*reduce[^}]*\{([\s\S]*?)\}\s*\}/g)].map((m) => m[1] ?? '');
       const kills = reduceBlocks.some((block) => /animation\s*:\s*none/.test(block) && /transition\s*:\s*none/.test(block)) || reduceBlocks.some((block) => /(animation|transition)\s*:\s*none[^}]*(animation|transition)\s*:\s*none/.test(block));
-      run.add('reduced-motion', 'app', moved.length === 0 && kills, `${moved.length} element(s) carry inline transform/animation under reduce; stylesheet reduce rule ${kills ? 'kills animation and transition' : 'does NOT kill both'}`);
+      run.add('reduced-motion', 'app', moved.length === 0 && kills, `${moved.length} element(s) carry inline transform/animation under reduce${moved[0] ? ` (first: <${moved[0].tagName.toLowerCase()} class="${(moved[0].getAttribute('class') ?? '').slice(0, 40)}" style="${(moved[0].getAttribute('style') ?? '').slice(0, 80)}">)` : ''}; stylesheet reduce rule ${kills ? 'kills animation and transition' : 'does NOT kill both'}`);
     } finally {
       s.close();
     }

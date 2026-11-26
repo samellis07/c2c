@@ -58,7 +58,7 @@ const byState = (verdicts: StateVerdict[], state: string): StateVerdict | undefi
 test('the vanilla bundle passes the states it already ships and xfails the rest under their issues', async () => {
   const verdicts = await run();
   const states = verdicts.map((v) => v.state);
-  for (const state of ['loading', 'empty', 'error', 'invalid', 'submitting', 'confirm-open', 'row-rollback', 'toast', 'offline', 'session-expired', 'denied', 'not-found', 'crash', 'route-focus', 'reduced-motion']) {
+  for (const state of ['loading', 'empty', 'error', 'invalid', 'submitting', 'confirm-open', 'row-rollback', 'toast', 'offline', 'session-expired', 'denied', 'not-found', 'crash', 'route-focus', 'reduced-motion', 'pagination', 'disabled', 'long-text']) {
     assert.ok(states.includes(state), `missing verdict row ${state}`);
   }
   // Already shipped on vanilla: loading (skeleton+status), empty with the form
@@ -77,7 +77,6 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   // Everything a tracked issue owns reports an expected-fail naming the issue.
   for (const [state, issue] of Object.entries({
     'confirm-open': 'ux-confirm-pending',
-    submitting: 'ux-confirm-pending',
     toast: 'ux-toasts-field-errors',
     offline: 'ux-offline-session',
     'server-field-error': 'ux-toasts-field-errors',
@@ -94,7 +93,7 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   }
   // Rows vanilla may already satisfy: a pass is fine, a fail must still name
   // its issue.
-  for (const [state, issue] of Object.entries({ 'reduced-motion': 'ux-focus-motion', 'empty-filtered': 'ux-loading-empty-not-found', 'row-rollback': 'ux-confirm-pending' })) {
+  for (const [state, issue] of Object.entries({ 'reduced-motion': 'ux-focus-motion', 'empty-filtered': 'ux-loading-empty-not-found', 'row-rollback': 'ux-confirm-pending', submitting: 'ux-confirm-pending', pagination: 'ux-pagination-overflow', disabled: 'ux-pagination-overflow', 'long-text': 'ux-pagination-overflow' })) {
     const v = byState(verdicts, state);
     if (!v || v.status !== 'fail') continue;
     assert.equal(v.issue, issue, `${state}: issue`);
