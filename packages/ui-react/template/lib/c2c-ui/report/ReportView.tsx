@@ -126,6 +126,22 @@ export function buildQuery(report: ReportSpec, opts: { page: number; q: string; 
   return { op: 'query', page: opts.page, pageSize: report.pageSize, sort, q: opts.q, filter: opts.filter };
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A timeline lane key: the ISO day of the start value, or the ISO date of the week's first day. '' when the value has no day. */
+export function timelineLaneKey(value: unknown, weekStartDay?: 'monday' | 'sunday'): string {
+  const day = String(value ?? '').trim().split(/[ T]/)[0] ?? '';
+  const named = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(day);
+  const iso = named ? `${named[3]}-${String(MONTHS.indexOf(named[2]!) + 1).padStart(2, '0')}-${named[1]!.padStart(2, '0')}` : day;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  if (!weekStartDay) return iso;
+  const date = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return '';
+  const dow = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() - (weekStartDay === 'sunday' ? dow : dow === 0 ? 6 : dow - 1));
+  return date.toISOString().slice(0, 10);
+}
+
 /** Group rows in first-seen order, like the export's lanes. Keys are display text; '' is the empty group. */
 export function groupRows(rows: Row[], field: string, text: (value: unknown) => string = formatValue): { key: string; rows: Row[] }[] {
   const lanes: { key: string; rows: Row[] }[] = [];
@@ -199,7 +215,7 @@ export function ReportView({ report, row, asList }: { report: ReportSpec; row?: 
   // Embedded on a page a non-list report still draws its records, as the list
   // table; the standalone route keeps the pending-view stub. A map draws pins.
   if (report.view === 'map' && !asList) return <ReportList report={report} />;
-  if (report.view !== 'list' && !asList) return <ViewStub report={report} />;
+  if (report.view !== 'list' && !(report.view === 'timeline' && report.startField) && !asList) return <ViewStub report={report} />;
   return <ReportList report={report} />;
 }
 
@@ -526,7 +542,16 @@ function ReportList({ report }: { report: ReportSpec }) {
   const named = report.filters.map((f) => f.label).filter((label): label is string => !!label);
   // A field-only filter has no criteria to offer; name it instead of dropping it silently.
   const groupField = report.groupBy[0]?.field;
-  const groups = groupField ? groupRows(shown, groupField, (value) => fieldText(groupField, value)) : null;
+  // A timeline lays its rows in lanes by the start date (the week when `week start day` is set); an explicit group-by wins.
+  const timelineStart = report.view === 'timeline' ? report.startField : undefined;
+  const groups = groupField
+    ? groupRows(shown, groupField, (value) => fieldText(groupField, value))
+    : timelineStart
+      ? groupRows(shown, timelineStart, (value) => {
+          const key = timelineLaneKey(value, report.weekStartDay);
+          return key ? (displayDateValue(key, 'date', { dateFormat: spec.dateFormat }) ?? key) : '–';
+        })
+      : null;
   const showPages = load.state === 'ready' && (page > 0 || live.length >= report.pageSize);
   const headerActions = report.customActions.filter((a) => a.header === true && !(a.navigate && navNeedsRow(a.navigate)));
 

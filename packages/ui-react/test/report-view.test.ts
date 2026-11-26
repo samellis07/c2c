@@ -923,3 +923,89 @@ test('the React conditional format matcher numerically coerces a row-vs-row comp
     assert.equal(reactMatch(row, criteria), plainMatch(row, criteria), label);
   }
 });
+
+const TIMELINE_SOURCE = `application "Rooms"
+{
+date format = "dd-MMM-yyyy"
+form Booking
+{
+Room
+(
+type = text
+)
+Starts
+(
+type = datetime
+)
+Ends
+(
+type = datetime
+)
+Notes
+(
+type = text
+)
+}
+timeline Schedule
+{
+displayName = "Schedule"
+show all rows from Booking
+(
+Room
+Starts as "From"
+Ends as "To"
+Notes
+)
+options
+(
+week start day = monday
+display field = Room
+start date = Starts
+end date = Ends
+)
+}
+timeline Daily
+{
+displayName = "Daily"
+show all rows from Booking
+(
+Room
+Starts
+)
+options
+(
+start date = Starts
+)
+}
+}`;
+
+const TIMELINE_ROWS: Row[] = [
+  { ROWID: '1', Room: 'Atlas', Starts: '2026-10-14 09:00:00', Ends: '2026-10-14 10:00:00', Notes: 'Kickoff' },
+  { ROWID: '2', Room: 'Birch', Starts: '2026-10-15 11:00:00', Ends: '2026-10-15 12:00:00', Notes: 'Review' },
+  { ROWID: '3', Room: 'Cedar', Starts: '2026-10-21 08:00:00', Ends: '2026-10-21 09:00:00', Notes: 'Retro' },
+];
+
+test('a timeline report spec carries its start, end and week start', () => {
+  const spec = reactAppSpec(appOf(TIMELINE_SOURCE));
+  const schedule = spec.reports.Schedule!;
+  assert.equal(schedule.view, 'timeline');
+  assert.equal(schedule.startField, 'Starts');
+  assert.equal(schedule.endField, 'Ends');
+  assert.equal(schedule.weekStartDay, 'monday');
+  assert.equal(spec.reports.Daily!.weekStartDay, undefined);
+});
+
+test('a timeline report draws every column in lanes keyed by the start date', { skip: SKIP }, async (t) => {
+  const spec = reactAppSpec(appOf(TIMELINE_SOURCE));
+  const out = await compileOnly(t, 'timeline');
+  const week = await mount(out, spec.reports.Schedule!, TIMELINE_ROWS, new Set(), {}, undefined, undefined, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
+  assert.equal(week.container.querySelector('[data-view-stub]'), null, 'a timeline is drawn, not stubbed');
+  assert.deepEqual([...week.container.querySelectorAll('th')].map((th) => th.textContent?.trim()).filter((x, i) => i < 4), ['Room', 'From', 'To', 'Notes'], 'each report column heads the lane table');
+  assert.deepEqual([...week.container.querySelectorAll('[data-group]')].map((g) => g.getAttribute('data-group')), ['12-Oct-2026', '19-Oct-2026'], 'week lanes are keyed by the Monday');
+  assert.deepEqual(week.textOf('Room'), ['Atlas', 'Birch', 'Cedar']);
+  assert.deepEqual(week.textOf('Notes'), ['Kickoff', 'Review', 'Retro']);
+  assert.deepEqual(week.textOf('To'), ['14-Oct-2026 10:00:00', '15-Oct-2026 12:00:00', '21-Oct-2026 09:00:00']);
+
+  const day = await mount(out, spec.reports.Daily!, TIMELINE_ROWS, new Set(), {}, undefined, undefined, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
+  assert.deepEqual([...day.container.querySelectorAll('[data-group]')].map((g) => g.getAttribute('data-group')), ['14-Oct-2026', '15-Oct-2026', '21-Oct-2026'], 'without a week start the lane is the day');
+});

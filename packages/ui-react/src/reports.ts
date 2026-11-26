@@ -139,6 +139,7 @@ export function reportSpec(app: App, ui: UiReport, forms: UiForm[] = []): Report
     ...(ui.mapRadius !== undefined ? { mapRadius: ui.mapRadius } : {}),
     ...(ui.startField ? { startField: ui.startField } : {}),
     ...(ui.endField ? { endField: ui.endField } : {}),
+    ...(ui.weekStartDay ? { weekStartDay: ui.weekStartDay } : {}),
     ...(ui.recordsPerRow ? { recordsPerRow: ui.recordsPerRow } : {}),
     ...(ui.labelWidth ? { labelWidth: ui.labelWidth } : {}),
     ...(ui.showRecordCount ? { showRecordCount: true } : {}),

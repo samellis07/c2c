@@ -250,7 +250,7 @@ export interface CustomActionSpec {
 export interface ReportSpec {
   name: string;
   label: string;
-  /** list for a table; map plots stored coordinates; kanban, calendar, timeline, pivot, chart, spreadsheet and summary render a counted stub until they are generated. */
+  /** list for a table; map plots stored coordinates; kanban, calendar, pivot, chart, spreadsheet and summary render a counted stub until they are generated. */
   view: string;
   /** Shown above the records when a map/pivot fell back to the list view. */
   note?: string;
@@ -287,6 +287,8 @@ export interface ReportSpec {
   /** Calendar and timeline placement columns. */
   startField?: string;
   endField?: string;
+  /** Timeline `options { week start day }`: lanes are the week starting on this day; without it a lane is a day. */
+  weekStartDay?: 'monday' | 'sunday';
   /** `options { display records per row = N }`: the list draws each record as a card, N cards per row. */
   recordsPerRow?: number;
   /** `options { label width = 20% }`: the record-card label column width. */
