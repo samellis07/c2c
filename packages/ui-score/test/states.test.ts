@@ -196,3 +196,11 @@ test('checkUiStates observes unhandled rejections for the length of the run only
   assert.equal(seen[0], before + 1, 'an observer is installed while the gate runs, so a stray app rejection cannot end the process');
   assert.equal(process.listenerCount('unhandledRejection'), before, 'and removed when it is done');
 });
+
+test('vanilla offline, expired-session and denied rows pass: re-fetch once online, sign-in prompt, no dead Retry', async () => {
+  const verdicts = await run();
+  for (const state of ['offline', 'session-expired', 'denied']) {
+    const v = byState(verdicts, state)!;
+    assert.equal(v.status, 'pass', `${state}: ${v.evidence}`);
+  }
+});
