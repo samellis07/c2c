@@ -656,7 +656,11 @@ export function isShapeCGuarded(ast: Script): ShapeCGuard {
 
   function testGuard(test: Expr, ifMeta: StmtMeta | undefined): WriteGuard {
     // `admin && other`: the then-branch runs only when the admin comparison holds.
-    if (conjuncts(test).some(isAuthenticatedAdminGuard)) return { kind: 'admin' };
+    // The guard compares the caller with the application owner, so the endpoint lets only the owner (C2C_ADMIN_USER_ID) run the write.
+    if (conjuncts(test).some(isAuthenticatedAdminGuard)) {
+      requireOwner = true;
+      return { kind: 'admin' };
+    }
     if (!ifMeta) return NO_GUARD;
     const read = provisioningRead(test, ifMeta, assigns);
     if (!read) return NO_GUARD;
