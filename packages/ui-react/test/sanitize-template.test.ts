@@ -54,7 +54,8 @@ test('snippet sanitizers keep checkbox labels while dropping hostile input attri
   assert.equal(buildSanitize(safe), safe);
   assert.equal(runtime.sanitizeSnippet(safe, doc), safe);
   const hostile = '<input id="x" type="checkbox" name="secret" value="1" checked onclick="alert(1)"><label for="x" onmouseover="alert(1)">x</label>';
-  const expected = '<input id="x" type="checkbox"><label for="x">x</label>';
+  // `checked` is a boolean the sanitizer keeps with an empty value; every other attribute on the input is dropped.
+  const expected = '<input id="x" type="checkbox" checked=""><label for="x">x</label>';
   assert.equal(sanitizeSnippet(hostile, doc as unknown as Document), expected);
   assert.equal(buildSanitize(hostile), expected);
   assert.equal(runtime.sanitizeSnippet(hostile, doc), expected);
