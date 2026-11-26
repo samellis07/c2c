@@ -36,6 +36,10 @@ const DS = `application "d2-defects"
 \t\t\t(
 \t\t\t\ttype = text
 \t\t\t)
+\t\t\tBadge
+\t\t\t(
+\t\t\t\ttype = file
+\t\t\t)
 \t\t}
 \t\tform Bom
 \t\t{
@@ -143,5 +147,19 @@ for (const route of ['success', 'submit'] as const) {
     const { reply, rows } = await post('Bom', route, { Name: 'Frame', Items: [{ Item: 'Bolt', Qty: 2 }] });
     assert.equal(reply.status, 200, JSON.stringify(reply.body));
     assert.equal(rows.length, 1);
+  });
+}
+
+for (const route of ['success', 'submit'] as const) {
+  test(`${route}: a bad file reference is the same fixed 400 with nothing written`, async () => {
+    for (const badge of [{ key: 'secret-key-k1' }, { key: '../etc/passwd' }, { key: 'uploads/Other/Badge/' + 'a'.repeat(64) + '/x.png' }]) {
+      const { reply, rows } = await post('Bug', route, { Title: 'T', Priority: 'High', Badge: badge });
+      assert.equal(reply.status, 400, `${route} ${JSON.stringify(badge)}: ${JSON.stringify(reply.body)}`);
+      const body = reply.body as Record<string, unknown>;
+      assert.equal(body.code, 'FILE_REFERENCE_INVALID');
+      const text = JSON.stringify(body);
+      for (const leak of ['secret-key-k1', 'passwd', 'Badge', 'uploads']) assert.ok(!text.includes(leak), `${leak} leaked: ${text}`);
+      assert.equal(rows.length, 0, 'nothing was written');
+    }
   });
 }
