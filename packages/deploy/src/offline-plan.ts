@@ -163,6 +163,7 @@ export const PLAN_BUDGET_IDS = [
   'varchar-length',
   'dev-api-calls',
   'dev-write-rate',
+  'runtime-calls',
 ] as const;
 
 export interface StepEndpoint {

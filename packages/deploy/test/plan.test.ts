@@ -25,6 +25,7 @@ import { loadApp, type Io } from '../src/cli.js';
 import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
 import { generateSchema, type SourceTableData } from '../../schema/src/generator.js';
 import { limitValue, selectListOf } from '../../schema/src/limits.js';
+import { LIMITS } from '../../shims/src/runtime.js';
 import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { generateUi } from '../../ui/src/generate.js';
 import { pathToFileURL } from 'node:url';
