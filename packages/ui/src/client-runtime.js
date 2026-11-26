@@ -3522,9 +3522,17 @@ export function applyActionNav(root, nav, source) {
     }
   };
   switch (nav.kind) {
-    case 'navigate':
-      openUrlNav(root, Object.prototype.hasOwnProperty.call(nav, 'url') ? nav.url : undefined, Object.prototype.hasOwnProperty.call(nav, 'target') && nav.target === 'new' ? 'new window' : 'same window');
+    case 'navigate': {
+      const url = Object.prototype.hasOwnProperty.call(nav, 'url') ? nav.url : undefined;
+      // A reply opens only this app's own routes: no https host is allow-listed and plain http is refused (docs/report-action-navigation.md; the React client's navOk).
+      if (typeof url === 'string' && url !== '' && !(url.startsWith('#') || (url.startsWith('/') && !url.startsWith('//')))) {
+        const banner = root && root.querySelector ? root.querySelector('[data-banner]') : null;
+        if (banner) banner.textContent = 'The link was not opened: the address is not allowed.';
+        break;
+      }
+      openUrlNav(root, url, Object.prototype.hasOwnProperty.call(nav, 'target') && nav.target === 'new' ? 'new window' : 'same window');
       break;
+    }
     case 'reload':
       reload(view);
       break;
