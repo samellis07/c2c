@@ -5176,6 +5176,8 @@ test('a markup value follows the HTML parser for abruptly closed and malformed c
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
   const abrupt = await renderPage(app, snippet, { q: '<!--><p>live</p>' });
   assert.match(abrupt.html, /<p>live<\/p>/);
+  const bang = await renderPage(app, snippet, { q: 'a<!-- x --!><p>live</p>' });
+  assert.match(bang.html, /<p>live<\/p>/);
   const malformed = await renderPage(app, snippet, { q: '<!--not closed><p>hidden</p>' });
   assert.doesNotMatch(malformed.html, /hidden/);
 });

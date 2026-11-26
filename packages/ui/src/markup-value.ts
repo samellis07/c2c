@@ -127,8 +127,11 @@ function c2cMarkup(value, notes, href) {
       // both the empty and hyphenated forms are comments, followed by live text/markup.
       if (text.startsWith("<!-->", lt)) { at = lt + 5; continue; }
       if (text.startsWith("<!--->", lt)) { at = lt + 6; continue; }
-      var end = text.indexOf("-->", lt + 4);
-      at = end < 0 ? text.length : end + 3;
+      // A comment closes at "-->" or "--!>".
+      var close = /--!?>/g;
+      close.lastIndex = lt + 4;
+      var end = close.exec(text);
+      at = end ? end.index + end[0].length : text.length;
       continue;
     }
     C2C_MK_TAG_AT.lastIndex = lt;

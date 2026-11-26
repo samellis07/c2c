@@ -349,7 +349,8 @@ export const ALLOWED_ATTRS: Record<string, Set<string>> = {
 export const SHELL_OVERLAY_CLASSES = new Set([
   'c2c-modal-backdrop', 'c2c-sr-only', 'modal', 'modal-close', 'navitems', 'skip', 'skip-link', 'visually-hidden',
 ]);
-const SHELL_OVERLAY_MODULE_CLASS = /^_overlay_[A-Za-z0-9_-]+$/i;
+// A bundler-hashed CSS-module name, `_local_hash`: the template's modules lift .overlay and .content out of flow.
+const SHELL_OVERLAY_MODULE_CLASS = /^_[A-Za-z0-9-]+_[A-Za-z0-9_-]+$/;
 
 /** Longest class attribute and token the sanitizers scan, and the most tokens they keep. */
 const CLASS_TEXT_MAX = 4096;

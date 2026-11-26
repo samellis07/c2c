@@ -89,6 +89,11 @@ test('template sanitizer keeps a class token by the same rule as the generator a
     '<div class="a<script>">x</div>',
     '<div class="url(//x.test/a) ok caf\u00e9 1abc">x</div>',
     '<div class="   ">x</div>',
+    '<div class="a _content_x1y2z b">x</div>',
+    '<div class="a _dialog-overlay_Ab3_9 b _my_class">x</div>',
+    '<p>a</p><!--><p>live</p>',
+    '<p>a</p><!---><p>live</p>',
+    '<p>a</p><!-- x --!><p>live</p>',
     `<div class="${'a'.repeat(65)} ${Array.from({ length: 200 }, (_, n) => `c${n}`).join(' ')}">x</div>`,
   ];
   for (const html of htmls) {
@@ -98,6 +103,10 @@ test('template sanitizer keeps a class token by the same rule as the generator a
   }
   assert.equal(sanitizeSnippet('<div class="a modal skip-link b">x</div>', doc as unknown as Document), '<div class="a b">x</div>');
   assert.equal(sanitizeSnippet('<div class="a _overlay_abc123 b">x</div>', doc as unknown as Document), '<div class="a b">x</div>');
+  // A bundler-hashed CSS-module name (`_local_hash`) is reserved whatever the local name: arc modules lift .content and .overlay out of flow.
+  assert.equal(sanitizeSnippet('<div class="a _content_x1y2z _dialog-overlay_Ab3 b">x</div>', doc as unknown as Document), '<div class="a b">x</div>');
+  assert.equal(runtime.sanitizeSnippet('<div class="a _content_x1y2z b">x</div>', doc), '<div class="a b">x</div>');
+  assert.equal(buildSanitize('<div class="a _content_x1y2z b">x</div>'), '<div class="a b">x</div>');
   // One list in three places, and it names every class either shell stylesheet lifts out of flow.
   assert.deepEqual([...SHELL_OVERLAY_CLASSES].sort(), [...BUILD_OVERLAY_CLASSES].sort());
   assert.deepEqual([...SHELL_OVERLAY_CLASSES].sort(), [...runtime.SHELL_OVERLAY_CLASSES].sort());
