@@ -170,7 +170,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
   const view = dom.window as unknown as Record<string, unknown> & Window;
-  const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'CustomEvent', 'DocumentFragment', 'SVGElement', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLTableElement', 'getComputedStyle', 'CSS', 'self'];
+  const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'CustomEvent', 'DocumentFragment', 'SVGElement', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLTableElement', 'MutationObserver', 'NodeFilter', 'getComputedStyle', 'CSS', 'self'];
   for (const key of globals) {
     try {
       (globalThis as Record<string, unknown>)[key] = view[key as keyof typeof view];
@@ -678,30 +678,39 @@ test('non-list reports keep their visible pending-view stub', { skip: SKIP }, as
   assert.equal(board.container.querySelector('table'), null, 'pending views are not silently rendered as lists');
 });
 
-test('a row Delete asks first and Cancel sends nothing', { skip: SKIP }, async (t) => {
+test('a row Delete opens an alert dialog and Cancel sends nothing', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'delete-confirm');
   const spec = reactAppSpec(appOf());
   const report = { ...spec.reports.Orders!, deleteEndpoint: '/forms/Order/delete' };
-  const view = await mount(out, report, ROWS, new Set(['Total']));
-  const asked: string[] = [];
-  let answer = false;
-  view.win.confirm = (text: string) => {
-    asked.push(text);
-    return answer;
-  };
+  const view = await mount(out, report, ROWS, new Set(['Total']), spec.forms);
   const deletes = () => view.posted.filter((p) => p.endpoint === '/forms/Order/delete');
+  const dialog = () => view.container.ownerDocument.querySelector('[role="alertdialog"]');
   const button = view.container.querySelector('button[data-row-delete]');
   assert.ok(button, 'the report draws a row Delete');
+  assert.equal(dialog(), null, 'no dialog before Delete');
   await view.click(button);
-  assert.deepEqual(asked, ['Are you sure you want to delete this record?'], 'Delete asks with the confirm text');
+  assert.ok(dialog(), 'Delete opens an alert dialog');
+  assert.match(dialog()!.textContent ?? '', /Are you sure you want to delete this record\?/, 'the dialog asks with the confirm text');
+  assert.equal(deletes().length, 0, 'opening the dialog sends no delete');
+  const cancel = Array.from(dialog()!.querySelectorAll('button')).find((b) => /cancel/i.test(b.textContent ?? ''));
+  await view.click(cancel ?? null);
   assert.equal(deletes().length, 0, 'Cancel sends no delete');
   assert.equal(view.textOf('Title').length, ROWS.length, 'Cancel keeps the row');
 
-  answer = true;
   await view.click(view.container.querySelector('button[data-row-delete]'));
-  assert.equal(asked.length, 2);
-  assert.equal(deletes().length, 1, 'OK posts the delete once');
+  const confirm = dialog()!.querySelector('[data-confirm-delete]');
+  await view.click(confirm);
+  assert.equal(deletes().length, 1, 'Delete posts once');
   assert.ok(ROWS.some((r) => r.ROWID === deletes()[0]!.body.ROWID), 'the delete names a drawn row');
+});
+
+test('a report that is loading shows a busy skeleton, and an empty one offers a way to add', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'states-empty');
+  const spec = reactAppSpec(appOf());
+  const empty = await mount(out, spec.reports.Orders!, [], new Set(['Total']), spec.forms);
+  const state = empty.container.querySelector('[data-state="empty"]');
+  assert.ok(state, 'an empty report shows the empty state');
+  assert.ok(state!.querySelector('a[href^="#/form/"]'), 'the empty state links to the form that adds a record');
 });
 
 test('a custom action whose endpoint is a dry-run stub is turned off and named, never run', { skip: SKIP }, async (t) => {

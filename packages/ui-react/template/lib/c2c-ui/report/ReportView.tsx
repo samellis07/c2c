@@ -26,6 +26,7 @@ import { Alert } from '../arc/components/alert/alert';
 import { Button } from '../arc/components/button/button';
 import { EmptyState } from '../arc/components/empty-state/empty-state';
 import { FilterToolbar } from '../arc/components/filter-toolbar/filter-toolbar';
+import { Dialog, DialogContent } from '../arc/components/dialog/dialog';
 import { Pagination } from '../arc/components/pagination/pagination';
 import { SortableDataTable, type DataColumn, type SortState } from '../arc/components/sortable-data-table/sortable-data-table';
 import type { AppSpec, FormSpec, ReportSpec } from '../types';
@@ -250,7 +251,7 @@ function ViewStub({ report }: { report: ReportSpec }) {
 }
 
 function ReportList({ report }: { report: ReportSpec }) {
-  const { api, spec, view } = useEnv();
+  const { api, spec, view, doc } = useEnv();
   const fieldText = (field: string, value: unknown) => reportFieldText(report, spec, view, field, value);
   const custom = useCustomization();
   const own = custom.reports?.[report.name];
@@ -274,6 +275,8 @@ function ReportList({ report }: { report: ReportSpec }) {
   const [attempt, setAttempt] = useState(0);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const deleteTrigger = useRef<HTMLElement | null>(null);
   const [selectedRows, setSelectedRows] = useState<ReadonlySet<string>>(new Set());
   const [bulkField, setBulkField] = useState('');
   const [bulkValue, setBulkValue] = useState('');
@@ -308,6 +311,12 @@ function ReportList({ report }: { report: ReportSpec }) {
   }, [api, deny, report.queryEndpoint, bodyText, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const clearSearch = useCallback(() => {
+    setQuery('');
+    setQ('');
+    setChoice(null);
+    setPage(0);
+  }, []);
   const search = useCallback(
     (event: { preventDefault(): void }) => {
       event.preventDefault();
@@ -362,7 +371,6 @@ function ReportList({ report }: { report: ReportSpec }) {
     (rowId: string) => {
       const endpoint = report.deleteEndpoint;
       if (!endpoint) return;
-      if (typeof view.confirm !== 'function' || view.confirm(DELETE_CONFIRM_TEXT) !== true) return;
       api.post(endpoint, { ROWID: rowId }).then(
         (reply) => {
           if (reply.status === 403) {
@@ -494,7 +502,11 @@ function ReportList({ report }: { report: ReportSpec }) {
               </a>
             ) : null}
             {deletable && id ? (
-              <Button type="button" variant="secondary" size="sm" data-row-delete="" onClick={() => removeRow(id)}>
+              <Button type="button" variant="secondary" size="sm" data-row-delete="" onClick={(event) => {
+                  deleteTrigger.current = event.currentTarget;
+                  setPendingDelete(id);
+                }}
+              >
                 Delete
               </Button>
             ) : null}
@@ -608,10 +620,42 @@ function ReportList({ report }: { report: ReportSpec }) {
         </div>
       ) : null}
       {actionNote ? (
-        <p className="c2c-notice" role="status">
-          {actionNote}
-        </p>
+        <div className="c2c-notice c2c-toast" role="status" data-toast="" data-kind={/not |failed|did not/i.test(actionNote) ? 'error' : 'success'}>
+          <span>{actionNote}</span>
+          <Button type="button" variant="secondary" size="sm" aria-label="Dismiss message" onClick={() => setActionNote(null)}>
+            Dismiss
+          </Button>
+        </div>
       ) : null}
+      <Dialog open={pendingDelete !== null} onOpenChange={(next) => { if (!next) setPendingDelete(null); }}>
+        <DialogContent
+          role="alertdialog"
+          container={doc.body ?? doc.documentElement}
+          title="Delete this record?"
+          description={DELETE_CONFIRM_TEXT}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            deleteTrigger.current?.focus();
+          }}
+        >
+          <div className="c2c-confirm-actions">
+            <Button type="button" variant="secondary" onClick={() => setPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              data-confirm-delete=""
+              onClick={() => {
+                const id = pendingDelete;
+                setPendingDelete(null);
+                if (id) removeRow(id);
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       {previewEndpoints.size ? <p className="todo" data-action-preview>{previewActionsNote(report.customActions.filter((a) => a.preview).map((a) => a.name.trim()))}</p> : null}
       {report.note ? <p className="todo" data-report-note>{report.note}</p> : null}
       {report.showRecordCount && load.state === 'ready' ? (
@@ -620,14 +664,33 @@ function ReportList({ report }: { report: ReportSpec }) {
         </p>
       ) : null}
       {load.state === 'loading' ? (
-        <p className="c2c-loading" data-state="loading" role="status">
-          Loading records…
-        </p>
+        <div data-state="loading" aria-busy="true">
+          <p className="c2c-loading" role="status">
+            Loading records…
+          </p>
+          {[0, 1, 2].map((n) => (
+            <div key={n} className="c2c-skeleton" data-skeleton="" aria-hidden="true" />
+          ))}
+        </div>
       ) : load.state === 'error' ? (
         <LoadError status={load.status} what="records" onRetry={retry} />
       ) : shown.length === 0 ? (
         <div data-state="empty">
-          {Empty ? <Empty report={report} /> : <EmptyState title="No records found" description={needle || filter ? 'No record matches.' : 'Records added through the form appear here.'} />}
+          {Empty ? <Empty report={report} /> : <EmptyState
+              title="No records found"
+              description={needle || filter ? 'No record matches.' : 'Records added through the form appear here.'}
+              action={
+                needle || chosen !== '' ? (
+                  <Button type="button" variant="secondary" size="sm" onClick={clearSearch}>
+                    Clear search
+                  </Button>
+                ) : report.form && spec.forms[report.form] ? (
+                  <a className="c2c-link" href={hrefFor('form', report.form)}>
+                    Add a record
+                  </a>
+                ) : undefined
+              }
+            />}
         </div>
       ) : report.view === 'map' ? (
         <MapPlot report={report} rows={shown} />
