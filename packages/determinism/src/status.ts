@@ -145,22 +145,70 @@ function collidesWithPublicWord(name: string): boolean {
   return words.length > 0 && words.every((word) => PUBLIC_WORDS.has(word));
 }
 
+/**
+ * Capitalised first words of the known reason / manual-step sentences (grepped from the templates in
+ * `packages/ui/src/{model,pages,htmlpage,snippet-guidance}.ts` and the report wording). A colliding app-looking
+ * identifier equal to one of these is sentence text only at position 0; anywhere else it is an identifier slot.
+ */
+const SENTENCE_INITIAL_WORDS = new Set([
+  'Add', 'Clicking', 'Configure', 'Correct', 'Custom', 'Decimal', 'Default', 'Enforce', 'Every', 'Field', 'Fields', 'Filter', 'Format',
+  'Function', 'Hide', 'In', 'Make', 'Map', 'Maximum', 'Named', 'No', 'On', 'Pre', 'Print', 'Reconfigure', 'Recreate', 'Reimplement',
+  'Report', 'Same', 'Show', 'Sort', 'Static', 'The', 'There', 'Toolbar', 'Wire', 'ZML',
+]);
+const LOWERCASE_WORD = /^[a-z]+$/;
+const APP_ID = '(app identifier)';
+const escapeRe = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * The word (or `=`) that immediately precedes an interpolated identifier in every reason template (grepped from the
+ * `${...}` slots of `packages/ui/src`; the status test re-derives them from model.ts and fails on a new one).
+ */
+export const IDENTIFIER_INTRODUCERS = ['field', 'fields', 'report', 'form', 'filter', 'filters', 'for', 'of', 'column', 'because', 'neither', 'nor', 'page', 'on', 'from', 'by', 'under', '='];
+const INTRODUCED = `(?<=(?:^|\\s)(?:${IDENTIFIER_INTRODUCERS.map(escapeRe).join('|')})\\s)`;
+
+/** Creator's own record columns (`Added_Location`, `Record_Status`): reserved, public, never a user's choice. */
+const isSystemColumn = (name: string) => name.includes('_') && PUBLIC_WORDS.has(name.toLowerCase());
+/** The translator's own `a navigation (openUrl) inside it` wording names the builtin, not an app identifier. */
+const isOpenUrlWording = (text: string, offset: number, match: string) => match === 'openUrl' && text.startsWith('navigation (', offset - 12) && text[offset + match.length] === ')';
+
+/**
+ * A colliding identifier is redacted where it stands in an identifier slot and kept only as the sentence's own text:
+ *  - app-looking (uppercase, digit, underscore, non-ASCII, space...): every exact-case whole-token occurrence is redacted, except a
+ *    sentence-initial template word at position 0.
+ *  - all-lowercase (`target`, `value`): template words are lowercase too, so position cannot tell them apart. The slot is
+ *    recognised by the word that introduces an interpolated identifier in the templates (IDENTIFIER_INTRODUCERS); a word
+ *    that stands anywhere else is the template's own text (see N1v3b.md for the residual).
+ */
 function redactIdentifiers(text: string, identifiers: Iterable<string> | undefined): string {
   if (!identifiers) return text;
   const haystack = text.toLowerCase();
   // Only names that occur in this sentence can match: an app declares thousands, a sentence is short.
   const present = new Set<string>();
+  const collidingExact = new Set<string>();
+  const collidingLower = new Set<string>();
   for (const raw of identifiers) {
     const name = raw.replace(/^[^\p{L}\p{N}_]+|[^\p{L}\p{N}_]+$/gu, '');
-    if (name && !/^\d+$/.test(name) && haystack.includes(name.toLowerCase()) && !collidesWithPublicWord(name)) present.add(name);
+    if (!name || /^\d+$/.test(name) || !haystack.includes(name.toLowerCase())) continue;
+    if (!collidesWithPublicWord(name)) present.add(name);
+    else if (LOWERCASE_WORD.test(name)) collidingLower.add(name);
+    else if (!isSystemColumn(name)) collidingExact.add(name);
   }
-  if (!present.size) return text;
-  const alternation = [...present]
-    .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
-    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('|');
-  // Whole token with Unicode letter/digit/underscore (and hyphen) boundaries: \b is ASCII-only, `Ünï_Rep` and `9lives` are names.
-  return text.replace(new RegExp(`(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'giu'), '(app identifier)');
+  const byLength = (a: string, b: string) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0);
+  if (present.size) {
+    const alternation = [...present].sort(byLength).map(escapeRe).join('|');
+    // Whole token with Unicode letter/digit/underscore (and hyphen) boundaries: \b is ASCII-only, `Ünï_Rep` and `9lives` are names.
+    text = text.replace(new RegExp(`(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'giu'), APP_ID);
+  }
+  if (collidingExact.size) {
+    const alternation = [...collidingExact].sort(byLength).map(escapeRe).join('|');
+    text = text.replace(new RegExp(`(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'gu'), (match, offset: number) =>
+      (offset === 0 && SENTENCE_INITIAL_WORDS.has(match)) || isOpenUrlWording(text, offset, match) ? match : APP_ID,
+    );
+  }
+  if (collidingLower.size) {
+    const alternation = [...collidingLower].sort(byLength).map(escapeRe).join('|');
+    text = text.replace(new RegExp(`${INTRODUCED}(?<!${BOUNDARY})(?:${alternation})(?!${BOUNDARY})`, 'giu'), APP_ID);
+  }
+  return text;
 }
 
 /**
@@ -190,7 +238,7 @@ export function publicConstruct(construct: string, identifiers?: Iterable<string
     const name = named[2]!.replace(/[.,;:)]+$/u, '');
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // \b is ASCII-only: use Unicode letter/digit lookarounds so `Ünï_Rep` and `9lives` match whole.
-    text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'gu'), '(app identifier)');
+    text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'gu'), (match, offset: number) => (offset === 0 ? match : '(app identifier)'));
   }
   // Name-aware layer: every identifier the analysed app declares is redacted wherever it appears, whatever the sentence
   // shape, quoted or not. The shape rules above are the second layer, for names the IR does not list.

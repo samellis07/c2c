@@ -14,6 +14,7 @@ import {
   computeDeterminismStatus,
   main,
   parseStatusDoc,
+  IDENTIFIER_INTRODUCERS,
   publicConstruct,
   statusDocLayout,
   renderStatusDoc,
@@ -931,12 +932,12 @@ test('publicConstruct redacts a name whole-token only: a name that is a substrin
 });
 
 test('publicConstruct: an app identifier equal to a public word keeps the public buckets intact', () => {
-  // A form called "Report" (or "is", "not", "Field", "Map"): replacing every occurrence would turn every sentence into noise.
-  const words = ['Report', 'report', 'Field', 'Map', 'is', 'not', 'form', 'Named', 'filter', 'Sort', 'new', 'app', 'task', 'method', 'call'];
+  // Capitalised template words are text only at position 0; the lowercase ones cannot be told apart, so they fail closed (see the collision tests).
+  const words = ['Report', 'Field', 'Map', 'Named', 'Sort'];
   const sentence = formSentences('Salary_Form', 'Rep_Q3')[0]!;
   const expected = publicConstruct(sentence, ['Salary_Form', 'Rep_Q3']);
   assert.equal(publicConstruct(sentence, ['Salary_Form', 'Rep_Q3', ...words]), expected);
-  assert.equal(publicConstruct('task:if', ['if', 'task']), 'task:if');
+  assert.equal(publicConstruct('task:if', []), 'task:if');
   assert.equal(publicConstruct('criteria-dynamic', ['criteria', 'dynamic']), 'criteria-dynamic');
   // The slot-based layer still redacts the colliding name where the sentence names it.
   assert.equal(
@@ -972,5 +973,113 @@ test('siteAttributionForDir signatures carry no app identifier of the attributed
     for (const sig of sigs) assert.equal(sig.includes(form), false, sig);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------- public-word collisions (v3b): a private identifier that equals a template word still never survives ----------
+
+const COLLIDING = ['Report', 'Payments', 'Partner', 'Task', 'Address', 'Status', 'Field', 'If', 'Criteria', 'Form', 'Map', 'Named', 'Sort', 'Filter', 'Target', 'Value'];
+const LOWER_COLLIDING = ['target', 'value', 'if', 'criteria', 'status', 'report', 'payments', 'field', 'form'];
+
+/** Every reason sentence model.ts builds that places an identifier in a slot. */
+const slotSentences = (name: string): string[] => [
+  `Named filter ${name} is not migrated: selecting it returns no rows.`,
+  `Named filter "Broken" on report "Rep_Q3" is not migrated: manually translate its source criterion for ${name} in the new app; selecting it returns no rows.`,
+  `Clicking a chart segment to view its underlying records is not generated: wire up a click handler that filters ${name} to the clicked category manually.`,
+  `Sort by "Missing_Col" is not migrated; the field is not a plain column of ${name}, so rows render in default (ROWID) order.`,
+  `Map report Rep_Q3 is shown as a list because ${name} has no address field to plot.`,
+  `Field ${name} requests a live character counter; the generated field does not show one.`,
+  `Field Zq_Other sets \`target = ${name}\`; the generated image field has no clickable link, so there is no window to open it in.`,
+  `Field Zq_Other is flagged \`bidirectional = ${name}\`; Catalyst only creates the reverse column from a linked grid side or a partner field that looks back and names this field, and neither Zq_Other nor its target is one.`,
+  `Report ${name} has an \`options\` setting (x) that Catalyst does not carry into the generated list report.`,
+];
+
+/** The whole-token occurrences of `name` that are not the sentence's own first word. */
+const slotLeak = (out: string, name: string): boolean => {
+  if (/^[a-z]+$/.test(name)) return new RegExp(`(?:^|\\s)(?:${IDENTIFIER_INTRODUCERS.join('|')})\\s${name}(?![\\p{L}\\p{N}_-])`, 'iu').test(out);
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_-])${name}(?![\\p{L}\\p{N}_-])`, 'gu');
+  return [...out.matchAll(re)].some((m) => !(m.index === 0 && /^[A-Z]/.test(name)));
+};
+
+test('publicConstruct: a capitalised or app-looking identifier equal to a template word is redacted in every slot', () => {
+  assert.equal(
+    publicConstruct('Named filter Report is not migrated: selecting it returns no rows.', ['Report']),
+    'Named filter (app identifier) is not migrated: selecting it returns no rows.',
+  );
+  for (const name of COLLIDING) {
+    for (const sentence of slotSentences(name)) {
+      const out = publicConstruct(sentence, [name]);
+      assert.equal(slotLeak(out, name), false, `${name} survived in: ${out}`);
+      // Same bucket as a name that does not collide.
+      assert.equal(out, publicConstruct(sentence.replace(new RegExp(name, 'g'), (m, off: number) => (off === 0 ? m : 'Zq_Name')), ['Zq_Name']), `${name} bucket differs`);
+    }
+  }
+});
+
+test('publicConstruct: a sentence-initial template word at position 0 stays; the same word as an identifier does not', () => {
+  assert.equal(publicConstruct('Field Field requests a live character counter; the generated field does not show one.', ['Field']), 'Field (app identifier) requests a live character counter; the generated field does not show one.');
+  assert.equal(publicConstruct('Sort by "x" is not migrated; the field is not a plain column of Sort, so rows render in default (ROWID) order.', ['Sort']), 'Sort by (app identifier) is not migrated; the field is not a plain column of (app identifier), so rows render in default (ROWID) order.');
+});
+
+test('publicConstruct: an all-lowercase identifier equal to a template word is redacted wherever a template slot holds it', () => {
+  const introduced = (out: string, name: string) => new RegExp(`(?:^|\\s)(?:${IDENTIFIER_INTRODUCERS.join('|')})\\s${name}(?![\\p{L}\\p{N}_-])`, 'iu').test(out);
+  for (const name of LOWER_COLLIDING) {
+    for (const sentence of slotSentences(name)) {
+      const out = publicConstruct(sentence, [name]);
+      assert.equal(introduced(out, name), false, `${name} survived in a slot of: ${out}`);
+      // Same bucket as a name that does not collide: the template's own lowercase words are untouched.
+      if (/^(Field|Report) /.test(sentence)) continue; // the Field/Report slot rule redacts the name globally, template words included
+      assert.equal(out, publicConstruct(sentence.replace(new RegExp(`(?<=(?:^|\\s)(?:${IDENTIFIER_INTRODUCERS.join('|')})\\s)${name}\\b`, 'gi'), 'Zq_Name'), ['Zq_Name']), out);
+    }
+  }
+  assert.equal(
+    publicConstruct('Clicking a chart segment to view its underlying records is not generated: wire up a click handler that filters target to the clicked category manually.', ['target']),
+    'Clicking a chart segment to view its underlying records is not generated: wire up a click handler that filters (app identifier) to the clicked category manually.',
+  );
+  assert.equal(publicConstruct('Named filter value is not migrated: selecting it returns no rows.', ['value']), 'Named filter (app identifier) is not migrated: selecting it returns no rows.');
+  assert.equal(
+    publicConstruct('Field Zq_Other sets `target = target`; the generated image field has no clickable link.', ['target']),
+    'Field (app identifier) sets `target = (app identifier)`; the generated image field has no clickable link.',
+  );
+  // Buckets of an app without such names do not change, and the placeholder's own words never matter.
+  const plain = formSentences('Salary_Form', 'Rep_Q3')[0]!;
+  assert.equal(publicConstruct(plain, ['Salary_Form', 'Rep_Q3', 'app', 'identifier', 'style']), publicConstruct(plain, ['Salary_Form', 'Rep_Q3']));
+  assert.equal(publicConstruct('Report (app identifier) lists column Added_Location, a Creator built-in record column.', ['Added_Location']), 'Report (app identifier) lists column Added_Location, a Creator built-in record column.');
+  assert.equal(publicConstruct('a navigation (openUrl) inside it', ['openUrl']), 'a navigation (openUrl) inside it');
+});
+
+test('every identifier slot in the model.ts reason templates is introduced by a known word (guards the lowercase-collision rule)', () => {
+  const src = readFileSync(join(root, 'packages/ui/src/model.ts'), 'utf8');
+  // Words that precede an interpolation which is a widget, view, value or count, not an app identifier.
+  const NOT_A_SLOT = new Set(['the', 'generated', 'plain', 'type', 'to', 'when', 'so', 'its', 'native', 'open', 'Recreate', 'Format', 'Crop', 'Compute', 'View:', 'TODO:', ':', '-', '${location}:', "''}", 'Field', 'in', 'a', 'and', 'with', 'report.name}:']);
+  const seen = new Set<string>();
+  for (const line of src.split('\n')) {
+    if (!/reason|manualStep|todo/.test(line)) continue;
+    for (const m of line.matchAll(/(\S+) \$\{/g)) seen.add(m[1]!.replace(/^`/, ''));
+  }
+  const known = new Set([...IDENTIFIER_INTRODUCERS, ...NOT_A_SLOT]);
+  assert.deepEqual([...seen].filter((word) => !known.has(word)), [], 'a new interpolation introducer: add it to IDENTIFIER_INTRODUCERS (a slot) or to NOT_A_SLOT (not an identifier)');
+});
+
+test('statusFromReport: a form, report or field named like a template word never reaches the status doc', () => {
+  const NAMES = ['Report', 'Payments', 'Partner', 'Task', 'Address', 'Status', 'Field', 'if', 'criteria', 'target', 'value', 'If', 'Criteria'];
+  const source = (form: string, field: string, report: string) =>
+    `application "X"\n{\n\tforms\n\t{\n\t\tform ${form}\n\t\t{\n\t\t\t${field}\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t}\n\treports\n\t{\n\t\tlist ${report}\n\t\t{\n\t\t\tshow all rows from ${form}\n\t\t\t(\n\t\t\t\t${field}\n\t\t\t)\n\t\t\tfilters\n\t\t\t{\n\t\t\t\t"Broken" : Lookup.Field\n\t\t\t}\n\t\t}\n\t}\n}\n`;
+  const constructsOf = (form: string, field: string, report: string): string[] => {
+    const rep = buildMigrationReport([{ name: 'a', ir: deriveIr(parse(source(form, field, report))) }], 'x');
+    assert.ok(rep.apps[0]!.todoKinds.some((k) => k.construct.startsWith('Named filter')), 'the app must produce the named-filter sentence');
+    const status = statusFromReport(rep);
+    return [...status.kinds.map((k) => k.construct), ...status.perAppConstructSets.flatMap((s) => s.constructs)];
+  };
+  for (const name of NAMES) {
+    for (const slot of ['form', 'report', 'field'] as const) {
+      const got = constructsOf(slot === 'form' ? name : 'Zq_Form', slot === 'field' ? name : 'Zq_Field', slot === 'report' ? name : 'Zq_Rep');
+      for (const construct of got) assert.equal(slotLeak(construct, name) && !construct.endsWith('(app identifier)'), false, `${name} as ${slot} survived: ${construct}`);
+      if (/[A-Z]/.test(name) && !/^(If|Criteria)$/.test(name)) {
+        // App-looking names land in exactly the bucket a non-colliding name gets.
+        const ref = constructsOf(slot === 'form' ? 'Zq_Name' : 'Zq_Form', slot === 'field' ? 'Zq_Name' : 'Zq_Field', slot === 'report' ? 'Zq_Name' : 'Zq_Rep');
+        assert.deepEqual(got, ref, `${name} as ${slot}`);
+      }
+    }
   }
 });
