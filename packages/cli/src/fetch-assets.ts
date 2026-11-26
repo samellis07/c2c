@@ -13,7 +13,7 @@
  */
 
 import { lookup as dnsLookup } from 'node:dns/promises';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import { dirname, join } from 'node:path';
 import {
@@ -178,6 +178,32 @@ export interface FetchAssetsSummary {
   overCap: number;
 }
 
+
+/** Write `data` to `path` through a sibling temp file opened O_EXCL|O_NOFOLLOW, then rename: a symlink planted at the temp or the target is never followed. */
+function writeNoFollow(path: string, data: Uint8Array | string, mode: number): void {
+  const temp = `${path}.tmp`;
+  rmSync(temp, { force: true });
+  const fd = openSync(temp, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, mode);
+  try {
+    writeSync(fd, typeof data === 'string' ? Buffer.from(data) : data);
+  } finally {
+    closeSync(fd);
+  }
+  chmodSync(temp, mode);
+  renameSync(temp, path);
+}
+
+/** The export's own cache directory and lock must be what they claim: refuse a symlink instead of writing through it. */
+function refuseSymlink(path: string): void {
+  let link = false;
+  try {
+    link = lstatSync(path).isSymbolicLink();
+  } catch {
+    return;
+  }
+  if (link) throw new Error('fetch-assets refuses to write through a symbolic link in the export directory');
+}
+
 /**
  * Fetch every literal remote background url found in `sources` (the export's
  * text), write the cache and the lock under `dir`. A url already locked as
@@ -187,6 +213,8 @@ export interface FetchAssetsSummary {
 export async function fetchAssetsInto(dir: string, sources: readonly string[], deps: FetchDeps = nodeFetchDeps): Promise<FetchAssetsSummary> {
   const lockPath = join(dir, ASSET_LOCK_FILE);
   const cacheDir = join(dir, ASSET_CACHE_DIR);
+  refuseSymlink(lockPath);
+  refuseSymlink(cacheDir);
   const existing = new Map<string, AssetLockEntry>();
   if (existsSync(lockPath) && lstatSync(lockPath).isFile()) for (const entry of parseAssetLock(readFileSync(lockPath, 'utf8'))) existing.set(entry.url, entry);
   const urls = [...new Set(sources.flatMap((text) => literalBackgroundUrls(text)))].sort();
@@ -202,11 +230,10 @@ export async function fetchAssetsInto(dir: string, sources: readonly string[], d
     const result = await fetchAsset(url, deps);
     if (result.ok) {
       mkdirSync(cacheDir, { recursive: true });
+      refuseSymlink(cacheDir);
       const target = join(cacheDir, assetFileName(result.sha256, result.ext));
-      const temp = `${target}.tmp`;
-      writeFileSync(temp, result.bytes, { mode: 0o644 });
-      chmodSync(temp, 0o644);
-      renameSync(temp, target);
+      refuseSymlink(target);
+      writeNoFollow(target, result.bytes, 0o644);
       entries.push({ url, status: 'fetched', sha256: result.sha256, ext: result.ext, size: result.bytes.length });
       summary.fetched++;
     } else {
@@ -215,6 +242,7 @@ export async function fetchAssetsInto(dir: string, sources: readonly string[], d
     }
   }
   mkdirSync(dirname(lockPath), { recursive: true });
-  writeFileSync(lockPath, `${JSON.stringify({ version: 1, entries }, null, 2)}\n`);
+  refuseSymlink(lockPath);
+  writeNoFollow(lockPath, `${JSON.stringify({ version: 1, entries }, null, 2)}\n`, 0o644);
   return summary;
 }

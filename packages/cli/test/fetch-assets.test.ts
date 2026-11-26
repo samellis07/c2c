@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -216,5 +216,44 @@ test('the url count is capped and the overflow is counted, not silently dropped'
     assert.equal(summary.overCap, 8);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fetchAssetsInto never writes through a symlinked lock, cache directory or temp file', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'c2c-fetch-link-'));
+  try {
+    const script = (): Script => ({ routes: { 'https://img.example.com/a.png': () => response(200, OK, PNG) }, connected: [] });
+    // 1. A symlinked lock file would clobber its target.
+    const lockDir = join(root, 'a');
+    mkdirSync(lockDir);
+    const victim = join(root, 'victim.txt');
+    writeFileSync(victim, 'keep');
+    symlinkSync(victim, join(lockDir, 'c2c-assets.lock.json'));
+    await assert.rejects(fetchAssetsInto(lockDir, [DS], deps(script())), /symbolic link/);
+    assert.equal(readFileSync(victim, 'utf8'), 'keep');
+    // 2. A symlinked cache directory would receive the fetched file outside the export.
+    const cacheDir = join(root, 'b');
+    const outside = join(root, 'outside');
+    mkdirSync(cacheDir);
+    mkdirSync(outside);
+    symlinkSync(outside, join(cacheDir, 'c2c-assets'));
+    await assert.rejects(fetchAssetsInto(cacheDir, [DS], deps(script())), /symbolic link/);
+    assert.deepEqual(readdirSync(outside), []);
+    // 3. A symlink planted at the temp name is replaced, never followed.
+    const tmpDir = join(root, 'c');
+    mkdirSync(join(tmpDir, 'c2c-assets'), { recursive: true });
+    const first = await fetchAssetsInto(tmpDir, [DS], deps(script()));
+    const file = readdirSync(join(tmpDir, 'c2c-assets'))[0] as string;
+    rmSync(join(tmpDir, 'c2c-assets', file));
+    rmSync(join(tmpDir, 'c2c-assets.lock.json'));
+    const victim2 = join(root, 'victim2.txt');
+    writeFileSync(victim2, 'keep2');
+    symlinkSync(victim2, join(tmpDir, 'c2c-assets', `${file}.tmp`));
+    await fetchAssetsInto(tmpDir, [DS], deps(script()));
+    assert.equal(first.fetched, 1);
+    assert.equal(readFileSync(victim2, 'utf8'), 'keep2');
+    assert.ok(existsSync(join(tmpDir, 'c2c-assets', file)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
