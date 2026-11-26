@@ -78,6 +78,8 @@ export interface AppInputs {
   rebuiltJson: string;
   rebuiltMd: string;
   golden: { json?: string; md?: string };
+  /** A gallery fixture whose private golden directory is not configured here: the golden check cannot run. */
+  goldenDirMissing?: boolean;
   plan: PlanRun;
 }
 
@@ -107,6 +109,7 @@ export async function loadAppInputs(repoRoot: string, fixture: InRepoFixture): P
     rebuiltJson: fixtureMigrationReportAsJson(rebuilt),
     rebuiltMd: fixtureMigrationReportAsMarkdown(rebuilt),
     golden: { json: readIfPresent(`${base}.json`), md: readIfPresent(`${base}.md`) },
+    ...(fixture.id.startsWith('gallery/') && privateDir === null ? { goldenDirMissing: true } : {}),
     plan: await runOfflinePlan(fixture.file),
   };
 }
@@ -297,7 +300,8 @@ export function checkApp(inputs: AppInputs): AppReadiness {
     const id = 'report-golden-current';
     const title = 'Committed report golden matches a fresh build';
     const { json, md } = inputs.golden;
-    if (json === undefined || md === undefined) criteria.push(fail(id, title, `no committed golden for ${inputs.fixture.id}`));
+    if ((json === undefined || md === undefined) && inputs.goldenDirMissing) criteria.push(gap(id, title, `not run: the private golden directory is not configured here (set C2C_FIXTURES_DIR to the private fixtures directory); ${inputs.fixture.id} is not compared`));
+    else if (json === undefined || md === undefined) criteria.push(fail(id, title, `no committed golden for ${inputs.fixture.id}`));
     else if (json !== inputs.reportJson || md !== inputs.reportMd) criteria.push(fail(id, title, `golden for ${inputs.fixture.id} is stale; run migration-reports:update`));
     else criteria.push(pass(id, title, `${inputs.fixture.id}.json and .md current`));
   }

@@ -146,6 +146,15 @@ test('a stale or missing golden fails', async () => {
   assert.equal(status(checkApp({ ...inputs, golden: {} }).criteria, 'report-golden-current').status, 'FAIL');
 });
 
+test('a gallery fixture without the private golden directory reports the golden check as not run, never as a failure', async () => {
+  const inputs = await fresh();
+  const missingDir = checkApp({ ...inputs, golden: {}, goldenDirMissing: true }).criteria;
+  assert.equal(status(missingDir, 'report-golden-current').status, 'GAP');
+  assert.match(status(missingDir, 'report-golden-current').detail, /not run/);
+  // With the directory configured, a missing golden is still a failure, and a current one still passes.
+  assert.equal(status(checkApp({ ...inputs, golden: {} }).criteria, 'report-golden-current').status, 'FAIL');
+});
+
 test('two different builds of the same report fail the byte-identity check', async () => {
   const inputs = await fresh();
   assert.equal(status(checkApp({ ...inputs, rebuiltJson: `${inputs.rebuiltJson} ` }).criteria, 'report-deterministic').status, 'FAIL');
