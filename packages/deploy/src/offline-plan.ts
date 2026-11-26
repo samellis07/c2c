@@ -27,7 +27,7 @@ import { JOB_TARGET, sweeperCron, SWEEPER_CRON, type CronDefinition } from '../.
 import { schedulePlansFor } from '../../deluge/src/generate.js';
 import { buildUi } from '../../ui/src/generate.js';
 import { principalRoleMap } from '../../auth/src/apply.js';
-import { flag, hasReportJson, loadApp, type Io } from './cli.js';
+import { deployedModelPath, flag, hasReportJson, loadApp, type Io } from './cli.js';
 import { ZCQL_IN_LIMIT } from '../../data/src/migrate.js';
 import { cyclicForeignKeys, foreignKeyId, tableCreatePlan } from './tables.js';
 import { readSourceCsv, readSourceJson } from './csv.js';
@@ -2001,7 +2001,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
   if (!target || unknown.length > 0) {
     io.stderr(
       'usage: c2c plan <file|dir> [--out <dir>] [--dc <dc>] [--mail] [--project <id>] [--production] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--allow-budget-fail]\n' +
-        '                [--previous <deployed .ds> [--rename Form.Old=New]... [--allow-destructive --backup <rollback-export dir>]]\n' +
+        '                [--previous <deployed .ds> [--rename Form.Old=New]... [--no-detect-renames] [--allow-destructive --backup <rollback-export dir>]]\n' +
         '       --previous compares the re-export with the deployed model; a drop, rename or alter is refused without a verified backup\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n',
     );
@@ -2029,9 +2029,10 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
         : srcJson !== undefined
           ? readSourceJson(srcJson, app, allowEmpty).sourceData
           : undefined;
-    const previous = flag(args, '--previous');
+    const previousFlag = flag(args, '--previous');
+    const previous = previousFlag === undefined ? undefined : deployedModelPath(previousFlag);
     if (previous !== undefined) {
-      const review = reviewSchemaChange(loadApp(previous), app, dc.dc, renameFlags(args));
+      const review = reviewSchemaChange(loadApp(previous), app, dc.dc, renameFlags(args), { detect: !args.includes('--no-detect-renames') });
       writeDeltaTree(join(out, 'schema-change'), [
         { path: 'delta.json', data: `${JSON.stringify(review.delta, null, 2)}\n` },
         { path: 'delta.md', data: formatDelta(review.delta) },

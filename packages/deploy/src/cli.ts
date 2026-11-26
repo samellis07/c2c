@@ -42,7 +42,7 @@ import { importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuid
 import { spawnWithRetry, restWithRetry, type RetryOptions } from './retry.js';
 import { SLATE_FIRST_USE_GUIDANCE, slateAppName, slateConfigToml, slateNameProblem, waitForSlateApp, waitForSlateDomain } from './slate.js';
 import { applyEdits, editsPathFor, readEdits, withEdits } from './edit.js';
-import { renameFlags, unsupportedSchemaOps } from './delta.js';
+import { renameFlags, reviewSchemaChange, unsupportedSchemaOps } from './delta.js';
 import { assertProjectDetails, assertReportedScope, catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { assertSeedReferences, assertSeedTables, foreignKeysForApp } from './remap.js';
 import { formatMigratePlan, formatSkipped, migrateSeed, parseSeed, parseSeedBlocked, seedBucketName, seedFileColumns, seedStoreColumns, type SeedTable } from './seed.js';
@@ -605,6 +605,35 @@ export interface DeployState {
 
 export const STATE_FILE = '.c2c-deploy-state.json';
 
+/** Folder beside the deploy state that holds the deployed model: the .ds (and its edits file) the last successful deploy came from. */
+export const DEPLOYED_MODEL_DIR = '.c2c-deployed-model';
+
+/**
+ * Keeps the deployed model with the deploy, so a later `c2c plan --previous <deploy dir>`
+ * compares against what is really deployed and the operator does not have to keep the
+ * old export. Only a single .ds file target is recorded; returns the copy, or undefined.
+ */
+export function recordDeployedModel(dir: string, target: string): string | undefined {
+  if (!statSync(target, { throwIfNoEntry: false })?.isFile() || !target.toLowerCase().endsWith('.ds')) return undefined;
+  const folder = join(dir, DEPLOYED_MODEL_DIR);
+  rmSync(folder, { recursive: true, force: true });
+  mkdirSync(folder, { recursive: true });
+  const copy = join(folder, basename(target));
+  writeFileSync(copy, readFileSync(target));
+  const edits = editsPathFor(target);
+  if (existsSync(edits)) writeFileSync(editsPathFor(copy), readFileSync(edits));
+  return copy;
+}
+
+/** `--previous` may name a deploy folder: the model it recorded stands in for the old export. */
+export function deployedModelPath(previous: string): string {
+  const folder = join(previous, DEPLOYED_MODEL_DIR);
+  if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) return previous;
+  const ds = readdirSync(folder).filter((name) => name.toLowerCase().endsWith('.ds'));
+  if (ds.length !== 1) throw new Error(`${folder} must hold exactly one .ds (found ${ds.length})`);
+  return join(folder, ds[0]!);
+}
+
 
 const SHELL_CSP_META = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")[^"]*(")/;
 
@@ -986,11 +1015,15 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }
     // A re-export compared with the deployed model (--previous): the same
     // refusal, since the live table step adds tables and columns only.
-    const deployedSource = flag(rest, '--previous');
+    const previousFlag = flag(rest, '--previous');
+    const deployedSource = previousFlag === undefined ? undefined : deployedModelPath(previousFlag);
     if (deployedSource !== undefined) {
-      const blocked = unsupportedSchemaOps(generateSchema(loadSource(deployedSource)), generateSchema(app), renameFlags(rest));
+      const blocked = unsupportedSchemaOps(generateSchema(loadSource(deployedSource)), generateSchema(app), renameFlags(rest), !rest.includes('--no-detect-renames'));
       if (blocked.length > 0) {
-        io.stderr(`c2c deploy: the re-export changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}\n`);
+        const review = reviewSchemaChange(loadSource(deployedSource), app, 'in', renameFlags(rest), { detect: !rest.includes('--no-detect-renames') });
+        const lost = review.losses.length ? `would lose:\n${review.losses.map((l) => `  - ${l}`).join('\n')}\n` : '';
+        const moved = review.detectedRenames.length ? `${review.detectedRenames.map((l) => `  ${l}`).join('\n')}\n` : '';
+        io.stderr(`c2c deploy: the re-export changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}\n${moved}${lost}`);
         return 1;
       }
     }
@@ -1489,6 +1522,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         // The function base the app calls (what `c2c smoke --owner-session --url` takes).
         ...(apiBase && /^https:\/\//.test(apiBase) ? { functions: { apiBase } } : {}),
       };
+      if (report.exitCode === 0) recordDeployedModel(cwd, target);
       writeFileSync(join(cwd, DEPLOY_REPORT), `${JSON.stringify(report, null, 2)}\n`);
       io.stdout(`report: ${join(cwd, DEPLOY_REPORT)}\n`);
       return report.exitCode;
