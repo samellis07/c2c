@@ -1413,10 +1413,10 @@ export function askConfirm(doc, message, labels, trigger) {
   if (old) old.remove();
   return new Promise((resolve) => {
     const backdrop = documentRef.createElement('div');
-    backdrop.className = 'c2c-confirm';
+    backdrop.className = 'modal';
     backdrop.setAttribute('data-confirm-dialog', '');
     const box = documentRef.createElement('div');
-    box.className = 'c2c-confirm-box';
+    box.className = 'modal-card';
     box.setAttribute('role', 'alertdialog');
     box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-labelledby', 'c2c-confirm-msg');
