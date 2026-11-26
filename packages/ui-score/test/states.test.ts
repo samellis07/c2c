@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { buildUi } from '../../ui/src/index.js';
 import { bundleFromFiles, createFakeApi, scoreUi, type UiScore } from '../src/score.js';
-import { OWNER, STATE_OWNER_ISSUES, checkUiStates, type StateVerdict } from '../src/states.js';
+import { OWNER, STATE_OWNER_ISSUES, checkUiStates, type StateVerdict, reducedMotionCoverage } from '../src/states.js';
 
 function field(name: string, type: string, extra = '', modifiers = ''): string {
   const head = modifiers ? `${modifiers} ${name}` : name;
@@ -197,4 +197,23 @@ test('vanilla offline, expired-session and denied rows pass: re-fetch once onlin
     const v = byState(verdicts, state)!;
     assert.equal(v.status, 'pass', `${state}: ${v.evidence}`);
   }
+});
+
+test('the reduced-motion row needs a reduce override for EVERY animated selector, not any reduce block', () => {
+  const animated = '.pulse { animation: pulse 1s infinite; } .fade { transition: opacity .2s; }';
+  // An unrelated reduce block does not cover them.
+  const unrelated = `${animated} @media (prefers-reduced-motion: reduce) { .other { animation: none; } }`;
+  const bad = reducedMotionCoverage(unrelated);
+  assert.equal(bad.kills, false);
+  assert.deepEqual(bad.uncovered, ['.pulse', '.fade']);
+  // One selector covered, one not: still a fail, and it names the missing one.
+  const partial = `${animated} @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }`;
+  assert.deepEqual(reducedMotionCoverage(partial).uncovered, ['.fade']);
+  // Every selector with its own override passes; so does a universal rule.
+  const both = `${animated} @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } .fade { transition: none; } }`;
+  assert.equal(reducedMotionCoverage(both).kills, true);
+  const universal = `${animated} @media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }`;
+  assert.equal(reducedMotionCoverage(universal).kills, true);
+  // A stylesheet that animates nothing has nothing to prove: the row stays a fail rather than a vacuous pass.
+  assert.equal(reducedMotionCoverage('.a { color: red; }').kills, false);
 });

@@ -8869,6 +8869,8 @@ export function boot(appModel, doc) {
     const label = ((current && current.textContent) || (heading && heading.textContent) || '').replace(/\s+/g, ' ').trim();
     const app = appModel.name || '';
     documentRef.title = label && app ? `${label} - ${app}` : label || app || documentRef.title;
+    const announcer = documentRef.querySelector('[data-route-announcer]');
+    if (announcer && movedToNewRoute) announcer.textContent = label;
     if (!heading || typeof heading.focus !== 'function' || !movedToNewRoute) return;
     if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
     heading.focus({ preventScroll: true });

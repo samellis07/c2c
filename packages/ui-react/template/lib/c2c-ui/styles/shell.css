@@ -130,7 +130,7 @@ body { background: var(--c2c-page-bg); color: var(--foreground); font-family: va
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
 
 .c2c-skeleton { height: 2.25rem; margin: 0.5rem 0; border-radius: 6px; background: var(--surface-muted, rgba(127, 127, 127, 0.15)); animation: c2c-pulse 1.4s ease-in-out infinite; }

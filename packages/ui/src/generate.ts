@@ -4181,7 +4181,8 @@ function indexHtml(model: UiModel, apiBase?: string): string {
 <button id="nav-drawer-open" type="button" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="drawer">Menu</button>
 <nav id="drawer" hidden role="dialog" aria-modal="true" aria-label="Menu"></nav>
 <div id="toasts" aria-live="polite"></div>
-<p id="offline" role="status" hidden>Offline: data unavailable. Reports and forms load again when the network is back.</p>
+<div class="visually-hidden" data-route-announcer aria-live="polite"></div>
+<div role="status"><p id="offline" hidden>Offline: data unavailable. Reports and forms load again when the network is back.</p></div>
 <!-- c2c-config.js keeps a stable URL. c2c deploy rewrites it with the function base URL and the Catalyst Web SDK. -->
 <script src="./c2c-config.js"></script>
 <script type="module" src="@@asset:slate/assets/runtime.js@@"></script>

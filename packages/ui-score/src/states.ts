@@ -921,11 +921,7 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         return /transform\s*:\s*(?!\s|none\b)/.test(style) || /animation\s*:/.test(style);
       });
       // The stylesheet must carry a reduce rule that kills animation AND transition.
-      const reduceBlocks = [...bundle.css.matchAll(/@media[^{}]*prefers-reduced-motion\s*:\s*reduce[^{}]*\{([\s\S]*?)\}/g)].map((m) => m[1] ?? '');
-      const animatedSelectors = [...bundle.css.matchAll(/([^{}]+)\{[^{}]*(?:animation(?:-name)?\s*:|transition(?:-property)?\s*:)[^{}]*\}/g)]
-        .map((m) => m[1] ?? '').flatMap((x) => x.split(',').map((v) => v.trim()).filter(Boolean));
-      const reducedSelectors = reduceBlocks.flatMap((block) => [...block.matchAll(/([^{}]+)\{[^{}]*(?:animation|transition)\s*:\s*none[^{}]*\}/g)].flatMap((m) => (m[1] ?? '').split(',').map((v) => v.trim())));
-      const kills = animatedSelectors.length > 0 && animatedSelectors.every((selector) => reducedSelectors.some((reduced) => reduced === selector || reduced === '*' || reduced.includes(selector)));
+      const { kills } = reducedMotionCoverage(bundle.css);
       run.add('reduced-motion', 'app', moved.length === 0 && kills, `${moved.length} element(s) carry inline transform/animation under reduce${moved[0] ? ` (first: <${moved[0].tagName.toLowerCase()} class="${(moved[0].getAttribute('class') ?? '').slice(0, 40)}" style="${(moved[0].getAttribute('style') ?? '').slice(0, 80)}">)` : ''}; stylesheet reduce rule ${kills ? 'kills animation and transition' : 'does NOT kill both'}`);
     } finally {
       s.close();
@@ -933,4 +929,62 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
   }
 
   return run.verdicts;
+}
+
+/**
+ * Does the stylesheet kill motion for EVERY selector that animates or transitions?
+ * An unrelated `prefers-reduced-motion` block does not count: each animated
+ * selector needs its own `animation|transition: none` rule under reduce (or a `*` rule).
+ * The CSS is walked by brace depth so nested at-rules are read correctly.
+ */
+export function reducedMotionCoverage(css: string): { kills: boolean; uncovered: string[] } {
+  type Kind = 'animation' | 'transition';
+  const animated = new Map<string, Set<Kind>>();
+  const killed = new Map<string, Set<Kind>>();
+  const add = (map: Map<string, Set<Kind>>, selector: string, kind: Kind): void => {
+    const have = map.get(selector) ?? new Set<Kind>();
+    have.add(kind);
+    map.set(selector, have);
+  };
+  const walk = (text: string, inReduce: boolean): void => {
+    let at = 0;
+    while (at < text.length) {
+      const open = text.indexOf('{', at);
+      if (open < 0) return;
+      const prelude = text.slice(at, open).trim();
+      let depth = 1;
+      let close = open + 1;
+      while (close < text.length && depth > 0) {
+        const ch = text[close];
+        if (ch === '{') depth += 1;
+        else if (ch === '}') depth -= 1;
+        close += 1;
+      }
+      const body = text.slice(open + 1, close - 1);
+      at = close;
+      if (prelude.startsWith('@')) {
+        if (/^@(keyframes|font-face)|^@-\w+-keyframes/.test(prelude)) continue;
+        walk(body, inReduce || /^@media[^{]*prefers-reduced-motion\s*:\s*reduce/.test(prelude));
+        continue;
+      }
+      const selectors = prelude.split(',').map((v) => v.trim()).filter(Boolean).map((v) => (/^\*(::(before|after))?$/.test(v) ? '*' : v));
+      for (const decl of body.split(';')) {
+        const colon = decl.indexOf(':');
+        if (colon < 0) continue;
+        const prop = decl.slice(0, colon).trim().toLowerCase();
+        const value = decl.slice(colon + 1).replace(/!important/i, '').trim().toLowerCase();
+        const kind: Kind | null = /^animation(-name)?$/.test(prop) ? 'animation' : /^transition(-property)?$/.test(prop) ? 'transition' : null;
+        if (!kind) continue;
+        const none = value === 'none' || (prop === 'animation' && /^none\b/.test(value)) || (prop === 'transition' && /^none\b/.test(value));
+        if (inReduce) {
+          if (none) for (const selector of selectors) add(killed, selector, kind);
+        } else if (!none) {
+          for (const selector of selectors) add(animated, selector, kind);
+        }
+      }
+    }
+  };
+  walk(css.replace(/\/\*[\s\S]*?\*\//g, ''), false);
+  const uncovered = [...animated].filter(([selector, kinds]) => [...kinds].some((kind) => !killed.get(selector)?.has(kind) && !killed.get('*')?.has(kind))).map(([selector]) => selector);
+  return { kills: animated.size > 0 && uncovered.length === 0, uncovered };
 }
