@@ -115,7 +115,8 @@ function resolveBundle(text: (rel: string) => string | undefined, listJs: () => 
     .map((m) => m[0])
     .filter((tag) => /rel="stylesheet"/.test(tag) || /href="[^"]+\.css"/.test(tag))
     .map((tag) => /href="([^"]+)"/.exec(tag)?.[1]?.replace(/^\.?\//, ''))
-    .filter((rel): rel is string => !!rel);
+    // A link that climbs out of the bundle is not a bundle stylesheet: never read it.
+    .filter((rel): rel is string => !!rel && !rel.split('/').includes('..'));
   const entry = (linked(html, /<script[^>]+type="module"[^>]+src="([^"]+)"/) ?? '').replace(/^\//, '');
   const modules: Record<string, string> = {};
   const lazyCss: string[] = [];
