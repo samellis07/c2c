@@ -3395,8 +3395,17 @@ function capturedPosition(req) {
     const target = app.forms.find((item) => item.name.toLowerCase() === f.lookup!.form.toLowerCase());
     if (target) lookupLinks[f.name] = target.name;
   }
+  // The lookups of each linked form, so `input.A.B.Field` follows the chain.
+  const lookupGraph: Record<string, Record<string, string>> = {};
+  for (const f2 of app.forms) {
+    for (const g of f2.fields) {
+      if (!g.lookup || Object.hasOwn(multiLookupMap[f2.name] ?? {}, g.name)) continue;
+      const to = app.forms.find((item) => item.name.toLowerCase() === g.lookup!.form.toLowerCase());
+      if (to) (lookupGraph[f2.name] ??= {})[g.name] = to.name;
+    }
+  }
   const lookupHydrate = Object.keys(lookupLinks).length && validate.add.length + validate.edit.length + success.add.length + success.edit.length + presuccess.add.length + presuccess.edit.length
-    ? `    await ctx.shim.input.hydrate(ctx, ${JSON.stringify(lookupLinks)});\n`
+    ? `    await ctx.shim.input.hydrate(ctx, ${JSON.stringify(lookupLinks)}, ${JSON.stringify(lookupGraph)});\n`
     : '';
   const validateRun = validate.add.length + validate.edit.length
     ? `    try {
@@ -3652,9 +3661,9 @@ ${hasPresuccess ? '    // A refused or failed write drops the effects a presucce
       return;
     }
     // A file reference the form and field do not own is the caller's input,
-    // never a server fault (the message names the field only).
+    // never a server fault. The reply is fixed text: no key or path.
     if (err && err.code === "FILE_REFERENCE_INVALID") {
-      send(res, 400, { dryRun: !live, wrote: false, code: err.code, error: err.message });
+      send(res, 400, { dryRun: !live, wrote: false, code: "FILE_REFERENCE_INVALID", error: "A file reference in the submitted record is not valid." });
       return;
     }
     fail(res, err, live);

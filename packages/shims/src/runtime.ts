@@ -479,6 +479,8 @@ export interface ShimContext {
    * `input.Lookup.Field`, which Creator reads as the linked record's field.
    */
   linked?: Record<string, Record<string, unknown>>;
+  /** The lookup fields `input.hydrate` covered: an unresolved read below one reads as empty text. */
+  linkedFields?: string[];
   /** Prefetch endpoint path the client handler loaded, set by the first prefetch call. */
   prefetchPath?: string;
   /**
@@ -800,7 +802,7 @@ export interface Shim {
      * -> the form it links to) so `input.Lookup.Field` reads the linked row.
      * A field the caller may not read, or with no row, reads as no linked row.
      */
-    hydrate(ctx: ShimContext, links: Record<string, string>): Promise<void>;
+    hydrate(ctx: ShimContext, links: Record<string, string>, graph?: Record<string, Record<string, string>>): Promise<void>;
     /**
      * `input.<subform>.insert(rows)` appends rows to the field list: one row
      * per element of a collection argument, else the single row.
@@ -1492,6 +1494,10 @@ function indexSet(obj: unknown, key: unknown, value: unknown): unknown {
   (obj as Record<string, unknown>)[k] = value;
   return value;
 }
+
+/** Lookup links `input.hydrate` follows, and the store reads it may spend, per submit. */
+const HYDRATE_DEPTH = 3;
+const HYDRATE_READS = 32;
 
 function getPath(root: unknown, path: string[]): unknown {
   let cur = root;
@@ -3382,8 +3388,11 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       get(ctx, ...path) {
         const value = getPath(ctx.record, path);
         if (value === undefined && path.length > 1 && ctx.linked && Object.hasOwn(ctx.linked, path[0]!)) {
-          return getPath(ctx.linked[path[0]!], path.slice(1));
+          // A link below the parent that did not resolve reads as empty text.
+          const linked = getPath(ctx.linked[path[0]!], path.slice(1));
+          return linked === undefined ? '' : linked;
         }
+        if (value === undefined && path.length > 1 && ctx.linkedFields?.includes(path[0]!)) return '';
         if (value === undefined && ctx.rowInput && ctx.row && path.length) {
           const field = shim.record.get(ctx.row, path[0]!);
           return path.length === 1 ? field : getPath(field, path.slice(1));
@@ -3393,16 +3402,47 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         if (value === undefined && path.length === 1 && path[0] === 'ID') return ctx.rowId;
         return value;
       },
-      async hydrate(ctx, links) {
-        for (const [field, form] of Object.entries(links)) {
-          const cell = getPath(ctx.record, [field]);
-          if ((typeof cell !== 'string' && typeof cell !== 'number') || String(cell) === '') continue;
+      async hydrate(ctx, links, graph = {}) {
+        // The chain A -> B -> C is followed to HYDRATE_DEPTH links, each link
+        // read through the same grant as any lookup read; a link the caller
+        // cannot read, or that has no row, stays an id and reads as empty.
+        // One read per distinct (form, id), at most HYDRATE_READS per submit.
+        ctx.linkedFields = Object.keys(links);
+        const seen = new Map<string, Record<string, unknown> | null>();
+        let budget = HYDRATE_READS;
+        const load = async (form: string, id: string, depth: number, trail: string[]): Promise<Record<string, unknown> | null> => {
+          const key = `${form.toLowerCase()}\u0000${id}`;
+          if (seen.has(key)) return seen.get(key)!;
+          if (trail.includes(key) || budget <= 0) return null;
+          budget--;
+          let row: Record<string, unknown> | null = null;
           try {
-            const rows = await shim.datastore.plainRows(ctx, shim.datastore.query(ctx, form, { op: '==', field: 'ROWID', value: String(cell) }));
-            if (rows[0]) (ctx.linked ??= {})[field] = rows[0];
+            const rows = await shim.datastore.plainRows(ctx, shim.datastore.query(ctx, form, { op: '==', field: 'ROWID', value: id }));
+            row = rows[0] ? { ...rows[0] } : null;
           } catch (err) {
             if (!(err instanceof RecordAccessError)) throw err;
           }
+          if (row && depth < HYDRATE_DEPTH) {
+            const next = Object.hasOwn(graph, form) ? graph[form]! : {};
+            for (const [field, target] of Object.entries(next)) {
+              const cell = row[field];
+              if ((typeof cell !== 'string' && typeof cell !== 'number') || String(cell) === '') continue;
+              const child = await load(target, String(cell), depth + 1, [...trail, key]);
+              if (child) {
+                const out = { ...child };
+                Object.defineProperty(out, 'toString', { value: () => String(child.ID ?? ''), enumerable: false });
+                row[field] = out;
+              }
+            }
+          }
+          seen.set(key, row);
+          return row;
+        };
+        for (const [field, form] of Object.entries(links)) {
+          const cell = getPath(ctx.record, [field]);
+          if ((typeof cell !== 'string' && typeof cell !== 'number') || String(cell) === '') continue;
+          const row = await load(form, String(cell), 1, []);
+          if (row) (ctx.linked ??= {})[field] = row;
         }
       },
       set(ctx, path, value) {

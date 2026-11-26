@@ -23,11 +23,24 @@ const LOOKUP_DS = `application "lookup-sample"
 	}
 	section S
 	{
+		form Add_Dept
+		{
+			must have Dept_Name
+			(
+				type = text
+			)
+		}
 		form Add_Team
 		{
 			must have Team_Name
 			(
 				type = text
+			)
+			Dept
+			(
+				type = picklist
+				values  = Add_Dept.ID
+				displayformat = [Dept_Name]
 			)
 		}
 		form Add_Shift
@@ -64,6 +77,10 @@ const LOOKUP_DS = `application "lookup-sample"
 			(
 				type = text
 			)
+			Job_Chain
+			(
+				type = text
+			)
 		}
 		list All_Jobs
 		{
@@ -86,6 +103,7 @@ const LOOKUP_DS = `application "lookup-sample"
 						custom deluge script
 						(
 							input.Job_Key = input.Team.Team_Name + " " + input.Shift.Shift_Name + " (" + input.Window + ")";
+							input.Job_Chain = input.Team.Dept.Dept_Name + "|" + input.Team.Team_Name;
 						)
 					}
 				}
@@ -107,7 +125,8 @@ async function replayJobs(cases: unknown[]) {
 }
 
 const SETUP = [
-  { op: 'submit', form: 'Add_Team', record: { Team_Name: 'Physics' }, bind: { team: 'body.values.ROWID' }, expect: { outcome: 'saved' } },
+  { op: 'submit', form: 'Add_Dept', record: { Dept_Name: 'Science' }, bind: { dept: 'body.values.ROWID' }, expect: { outcome: 'saved' } },
+  { op: 'submit', form: 'Add_Team', record: { Team_Name: 'Physics', Dept: '<ref:dept>' }, bind: { team: 'body.values.ROWID' }, expect: { outcome: 'saved' } },
   { op: 'submit', form: 'Add_Shift', record: { Shift_Name: 'Morning' }, bind: { shift: 'body.values.ROWID' }, expect: { outcome: 'saved' } },
 ];
 
@@ -143,4 +162,34 @@ test('a file reference the form does not own is a 400, never a 500; a well-forme
   // MUST-FAIL: expecting the old 500 for the unowned key is a finding.
   const bad = await replayJobs([{ id: 'files', steps: [...SETUP, post({ key: 'k1' }, 500)], expect: { partial: true } }]);
   assert.equal(bad.ok, false);
+});
+
+test('a chain A -> B -> C reads the last link, and an unreadable link stores empty text, never "undefined"', async () => {
+  const chain = { op: 'submit', form: 'Add_Job', record: { Team: '<ref:team>', Window: 'Jun 2027' }, expect: { outcome: 'saved' } };
+  const ok = await replayJobs([{ id: 'chain', steps: [...SETUP, chain], expect: { partial: true, tables: { Add_Job: [{ Job_Chain: 'Science|Physics' }] } } }]);
+  assert.equal(ok.ok, true, JSON.stringify(ok.findings));
+  // A team with no department: the middle link is missing.
+  const noDept = { op: 'submit', form: 'Add_Team', record: { Team_Name: 'Orphan' }, bind: { orphan: 'body.values.ROWID' }, expect: { outcome: 'saved' } };
+  const job = { op: 'submit', form: 'Add_Job', record: { Team: '<ref:orphan>', Window: 'Jun 2027' }, expect: { outcome: 'saved' } };
+  const mid = await replayJobs([{ id: 'mid', steps: [...SETUP, noDept, job], expect: { partial: true, tables: { Add_Job: [{ Job_Chain: '|Orphan' }] } } }]);
+  assert.equal(mid.ok, true, JSON.stringify(mid.findings));
+  // A parent id that no longer exists.
+  const gone = { op: 'submit', form: 'Add_Job', record: { Team: '999999999', Window: 'Jun 2027' } };
+  const missing = await replayJobs([{ id: 'gone', steps: [...SETUP, gone], expect: { partial: true, tables: { Add_Job: [{ Job_Chain: '|', Job_Key: '  (Jun 2027)' }] } } }]);
+  assert.equal(missing.ok, true, JSON.stringify(missing.findings));
+});
+
+test('the FILE_REFERENCE_INVALID reply is fixed text with a stable code: no key, field or path', async () => {
+  const app = deriveIr(parse(LOOKUP_DS));
+  const backend = await startOfflineBackend(app);
+  try {
+    const res = await backend.call('POST', '/forms/Add_Job/submit', { record: { Team: '1', Window: 'w', Badge: { key: 'secret-key-k1' } } });
+    assert.equal(res.status, 400);
+    const body = res.body as Record<string, unknown>;
+    assert.equal(body.code, 'FILE_REFERENCE_INVALID');
+    const text = JSON.stringify(body);
+    for (const leak of ['secret-key-k1', 'Badge', 'Add_Job', 'uploads']) assert.ok(!text.includes(leak), `${leak} leaked: ${text}`);
+  } finally {
+    await backend.close();
+  }
 });
