@@ -8859,14 +8859,17 @@ export function boot(appModel, doc) {
   // After a route change, retitle the document to the open screen and move focus
   // to its heading so a keyboard or screen-reader user lands on the new screen.
   let watchHeading = null;
-  const announceRoute = () => {
+  let lastRouteIdentity = null;
+  const announceRoute = (routeIdentity) => {
+    const movedToNewRoute = lastRouteIdentity !== null && lastRouteIdentity !== routeIdentity;
+    lastRouteIdentity = routeIdentity;
     if (watchHeading) watchHeading.disconnect();
     const heading = main.querySelector('h1, h2');
     const current = nav && nav.querySelector ? nav.querySelector('a[aria-current="page"]') : null;
     const label = ((current && current.textContent) || (heading && heading.textContent) || '').replace(/\s+/g, ' ').trim();
     const app = appModel.name || '';
     documentRef.title = label && app ? `${label} - ${app}` : label || app || documentRef.title;
-    if (!heading || typeof heading.focus !== 'function') return;
+    if (!heading || typeof heading.focus !== 'function' || !movedToNewRoute) return;
     if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
     heading.focus({ preventScroll: true });
     // A screen that redraws itself once its data lands replaces the heading;
@@ -8956,7 +8959,7 @@ export function boot(appModel, doc) {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
     if (report && report.form) loadRecordSummary(appModel, { ...route, id: report.form, report: report.name }, main, view);
   }
-  announceRoute();
+  announceRoute(`${route.name}|${route.id || ""}|${route.row || ""}|${route.edit || ""}`);
   };
   const paint = () => {
     if (!main) return Promise.resolve();

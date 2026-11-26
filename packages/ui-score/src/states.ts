@@ -921,8 +921,11 @@ async function checkUiStatesRun(app: App, bundle: UiBundle, opts: StatesOptions)
         return /transform\s*:\s*(?!\s|none\b)/.test(style) || /animation\s*:/.test(style);
       });
       // The stylesheet must carry a reduce rule that kills animation AND transition.
-      const reduceBlocks = [...bundle.css.matchAll(/@media[^{]*prefers-reduced-motion\s*:\s*reduce[^}]*\{([\s\S]*?)\}\s*\}/g)].map((m) => m[1] ?? '');
-      const kills = reduceBlocks.some((block) => /animation\s*:\s*none/.test(block) && /transition\s*:\s*none/.test(block)) || reduceBlocks.some((block) => /(animation|transition)\s*:\s*none[^}]*(animation|transition)\s*:\s*none/.test(block));
+      const reduceBlocks = [...bundle.css.matchAll(/@media[^{}]*prefers-reduced-motion\s*:\s*reduce[^{}]*\{([\s\S]*?)\}/g)].map((m) => m[1] ?? '');
+      const animatedSelectors = [...bundle.css.matchAll(/([^{}]+)\{[^{}]*(?:animation(?:-name)?\s*:|transition(?:-property)?\s*:)[^{}]*\}/g)]
+        .map((m) => m[1] ?? '').flatMap((x) => x.split(',').map((v) => v.trim()).filter(Boolean));
+      const reducedSelectors = reduceBlocks.flatMap((block) => [...block.matchAll(/([^{}]+)\{[^{}]*(?:animation|transition)\s*:\s*none[^{}]*\}/g)].flatMap((m) => (m[1] ?? '').split(',').map((v) => v.trim())));
+      const kills = animatedSelectors.length > 0 && animatedSelectors.every((selector) => reducedSelectors.some((reduced) => reduced === selector || reduced === '*' || reduced.includes(selector)));
       run.add('reduced-motion', 'app', moved.length === 0 && kills, `${moved.length} element(s) carry inline transform/animation under reduce${moved[0] ? ` (first: <${moved[0].tagName.toLowerCase()} class="${(moved[0].getAttribute('class') ?? '').slice(0, 40)}" style="${(moved[0].getAttribute('style') ?? '').slice(0, 80)}">)` : ''}; stylesheet reduce rule ${kills ? 'kills animation and transition' : 'does NOT kill both'}`);
     } finally {
       s.close();

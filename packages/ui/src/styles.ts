@@ -242,6 +242,7 @@ svg.chart{display:block;width:100%;max-width:40rem;height:auto}
 }
 @media (prefers-reduced-motion:reduce){
 *,*::before,*::after{animation:none;transition:none}
+.skeleton{animation:none}
 #nav{transition:none}
 }
 /* Record print sheet: an overlay on screen, the only page content on paper. */
