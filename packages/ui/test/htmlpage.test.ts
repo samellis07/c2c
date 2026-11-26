@@ -6202,6 +6202,9 @@ test('a link name, a params value or a route a name can hold outside the closed 
     ['route from input', swap('profileUrl = "#View:My_Profile_Customers";', 'profileUrl = input.go;')],
     ['route with an unencoded read', swap('encodeUrl(acc.Company_Name)', 'acc.Company_Name')],
     ['route with a read of a page input', swap('encodeUrl(acc.Company_Name)', 'encodeUrl(input.name)')],
+    ['route name that is a page parameter', swap('htmlpage prof()', 'htmlpage prof(profileUrl)')],
+    ['link name that is a page parameter', swap('htmlpage prof()', 'htmlpage prof(caseView)')],
+    ['params name that is a page parameter', swap('htmlpage prof()', 'htmlpage prof(callParams)')],
     ['route with a quote in the key', swap('"#View:All_Accounts?Company_Name="', '"#View:All_Accounts?a\\"onmouseover=x="')],
   ];
   for (const [label, snippet] of variants) assert.equal(profileCompiles(snippet), false, label);
