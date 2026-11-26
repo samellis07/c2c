@@ -38,7 +38,9 @@ export function round(value: unknown, places: unknown = 0): number | bigint {
   if (Number.isInteger(digits) && digits >= 0) {
     // Creator rounds the decimal value, not its binary double: 1.005 -> 1.01.
     const text = value instanceof Decimal ? value.toString() : String(n);
-    return Number(Decimal.from(text).quantize(digits).toString());
+    const rounded = Number(Decimal.from(text).quantize(digits).toString());
+    // A negative value that rounds to zero keeps its sign, as the float path always did.
+    return rounded === 0 && (n < 0 || Object.is(n, -0)) ? -0 : rounded;
   }
   const f = 10 ** digits;
   const x = n * f;

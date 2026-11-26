@@ -152,3 +152,10 @@ test('randomNumber is null on blank or non-numeric input', () => {
   assert.equal(randomNumber(1, ''), null);
   assert.equal(randomNumber('abc', 10), null);
 });
+
+test("round keeps the sign of a value that rounds to zero", () => {
+  assert.ok(Object.is(round(-0, 2), -0), "-0 stays -0");
+  assert.ok(Object.is(round(-0.001, 2), -0), "a small negative rounds to -0 as the float path did");
+  assert.ok(Object.is(round(0.001, 2), 0), "a small positive rounds to +0");
+  assert.ok(Object.is(round(0, 2), 0), "+0 stays +0");
+});
