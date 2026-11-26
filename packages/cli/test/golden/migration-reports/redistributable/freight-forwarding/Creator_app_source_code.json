@@ -961,27 +961,27 @@
     {
       "location": "field New_SOF.Time property timedisplayoptions",
       "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for Time shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.FROM property timedisplayoptions",
       "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for FROM shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.TO property timedisplayoptions",
       "construct": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for TO shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.FROM2 property timedisplayoptions",
       "construct": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for FROM2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.TO2 property timedisplayoptions",
       "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for TO2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "report Container_Movement_Tracking block report properties",

@@ -54,7 +54,7 @@
       "area": "field",
       "name": "Artifact_Intake.Detected_Objects",
       "detail": "Objects in uploaded images are no longer labelled automatically.",
-      "workaround": "Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live."
+      "workaround": "Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand."
     },
     {
       "area": "field",
@@ -66,13 +66,13 @@
       "area": "field",
       "name": "Artifact_Intake.Extracted_Terms",
       "detail": "Keywords are no longer extracted automatically when a record is submitted.",
-      "workaround": "Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live."
+      "workaround": "Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand."
     },
     {
       "area": "field",
       "name": "Artifact_Intake.Forecast",
       "detail": "The AI-predicted value is not filled automatically in the generated app.",
-      "workaround": "Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live."
+      "workaround": "Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand."
     },
     {
       "area": "field",
@@ -102,13 +102,13 @@
       "area": "field",
       "name": "Artifact_Intake.Text_From_Image",
       "detail": "Text is no longer read out of uploaded images automatically.",
-      "workaround": "Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live."
+      "workaround": "Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand."
     },
     {
       "area": "field",
       "name": "Artifact_Intake.Tone_Result",
       "detail": "Sentiment is no longer scored automatically when a record is submitted.",
-      "workaround": "Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live."
+      "workaround": "Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand."
     }
   ],
   "data": {

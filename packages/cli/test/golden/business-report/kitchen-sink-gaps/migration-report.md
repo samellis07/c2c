@@ -26,13 +26,13 @@ This report explains what will move to Catalyst, what needs a person, and what t
 This list covers everything the converter can see in the export. A check inside the running app may surface more; open each converted screen once before sign-off.
 
 - Artifact_Intake.Detected_Objects — Objects in uploaded images are no longer labelled automatically.
-  - What to do: Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live.
+  - What to do: Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand.
 - Artifact_Intake.External_Record — The link to the other product is stored as text or an external reference until a connection is authorized.
   - What to do: Ask the person who owns the external account to authorize the matching connection during migration; otherwise keep the value as text and complete the lookup after launch.
 - Artifact_Intake.Extracted_Terms — Keywords are no longer extracted automatically when a record is submitted.
-  - What to do: Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live.
+  - What to do: Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand.
 - Artifact_Intake.Forecast — The AI-predicted value is not filled automatically in the generated app.
-  - What to do: Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live.
+  - What to do: Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand.
 - Artifact_Intake.Old_Crm_Record — The link to the old customer-record system is kept as a reference number.
   - What to do: Ask the person who owns the external account to authorize the matching connection during migration; otherwise keep the value as text and complete the lookup after launch.
 - Artifact_Intake.Old_Crm_Reference — The link to the old customer-record system is kept as its display text.
@@ -42,9 +42,9 @@ This list covers everything the converter can see in the export. A check inside 
 - Artifact_Intake.Site_Location — There is no separate map-location field; coordinates travel inside the address field instead.
   - What to do: Capture the needed address or location in the supported address fields instead of a separate location field.
 - Artifact_Intake.Text_From_Image — Text is no longer read out of uploaded images automatically.
-  - What to do: Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live.
+  - What to do: Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand.
 - Artifact_Intake.Tone_Result — Sentiment is no longer scored automatically when a record is submitted.
-  - What to do: Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live.
+  - What to do: Decide whether the app still needs this value. If it does, ask a developer to add a step that fills it in after each record is saved, and check a saved record before go-live; if not, leave the field empty or type the value in by hand.
 
 ## Data migration
 

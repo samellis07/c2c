@@ -2028,7 +2028,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           area: 'field',
           name,
           reason: `Field ${field.name} sets \`timedisplayoptions = ${timeDisplay}\`; the generated ${widget} input has no seconds step and never shows seconds.`,
-          manualStep: manualStepWithAnchor(`Add a seconds-precision time control for ${field.name} by hand (the native ${widget} input shows only hours and minutes) — this is not generated.`, MANUAL_STEP_ANCHORS.fieldTimePrecision),
+          manualStep: manualStepWithAnchor(`The generated ${widget} input for ${field.name} shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept.`, MANUAL_STEP_ANCHORS.fieldTimePrecision),
         });
       }
     }
@@ -3265,7 +3265,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
         area: 'zml',
         name: `${page.name}.${elementName}`,
         reason: `ZML <${el.tag}> "${elementName}" click parameters "${el.droppedParameters}" are not generated; wire them to the click handler by hand`,
-        manualStep: manualStepWithAnchor(`On page "${page.name}", wire click parameters "${el.droppedParameters}" to the generated <${el.tag}> "${elementName}" click handler.`, MANUAL_STEP_ANCHORS.zmlClickParameters),
+        manualStep: manualStepWithAnchor(`On page "${page.name}", the <${el.tag}> "${elementName}" opens without its values "${el.droppedParameters}". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them.`, MANUAL_STEP_ANCHORS.zmlClickParameters),
       });
       delete el.droppedParameters;
     }

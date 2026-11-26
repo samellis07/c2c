@@ -383,7 +383,7 @@
       "field": "Total_Hours",
       "property": "property value",
       "reason": "property value is not carried by the generated formula field. The value is computed, not entered. A text column holds the result until expression translation knows the result type. It is not dropped and it is not a ROWID.",
-      "step": "The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, configure that setting for Media_Kit.Total_Hours, then preview the form or report and confirm the field behaves as expected.",
+      "step": "The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, open Media_Kit.Total_Hours and set its property value setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
     }
   ]

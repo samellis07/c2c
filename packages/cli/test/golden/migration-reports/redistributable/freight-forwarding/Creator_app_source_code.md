@@ -80,15 +80,15 @@ App: Freight Forwarding and Feeder Solution
 ## Residual TODO steps
 
 - `field New_SOF.Time property timedisplayoptions` — Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for Time shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.FROM property timedisplayoptions` — Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for FROM shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.TO property timedisplayoptions` — Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for TO shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.FROM2 property timedisplayoptions` — Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for FROM2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.TO2 property timedisplayoptions` — Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for TO2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `report Container_Movement_Tracking block report properties` — Report "Container_Movement_Tracking" has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
   - Step: In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false.
 - `report SOFs block options` — Report "SOFs" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.

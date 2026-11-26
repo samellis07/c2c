@@ -99,7 +99,7 @@ test('kitchen sink analyzes with no residual TODO and names settings the field m
   assert.deepEqual(
     r.blockers,
     [
-      { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Total_Hours property value', detail: 'Field Media_Kit.Total_Hours property value is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app', manualStep: 'The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, configure that setting for Media_Kit.Total_Hours, then preview the form or report and confirm the field behaves as expected.' },
+      { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Total_Hours property value', detail: 'Field Media_Kit.Total_Hours property value is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app', manualStep: 'The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, open Media_Kit.Total_Hours and set its property value setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.' },
     ],
   );
   assert.equal(analyzeAsJson(analyze(load())), analyzeAsJson(r));
