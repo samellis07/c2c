@@ -32,12 +32,12 @@ import { routePrefill } from '../runtime/router';
 import { SESSION_EXPIRED_EVENT, pageHash, watchAuthCall, type AppWindow } from '../runtime/api';
 import { navigableUrl } from '../runtime/navigation';
 import { useEnv } from '../runtime/env';
-import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
+import { cleanServerText, failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { Slot, useCustomization } from '../runtime/extend';
 import { FormContext } from './fields';
 import { FormHandlersContext } from './context';
 import { applyHandlerActions, matchingHandlers, mergeScriptRecord, runHandlers, type FormHandlers, type HandlerCtx, type HandlerDraft } from './handlers';
-import { chosenFiles, firstErrorControl, readRecord, resolveUrlSources, validate } from './record';
+import { chosenFiles, firstErrorControl, linkFieldErrors, readRecord, resolveUrlSources, validate } from './record';
 import { subformRows, validateSubforms } from '../subform/rows';
 
 interface Banner {
@@ -52,7 +52,7 @@ export const DEFAULT_UPDATE_MESSAGE = 'Data Updated Successfully!';
 
 /** The banner for a submit the server refused or failed. */
 export function submitFailure(status: number, body: { error?: unknown; message?: unknown; wrote?: unknown } | undefined): string {
-  const server = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : typeof body?.error === 'string' ? body.error.trim() : '';
+  const server = cleanServerText(typeof body?.message === 'string' && body.message.trim() ? body.message : typeof body?.error === 'string' ? body.error : '');
   // The row is stored; only a step after the write failed. A resubmit would add it twice.
   // The generic "request failed" adds nothing; a Deluge runtime error's text does.
   if (body?.wrote === true) return `The record was saved, but a step after saving failed${server && server !== 'request failed' ? `: ${server}` : '.'}`;
@@ -307,6 +307,11 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
   );
 
   // On load runs once per screen: immediately on add, after the row arrives on edit.
+  // A shown error is the description of its control.
+  useEffect(() => {
+    if (formRef.current) linkFieldErrors(formRef.current);
+  }, [errors]);
+
   useEffect(() => {
     if (edit || loadRan.current) return;
     loadRan.current = true;

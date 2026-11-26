@@ -31,6 +31,15 @@ export function failureText(status: number): string {
   return '';
 }
 
+/** Server text shown to the user: control and direction characters removed, whitespace collapsed, length capped. */
+export function cleanServerText(value: unknown): string {
+  const text = String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 300 ? `${text.slice(0, 299)}\u2026` : text;
+}
+
 /** A status worth a Retry button: the network or the service may come back; a refusal will not. */
 export function retryable(status: number): boolean {
   return status === 0 || status >= 500;
