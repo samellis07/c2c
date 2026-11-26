@@ -52,7 +52,7 @@ div class="c2c-app"
               "Dining Guide"
   main tabindex="-1"
     section class="c2c-card" data-form-card=""
-      h1
+      h1 tabindex="-1"
         "Restaurant"
       form data-form="Restaurant" data-layout="one" data-mode="add"
         div class="form-grid"
@@ -180,8 +180,8 @@ div class="c2c-app"
               span class="labelContent"
                 span class="labelPhase"
                   "Save"
-  nav aria-label="Tabs"
-    a aria-current="page" href="#/form/Restaurant"
+  nav aria-label="Tabs" role="tablist"
+    a aria-current="page" aria-selected="true" href="#/form/Restaurant" role="tab" tabindex="0"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -190,7 +190,7 @@ div class="c2c-app"
         path
       span
         "Restaurant"
-    a href="#/form/Visit"
+    a aria-selected="false" href="#/form/Visit" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -199,7 +199,7 @@ div class="c2c-app"
         path
       span
         "Visit"
-    a href="#/report/All_Restaurants"
+    a aria-selected="false" href="#/report/All_Restaurants" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-table c2c-icon"
         path
         rect
@@ -207,7 +207,7 @@ div class="c2c-app"
         path
       span
         "All Restaurants"
-    a href="#/page/Guide"
+    a aria-selected="false" href="#/page/Guide" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
         rect
         rect

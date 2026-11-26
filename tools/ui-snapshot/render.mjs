@@ -134,7 +134,8 @@ async function flushLazy(act, container, rounds = 200) {
     await act(async () => {
       await delay(0);
     });
-    if (!container.querySelector('[aria-busy="true"]')) return;
+    // The loading marker of a data read is the snapshot's subject, not a lazy widget.
+    if (!container.querySelector('[aria-busy="true"]:not([data-state="loading"])')) return;
   }
   throw new Error('a lazy widget never mounted (aria-busy stuck)');
 }

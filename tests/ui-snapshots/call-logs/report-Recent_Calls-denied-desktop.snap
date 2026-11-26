@@ -41,8 +41,8 @@ div class="c2c-app"
       p
         a class="c2c-link" href="#/"
           "Go to home"
-  nav aria-label="Tabs"
-    a href="#/form/Log_Call"
+  nav aria-label="Tabs" role="tablist"
+    a aria-selected="false" href="#/form/Log_Call" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -51,7 +51,7 @@ div class="c2c-app"
         path
       span
         "Log a Call"
-    a aria-current="page" href="#/report/Recent_Calls"
+    a aria-current="page" aria-selected="true" href="#/report/Recent_Calls" role="tab" tabindex="0"
       svg aria-hidden="true" class="lucide lucide-table c2c-icon"
         path
         rect

@@ -33,7 +33,7 @@ div class="c2c-app"
               "Recent Calls"
   main tabindex="-1"
     section class="c2c-card" data-form-card=""
-      h1
+      h1 tabindex="-1"
         "Log a Call"
       form data-form="Log_Call" data-layout="one" data-mode="add"
         div class="form-grid"
@@ -736,8 +736,8 @@ div class="c2c-app"
               span class="labelContent"
                 span class="labelPhase"
                   "Log Call"
-  nav aria-label="Tabs"
-    a aria-current="page" href="#/form/Log_Call"
+  nav aria-label="Tabs" role="tablist"
+    a aria-current="page" aria-selected="true" href="#/form/Log_Call" role="tab" tabindex="0"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -746,7 +746,7 @@ div class="c2c-app"
         path
       span
         "Log a Call"
-    a href="#/report/Recent_Calls"
+    a aria-selected="false" href="#/report/Recent_Calls" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-table c2c-icon"
         path
         rect

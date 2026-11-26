@@ -33,7 +33,7 @@ div class="c2c-app"
               "Recent Calls"
   main tabindex="-1"
     section class="c2c-card" data-report="Recent_Calls" data-view="list"
-      h1
+      h1 tabindex="-1"
         "Recent Calls"
       div class="c2c-report-tools"
         form class="c2c-search-form" role="search"
@@ -47,6 +47,8 @@ div class="c2c-app"
               span class="labelContent"
                 span class="labelPhase"
                   "Search"
+      p
+        "Recent Calls"
       div class="c2c-report-tools"
         label
           "Field to edit"
@@ -75,10 +77,14 @@ div class="c2c-app"
                 "Edit 0 selected"
         span aria-live="polite"
           "Maximum 25 rows per batch."
-      p class="c2c-loading" data-state="loading" role="status"
-        "Loading records…"
-  nav aria-label="Tabs"
-    a href="#/form/Log_Call"
+      div aria-busy="true" data-state="loading"
+        p class="c2c-loading" role="status"
+          "Loading records…"
+        div aria-hidden="true" class="c2c-skeleton"
+        div aria-hidden="true" class="c2c-skeleton"
+        div aria-hidden="true" class="c2c-skeleton"
+  nav aria-label="Tabs" role="tablist"
+    a aria-selected="false" href="#/form/Log_Call" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -87,7 +93,7 @@ div class="c2c-app"
         path
       span
         "Log a Call"
-    a aria-current="page" href="#/report/Recent_Calls"
+    a aria-current="page" aria-selected="true" href="#/report/Recent_Calls" role="tab" tabindex="0"
       svg aria-hidden="true" class="lucide lucide-table c2c-icon"
         path
         rect

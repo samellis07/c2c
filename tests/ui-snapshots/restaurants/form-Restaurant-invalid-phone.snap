@@ -52,7 +52,7 @@ div class="c2c-app"
               "Dining Guide"
   main tabindex="-1"
     section class="c2c-card" data-form-card=""
-      h1
+      h1 tabindex="-1"
         "Restaurant"
       form data-form="Restaurant" data-layout="one" data-mode="add"
         div class="form-grid"
@@ -60,7 +60,7 @@ div class="c2c-app"
             div class="field"
               label class="label" for="#ref"
                 "Name"
-              input aria-describedby="#ref" aria-invalid="true" class="input" name="Name" type="text"
+              input aria-describedby="#ref #ref" aria-invalid="true" class="input" name="Name" type="text"
               span class="messageSlot"
                 span class="error" role="alert"
                   span class="srOnly"
@@ -185,26 +185,31 @@ div class="c2c-app"
               label class="label" for="#ref"
                 "Website"
               input class="input" name="Website" type="url"
-        div class="alert danger c2c-banner" role="alert"
-          span class="icon"
-            span class="glyph"
-              svg aria-hidden="true" class="lucide lucide-circle-x lucide-x-circle"
-                circle
+        div class="presence"
+          div class="alert danger c2c-banner" role="alert"
+            span class="icon"
+              span class="glyph"
+                svg aria-hidden="true" class="lucide lucide-circle-x lucide-x-circle"
+                  circle
+                  path
+                  path
+            div class="copy"
+              div class="content"
+                strong class="title"
+                  span class="line"
+                    "Check the highlighted fields."
+            button aria-label="Dismiss: Check the highlighted fields." class="dismiss" type="button"
+              svg aria-hidden="true" class="lucide lucide-x"
                 path
                 path
-          div class="copy"
-            div class="content"
-              strong class="title"
-                span class="line"
-                  "Check the highlighted fields."
         div class="c2c-form-actions"
           button class="button primary md" tabindex="0" type="submit"
             span class="labelSlot"
               span class="labelContent"
                 span class="labelPhase"
                   "Save"
-  nav aria-label="Tabs"
-    a aria-current="page" href="#/form/Restaurant"
+  nav aria-label="Tabs" role="tablist"
+    a aria-current="page" aria-selected="true" href="#/form/Restaurant" role="tab" tabindex="0"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -213,7 +218,7 @@ div class="c2c-app"
         path
       span
         "Restaurant"
-    a href="#/form/Visit"
+    a aria-selected="false" href="#/form/Visit" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -222,7 +227,7 @@ div class="c2c-app"
         path
       span
         "Visit"
-    a href="#/report/All_Restaurants"
+    a aria-selected="false" href="#/report/All_Restaurants" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-table c2c-icon"
         path
         rect
@@ -230,7 +235,7 @@ div class="c2c-app"
         path
       span
         "All Restaurants"
-    a href="#/page/Guide"
+    a aria-selected="false" href="#/page/Guide" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
         rect
         rect
