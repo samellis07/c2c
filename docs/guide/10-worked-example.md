@@ -129,14 +129,29 @@ report: report/migration-report.md
 
 ```
 ## What will be converted
-- Forms: 14 ...   - Reports: 26 ...   - Pages: 1 — Dashboard
-- Workflows: 41   - Schedules: 3      - Functions: 31   - Roles: 6
+
+- Forms: 14 — Add_Academic_Info, Add_Assessor, Add_Course, ...
+- Reports: 26 — Absentees, Add_Required_Proofs_Report, All_Academic_Infos, ...
+- Pages: 1 — Dashboard
+- Workflows: 41 — Direct_to_Form_Properties, Run_Scripts_On_Always10, ...
+- Schedules: 3 — Deadline_Notification, Deadline_Notification (2), Mark_Absent
+- Functions: 31 — Absent, Admission.Apply, Admission.Cancel, ...
+- Roles: 6 — Administrator, Candidate Profile, CEO, Read, Test, Write
+
 ## Guided steps for a person
-1. Start the used services ...  2. Accept the admin invite
-3. Sign in once                 4. Verify the sender email
+
+1. **Start the used services** — In the Catalyst console, start file storage ...
+2. **Accept the admin invite** — Open the app invite email sent to the admin address and set the password.
+3. **Sign in once** — Open the deployed app URL and sign in once so the first login completes activation.
+4. **Verify the sender email** — In Catalyst Mail settings, add the sender address, ...
+
 ## App-specific manual work
-- Deadline_Notification — ... Catalyst has no per-record schedule, so it was not created.
+
+- Deadline_Notification — The schedule runs relative to each record's Admission_Deadline on Start_New_Admission ...
+  - What to do: Ask a developer to build a recurring job in Job Scheduling ...
+...
 - Mark_Absent — The schedule is created disabled for review.
+  - What to do: Enable this schedule in Job Scheduling after checking its first run time.
 ```
 
 Read it the way [chapter 5](05-reading-the-report.md) describes. This
@@ -162,8 +177,8 @@ scope: dc=in org=? project=(not created yet)
 done: 0/17
 ```
 
-Items marked `[console]` are your clicks (they match
-[your five steps](04-your-five-steps.md)). Creating the project, the
+Items marked `[console]` are your clicks in the Catalyst console (four
+of them here); [your five steps](04-your-five-steps.md) explain them. Creating the project, the
 tables, the file bucket and the sign-in settings: **needs your
 Catalyst account**. The plan also writes the table definitions it
 would import, in `plan/provision/`.
