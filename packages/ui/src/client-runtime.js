@@ -4427,6 +4427,22 @@ export function clientDecimal() {
       return new Dec(signed < 0n ? -signed : signed, scale, signed < 0n);
     }
 
+    /** Round half away from zero to `places` fractional digits (same rules as shims/src/decimal.ts quantize). */
+    quantize(places) {
+      if (!Number.isInteger(places) || places < 0) throw new Error('decimal: bad scale ' + places);
+      if (places >= this.scale) {
+        const digits = this.digits * 10n ** BigInt(places - this.scale);
+        return new Dec(digits, places, this.neg && digits !== 0n);
+      }
+      const factor = 10n ** BigInt(this.scale - places);
+      const signed = this.signed();
+      const q = signed / factor;
+      const rem = signed % factor;
+      const remAbs = rem < 0n ? -rem : rem;
+      const bump = remAbs * 2n >= factor ? (signed < 0n ? -1n : 1n) : 0n;
+      return Dec.fromSigned(q + bump, places);
+    }
+
     add(other) {
       const b = Dec.from(other);
       const [ad, bd, scale] = Dec.align(this, b);
@@ -4518,7 +4534,7 @@ export function clientDecimal() {
     throw new Error('decimal: bad compare ' + op);
   }
 
-  return {
+  const api = {
     from(value) {
       return Dec.from(value).toString();
     },
@@ -4536,6 +4552,12 @@ export function clientDecimal() {
     },
     cmp,
   };
+  // Internal to math.round: not part of the decimal surface the translator may emit.
+  Object.defineProperty(api, 'quantize', {
+    value: (a, places) => Dec.from(a).quantize(places).toString(),
+    enumerable: false,
+  });
+  return api;
 }
 
 /**
@@ -6351,7 +6373,13 @@ export function browserShimSurface(fetchImpl) {
         const n = typeof value === 'number' ? value : Number(value);
         const p = Number(places);
         if (!Number.isFinite(n)) return n;
-        const f = 10 ** (Number.isFinite(p) ? p : 0);
+        const digits = Number.isFinite(p) ? p : 0;
+        if (Number.isInteger(digits) && digits >= 0) {
+          // The decimal text rounds, not its binary double: 1.005 -> 1.01 (same as number.ts).
+          const rounded = Number(clientDecimal().quantize(String(n), digits));
+          return rounded === 0 && (n < 0 || Object.is(n, -0)) ? -0 : rounded;
+        }
+        const f = 10 ** digits;
         const x = n * f;
         if (x < 0) return -Math.round(-x) / f;
         return Math.round(x) / f;

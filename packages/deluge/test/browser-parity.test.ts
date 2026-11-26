@@ -345,8 +345,8 @@ test('string.trim, getPrefix and getSuffix agree on both runtimes', async () => 
 test('math.round agrees on both runtimes, bigint and negative halves included', async () => {
   const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
   const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
-  const values: unknown[] = [1.5, -1.5, 2.675, -2.675, 0, '3.14159', 7n, 9007199254740993n, Number.NaN, Number.POSITIVE_INFINITY, null, 'abc', 1234.5678];
-  const places: unknown[] = [0, 1, 2, -1, 'x', null];
+  const values: unknown[] = [1.5, -1.5, 2.675, -2.675, 0, '3.14159', 7n, 9007199254740993n, Number.NaN, Number.POSITIVE_INFINITY, null, 'abc', 1234.5678, 1.005, 1.255, -1.005, -0, -0.001, 0.001, 1e21, 5e-324, 123456789.125, 8.345, 0.5, 2.5, -2.5];
+  const places: unknown[] = [0, 1, 2, 3, 20, -1, 'x', null];
   for (const value of values) {
     for (const p of places) {
       const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
