@@ -15,12 +15,12 @@
  * network, sorted file lists.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
 import { REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
-import { generateUi, serviceWorker, slateConfigSource, appTimeZone, clientRuntimeSource, stampUploadCap } from '../../ui/src/generate.js';
+import { backgroundBytes, generateUi, serviceWorker, slateConfigSource, appTimeZone, clientRuntimeSource, stampUploadCap } from '../../ui/src/generate.js';
 import { functionOriginFromApiBase, shellContentSecurityPolicy } from '../../ui/src/csp.js';
 import { solidPng } from '../../ui/src/build.js';
 import type { UiField, UiHandler, UiModel } from '../../ui/src/model.js';
@@ -110,8 +110,10 @@ function fieldSpec(field: UiField): FieldSpec {
   if (field.accept !== undefined) spec.accept = field.accept;
   if (field.uploadEndpoint !== undefined) spec.uploadEndpoint = field.uploadEndpoint;
   if (field.uploadSources !== undefined) spec.uploadSources = field.uploadSources;
+  if (field.browseSources !== undefined) spec.browseSources = field.browseSources;
   if (field.scan && field.scanner) spec.scanner = { camera: field.scanner.camera, formats: [...field.scanner.formats], gallery: field.scanner.gallery, onload: field.scanner.onload };
   if (field.scan && field.scanner && field.switchCamera) spec.switchCamera = true;
+  if (field.media) spec.media = { camera: field.media.camera, ...(field.media.recordSeconds !== undefined ? { recordSeconds: field.media.recordSeconds } : {}), ...(field.media.annotate ? { annotate: true } : {}), ...(field.media.onload ? { onload: true } : {}) };
   if (field.captureCoordinates) spec.captureCoordinates = true;
   if (field.adjustUsingMap) spec.adjustUsingMap = true;
   if (field.imageLink) spec.imageLink = true;
@@ -183,6 +185,7 @@ export function reactAppSpec(app: App, model: UiModel = generateUi(app).model, f
       ...(form.phoneLayout ? { phoneLayout: form.phoneLayout } : {}),
       fields: form.fields.map(fieldSpec),
       submitEndpoint: form.submitEndpoint,
+      ...(form.capturesLocation ? { capturesLocation: true } : {}),
       ...(form.editSubmitEndpoint ? { editSubmitEndpoint: form.editSubmitEndpoint } : {}),
       recordEndpoint: form.recordEndpoint,
       deleteEndpoint: form.deleteEndpoint,
@@ -552,6 +555,10 @@ export function generateReactApp(app: App, opts: ReactGenerateOptions = {}): Rea
   const rgb = iconColorRgb(ui.model.theme?.iconColor);
   gen('public/icons/icon-192.png', solidPng(192, rgb));
   gen('public/icons/icon-512.png', solidPng(512, rgb));
+  for (const path of ui.model.backgroundAssets ?? []) {
+    const bytes = backgroundBytes(app, path);
+    if (bytes) gen(`public/${path}`, bytes);
+  }
 
   // Creator client handlers reuse the same generated modules the vanilla
   // target emits (client/handlers/*.mjs), copied verbatim as lazy TS modules
@@ -597,6 +604,69 @@ export class HandEditedError extends Error {
   }
 }
 
+/** What `writeReactApp` would do with `files` in `out`, without touching the disk. */
+export interface WritePlan {
+  /** Files that do not exist in `out` yet. */
+  added: string[];
+  /** Files rewritten with different bytes (generated files, and platform files when `upgradePlatform`). */
+  replaced: string[];
+  /** Files already identical to the new output. */
+  unchanged: string[];
+  /** Existing custom files, and platform files without `upgradePlatform`: never overwritten. */
+  kept: string[];
+  /** Generated files the app no longer has. */
+  removed: string[];
+  /** Generated files whose bytes no longer match the recorded hash; a write stops on these unless `force`. */
+  edited: string[];
+}
+
+function safeGeneratedPath(rawOut: string, path: string): string {
+  // Normalise first: './ui5' and 'ui5//' must be walked exactly like 'ui5'.
+  const out = resolve(rawOut);
+  if (!path || isAbsolute(path) || /[\\\u0000-\u001f\u007f]/.test(path) || path.split('/').some((p) => !p || p === '.' || p === '..')) throw new Error('React app manifest names an unsafe path');
+  const dest = join(out, ...path.split('/'));
+  // Ancestors above the output root may be aliases (for example macOS /tmp);
+  // only the output tree itself must not redirect writes.
+  let probe = out;
+  try { if (lstatSync(probe).isSymbolicLink()) throw new Error('React app output path must not contain a symbolic link'); }
+  catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+  let ancestor = dirname(dest);
+  while (ancestor !== out && ancestor.startsWith(out + sep)) {
+    try { if (lstatSync(ancestor).isSymbolicLink()) throw new Error('React app manifest names a path through a symbolic link'); }
+    catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+    const parent = dirname(ancestor); if (parent === ancestor) break; ancestor = parent;
+  }
+  const rel = relative(out, dest);
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('React app manifest names a path outside the app');
+  try {
+    const leaf = lstatSync(dest);
+    if (leaf.isSymbolicLink() || (leaf.isFile() && leaf.nlink > 1)) throw new Error('React app generated path must not be a symbolic link or hard link');
+  } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+  return dest;
+}
+
+export function planReactWrite(out: string, files: readonly ReactFile[], opts: { upgradePlatform?: boolean } = {}): WritePlan {
+  const plan: WritePlan = { added: [], replaced: [], unchanged: [], kept: [], removed: [], edited: [] };
+  const manifestPath = join(out, GENERATED_MANIFEST);
+  const previous: Record<string, string> = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> }).files : {};
+  plan.edited = Object.entries(previous)
+    .filter(([path, hash]) => existsSync(safeGeneratedPath(out, path)) && sha256(readFileSync(safeGeneratedPath(out, path))) !== hash)
+    .map(([path]) => path)
+    .sort();
+  const next = new Set(files.map((f) => f.path));
+  plan.removed = Object.keys(previous)
+    .filter((path) => !next.has(path) && existsSync(safeGeneratedPath(out, path)))
+    .sort();
+  for (const file of files) {
+    const dest = safeGeneratedPath(out, file.path);
+    if (!existsSync(dest)) plan.added.push(file.path);
+    else if (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform)) plan.kept.push(file.path);
+    else if (Buffer.compare(readFileSync(dest), Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data)) === 0) plan.unchanged.push(file.path);
+    else plan.replaced.push(file.path);
+  }
+  return plan;
+}
+
 /**
  * Write the app into `out`. A first generation writes every file. Into an
  * existing app it rewrites the generated files only, removes generated files
@@ -610,18 +680,18 @@ export function writeReactApp(out: string, files: readonly ReactFile[], opts: { 
   const manifestPath = join(out, GENERATED_MANIFEST);
   const previous: Record<string, string> = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> }).files : {};
   const edited = Object.entries(previous)
-    .filter(([path, hash]) => existsSync(join(out, path)) && sha256(readFileSync(join(out, path))) !== hash)
+    .filter(([path, hash]) => existsSync(safeGeneratedPath(out, path)) && sha256(readFileSync(safeGeneratedPath(out, path))) !== hash && !files.some((f) => f.path === path && sha256(f.data) === sha256(readFileSync(safeGeneratedPath(out, path)))))
     .map(([path]) => path)
     .sort();
   if (edited.length && !opts.force) throw new HandEditedError(edited);
   const next = new Set(files.map((f) => f.path));
   for (const path of Object.keys(previous).sort()) {
-    if (next.has(path) || !existsSync(join(out, path))) continue;
-    rmSync(join(out, path));
+    if (next.has(path) || !existsSync(safeGeneratedPath(out, path))) continue;
+    rmSync(safeGeneratedPath(out, path));
     result.removed.push(path);
   }
   for (const file of files) {
-    const dest = join(out, file.path);
+    const dest = safeGeneratedPath(out, file.path);
     mkdirSync(dirname(dest), { recursive: true });
     if (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform)) {
       // Create-only: a file present here must have existed when this write

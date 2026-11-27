@@ -423,3 +423,12 @@ test('deleting a record with subform rows deletes them too, pinned by the child 
   assert.match(parallel.evidence.join('\n'), /parallel-run delta: 1 new, 1 changed, 3 deleted/);
   assert.deepEqual(JSON.parse(readFileSync(join(work, 'export-1/counts.json'), 'utf8')), { Order: 30, Order__Lines: 43 });
 });
+
+// A multi lookup is a junction table. Its total is pinned in the export's counts.json like a subform's, so a
+// record deleted in Creator can delete its lookup rows; without it the final delta refuses and never converges.
+const GALLERY = process.env.C2C_GALLERY_DIR;
+test('an app with lookup junction tables: parallel run, freeze, final delta and verify pass', { skip: !GALLERY && 'needs C2C_GALLERY_DIR' }, async () => {
+  const report = await run(join(GALLERY!, 'approval-management'));
+  const status = statuses(report);
+  for (const id of ['D10.parallel-run', 'D10.final-delta', 'D10.freeze', 'D10.verify', 'D10.reverse-sync', 'D10.rollback']) assert.equal(status[id], 'PASS', `${id}: ${report.criteria.find((item) => item.id === id)?.reason ?? ''}`);
+});

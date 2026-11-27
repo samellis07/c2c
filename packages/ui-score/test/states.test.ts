@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { buildUi } from '../../ui/src/index.js';
 import { bundleFromFiles, createFakeApi, scoreUi, type UiScore } from '../src/score.js';
-import { OWNER, STATE_OWNER_ISSUES, checkUiStates, type StateVerdict } from '../src/states.js';
+import { OWNER, STATE_OWNER_ISSUES, checkUiStates, type StateVerdict, reducedMotionCoverage } from '../src/states.js';
 
 function field(name: string, type: string, extra = '', modifiers = ''): string {
   const head = modifiers ? `${modifiers} ${name}` : name;
@@ -58,7 +58,7 @@ const byState = (verdicts: StateVerdict[], state: string): StateVerdict | undefi
 test('the vanilla bundle passes the states it already ships and xfails the rest under their issues', async () => {
   const verdicts = await run();
   const states = verdicts.map((v) => v.state);
-  for (const state of ['loading', 'empty', 'error', 'invalid', 'submitting', 'confirm-open', 'row-rollback', 'toast', 'offline', 'session-expired', 'denied', 'not-found', 'crash', 'route-focus', 'reduced-motion']) {
+  for (const state of ['loading', 'empty', 'error', 'invalid', 'submitting', 'confirm-open', 'row-rollback', 'toast', 'offline', 'session-expired', 'denied', 'not-found', 'crash', 'route-focus', 'reduced-motion', 'pagination', 'disabled', 'long-text']) {
     assert.ok(states.includes(state), `missing verdict row ${state}`);
   }
   // Already shipped on vanilla: loading (skeleton+status), empty with the form
@@ -68,37 +68,30 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   // responses, so the table survives the error and the retry re-queries.
   // invalid also shipped: a field error is the control's description, marks
   // it aria-invalid, and an invalid submit moves focus to the first one.
-  for (const state of ['loading', 'empty', 'error', 'invalid']) {
+  for (const state of ['loading', 'empty', 'error', 'invalid', 'not-found', 'toast', 'server-field-error', 'route-focus']) {
     const v = byState(verdicts, state)!;
     assert.equal(v.status, 'pass', `${state}: ${v.evidence}`);
   }
   // The string-render runtime carries a named waiver for the crash row.
   assert.equal(byState(verdicts, 'crash')!.status, 'waived');
-  // Everything a tracked issue owns reports an expected-fail naming the issue.
-  for (const [state, issue] of Object.entries({
-    'confirm-open': 'ux-confirm-pending',
-    submitting: 'ux-confirm-pending',
-    toast: 'ux-toasts-field-errors',
-    offline: 'ux-offline-session',
-    'server-field-error': 'ux-toasts-field-errors',
-    'session-expired': 'ux-offline-session',
-    denied: 'ux-offline-session',
-    'not-found': 'ux-loading-empty-not-found',
-    'route-focus': 'ux-focus-motion',
-  })) {
-    const v = byState(verdicts, state);
-    assert.ok(v, `no verdict for ${state}`);
-    if (v.status === 'skip') continue;
-    assert.equal(v.status, 'fail', `${state}: ${v.evidence}`);
-    assert.equal(v.issue, issue, `${state}: issue`);
-  }
+  // Every state owned by a tracked issue now ships on vanilla; the rows below may only fail under their issue.
   // Rows vanilla may already satisfy: a pass is fine, a fail must still name
   // its issue.
-  for (const [state, issue] of Object.entries({ 'reduced-motion': 'ux-focus-motion', 'empty-filtered': 'ux-loading-empty-not-found', 'row-rollback': 'ux-confirm-pending' })) {
+  for (const [state, issue] of Object.entries({ 'reduced-motion': 'ux-focus-motion', 'empty-filtered': 'ux-loading-empty-not-found', 'row-rollback': 'ux-confirm-pending', submitting: 'ux-confirm-pending', pagination: 'ux-pagination-overflow', disabled: 'ux-pagination-overflow', 'long-text': 'ux-pagination-overflow' })) {
     const v = byState(verdicts, state);
     if (!v || v.status !== 'fail') continue;
     assert.equal(v.issue, issue, `${state}: issue`);
   }
+});
+
+test('vanilla confirms a destructive row action in a dialog, rolls back a failed delete and guards a double submit', async () => {
+  const verdicts = await run();
+  for (const state of ['confirm-open', 'row-rollback', 'submitting', 'disabled']) {
+    const v = byState(verdicts, state);
+    assert.ok(v, `no verdict for ${state}`);
+    assert.notEqual(v.status, 'fail', `${state}: ${v.evidence}`);
+  }
+  assert.equal(byState(verdicts, 'confirm-open')!.status, 'pass');
 });
 
 test('every xfail owner is a real issue id — a phantom name fails', () => {
@@ -184,4 +177,43 @@ test('the invalid row reads a fresh form even when earlier rows left the same ro
   const verdicts = await checkUiStates(dirty, bundle, { ui: 'vanilla' });
   const v = byState(verdicts, 'invalid')!;
   assert.equal(v.status, 'pass', `invalid: ${v.evidence}`);
+});
+
+test('checkUiStates observes unhandled rejections for the length of the run only, and leaves no listener behind', async () => {
+  const before = process.listenerCount('unhandledRejection');
+  const seen: number[] = [];
+  const probe = (): void => void seen.push(process.listenerCount('unhandledRejection'));
+  const bundle = bundleFromFiles(buildUi(app()).files);
+  const running = checkUiStates(app(), bundle, { ui: 'vanilla' });
+  probe();
+  await running;
+  assert.equal(seen[0], before + 1, 'an observer is installed while the gate runs, so a stray app rejection cannot end the process');
+  assert.equal(process.listenerCount('unhandledRejection'), before, 'and removed when it is done');
+});
+
+test('vanilla offline, expired-session and denied rows pass: re-fetch once online, sign-in prompt, no dead Retry', async () => {
+  const verdicts = await run();
+  for (const state of ['offline', 'session-expired', 'denied']) {
+    const v = byState(verdicts, state)!;
+    assert.equal(v.status, 'pass', `${state}: ${v.evidence}`);
+  }
+});
+
+test('the reduced-motion row needs a reduce override for EVERY animated selector, not any reduce block', () => {
+  const animated = '.pulse { animation: pulse 1s infinite; } .fade { transition: opacity .2s; }';
+  // An unrelated reduce block does not cover them.
+  const unrelated = `${animated} @media (prefers-reduced-motion: reduce) { .other { animation: none; } }`;
+  const bad = reducedMotionCoverage(unrelated);
+  assert.equal(bad.kills, false);
+  assert.deepEqual(bad.uncovered, ['.pulse', '.fade']);
+  // One selector covered, one not: still a fail, and it names the missing one.
+  const partial = `${animated} @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }`;
+  assert.deepEqual(reducedMotionCoverage(partial).uncovered, ['.fade']);
+  // Every selector with its own override passes; so does a universal rule.
+  const both = `${animated} @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } .fade { transition: none; } }`;
+  assert.equal(reducedMotionCoverage(both).kills, true);
+  const universal = `${animated} @media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }`;
+  assert.equal(reducedMotionCoverage(universal).kills, true);
+  // A stylesheet that animates nothing has nothing to prove: the row stays a fail rather than a vacuous pass.
+  assert.equal(reducedMotionCoverage('.a { color: red; }').kills, false);
 });

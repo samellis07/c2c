@@ -1,3 +1,4 @@
+import { loadRemoteAssets } from './remote-assets.js';
 import { closeSync, constants, fstatSync, openSync, readFileSync, readdirSync, type Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { NO_FOLLOW_READ_FLAGS, entryKind, isAbsentError, isSymlinkRefusedError, isUnopenableError, openKind } from './fs-kind.js';
@@ -87,6 +88,8 @@ export function parseFileOrProjectWithSidecars(target: string): { files: ParsedF
   const file = parseBytes(target, bytes);
   const widgets = listWidgetSidecars(dirname(target));
   if (widgets.length) file.ir.widgets = widgets;
+  const remoteAssets = loadRemoteAssets(dirname(target));
+  if (remoteAssets.length) file.ir.remoteAssets = remoteAssets;
   return { files: [file], ir: file.ir };
 }
 
@@ -290,6 +293,8 @@ export function parseFileWithSidecars(path: string): ParsedFile {
   const file = parseFile(path);
   const widgets = listWidgetSidecars(dirname(path));
   if (widgets.length) file.ir.widgets = widgets;
+  const remoteAssets = loadRemoteAssets(dirname(path));
+  if (remoteAssets.length) file.ir.remoteAssets = remoteAssets;
   return file;
 }
 
@@ -309,6 +314,8 @@ export function parseProject(dir: string): { files: ParsedFile[]; ir: App } {
   ir.files = files.map((f) => relative(dir, f.path).split(sep).join('/'));
   const widgets = listWidgetSidecars(dir);
   if (widgets.length) ir.widgets = widgets;
+  const remoteAssets = loadRemoteAssets(dir);
+  if (remoteAssets.length) ir.remoteAssets = remoteAssets;
   return { files, ir };
 }
 

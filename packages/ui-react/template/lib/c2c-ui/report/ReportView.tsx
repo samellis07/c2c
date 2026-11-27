@@ -26,18 +26,20 @@ import { Alert } from '../arc/components/alert/alert';
 import { Button } from '../arc/components/button/button';
 import { EmptyState } from '../arc/components/empty-state/empty-state';
 import { FilterToolbar } from '../arc/components/filter-toolbar/filter-toolbar';
+import { Dialog, DialogContent } from '../arc/components/dialog/dialog';
 import { Pagination } from '../arc/components/pagination/pagination';
 import { SortableDataTable, type DataColumn, type SortState } from '../arc/components/sortable-data-table/sortable-data-table';
 import type { AppSpec, FormSpec, ReportSpec } from '../types';
 import { formattedNumber } from '../number-format';
 import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
-import { actionNavHref, hrefFor, navNeedsRow, reportClickFilter, useLocationHash } from '../runtime/router';
+import { actionNavHref, hrefFor, navNeedsRow, reportClickFilter, useLocationHash, useOnline } from '../runtime/router';
 import { performActionNav, type ActionNavInstruction } from '../runtime/navigation';
-import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
+import { cleanServerText, failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { matchCriteria } from './criteria';
 import { MapPlot } from './MapView';
 import { PrintSheet } from './PrintSheet';
+import { MAX_EXPORT_ROWS, boundRows, buildCsv, buildXlsx, downloadFile, exportFilename, type DownloadWindow } from './export';
 import { multiValueItems } from '../form/value';
 import { isSafeStyleProperty, isSafeStyleValue, STYLE_TEXT_MAX } from '../style-allowlist';
 import { displayDateValue, type DateKind } from '../form/dates';
@@ -78,7 +80,7 @@ function navigationControl(nav: Parameters<typeof actionNavHref>[0], row: Row | 
 
 /** The notice line for a refused or failed row/header action. */
 function actionFailure(status: number, fallback: string): string {
-  return failureText(status) || fallback;
+  return failureText(status) || cleanServerText(fallback);
 }
 
 /** A cell's text: composite values joined, lists comma-separated, decisions as Yes/No, file references by name. */
@@ -124,6 +126,23 @@ export function buildQuery(report: ReportSpec, opts: { page: number; q: string; 
     ? [{ field: opts.sort.key, order: opts.sort.direction === 'desc' ? 'descending' : 'ascending' }]
     : report.sort.map((s) => ({ field: s.field, ...(s.order ? { order: s.order } : {}) }));
   return { op: 'query', page: opts.page, pageSize: report.pageSize, sort, q: opts.q, filter: opts.filter };
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A timeline lane key: the ISO day of the start value, or the ISO date of the week's first day. '' when the value has no day. */
+export function timelineLaneKey(value: unknown, weekStartDay?: 'monday' | 'sunday'): string {
+  const day = String(value ?? '').trim().split(/[ T]/)[0] ?? '';
+  const named = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(day);
+  const iso = named ? `${named[3]}-${String(MONTHS.indexOf(named[2]!) + 1).padStart(2, '0')}-${named[1]!.padStart(2, '0')}` : day;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  const date = new Date(`${iso}T00:00:00Z`);
+  // An impossible day (2026-02-30, month 13, day 00) is no lane: the date must round-trip to the same ISO day.
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return '';
+  if (!weekStartDay) return iso;
+  const dow = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() - (weekStartDay === 'sunday' ? dow : dow === 0 ? 6 : dow - 1));
+  return date.toISOString().slice(0, 10);
 }
 
 /** Group rows in first-seen order, like the export's lanes. Keys are display text; '' is the empty group. */
@@ -199,7 +218,7 @@ export function ReportView({ report, row, asList }: { report: ReportSpec; row?: 
   // Embedded on a page a non-list report still draws its records, as the list
   // table; the standalone route keeps the pending-view stub. A map draws pins.
   if (report.view === 'map' && !asList) return <ReportList report={report} />;
-  if (report.view !== 'list' && !asList) return <ViewStub report={report} />;
+  if (report.view !== 'list' && !(report.view === 'timeline' && report.startField) && !asList) return <ViewStub report={report} />;
   return <ReportList report={report} />;
 }
 
@@ -250,7 +269,7 @@ function ViewStub({ report }: { report: ReportSpec }) {
 }
 
 function ReportList({ report }: { report: ReportSpec }) {
-  const { api, spec, view } = useEnv();
+  const { api, spec, view, doc } = useEnv();
   const fieldText = (field: string, value: unknown) => reportFieldText(report, spec, view, field, value);
   const custom = useCustomization();
   const own = custom.reports?.[report.name];
@@ -274,6 +293,9 @@ function ReportList({ report }: { report: ReportSpec }) {
   const [attempt, setAttempt] = useState(0);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const [printView, setPrintView] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const deleteTrigger = useRef<HTMLElement | null>(null);
   const [selectedRows, setSelectedRows] = useState<ReadonlySet<string>>(new Set());
   const [bulkField, setBulkField] = useState('');
   const [bulkValue, setBulkValue] = useState('');
@@ -308,6 +330,19 @@ function ReportList({ report }: { report: ReportSpec }) {
   }, [api, deny, report.queryEndpoint, bodyText, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  // Coming back online re-reads the report once, so a read that failed offline does not stay on its error.
+  const online = useOnline(view);
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnline.current) retry();
+    wasOnline.current = online;
+  }, [online, retry]);
+  const clearSearch = useCallback(() => {
+    setQuery('');
+    setQ('');
+    setChoice(null);
+    setPage(0);
+  }, []);
   const search = useCallback(
     (event: { preventDefault(): void }) => {
       event.preventDefault();
@@ -362,7 +397,6 @@ function ReportList({ report }: { report: ReportSpec }) {
     (rowId: string) => {
       const endpoint = report.deleteEndpoint;
       if (!endpoint) return;
-      if (typeof view.confirm !== 'function' || view.confirm(DELETE_CONFIRM_TEXT) !== true) return;
       api.post(endpoint, { ROWID: rowId }).then(
         (reply) => {
           if (reply.status === 403) {
@@ -494,7 +528,11 @@ function ReportList({ report }: { report: ReportSpec }) {
               </a>
             ) : null}
             {deletable && id ? (
-              <Button type="button" variant="secondary" size="sm" data-row-delete="" onClick={() => removeRow(id)}>
+              <Button type="button" variant="secondary" size="sm" data-row-delete="" onClick={(event) => {
+                  deleteTrigger.current = event.currentTarget;
+                  setPendingDelete(id);
+                }}
+              >
                 Delete
               </Button>
             ) : null}
@@ -526,9 +564,40 @@ function ReportList({ report }: { report: ReportSpec }) {
   const named = report.filters.map((f) => f.label).filter((label): label is string => !!label);
   // A field-only filter has no criteria to offer; name it instead of dropping it silently.
   const groupField = report.groupBy[0]?.field;
-  const groups = groupField ? groupRows(shown, groupField, (value) => fieldText(groupField, value)) : null;
+  // A timeline lays its rows in lanes by the start date (the week when `week start day` is set); an explicit group-by wins.
+  const timelineStart = report.view === 'timeline' ? report.startField : undefined;
+  const groups = groupField
+    ? groupRows(shown, groupField, (value) => fieldText(groupField, value))
+    : timelineStart
+      ? groupRows(shown, timelineStart, (value) => {
+          const key = timelineLaneKey(value, report.weekStartDay);
+          return key ? (displayDateValue(key, 'date', { dateFormat: spec.dateFormat }) ?? key) : '–';
+        })
+      : null;
   const showPages = load.state === 'ready' && (page > 0 || live.length >= report.pageSize);
   const headerActions = report.customActions.filter((a) => a.header === true && !(a.navigate && navNeedsRow(a.navigate)));
+
+  // Export and print carry what the table shows: the same columns (action and
+  // select columns are not data), the same rows in the same order after the
+  // search and filter, and the same cell text. A blank cell exports as the table's own blank mark.
+  const exportRows = groups ? groups.flatMap((group) => group.rows) : shown;
+  const exportColumns = report.columns.filter((c) => !c.action).map((c) => ({ key: c.field, label: c.label }));
+  const exportCell = (row: Row, field: string): string => {
+    const value = row[field];
+    const column = report.columns.find((c) => c.field === field);
+    const custom = own?.cells?.[field]?.(value, row);
+    if (typeof custom === 'string' || typeof custom === 'number') return String(custom);
+    return column?.multiValue ? formatValue(multiValueItems(value)) : fieldText(field, value);
+  };
+  const runExport = (kind: 'csv' | 'xlsx') => {
+    const bound = boundRows(exportRows.map((row) => exportColumns.map((c) => exportCell(row, c.key))));
+    const name = exportFilename(report.label, kind);
+    if (kind === 'csv') downloadFile(view as unknown as DownloadWindow, name, 'text/csv;charset=utf-8', buildCsv(exportColumns, bound.rows));
+    else downloadFile(view as unknown as DownloadWindow, name, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buildXlsx(report.label, exportColumns, bound.rows));
+    const more = showPages ? ` This is page ${page + 1}; other pages are not included.` : '';
+    setActionNote(bound.truncated ? `Exported the first ${MAX_EXPORT_ROWS} rows; ${bound.truncated} more were left out.${more}` : `Exported ${bound.rows.length} ${bound.rows.length === 1 ? 'row' : 'rows'} to ${name}.${more}`);
+  };
+  const canExport = load.state === 'ready' && exportRows.length > 0 && report.view !== 'map';
 
   const table = (rows: Row[], caption: string) =>
     Table ? (
@@ -579,8 +648,39 @@ function ReportList({ report }: { report: ReportSpec }) {
           </Button>
           ),
         )}
+        {canExport ? (
+          <>
+            {report.showExport === false ? null : (
+              <>
+                <Button type="button" variant="secondary" size="sm" data-export="csv" onClick={() => runExport('csv')}>
+                  Export CSV
+                </Button>
+                <Button type="button" variant="secondary" size="sm" data-export="xlsx" onClick={() => runExport('xlsx')}>
+                  Export XLSX
+                </Button>
+              </>
+            )}
+            <Button type="button" variant="secondary" size="sm" data-print="" onClick={() => setPrintView(true)}>
+              Print
+            </Button>
+          </>
+        ) : null}
         <Slot>{own?.slots?.toolbar}</Slot>
       </div>
+      {printView ? (
+        <div className="c2c-report-tools" data-print-view="">
+          <Button type="button" variant="secondary" size="sm" data-print-now="" onClick={() => view.print()}>
+            Print now
+          </Button>
+          <Button type="button" variant="secondary" size="sm" data-print-close="" onClick={() => setPrintView(false)}>
+            Close
+          </Button>
+          <p data-print-hint="">Use the print dialog to save a PDF.</p>
+        </div>
+      ) : null}
+      <p data-print-only="" data-print-filters="">
+        {[report.label, chosen ? `Filter: ${chosen}` : '', q ? `Search: ${q}` : ''].filter(Boolean).join(' | ')}
+      </p>
       {canBulkEdit ? (
         <div className="c2c-report-tools" data-bulk-edit>
           <label>
@@ -608,10 +708,42 @@ function ReportList({ report }: { report: ReportSpec }) {
         </div>
       ) : null}
       {actionNote ? (
-        <p className="c2c-notice" role="status">
-          {actionNote}
-        </p>
+        <div className="c2c-notice c2c-toast" role={/not |failed|did not/i.test(actionNote) ? 'alert' : 'status'} data-toast="" data-kind={/not |failed|did not/i.test(actionNote) ? 'error' : 'success'}>
+          <span>{actionNote}</span>
+          <Button type="button" variant="secondary" size="sm" aria-label="Dismiss message" onClick={() => setActionNote(null)}>
+            Dismiss
+          </Button>
+        </div>
       ) : null}
+      <Dialog open={pendingDelete !== null} onOpenChange={(next) => { if (!next) setPendingDelete(null); }}>
+        <DialogContent
+          role="alertdialog"
+          container={doc.body ?? doc.documentElement}
+          title="Delete this record?"
+          description={DELETE_CONFIRM_TEXT}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            deleteTrigger.current?.focus();
+          }}
+        >
+          <div className="c2c-confirm-actions">
+            <Button type="button" variant="secondary" onClick={() => setPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              data-confirm-delete=""
+              onClick={() => {
+                const id = pendingDelete;
+                setPendingDelete(null);
+                if (id) removeRow(id);
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       {previewEndpoints.size ? <p className="todo" data-action-preview>{previewActionsNote(report.customActions.filter((a) => a.preview).map((a) => a.name.trim()))}</p> : null}
       {report.note ? <p className="todo" data-report-note>{report.note}</p> : null}
       {report.showRecordCount && load.state === 'ready' ? (
@@ -620,14 +752,33 @@ function ReportList({ report }: { report: ReportSpec }) {
         </p>
       ) : null}
       {load.state === 'loading' ? (
-        <p className="c2c-loading" data-state="loading" role="status">
-          Loading records…
-        </p>
+        <div data-state="loading" aria-busy="true">
+          <p className="c2c-loading" role="status">
+            Loading records…
+          </p>
+          {[0, 1, 2].map((n) => (
+            <div key={n} className="c2c-skeleton" data-skeleton="" aria-hidden="true" />
+          ))}
+        </div>
       ) : load.state === 'error' ? (
         <LoadError status={load.status} what="records" onRetry={retry} />
       ) : shown.length === 0 ? (
         <div data-state="empty">
-          {Empty ? <Empty report={report} /> : <EmptyState title="No records found" description={needle || filter ? 'No record matches.' : 'Records added through the form appear here.'} />}
+          {Empty ? <Empty report={report} /> : <EmptyState
+              title="No records found"
+              description={needle || filter ? 'No record matches.' : 'Records added through the form appear here.'}
+              action={
+                needle || chosen !== '' ? (
+                  <Button type="button" variant="secondary" size="sm" onClick={clearSearch}>
+                    Clear search
+                  </Button>
+                ) : report.form && spec.forms[report.form] ? (
+                  <a className="c2c-link" href={hrefFor('form', report.form)}>
+                    Add a record
+                  </a>
+                ) : undefined
+              }
+            />}
         </div>
       ) : report.view === 'map' ? (
         <MapPlot report={report} rows={shown} />

@@ -1,0 +1,445 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Appointment Management",
+  "cases": [
+    {
+      "id": "service-unique-and-time-mandatory",
+      "notes": [
+        "Add_Services: must have unique Service; must have Service_Time"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Services",
+          "record": {
+            "Service": "Cut"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Services",
+          "record": {
+            "Service": "Cut",
+            "Service_Time": 30
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Services",
+          "record": {
+            "Service": "Cut",
+            "Service_Time": 45
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Services": [
+            {
+              "Service": "Cut",
+              "Service_Time": 30
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "customer-email-unique",
+      "notes": [
+        "Add_Customer: must have unique Customer_Email"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {},
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Customer_Email": "c1@example.test"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Customer",
+          "record": {
+            "Customer_Email": "c1@example.test"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Customer": [
+            {
+              "Customer_Email": "c1@example.test"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "review-satisfactory-level-initial-value",
+      "notes": [
+        "initial value Satisfactory_Level = Very Satisfied; Review_About=Service with a Service picked passes the on validate check"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Services",
+          "record": {
+            "Service": "Cut",
+            "Service_Time": 30
+          },
+          "bind": {
+            "s": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Review",
+          "record": {
+            "Review_About": "Service",
+            "Service": "<ref:s>",
+            "Review": "ok"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Review": [
+            {
+              "Review_About": "Service",
+              "Satisfactory_Level": "Very Satisfied",
+              "Review": "ok"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "review-about-service-without-service-cancel-submit",
+      "notes": [
+        "on validate: Review_About==\"Service\" && Service==null -> cancel submit"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Review",
+          "record": {
+            "Review_About": "Service"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Review": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "review-about-staff-without-staff-cancel-submit",
+      "notes": [
+        "on validate: Review_About==\"Staff\" && Staff_Name==null -> cancel submit"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Review",
+          "record": {
+            "Review_About": "Staff"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Review": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "booking-in-past-cancel-submit",
+      "notes": [
+        "on validate: Schedule_Date_Time <= currenttime (and < currenttime+1h) -> cancel submit"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Branch",
+          "record": {
+            "Branch_Name": "Main",
+            "Branch_Address": {
+              "address_line_1": "1 Road"
+            },
+            "Branch_Admin_Name": "Admin One",
+            "Branch_Admin_Email": "admin@example.test"
+          },
+          "bind": {
+            "b": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Setup",
+          "record": {
+            "Company_Name": "Acme",
+            "Company_Email": "co@example.test",
+            "Add_Branch": [
+              "<ref:b>"
+            ]
+          },
+          "bind": {
+            "co": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Services",
+          "record": {
+            "Service": "Cut",
+            "Service_Time": 30,
+            "Branches": [
+              "<ref:b>"
+            ]
+          },
+          "bind": {
+            "s": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Staffs",
+          "record": {
+            "Company_Name": "<ref:co>",
+            "Name": {
+              "first_name": "Sam",
+              "last_name": "Lee"
+            },
+            "Working_at": "<ref:b>",
+            "Email": "staff@example.test",
+            "Contact_Number": "5550100",
+            "Services": [
+              "<ref:s>"
+            ],
+            "Working_Hours": [
+              {
+                "Days": "Monday",
+                "From_Timing": "09:00 AM",
+                "To_Timing": "05:00 PM"
+              }
+            ]
+          },
+          "bind": {
+            "st": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Appointment_Booking",
+          "record": {
+            "Branch": "<ref:b>",
+            "Service": "<ref:s>",
+            "Customer_Email": "c1@example.test",
+            "Schedule_Date_Time": "2020-01-06 10:00:00",
+            "Schedule_upto": "2020-01-06 10:30:00",
+            "Staff_Name": "<ref:st>"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Appointment_Booking": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "booking-id-sequence-and-status-default",
+      "notes": [
+        "on validate: first booking Booking_Id \"0001\", next = last+1 left-padded to 4 digits; Status initial value Open. Schedule Monday 10:00 inside staff hours 09:00-17:00 in a far-future year"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Branch",
+          "record": {
+            "Branch_Name": "Main",
+            "Branch_Address": {
+              "address_line_1": "1 Road"
+            },
+            "Branch_Admin_Name": "Admin One",
+            "Branch_Admin_Email": "admin@example.test"
+          },
+          "bind": {
+            "b": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Setup",
+          "record": {
+            "Company_Name": "Acme",
+            "Company_Email": "co@example.test",
+            "Add_Branch": [
+              "<ref:b>"
+            ]
+          },
+          "bind": {
+            "co": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Services",
+          "record": {
+            "Service": "Cut",
+            "Service_Time": 30,
+            "Branches": [
+              "<ref:b>"
+            ]
+          },
+          "bind": {
+            "s": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Staffs",
+          "record": {
+            "Company_Name": "<ref:co>",
+            "Name": {
+              "first_name": "Sam",
+              "last_name": "Lee"
+            },
+            "Working_at": "<ref:b>",
+            "Email": "staff@example.test",
+            "Contact_Number": "5550100",
+            "Services": [
+              "<ref:s>"
+            ],
+            "Working_Hours": [
+              {
+                "Days": "Monday",
+                "From_Timing": "09:00 AM",
+                "To_Timing": "05:00 PM"
+              }
+            ]
+          },
+          "bind": {
+            "st": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Appointment_Booking",
+          "record": {
+            "Branch": "<ref:b>",
+            "Service": "<ref:s>",
+            "Customer_Email": "c1@example.test",
+            "Schedule_Date_Time": "2035-01-01 10:00:00",
+            "Schedule_upto": "2035-01-01 10:30:00",
+            "Staff_Name": "<ref:st>"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Appointment_Booking",
+          "record": {
+            "Branch": "<ref:b>",
+            "Service": "<ref:s>",
+            "Customer_Email": "c2@example.test",
+            "Schedule_Date_Time": "2035-01-01 11:00:00",
+            "Schedule_upto": "2035-01-01 11:30:00",
+            "Staff_Name": "<ref:st>"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Appointment_Booking": [
+            {
+              "Booking_Id": "0001",
+              "Status": "Open",
+              "Customer_Email": "c1@example.test"
+            },
+            {
+              "Booking_Id": "0002",
+              "Status": "Open",
+              "Customer_Email": "c2@example.test"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    }
+  ]
+}

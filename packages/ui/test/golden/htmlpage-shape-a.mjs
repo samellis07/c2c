@@ -39,12 +39,19 @@ function send(res, status, body) {
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
+// A date value prints the way Creator prints it: the day as dd-MMM-yyyy, then the time when it has one.
+function c2cDateText(v) {
+  const p = (n) => String(n).padStart(2, "0");
+  const day = p(v.d) + "-" + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][v.m - 1] + "-" + String(v.y).padStart(4, "0");
+  return v.hh || v.mm || v.ss ? day + " " + p(v.hh) + ":" + p(v.mm) + ":" + p(v.ss) : day;
+}
+
 function c2cStr(v) {
   if (v == null) return "";
   if (typeof v === "object") {
     if (typeof v.zoho === "string") return v.zoho === "appuri" ? "#" : "";
     if (Array.isArray(v)) return v.map(c2cStr).join(", ");
-    if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return v.toString();
+    if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return c2cDateText(v);
     if (typeof v.label === "string") return v.label;
     if (v.constructor && v.constructor.name === "Decimal") return v.toString();
     try {

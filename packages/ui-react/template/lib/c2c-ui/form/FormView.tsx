@@ -32,12 +32,12 @@ import { routePrefill } from '../runtime/router';
 import { SESSION_EXPIRED_EVENT, pageHash, watchAuthCall, type AppWindow } from '../runtime/api';
 import { navigableUrl } from '../runtime/navigation';
 import { useEnv } from '../runtime/env';
-import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
+import { cleanServerText, failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { Slot, useCustomization } from '../runtime/extend';
 import { FormContext } from './fields';
 import { FormHandlersContext } from './context';
 import { applyHandlerActions, matchingHandlers, mergeScriptRecord, runHandlers, type FormHandlers, type HandlerCtx, type HandlerDraft } from './handlers';
-import { chosenFiles, firstErrorControl, readRecord, resolveUrlSources, validate } from './record';
+import { chosenFiles, firstErrorControl, linkFieldErrors, readRecord, resolveUrlSources, validate } from './record';
 import { subformRows, validateSubforms } from '../subform/rows';
 
 interface Banner {
@@ -51,8 +51,38 @@ export const DEFAULT_ADD_MESSAGE = 'Data Added Successfully!';
 export const DEFAULT_UPDATE_MESSAGE = 'Data Updated Successfully!';
 
 /** The banner for a submit the server refused or failed. */
+/**
+ * The browser position for the Added_Location / Modified_Location stamps,
+ * asked for once per submit (the browser shows its own permission prompt).
+ * Denied, unavailable, timed out or not finite resolves undefined: the
+ * stamped columns then stay null and the submit goes ahead.
+ */
+function capturePosition(): Promise<{ latitude: number; longitude: number } | undefined> {
+  return new Promise((resolve) => {
+    const geolocation = typeof navigator === 'undefined' ? undefined : navigator.geolocation;
+    if (!geolocation || typeof geolocation.getCurrentPosition !== 'function') {
+      resolve(undefined);
+      return;
+    }
+    const timer = setTimeout(() => resolve(undefined), 12000);
+    const done = (value: { latitude: number; longitude: number } | undefined) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      geolocation.getCurrentPosition(
+        ({ coords }) => done(Number.isFinite(coords.latitude) && Number.isFinite(coords.longitude) ? { latitude: coords.latitude, longitude: coords.longitude } : undefined),
+        () => done(undefined),
+        { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 },
+      );
+    } catch {
+      done(undefined);
+    }
+  });
+}
+
 export function submitFailure(status: number, body: { error?: unknown; message?: unknown; wrote?: unknown } | undefined): string {
-  const server = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : typeof body?.error === 'string' ? body.error.trim() : '';
+  const server = cleanServerText(typeof body?.message === 'string' && body.message.trim() ? body.message : typeof body?.error === 'string' ? body.error : '');
   // The row is stored; only a step after the write failed. A resubmit would add it twice.
   // The generic "request failed" adds nothing; a Deluge runtime error's text does.
   if (body?.wrote === true) return `The record was saved, but a step after saving failed${server && server !== 'request failed' ? `: ${server}` : '.'}`;
@@ -307,6 +337,11 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
   );
 
   // On load runs once per screen: immediately on add, after the row arrives on edit.
+  // A shown error is the description of its control.
+  useEffect(() => {
+    if (formRef.current) linkFieldErrors(formRef.current);
+  }, [errors]);
+
   useEffect(() => {
     if (edit || loadRan.current) return;
     loadRan.current = true;
@@ -443,8 +478,22 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
     if (el && typeof el.name === 'string' && el.name !== '') notify(el.name);
   }
 
+  // Set on the first submit event and held until it settles: the checks before
+  // the write are asynchronous, so a second event in that window would pass the
+  // in-flight guard below and post twice.
+  const entering = useRef(false);
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (entering.current) return;
+    entering.current = true;
+    try {
+      await submitNow(event);
+    } finally {
+      entering.current = false;
+    }
+  }
+
+  async function submitNow(event: FormEvent<HTMLFormElement>) {
     if (edit && !loaded) return;
     const formEl = event.currentTarget;
     let next = readRecord(formEl, form);
@@ -492,7 +541,8 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
         next = changed as FormRecord;
       }
       const endpoint = mode === 'edit' && form.editSubmitEndpoint ? form.editSubmitEndpoint : form.submitEndpoint;
-      const reply = await api.post<WriteReply>(endpoint, { record: next, ...(edit ? { ROWID: edit } : {}), idempotencyKey: submitKey.current });
+      const geo = form.capturesLocation ? await capturePosition() : undefined;
+      const reply = await api.post<WriteReply>(endpoint, { record: next, ...(geo ? { geo } : {}), ...(edit ? { ROWID: edit } : {}), idempotencyKey: submitKey.current });
       // wrote true is a stored row even when a step after the save failed.
       const committed = reply.ok || reply.body?.wrote === true;
       const dryRun = committed && reply.body?.wrote === true ? false : reply.body?.dryRun !== false;
@@ -501,7 +551,13 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
         deny();
         return;
       }
-      if (!reply.ok) {
+      const named = reply.status === 400 && typeof (reply.body as { field?: unknown } | undefined)?.field === 'string' ? ((reply.body as { field: string }).field) : '';
+      if (!reply.ok && named && form.fields.some((f) => f.name === named)) {
+        // A refused value names its field: the message lands on that control, as a client check's would.
+        setErrors({ [named]: submitFailure(reply.status, reply.body) });
+        setBanner({ tone: 'danger', title: 'Check the highlighted fields.' });
+        firstErrorControl(formEl, { [named]: '' })?.focus();
+      } else if (!reply.ok) {
         // A stored row whose after-save step failed (`wrote: true`) still lands here:
         // it is committed for idempotency, but the banner must not claim a clean save.
         setBanner({ tone: 'danger', title: submitFailure(reply.status, reply.body) });
@@ -578,7 +634,7 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
           <div className="form-grid" key={loaded}>
             {children}
           </div>
-          {banner ? <Alert className="c2c-banner" tone={banner.tone} title={banner.title} /> : null}
+          {banner ? <Alert className="c2c-banner" tone={banner.tone} title={banner.title} data-toast="" data-kind={banner.tone} onDismiss={() => setBanner(null)} /> : null}
           {notes.map((note, index) => (
             <p key={`${index}-${note}`} className="fidelity-note">
               {note}

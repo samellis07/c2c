@@ -1,0 +1,327 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Approval Management",
+  "cases": [
+    {
+      "id": "company-name-and-email-mandatory",
+      "notes": [
+        "Add_Company_Detail: must have Company_Name and Email"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Company_Detail",
+          "record": {
+            "Email": "co@example.test"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Company_Detail",
+          "record": {
+            "Company_Name": "Acme"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Company_Detail",
+          "record": {
+            "Company_Name": "Acme",
+            "Email": "co@example.test"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Company_Detail": [
+            {
+              "Company_Name": "Acme",
+              "Email": "co@example.test"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "employee-email-unique",
+      "notes": [
+        "must have unique Email_Id"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Name": {
+              "first_name": "Pat",
+              "last_name": "Doe"
+            },
+            "Email_Id": "a@example.test"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Name": {
+              "first_name": "Kim",
+              "last_name": "Roe"
+            },
+            "Email_Id": "a@example.test"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Employee": [
+            {
+              "Email_Id": "a@example.test"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "employee-empty-name-cancel-submit",
+      "notes": [
+        "on validate: Name.isEmpty() -> cancel submit (Name is not must-have, so the refusal comes from the script)"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Email_Id": "a@example.test"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Employee": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "employee-privilege-required-when-flag-true",
+      "notes": [
+        "on validate: Give_Approval_Privileges == true && Select_Privilege == null -> cancel submit; with a privilege the record saves"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Name": {
+              "first_name": "Pat",
+              "last_name": "Doe"
+            },
+            "Email_Id": "a@example.test",
+            "Give_Approval_Privileges": true
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Name": {
+              "first_name": "Pat",
+              "last_name": "Doe"
+            },
+            "Email_Id": "a@example.test",
+            "Give_Approval_Privileges": true,
+            "Select_Privilege": "1st Approver (Lead)"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Employee": [
+            {
+              "Email_Id": "a@example.test",
+              "Give_Approval_Privileges": true,
+              "Select_Privilege": "1st Approver (Lead)"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "employee-checkbox-initial-false",
+      "notes": [
+        "Give_Approval_Privileges initial value = false: omitted from the record it is stored false and no privilege is required"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Name": {
+              "first_name": "Pat",
+              "last_name": "Doe"
+            },
+            "Email_Id": "a@example.test"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Employee": [
+            {
+              "Email_Id": "a@example.test",
+              "Give_Approval_Privileges": false
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "idea-mandatory-fields",
+      "notes": [
+        "Raise_an_Idea: must have Idea and Description"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Name": {
+              "first_name": "Pat",
+              "last_name": "Doe"
+            },
+            "Email_Id": "a@example.test"
+          },
+          "setup": true,
+          "bind": {
+            "e": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Raise_an_Idea",
+          "record": {
+            "Raised_By": "<ref:e>",
+            "Description": "d"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Raise_an_Idea",
+          "record": {
+            "Raised_By": "<ref:e>",
+            "Idea": "i"
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Raise_an_Idea": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "idea-approval-status-initial-pending",
+      "notes": [
+        "Approval_Status initial value = Pending (picklist, must have)"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Employee",
+          "record": {
+            "Name": {
+              "first_name": "Pat",
+              "last_name": "Doe"
+            },
+            "Email_Id": "a@example.test"
+          },
+          "setup": true,
+          "bind": {
+            "e": "body.values.ROWID"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Raise_an_Idea",
+          "record": {
+            "Raised_By": "<ref:e>",
+            "Idea": "Idea one",
+            "Description": "Desc one"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Raise_an_Idea": [
+            {
+              "Raised_By": "<ref:e>",
+              "Idea": "Idea one",
+              "Approval_Status": "Pending"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    }
+  ]
+}

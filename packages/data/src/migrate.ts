@@ -70,6 +70,7 @@
  * other stored difference stays a silent-change refusal.
  */
 import { randomUUID } from 'node:crypto';
+import { ownGet, ownSet } from '../../core/src/own-keys.js';
 import { exactId, parseJsonExact } from '../../deploy/src/json-exact.js';
 import { decimalShadow } from '../../shims/src/criteria.js';
 import { migratedObjectKey } from '../../shims/src/files.js';
@@ -1128,7 +1129,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
     // Refuse a bad host before any fetch, including the other side of the pair.
     assertAllowedHost(readUrl, opts.dc);
     assertAllowedHost(writeUrl, opts.dc);
-    let state: TableCheckpoint = opts.checkpoint.tables[table.table] ?? {
+    let state: TableCheckpoint = ownGet(opts.checkpoint.tables, table.table) ?? {
       requestCursor: null,
       count: 0,
       checksum: checksumHex(FNV_OFFSET),
@@ -1138,7 +1139,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
     };
     const park = (err: unknown): never => {
       state = release(state);
-      opts.checkpoint.tables[table.table] = state;
+      ownSet(opts.checkpoint.tables, table.table, state);
       save(opts.checkpoint, opts.saveCheckpoint);
       // NULL fills and lookup corrections earlier slices already confirmed are
       // correct but the result is lost with this throw; name the counts on the
@@ -1157,7 +1158,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
         throw new TableLockedError(table.table, lock.owner, lock.expiresAt);
       }
       state = hold(state);
-      opts.checkpoint.tables[table.table] = state;
+      ownSet(opts.checkpoint.tables, table.table, state);
     }
     const batches: number[] = [];
     // Resume the source ledger from its own checksum. Seeding it from the written
@@ -1192,7 +1193,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
         }
         if (duplicateIds.length) {
           state = release(state);
-          opts.checkpoint.tables[table.table] = state;
+          ownSet(opts.checkpoint.tables, table.table, state);
           save(opts.checkpoint, opts.saveCheckpoint);
           results.push({
             table: table.table,
@@ -1213,7 +1214,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
         const tooLong = rows.find((row) => row.id.length > SOURCE_ID_MAX_LENGTH);
         if (tooLong) {
           state = release(state);
-          opts.checkpoint.tables[table.table] = state;
+          ownSet(opts.checkpoint.tables, table.table, state);
           save(opts.checkpoint, opts.saveCheckpoint);
           results.push({
             table: table.table,
@@ -1297,7 +1298,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
           if (blocked.length) {
             refusalLog.push(...blocked);
             state = release(state);
-            opts.checkpoint.tables[table.table] = state;
+            ownSet(opts.checkpoint.tables, table.table, state);
             save(opts.checkpoint, opts.saveCheckpoint);
             const duplicateIds = [...new Set(blocked.filter((item) => item.rule === 'duplicate-source-id').map((item) => item.sourceId))];
             const beforeWrite = blocked.every((item) => item.rule !== 'silent-change' && item.rule !== 'duplicate-source-id');
@@ -1339,7 +1340,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
               sourceChecksum: checksumHex(sourceState),
               done: false,
             });
-            opts.checkpoint.tables[table.table] = state;
+            ownSet(opts.checkpoint.tables, table.table, state);
             save(opts.checkpoint, opts.saveCheckpoint);
             i += slice.length;
             continue;
@@ -1352,7 +1353,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
             let reportWritten = writtenState;
             for (const id of acked) reportWritten = fnv1a64(reportWritten, id);
             state = release(state);
-            opts.checkpoint.tables[table.table] = state;
+            ownSet(opts.checkpoint.tables, table.table, state);
             save(opts.checkpoint, opts.saveCheckpoint);
             results.push({
               table: table.table,
@@ -1384,7 +1385,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
             sourceChecksum: checksumHex(sourceState),
             done: false,
           });
-          opts.checkpoint.tables[table.table] = state;
+          ownSet(opts.checkpoint.tables, table.table, state);
           save(opts.checkpoint, opts.saveCheckpoint);
           i += confirmed;
         }
@@ -1393,7 +1394,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
         } else {
           state = hold({ ...state, requestCursor: page.nextCursor, lastId: undefined, done: false });
         }
-        opts.checkpoint.tables[table.table] = state;
+        ownSet(opts.checkpoint.tables, table.table, state);
         save(opts.checkpoint, opts.saveCheckpoint);
       }
       const sourceChecksum = checksumHex(sourceState);
@@ -1477,11 +1478,11 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
       // (assertAllowedHost, TableLockedError) are raised before this block and
       // still abort the run.
       const message = err instanceof Error ? err.message : String(err);
-      const held = opts.checkpoint.tables[table.table];
+      const held = ownGet(opts.checkpoint.tables, table.table);
       if (held?.lock?.owner === owner) {
         const copy = { ...held };
         delete copy.lock;
-        opts.checkpoint.tables[table.table] = copy;
+        ownSet(opts.checkpoint.tables, table.table, copy);
       }
       results.push({
         table: table.table,

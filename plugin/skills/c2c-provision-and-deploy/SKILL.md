@@ -110,6 +110,10 @@ Each limit below names its limit id, the c2c behaviour, and [its row](../../refe
 - [L-JOB-TIME](../../references/limits.md#l-job-time-job-function): Job functions run 15 min [DOC] → split; generated Jobs chunk with self-resubmit and checkpoint.
 - [L-SERVICE-ACTIVATION](../../references/limits.md#l-service-activation-first-activation-of-stratus-and-smartbrowz): first activation of Stratus and SmartBrowz has no API, CLI or MCP path [UNVERIFIED] → guide; a closed gate is one console line naming only the services the app uses, one sentence each, outside the four customer steps, and c2c probes each gate before the first write. Slate needs no activation (`-ni` on a fresh project [TESTED]); the console Slate page is only the older-CLI fallback.
 
+## Moving a deployed app to a newer c2c
+
+`c2c upgrade <app> --plan <plan-dir> --ui <react-dir>` is offline and writes nothing without `--apply`. It lists regenerated, new, removed and hand-edited files and the table changes the new version brings (additive or breaking). Data, `src/custom/`, `function-env.json`, `provision/inputs.json`, the edits file, accepted fills and deploy settings are kept. A hand edit, a folder made by a newer c2c, or a breaking table change blocks `--apply` until the user resolves it (`--force`, or `--allow-destructive --backup <rollback-export dir>`). After `--apply`, run `c2c deploy` and then verify. Guide: `docs/guide/09-after-go-live.md`.
+
 ## Stop conditions
 
 - doctor not green (exit 5) → `c2c-preflight`.

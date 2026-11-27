@@ -391,7 +391,6 @@ const REPORT_NAME_REASONS = `application "Report_Name_Reasons"
 			show all rows from Item
 			(
 				Title
-				Record_Status
 			)
 			permission
 			(
@@ -409,10 +408,6 @@ const REPORT_NAME_REASONS = `application "Report_Name_Reasons"
 test('a report-level TODO reason quotes the report name, so it does not leak unredacted into the public doc', () => {
   const report = analyze(deriveIr(parse(REPORT_NAME_REASONS)));
   const constructs = report.deluge.todoLocations.map((todo) => todo.construct);
-  assert.ok(
-    constructs.some((c) => c === 'Report "Items" lists column Record_Status, a Creator built-in record column; the generated schema has no column for it.'),
-    constructs.join('\n'),
-  );
   // `permission add` is carried by the generated report add-record affordance.
   assert.equal(
     constructs.some((c) => c === 'Report "Items" has a `permission` settings block (add = true) that Catalyst generates no equivalent for.'),

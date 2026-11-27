@@ -174,7 +174,7 @@ test('business report: a record-relative schedule is not told it was "created di
   // since there is nothing to enable. The step must say it was not created.
   assert.doesNotMatch(relative!.detail, /created disabled for review/);
   assert.doesNotMatch(relative!.workaround, /Enable this schedule in Job Scheduling/);
-  assert.match(relative!.workaround, /scheduling per record is not generated yet/);
+  assert.match(relative!.workaround, /this per-record schedule is not generated/);
   // An absolute, fixed-time schedule still gets the original guidance: it was
   // posted as a real (disabled) cron and only needs enabling.
   const absolute = report.appSpecificSteps.find((item) => item.name === 'Nightly_Cleanup');

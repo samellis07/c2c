@@ -24,6 +24,8 @@ import type { RichTextValue } from '../arc/components/rich-text-editor/rich-text
 import { FormContext } from './context';
 import { navigableUrl } from '../runtime/navigation';
 import { createScanner } from './scanner';
+import { canvasToFile, createMedia, loadCanvas, MEDIA_PEN_COLORS, type MediaKind } from './media';
+import { googlePickerConfig, pickGoogleDoc } from './google-picker';
 
 export { FormContext, type FormState } from './context';
 
@@ -326,6 +328,166 @@ function ScanControls({ field, inputRef }: { field: FieldSpec; inputRef: RefObje
       ) : null}
       <video ref={videoRef} className="c2c-scan-video" playsInline muted hidden={!open} style={{ maxWidth: '100%' }} />
       <p role="status" className="c2c-scan-status">{message}</p>
+    </div>
+  );
+}
+
+/**
+ * The capture, recording and markup tools of an image, video or audio field
+ * that declares them (field.media). The result goes to onFile as a File, the
+ * same as a picked one, so the size and type checks and the upload are the
+ * file control's own. A refusal or a missing API shows a message and leaves
+ * the file chooser to use. The camera stops on close, page hide, reset and
+ * unmount.
+ */
+function MediaTools({ field, onFile }: { field: FieldSpec; onFile: (file: File) => void }) {
+  const spec = field.media!;
+  const kind = field.widget as MediaKind;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [message, setMessage] = useState('');
+  const [live, setLive] = useState(false);
+  const media = useRef<ReturnType<typeof createMedia> | null>(null);
+  const deliver = useRef(onFile);
+  deliver.current = onFile;
+  useEffect(() => {
+    const box = boxRef.current;
+    const win = box?.ownerDocument.defaultView;
+    if (!box || !win) return;
+    const m = createMedia(win, { kind, camera: spec.camera, recordSeconds: spec.recordSeconds ?? 0 }, { say: setMessage, active: setLive }, () => videoRef.current, (file) => deliver.current(file));
+    media.current = m;
+    const hide = () => m.release();
+    const visibility = () => {
+      if (box.ownerDocument.visibilityState === 'hidden') m.release();
+    };
+    const form = box.closest('form');
+    win.addEventListener('pagehide', hide);
+    box.ownerDocument.addEventListener('visibilitychange', visibility);
+    form?.addEventListener('reset', hide);
+    if (spec.onload && kind === 'image') void m.open();
+    return () => {
+      win.removeEventListener('pagehide', hide);
+      box.ownerDocument.removeEventListener('visibilitychange', visibility);
+      form?.removeEventListener('reset', hide);
+      m.release();
+      media.current = null;
+    };
+  }, [field, spec, kind]);
+  const recording = kind !== 'image';
+  return (
+    <div
+      ref={boxRef}
+      className="c2c-media"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && live) {
+          media.current?.release();
+          setMessage('');
+        }
+      }}
+    >
+      {live ? (
+        <>
+          <Button type="button" onClick={() => (recording ? media.current?.finish() : media.current?.capture())}>{recording ? 'Stop recording' : 'Capture'}</Button>
+          <Button type="button" onClick={() => { media.current?.release(); setMessage(''); }}>{recording ? 'Cancel' : 'Close camera'}</Button>
+        </>
+      ) : (
+        <Button type="button" onClick={() => void media.current?.open()}>{kind === 'image' ? 'Use camera' : kind === 'video' ? 'Record video' : 'Record audio'}</Button>
+      )}
+      <video ref={videoRef} className="c2c-media-video" playsInline muted hidden={!live || kind === 'audio'} style={{ maxWidth: '100%' }} />
+      <p role="status" className="c2c-media-status">{message}</p>
+    </div>
+  );
+}
+
+/** A small drawing editor for a chosen or captured photo; Done stores the marked-up image, Keep original stores the photo unchanged. */
+function MarkupEditor({ file, onDone, onKeep }: { file: File; onDone: (file: File) => void; onKeep: (note?: string) => void }) {
+  const host = useRef<HTMLDivElement>(null);
+  const shown = useRef<HTMLCanvasElement | null>(null);
+  const source = useRef<HTMLCanvasElement | null>(null);
+  const pen = useRef<{ x: number; y: number } | null>(null);
+  const color = useRef(MEDIA_PEN_COLORS[0]!);
+  const keep = useRef(onKeep);
+  keep.current = onKeep;
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    const win = host.current?.ownerDocument.defaultView;
+    if (!win) return;
+    void loadCanvas(win, file).then((base) => {
+      if (dead) return;
+      const view = win.document.createElement('canvas');
+      const ctx = base ? view.getContext('2d') : null;
+      if (!base || !ctx) {
+        keep.current('The photo could not be opened for markup; it is kept unmarked.');
+        return;
+      }
+      view.width = base.width;
+      view.height = base.height;
+      view.style.maxWidth = '100%';
+      view.style.touchAction = 'none';
+      view.className = 'c2c-media-canvas';
+      ctx.drawImage(base, 0, 0);
+      ctx.lineWidth = Math.max(2, Math.round(view.width / 200));
+      ctx.lineCap = 'round';
+      const at = (event: PointerEvent) => {
+        const rect = view.getBoundingClientRect();
+        return { x: ((event.clientX - rect.left) / (rect.width || view.width)) * view.width, y: ((event.clientY - rect.top) / (rect.height || view.height)) * view.height };
+      };
+      const stroke = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+        ctx.strokeStyle = color.current;
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+      };
+      view.addEventListener('pointerdown', (event) => {
+        pen.current = at(event);
+        try {
+          view.setPointerCapture(event.pointerId);
+        } catch {
+          // not every engine supports capture
+        }
+        stroke(pen.current, { x: pen.current.x + 0.01, y: pen.current.y });
+      });
+      view.addEventListener('pointermove', (event) => {
+        if (!pen.current) return;
+        const next = at(event);
+        stroke(pen.current, next);
+        pen.current = next;
+      });
+      const lift = () => { pen.current = null; };
+      view.addEventListener('pointerup', lift);
+      view.addEventListener('pointercancel', lift);
+      source.current = base;
+      shown.current = view;
+      host.current?.replaceChildren(view);
+      setReady(true);
+    });
+    return () => { dead = true; };
+  }, [file]);
+  return (
+    <div className="c2c-media-editor">
+      <div ref={host} />
+      {ready ? (
+        <div className="c2c-media-editor-tools">
+          {MEDIA_PEN_COLORS.map((c) => (
+            <button key={c} type="button" className="c2c-media-pen" aria-label={`Pen ${c}`} style={{ background: c, width: '1.5rem', height: '1.5rem' }} onClick={() => { color.current = c; }} />
+          ))}
+          <Button type="button" onClick={() => { const view = shown.current; const base = source.current; if (view && base) view.getContext('2d')?.drawImage(base, 0, 0); }}>Clear markup</Button>
+          <Button
+            type="button"
+            onClick={() => {
+              const view = shown.current;
+              const win = view?.ownerDocument.defaultView;
+              if (!view || !win) return;
+              void canvasToFile(win, view, file).then((marked) => (marked ? onDone(marked) : onKeep('The marked-up photo could not be saved; the original is kept.')));
+            }}
+          >
+            Use marked-up photo
+          </Button>
+          <Button type="button" onClick={() => onKeep()}>Keep original</Button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -865,6 +1027,19 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
     }
   };
   const [cleared, setCleared] = useState(false);
+  // `annotation = true`: a chosen or captured image opens in the markup editor first.
+  const [pending, setPending] = useState<File | null>(null);
+  const [markupNote, setMarkupNote] = useState('');
+  const mediaTools = field.media && (field.widget === 'image' || (field.media.recordSeconds ?? 0) > 0) ? field.media : undefined;
+  const choose = (files: File[]) => {
+    const first = files[0];
+    if (mediaTools?.annotate && field.widget === 'image' && first && /^image\//.test(first.type) && !/\+xml$|svg/i.test(first.type)) {
+      setMarkupNote('');
+      setPending(first);
+      return;
+    }
+    sync(files);
+  };
   const initialMeta = storedImageValue(value, state?.record, field.name, field);
   const stored = field.widget === 'image' ? initialMeta.stored : text(value);
   const [linkUrl, setLinkUrl] = useState<string>(initialMeta.link ?? '');
@@ -874,6 +1049,22 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
   const declared = (field.uploadSources ?? []).filter((s) => s === 'file' || s === 'camera' || s === 'public_url');
   const offers = new Set(declared.length ? declared : ['file']);
   const singleSource = offers.size === 1;
+  // Opt-in Google Drive control (docs/doc-pickers.md): only when the deployer's runtime
+  // config carries a key. Without one the field is the local upload alone.
+  const drive = offers.has('file') && field.widget === 'file' && field.browseSources?.includes('google_docs') === true && googlePickerConfig() !== null;
+  const [driveName, setDriveName] = useState('');
+  const [driveError, setDriveError] = useState('');
+  const chooseFromDrive = async () => {
+    const result = await pickGoogleDoc(field, window as unknown as Parameters<typeof pickGoogleDoc>[1]);
+    if (!result) return;
+    if ('error' in result) {
+      setDriveError(result.error);
+      return;
+    }
+    setDriveError('');
+    setDriveName(result.name);
+    sync([result]);
+  };
   return (
     <Box field={field}>
       {stored && !cleared ? (
@@ -896,13 +1087,32 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
               <FileDropzone
                 label="Choose a file or drop it here"
                 accept={field.accept}
-                onFilesChange={sync}
+                onFilesChange={(files) => {
+                  setDriveName('');
+                  choose(files);
+                }}
               />
             ) : null}
           </Suspense>
-          {offers.has('camera') ? (
-            <input type="file" name={`${field.name}__camera`} accept={field.accept} capture onChange={(e) => sync([...(e.target.files ?? [])])} />
+          {drive ? (
+            <>
+              <Button type="button" variant="secondary" size="sm" onClick={chooseFromDrive}>Choose from Google Drive</Button>
+              {driveName ? <span className="c2c-hint">{driveName}</span> : null}
+              {driveError ? <p className="c2c-error" role="alert">{driveError}</p> : null}
+            </>
           ) : null}
+          {offers.has('camera') ? (
+            <input type="file" name={`${field.name}__camera`} accept={field.accept} capture onChange={(e) => choose([...(e.target.files ?? [])])} />
+          ) : null}
+          {mediaTools ? <MediaTools field={field} onFile={(file) => choose([file])} /> : null}
+          {pending ? (
+            <MarkupEditor
+              file={pending}
+              onDone={(marked) => { setPending(null); sync([marked]); }}
+              onKeep={(note) => { setPending(null); setMarkupNote(note ?? ''); sync([pending]); }}
+            />
+          ) : null}
+          {markupNote ? <p role="status" className="c2c-media-status">{markupNote}</p> : null}
           {offers.has('public_url') ? (
             <input type="url" name={`${field.name}__url`} placeholder="Paste a public URL" className={inputStyles.input} onChange={notify} aria-label={`${field.label} URL`} />
           ) : null}

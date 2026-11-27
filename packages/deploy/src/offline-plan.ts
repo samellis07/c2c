@@ -27,7 +27,7 @@ import { JOB_TARGET, sweeperCron, SWEEPER_CRON, type CronDefinition } from '../.
 import { schedulePlansFor } from '../../deluge/src/generate.js';
 import { buildUi } from '../../ui/src/generate.js';
 import { principalRoleMap } from '../../auth/src/apply.js';
-import { flag, hasReportJson, loadApp, type Io } from './cli.js';
+import { deployedModelPath, flag, hasReportJson, loadApp, requireComparableModel, type Io } from './cli.js';
 import { ZCQL_IN_LIMIT } from '../../data/src/migrate.js';
 import { cyclicForeignKeys, foreignKeyId, tableCreatePlan } from './tables.js';
 import { readSourceCsv, readSourceJson } from './csv.js';
@@ -163,6 +163,7 @@ export const PLAN_BUDGET_IDS = [
   'varchar-length',
   'dev-api-calls',
   'dev-write-rate',
+  'runtime-calls',
 ] as const;
 
 export interface StepEndpoint {
@@ -672,7 +673,78 @@ function varcharLengthBudget(tables: SchemaTable[], source?: readonly SourceTabl
   };
 }
 
-export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]): { budgets: PlanBudget[]; ok: boolean } {
+/** Rows the generated aggregate op reads before it stops (AGGREGATE_ROW_CAP in packages/ui/src/generate.ts). */
+const AGGREGATE_ROW_CAP = LIMITS.zcqlRowsPerQuery * 10;
+const NO_PRICE = 'no Catalyst price is recorded in the repo, so no cost is estimated';
+
+/**
+ * Runtime-calls estimate, printed before deploy: for every measured Data Store
+ * table, the Data Store reads one full list walk and one aggregate make
+ * (one ZCQL page of zcqlRowsPerQuery rows per call; aggregate stops at
+ * AGGREGATE_ROW_CAP rows). Aggregate lookup display/scope resolution reads
+ * are included too: the generated handler (packages/ui/src/generate.ts, op
+ * "aggregate") reads only lookup columns used as the group or a measure. A
+ * plain group + count has no lookup reads. The report's group-by lookup forms
+ * are counted as one staged parent read per distinct parent form per scanned
+ * page, which assumes a page of distinct parent ids: the runtime reads
+ * ceil(distinct ids / zcqlRowsPerQuery) once per request through the cache, so
+ * shared parents cost fewer calls. A lookup used as a measure or a group the
+ * client chooses is not in the report definition and is not counted, nor are
+ * dotted lookup paths: this is not an upper bound.
+ * Only documented limits are used: the repo records no price and no per-call
+ * latency, so cost and time stay unknown. Warns when an aggregate would be
+ * truncated. Without --source-* counts it says unknown.
+ */
+/** ZCQL statements one read of a parent table takes: its columns are staged past zcql.select_columns, each statement repeating ROWID. */
+function stagesOf(table: SchemaTable | undefined): number {
+  const columns = table?.columns.length ?? 0;
+  const limit = limitValue('zcql.select_columns');
+  return columns + 1 <= limit ? 1 : Math.ceil(columns / (limit - 1));
+}
+
+function runtimeCallsBudget(tables: SchemaTable[], source?: readonly SourceTableData[], lookupColumns?: ReadonlyMap<string, { report: string; parents: string[] }>): PlanBudget {
+  const timeout = `function.timeout_seconds ${limitValue('function.timeout_seconds')}s, unverified`;
+  if (!source) {
+    return {
+      id: 'runtime-calls',
+      status: 'pass',
+      detail: `unknown: no source row counts, so list and aggregate page requests are not estimated; ${NO_PRICE}; per-request cap ${timeout}`,
+      fix: 're-run c2c plan with --source-backup, --source-csv or --source-json to estimate runtime list and aggregate calls per table',
+    };
+  }
+  const { rowsOf } = moverSourceModel(tables, source);
+  const page = LIMITS.zcqlRowsPerQuery;
+  const parts: string[] = [];
+  const truncated: string[] = [];
+  for (const table of tables) {
+    if (table.nosql || table.role === 'system') continue;
+    const rows = rowsOf(table);
+    if (rows === undefined || rows === 0) continue;
+    const pages = Math.ceil(rows / page);
+    const scanned = Math.min(pages, Math.ceil(AGGREGATE_ROW_CAP / page));
+    const lookup = lookupColumns?.get(table.name) ?? { report: '', parents: [] };
+    const parentForms = [...new Set(lookup.parents)];
+    const stages = parentForms.reduce((sum, parent) => sum + stagesOf(tables.find((item) => item.name === parent)), 0);
+    const own = stagesOf(table);
+    const aggregateCalls = (own + stages) * scanned;
+    const formula = `(${own} + ${stages}${stages ? ` [${parentForms.length} group-by lookup form${parentForms.length === 1 ? '' : 's'} of ${lookup.report}]` : ''}) x ${scanned}`;
+    parts.push(`${table.name} ${pages} list page request${pages === 1 ? '' : 's'} (${rows} rows), aggregate calls = (row selects + lookup selects) x scanned pages = ${formula} = ${aggregateCalls} (${page}-row/${page}-id chunks)`);
+    if (rows > AGGREGATE_ROW_CAP) truncated.push(table.name);
+  }
+  const body = parts.length ? parts.join('; ') : 'no measured rows';
+  const base = `${body}; this is the count for a plain group + count request, not an upper bound; each page is one Data Store call of up to ${page} rows; ${NO_PRICE}; per-request cap ${timeout}, latency per call unknown`;
+  if (truncated.length) {
+    return {
+      id: 'runtime-calls',
+      status: 'warn',
+      detail: `${base}; aggregate stops at ${AGGREGATE_ROW_CAP} rows for ${truncated.join(', ')} and marks the result truncated`,
+      fix: 'page the report or filter before aggregating; raise AGGREGATE_ROW_CAP only after measuring the request against the time cap',
+    };
+  }
+  return { id: 'runtime-calls', status: 'pass', detail: base };
+}
+
+export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[], lookupColumns?: ReadonlyMap<string, { report: string; parents: string[] }>): { budgets: PlanBudget[]; ok: boolean } {
   const budgets: PlanBudget[] = [];
   for (const table of tables) {
     const unique = uniqueVarchar(table);
@@ -767,6 +839,7 @@ export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTabl
   budgets.push({ ...varcharLengthBudget(tables, source), id: PLAN_BUDGET_IDS[7] });
   budgets.push({ ...devApiCallsBudget(tables, source), id: PLAN_BUDGET_IDS[8] });
   budgets.push({ ...writeRateBudget(tables, source), id: PLAN_BUDGET_IDS[9] });
+  budgets.push({ ...runtimeCallsBudget(tables, source, lookupColumns), id: PLAN_BUDGET_IDS[10] });
   return { budgets, ok: budgets.every((budget) => budget.status !== 'fail') };
 }
 
@@ -1643,7 +1716,15 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
   const connectionSecrets = extractConnectionSecrets(app);
   const connectionSecretKeys = connectionSecrets.map((s) => s.envKey);
   const mailStep = opts.mail || signals.sendmail;
-  const { budgets, ok } = buildBudgets(schema.tables, opts.source);
+  const lookupColumns = new Map<string, { report: string; parents: string[] }>();
+  const stageCount = (forms: readonly string[]) => forms.reduce((sum, form) => sum + stagesOf(schema.tables.find((item) => item.name === form)), 0);
+  for (const report of ui.model.reports) {
+    if (!report.form) continue;
+    const grouped = new Set(report.groupBy.map((item) => item.field));
+    const parents = report.columns.flatMap((column) => (grouped.has(column.field) && column.lookup ? [column.lookup.form] : []));
+    if (stageCount(parents) > stageCount(lookupColumns.get(report.form)?.parents ?? [])) lookupColumns.set(report.form, { report: report.name, parents });
+  }
+  const { budgets, ok } = buildBudgets(schema.tables, opts.source, lookupColumns);
   // One mapping source: the generator's schedule plans (deluge
   // schedulePlansFor) name every cron and pick OneTime vs CronExpression, the
   // same plans job-scheduling.json carries.
@@ -2001,7 +2082,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
   if (!target || unknown.length > 0) {
     io.stderr(
       'usage: c2c plan <file|dir> [--out <dir>] [--dc <dc>] [--mail] [--project <id>] [--production] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--allow-budget-fail]\n' +
-        '                [--previous <deployed .ds> [--rename Form.Old=New]... [--allow-destructive --backup <rollback-export dir>]]\n' +
+        '                [--previous <deployed .ds> [--rename Form.Old=New]... [--no-detect-renames] [--allow-destructive --backup <rollback-export dir>]]\n' +
         '       --previous compares the re-export with the deployed model; a drop, rename or alter is refused without a verified backup\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n',
     );
@@ -2029,9 +2110,10 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
         : srcJson !== undefined
           ? readSourceJson(srcJson, app, allowEmpty).sourceData
           : undefined;
-    const previous = flag(args, '--previous');
+    const previousFlag = flag(args, '--previous');
+    const previous = previousFlag === undefined ? undefined : deployedModelPath(previousFlag);
     if (previous !== undefined) {
-      const review = reviewSchemaChange(loadApp(previous), app, dc.dc, renameFlags(args));
+      const review = reviewSchemaChange(requireComparableModel(loadApp(previous), 'the previous model'), app, dc.dc, renameFlags(args), { detect: !args.includes('--no-detect-renames') });
       writeDeltaTree(join(out, 'schema-change'), [
         { path: 'delta.json', data: `${JSON.stringify(review.delta, null, 2)}\n` },
         { path: 'delta.md', data: formatDelta(review.delta) },

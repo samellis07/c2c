@@ -129,6 +129,8 @@
  *                                   and phone, out of 10 (packages/ui-score/rubric.json). --ui reads what
  *                                   `c2c ui --out <dir>` wrote; without it the bundle is built in memory.
  *                                   Renders offline in jsdom (a dev dependency). Exit 0 both >= 8, 1 below, 2 usage.
+ *   c2c upgrade <file|dir> [--plan <plan-dir>] [--ui <react-dir>] [--apply] [--force] [--allow-destructive --backup <dir>] [--json] [--out <file>]
+ *                                   Compare a generated plan folder / React app with this version's output; --apply writes it.
  *   c2c ui-react <file|dir> --out <dir> [--api-base <url>] [--no-auth] [--upgrade-platform] [--force]
  *                                   React + Vite app for Slate (docs/react-target.md). Into an existing app it
  *                                   rewrites src/generated only and keeps src/custom; stops on a hand-edited generated file
@@ -142,6 +144,8 @@
  *                                   lint, run the D3 and unit gates, and record the fill
  *   c2c fill-todos <file|dir> --lock <file> --report
  *                                   print stale lock keys. Does not rewrite output.
+ *   c2c fetch-assets <file|dir>     download the literal https images a CSS background names into c2c-assets/ and write
+ *                                   c2c-assets.lock.json (migration-time network input; generation stays offline; docs/known-gaps.md)
  *   c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]
  *                                   read-only project health: deployed functions with last
  *                                   deploy time, Slate URL, table count, recent function errors.
@@ -168,6 +172,7 @@ import {
   formatApps,
   formatFeatures,
   formatSummary,
+  isDirectoryPath,
   listDsFiles,
   LockedExportError,
   NotFileError,
@@ -187,14 +192,16 @@ import { generateReactApp, HandEditedError, writeReactApp } from '../../ui-react
 import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyBehaviorCli, verifyCli } from '../../deploy/src/index.js';
 import { cutoverCli } from './cutover.js';
 import { ARGV_SPEC, argvShapeProblems, seedArgsProblem } from './argv.js';
-import { GATE_EXIT, c2cVersion, defaultDoctorIo, terminalSafe, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
+import { GATE_EXIT, c2cVersion, defaultDoctorIo, terminalSafe, singleLine, doctorCli, doctorGateForArgs, doctorStamp, evaluateGate, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
 import { FillTodoError, fillTodosMain } from '../../deluge/src/fill-todos.js';
+import { fetchAssetsInto } from './fetch-assets.js';
 import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
 import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
 import { DISPATCH_COMMANDS } from './commands.js';
 
 import { CLI_EXIT, PRECHECK_EXIT } from './exit-codes.js';
 import { supportBundleCli } from './support-bundle.js';
+import { upgradeCli } from './upgrade.js';
 import { analyzeQuality, qualityAsText } from './analyze-quality.js';
 import { migrationReportAsJson, migrationReportAsText, migrationReportForDir } from './migration-report.js';
 import { businessReportCli } from './business-report.js';
@@ -232,6 +239,8 @@ const USAGE =
       '       c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>] [--previous <deployed.ds> [--rename Form.Old=New]...]\n' +
       '              (--previous refuses a rename, drop or alter today and changes nothing: those are plan-only; --allow-destructive and --backup are plan flags)\n' +
       '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
+      '       c2c upgrade <file|dir> [--plan <plan-dir>] [--ui <react-dir>] [--dc <dc>] [--config <c2c-deploy.json>] [--project <id>] [--mail] [--production] [--api-base <url>] [--no-auth] [--force] [--allow-destructive --backup <rollback-export dir>] [--apply] [--json] [--out <file>]\n' +
+      '              (offline: compares a generated plan folder or React app with this version\'s output and keeps data and customisations; writes only with --apply)\n' +
       '       c2c plan <file|dir> [--out <dir>] [--dc <dc>] [--mail] [--project <id>] [--production] [--allow-budget-fail] [--previous <deployed.ds> [--rename Form.Old=New]... [--allow-destructive --backup <rollback-export dir>]]\n' +
       '              (--previous writes schema-change/delta.md and refuses a rename, drop or alter unless --allow-destructive names a verified --backup)\n' +
       '       c2c provision [--out <dir>] [--status|--next|--confirm --run <id>|--record <id> [--result <file>] [--applied]]\n' +
@@ -260,6 +269,7 @@ const USAGE =
       '       c2c fill-todos <file|dir> --emit <dir>\n' +
       '       c2c fill-todos <file|dir> --accept <task-id> <fill-file> [--lock c2c.lock.json]\n' +
       '       c2c fill-todos <file|dir> --lock <file> --report\n' +
+      '       c2c fetch-assets <file|dir>\n' +
       // (No trailing `doctor [--local] [--quiet]` / `--verify-vendor` repeats:
       // both are already covered above. The census test fails repeats.)
       '       c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]\n' +
@@ -333,6 +343,9 @@ function summarize(ir: App): string {
     `unknown nodes: ${ir.unknown.length} of ${ir.statementCount} statements`,
   ].join('\n');
 }
+
+/** Commands whose first argument is an input path: a flag there is a usage error, a missing path one line. */
+const PATH_ARG_COMMANDS = new Set(['analyze', 'parse', 'corpus', 'features', 'schema', 'schema-corpus', 'deluge', 'ui', 'score-ui', 'ui-react', 'auth', 'ui-corpus']);
 
 function loadIr(target: string): App | undefined {
   try {
@@ -590,6 +603,9 @@ function main(argv: string[]): number {
     );
     return 0;
   }
+  if (cmd === 'upgrade') {
+    return upgradeCli(restAll, { stdout: (text) => process.stdout.write(text), stderr: (text) => process.stderr.write(terminalSafe(text)) });
+  }
   if (cmd === 'sync-delta' || cmd === 'rollback-export') {
     // --confirm writes to the live project, so it is gated like deploy and migrate-data.
     const refusal = doctorGateRefusal(restAll);
@@ -669,6 +685,43 @@ function main(argv: string[]): number {
     );
     return 0;
   }
+  if (cmd === 'fetch-assets') {
+    const target = restAll[0];
+    if (!target || restAll.length > 1) {
+      process.stderr.write('usage: c2c fetch-assets <file|dir>\n');
+      return 2;
+    }
+    let dir: string;
+    let sources: string[];
+    try {
+      const isDir = isDirectoryPath(target);
+      dir = isDir ? target : dirname(target);
+      sources = (isDir ? listDsFiles(target) : [target]).map((path) => readFileSync(path, 'utf8'));
+    } catch {
+      process.stderr.write(`c2c: cannot read ${target}\n`);
+      return CLI_EXIT.inputUnreadable;
+    }
+    fetchAssetsInto(dir, sources).then(
+      (summary) => {
+        for (const entry of summary.entries) {
+          let host = 'unparsed host';
+          try {
+            host = new URL(entry.url).host;
+          } catch {
+            // keep the placeholder
+          }
+          process.stdout.write(`${entry.status} ${host}${entry.reason ? ` (${entry.reason})` : ''}\n`);
+        }
+        process.stdout.write(`fetch-assets: fetched=${summary.fetched} reused=${summary.reused} refused=${summary.refused} failed=${summary.failed} over-cap=${summary.overCap}\n`);
+        process.exitCode = summary.refused + summary.failed + summary.overCap > 0 ? 1 : 0;
+      },
+      (err: unknown) => {
+        process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'fetch-assets failed'}\n`);
+        process.exitCode = 1;
+      },
+    );
+    return 0;
+  }
   if (cmd === 'migrate-data') {
     const refusal = doctorGateRefusal(restAll);
     if (refusal !== undefined) return refusal;
@@ -727,6 +780,16 @@ function main(argv: string[]): number {
   if (!target) {
     process.stderr.write(`c2c ${cmd}: an input file or directory is required (run c2c ${cmd} --help)\n`);
     return 2;
+  }
+  if (PATH_ARG_COMMANDS.has(cmd)) {
+    if (target.startsWith('--')) {
+      process.stderr.write(`c2c ${cmd}: unknown flag ${singleLine(target)} (run c2c ${cmd} --help)\n`);
+      return 2;
+    }
+    if (!existsSync(target)) {
+      process.stderr.write(`c2c: no such file or directory: ${singleLine(target)}\n`);
+      return CLI_EXIT.inputMissing;
+    }
   }
   const flag = (name: string) => {
     const i = rest.indexOf(name);

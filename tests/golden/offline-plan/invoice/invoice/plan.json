@@ -156,6 +156,12 @@
       "status": "pass",
       "detail": "no source row counts — the dev-api-calls budget carries the missing-source warning; the stated Development write rate is ~100 writes/min/table (datastore.write_requests_per_minute, unverified)",
       "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; measure a representative load before a large migration"
+    },
+    {
+      "id": "runtime-calls",
+      "status": "pass",
+      "detail": "unknown: no source row counts, so list and aggregate page requests are not estimated; no Catalyst price is recorded in the repo, so no cost is estimated; per-request cap function.timeout_seconds 30s, unverified",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json to estimate runtime list and aggregate calls per table"
     }
   ],
   "budgetsOk": true,

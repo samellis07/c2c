@@ -27,6 +27,7 @@ import {
   fixtureMigrationReportAsMarkdown,
   humanSteps,
   migrationReportGoldenDir,
+  privateMigrationReportGoldenDir,
   runOfflinePlan,
   type FixtureMigrationReport,
   type InRepoFixture,
@@ -78,6 +79,8 @@ export interface AppInputs {
   rebuiltJson: string;
   rebuiltMd: string;
   golden: { json?: string; md?: string };
+  /** A gallery fixture whose private golden directory is not configured here: the golden check cannot run. */
+  goldenDirMissing?: boolean;
   plan: PlanRun;
 }
 
@@ -94,7 +97,8 @@ export async function loadAppInputs(repoRoot: string, fixture: InRepoFixture): P
   const source = decode(readFileSync(fixture.file)).text;
   const report = await buildFixtureMigrationReport(fixture);
   const rebuilt = await buildFixtureMigrationReport(fixture);
-  const base = join(migrationReportGoldenDir(repoRoot), fixture.id);
+  const privateDir = fixture.id.startsWith('gallery/') ? privateMigrationReportGoldenDir() : null;
+  const base = join(privateDir ?? migrationReportGoldenDir(repoRoot), fixture.id);
   return {
     fixture,
     app: ir.name ?? null,
@@ -107,6 +111,7 @@ export async function loadAppInputs(repoRoot: string, fixture: InRepoFixture): P
     rebuiltJson: fixtureMigrationReportAsJson(rebuilt),
     rebuiltMd: fixtureMigrationReportAsMarkdown(rebuilt),
     golden: { json: readIfPresent(`${base}.json`), md: readIfPresent(`${base}.md`) },
+    ...(fixture.id.startsWith('gallery/') && privateDir === null ? { goldenDirMissing: true } : {}),
     plan: await runOfflinePlan(fixture.file),
   };
 }
@@ -259,14 +264,11 @@ export function checkApp(inputs: AppInputs): AppReadiness {
   }
 
   // 8. Human steps: at most four guided steps, counted from the offline plan.
-  const steps = humanSteps(inputs.plan);
+  const steps = humanSteps(inputs.plan, report.reviewChecklist?.length ?? 0);
   {
     const id = 'human-steps-within-limit';
     const title = `Customer has at most ${MAX_HUMAN_STEPS} guided steps`;
-    const consoleSteps = steps.filter((step) => step.startsWith('console: '));
-    const note = consoleSteps.length
-      ? `; the console step(s) ${consoleSteps.map((step) => step.slice('console: '.length)).join(', ')} are Catalyst first-use gates — no API or CLI command opens a service, so they cannot be automated`
-      : '';
+    const note = '; every console visit, the mail sender and connection secrets are folded into the one Connect Catalyst step, and every counted item sits in the review checklist';
     const detail = `${steps.length}${note}: ${steps.join(' | ')}`;
     if (inputs.plan.code !== 0) criteria.push(fail(id, title, `offline plan failed (exit ${inputs.plan.code}); no step list`));
     else criteria.push(steps.length <= MAX_HUMAN_STEPS ? pass(id, title, detail) : fail(id, title, detail));
@@ -297,7 +299,8 @@ export function checkApp(inputs: AppInputs): AppReadiness {
     const id = 'report-golden-current';
     const title = 'Committed report golden matches a fresh build';
     const { json, md } = inputs.golden;
-    if (json === undefined || md === undefined) criteria.push(fail(id, title, `no committed golden for ${inputs.fixture.id}`));
+    if ((json === undefined || md === undefined) && inputs.goldenDirMissing) criteria.push(gap(id, title, `not run: the private golden directory is not configured here (set C2C_FIXTURES_DIR to the private fixtures directory); ${inputs.fixture.id} is not compared`));
+    else if (json === undefined || md === undefined) criteria.push(fail(id, title, `no committed golden for ${inputs.fixture.id}`));
     else if (json !== inputs.reportJson || md !== inputs.reportMd) criteria.push(fail(id, title, `golden for ${inputs.fixture.id} is stale; run migration-reports:update`));
     else criteria.push(pass(id, title, `${inputs.fixture.id}.json and .md current`));
   }

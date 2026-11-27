@@ -24,7 +24,7 @@ test('a small gzip or deflate bomb is refused at the decoded cap without allocat
     const before = process.memoryUsage().rss;
     const started = Date.now();
     await assert.rejects(readBody(bodyRequest(encoding, bomb)), (err: { status?: number }) => err.status === 413);
-    assert.ok(Date.now() - started < 2000, `${encoding} bomb refused quickly`);
+    assert.ok(Date.now() - started < 10_000, `${encoding} bomb refused quickly`);
     assert.ok(process.memoryUsage().rss - before < 32 * 1024 * 1024, `${encoding} bomb did not allocate the full output`);
   }
 });

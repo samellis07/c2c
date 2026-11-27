@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App, Field, Form, FunctionDef, Page, Property, PropertyBlock, Report, ReportCustomAction } from '../../core/src/ir.js';
-import { hasOthersOption, PRIVACY_PROPERTY_KEYS, privacyFlagsOf, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
+import { builtinRecordColumns, hasOthersOption, PRIVACY_PROPERTY_KEYS, privacyFlagsOf, recordStatusColumn, translationSettings, translationStrings, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { actionNavigationDropReason, actionNavigationLifted, blueprintFieldSpecs, navScriptOnly, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
@@ -28,6 +28,7 @@ import {
   droppedStyleStep,
   carriedStyleRules,
   droppedStyleRulesTodo,
+  remoteBackgroundNote,
   droppedStyles,
   droppedTagReason,
   droppedTagStep,
@@ -85,6 +86,22 @@ export interface ScannerSpec {
   onload: boolean;
 }
 
+/**
+ * In-page media tools a generated image, video or audio field carries: the
+ * lens a live capture opens, the recording length cap, the markup step, and
+ * open-on-load. Absent when the field declares none of them (client-runtime.js
+ * attachMediaTools, form/media.ts).
+ */
+export interface MediaSpec {
+  camera: 'primary' | 'secondary';
+  /** Seconds a video or audio recording runs before it stops by itself. */
+  recordSeconds?: number;
+  /** Image field `annotation = true`: the photo is drawn on before it is stored. */
+  annotate?: boolean;
+  /** Image field `show onload = true`: the camera opens when the form opens. */
+  onload?: boolean;
+}
+
 export interface UiField {
   name: string;
   label: string;
@@ -113,11 +130,20 @@ export interface UiField {
   /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
   uploadSources?: string[];
   /**
+   * Remote document stores a file field's `browse` property names
+   * (`google_docs`, `zoho_docs`), in the export's order. Generated output only
+   * records them; the runtime offers a Google Drive picker beside the local
+   * upload when the deployer has configured one (docs/doc-pickers.md).
+   */
+  browseSources?: string[];
+  /**
    * `preview duration` (seconds) on an image field: the generated picker shows
    * the chosen photo next to the control and auto-confirms it after this many
    * seconds unless the user retakes first (client-runtime.js showCapturePreview).
    */
   previewDuration?: number;
+  /** Live capture, recording cap, markup and open-on-load for an image, video or audio field. */
+  media?: MediaSpec;
   scan: boolean;
   /** Scan control exposes the device camera switch when Creator enables it. */
   switchCamera?: boolean;
@@ -308,6 +334,8 @@ export interface UiReport {
   labelWidth?: string;
   /** `options { record count = enable }`: the list header shows how many rows are shown. */
   showRecordCount?: boolean;
+  /** `toolbar { show export = false }`: the list draws no Export CSV / XLSX buttons. */
+  showExport?: false;
   queryEndpoint: string;
   /** Scoped single-row endpoint used by this report's detail route. */
   recordEndpoint?: string;
@@ -470,6 +498,8 @@ export interface UiModel {
    * table and stay manual steps.
    */
   i18n?: Record<string, Record<string, string>>;
+  /** Fetched remote CSS background images the pages point at, as `bg/<sha256>.<ext>` public paths, sorted. */
+  backgroundAssets?: string[];
   /**
    * The blocks' `Language_Settings.LANGAGUE_WITH_LOGIN` value — how the app
    * picks a language when the visitor has not chosen one. The client honors
@@ -485,6 +515,8 @@ export interface UiForm {
   section?: string;
   fields: UiField[];
   submitEndpoint: string;
+  /** A report on this form lists Added_Location or Modified_Location: the client asks the browser for its position on submit and posts it as `geo`. */
+  capturesLocation?: boolean;
   /** Where an edit-mode submit posts. Falls back to `submitEndpoint`. */
   editSubmitEndpoint?: string;
   /** Scoped single-row read used to prefill the edit screen. */
@@ -657,6 +689,26 @@ function recordPrivacyFlags(formName: string, field: Field, todos: UiTodo[], dep
 // camera app with no such limit, so the setting is recorded as a manual step
 // rather than invented as UI.
 const VIDEO_DURATION_PROPERTY_KEY = 'duration';
+
+// The longest recording the generated recorder accepts as a declared limit.
+const RECORD_SECONDS_MAX = 3600;
+
+/** A declared `duration` as whole seconds from 1 to RECORD_SECONDS_MAX, else undefined. */
+function recordSeconds(text: string): number | undefined {
+  const plain = unquote(text).trim();
+  if (!/^\d{1,4}$/.test(plain)) return undefined;
+  const seconds = Number(plain);
+  return seconds >= 1 && seconds <= RECORD_SECONDS_MAX ? seconds : undefined;
+}
+
+/** The field's media block, created on first use with the lens its `camera` property names. */
+function mediaOf(ui: UiField, field: Field): MediaSpec {
+  if (!ui.media) {
+    const lens = prop(field, 'camera');
+    ui.media = { camera: lens !== undefined && unquote(lens).trim().toLowerCase() === 'secondary' ? 'secondary' : 'primary' };
+  }
+  return ui.media;
+}
 
 // `show onload = true` (scan field: "get input before the form is displayed"; image
 // field: launch the camera automatically) asks Creator to open the camera/scanner
@@ -1442,13 +1494,16 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
   const forms = app.forms.map((form) => buildForm(form, todos, app));
   const reports = app.reports.map((report) => buildReport(app, report, todos, delugeFiles));
   const snippetFiles: HtmlpageFile[] = [];
+  const backgroundPaths = new Set<string>();
   const componentViews = {
     forms: new Set(forms.filter((form) => formStatus(form) === 'generated').map((form) => form.name)),
     reports: new Set(reports.filter((report) => report.status === 'generated').map((report) => report.name)),
   };
   const pages = app.pages.map((page) => {
-    const env: ZmlEnv = { app, page: page.name, emit: (file) => snippetFiles.push(file), seq: { n: 0 }, components: componentViews };
-    return buildPage(page, todos, env);
+    const env: ZmlEnv = { app, page: page.name, emit: (file) => snippetFiles.push(file), seq: { n: 0 }, components: componentViews, remoteBg: { used: new Set(), unresolved: new Map() } };
+    const built = buildPage(page, todos, env);
+    for (const path of env.remoteBg?.used ?? []) backgroundPaths.add(path);
+    return built;
   });
   const handlers = handlersFrom(delugeFiles);
   for (const form of forms) {
@@ -1488,6 +1543,7 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
     ...(dateFormat ? { dateFormat: unquote(dateFormat.value) } : {}),
     ...(timeFormat ? { timeFormat: unquote(timeFormat.value) } : {}),
     ...(Object.keys(i18n).length ? { i18n } : {}),
+    ...(backgroundPaths.size ? { backgroundAssets: [...backgroundPaths].sort() } : {}),
     ...(languageWithLogin(app) !== undefined ? { languageWithLogin: languageWithLogin(app) } : {}),
   };
   Object.defineProperty(model, UI_SNIPPET_FILES, { value: snippetFiles, enumerable: false });
@@ -1632,6 +1688,7 @@ function buildForm(form: Form, todos: UiTodo[], app: App): UiForm {
     ...(form.section ? { section: form.section } : {}),
     fields: form.fields.map((field) => buildField(field, todos, form.name, 0, app, new Set(form.fields.map((item) => item.name)))),
     submitEndpoint: plainSubmitEndpoint(form.name),
+    ...(builtinRecordColumns(app, form).location ? { capturesLocation: true } : {}),
     recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record`,
     deleteEndpoint: `/forms/${encodeURIComponent(form.name)}/delete`,
     ...(success ? { successMessage: success } : {}),
@@ -1785,14 +1842,21 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   if (widget === 'video') {
     const duration = prop(field, VIDEO_DURATION_PROPERTY_KEY);
     if (duration !== undefined) {
-      const name = `${formName}.${field.name} property ${VIDEO_DURATION_PROPERTY_KEY}`;
-      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-        todos.push({
-          area: 'field',
-          name,
-          reason: `Field ${field.name} sets \`duration = ${duration}\`; the generated video field hands recording off to the device camera app with no recording-length limit.`,
-          manualStep: `Enforce the ${duration}-second recording limit by hand (client-side timer, or server-side rejection of longer uploads), or accept recordings of any length, per your policy — this is not generated.`,
-        });
+      const seconds = recordSeconds(duration);
+      if (seconds !== undefined) {
+        // Generated: a Record button films through the camera and stops by
+        // itself after this many seconds (client-runtime.js attachMediaTools).
+        mediaOf(ui, field).recordSeconds = seconds;
+      } else {
+        const name = `${formName}.${field.name} property ${VIDEO_DURATION_PROPERTY_KEY}`;
+        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+          todos.push({
+            area: 'field',
+            name,
+            reason: `Field ${field.name} sets \`duration = ${duration}\`, which is not a whole number of seconds from 1 to ${RECORD_SECONDS_MAX}; the generated video field sets no recording-length limit for it.`,
+            manualStep: `Decide the recording limit for ${field.name} by hand — the declared value \`${duration}\` is not generated.`,
+          });
+        }
       }
     }
   }
@@ -1800,8 +1864,10 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   if (ui.scan || widget === 'image') {
     const showOnload = prop(field, SHOW_ONLOAD_PROPERTY_KEY);
     // A scan field's onload is generated: the runtime opens the scanner when
-    // the form opens (ui.scanner.onload). An image field still has none.
-    if (showOnload?.trim().toLowerCase() === 'true' && !ui.scanner) {
+    // the form opens (ui.scanner.onload). An image field's is generated too:
+    // the live camera panel opens when the form opens (ui.media.onload).
+    if (showOnload?.trim().toLowerCase() === 'true' && widget === 'image') mediaOf(ui, field).onload = true;
+    else if (showOnload?.trim().toLowerCase() === 'true' && !ui.scanner) {
       const name = `${formName}.${field.name} property ${SHOW_ONLOAD_PROPERTY_KEY}`;
       if (!todos.some((t) => t.area === 'field' && t.name === name)) {
         todos.push({
@@ -1875,17 +1941,13 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   }
   if (widget === 'image') {
     const annotation = prop(field, ANNOTATION_PROPERTY_KEY);
-    if (annotation?.trim().toLowerCase() === 'true') {
-      const name = `${formName}.${field.name} property ${ANNOTATION_PROPERTY_KEY}`;
-      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-        todos.push({
-          area: 'field',
-          name,
-          reason: `Field ${field.name} sets \`annotation = true\`; the generated image field accepts the chosen file unchanged, with no tool to draw or mark it up first.`,
-          manualStep: `Add a way to draw or mark up the photo for ${field.name} before it is stored, by hand — this is not generated.`,
-        });
-      }
-    }
+    // Generated: the chosen or captured photo opens in a small drawing editor
+    // and the marked-up image is what is stored (client-runtime.js attachMediaTools).
+    if (annotation?.trim().toLowerCase() === 'true') mediaOf(ui, field).annotate = true;
+    // A front (secondary) lens needs the live camera panel: the device camera
+    // app a bare `capture` input opens cannot be told which lens to use.
+    const lens = prop(field, 'camera');
+    if (lens !== undefined && lens.trim().toLowerCase() === 'secondary') mediaOf(ui, field);
     const ratio = prop(field, ASPECT_RATIO_PROPERTY_KEY);
     if (ratio !== undefined && ratio.trim().toLowerCase() !== 'original') {
       const name = `${formName}.${field.name} property ${ASPECT_RATIO_PROPERTY_KEY}`;
@@ -1966,7 +2028,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
           area: 'field',
           name,
           reason: `Field ${field.name} sets \`timedisplayoptions = ${timeDisplay}\`; the generated ${widget} input has no seconds step and never shows seconds.`,
-          manualStep: manualStepWithAnchor(`Add a seconds-precision time control for ${field.name} by hand (the native ${widget} input shows only hours and minutes) — this is not generated.`, MANUAL_STEP_ANCHORS.fieldTimePrecision),
+          manualStep: manualStepWithAnchor(`The generated ${widget} input for ${field.name} shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept.`, MANUAL_STEP_ANCHORS.fieldTimePrecision),
         });
       }
     }
@@ -2068,6 +2130,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       const tokens = unquote(browseProp.value).split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
       const uncarried = tokens.filter((t) => t !== 'local_drive');
       if (uncarried.length && uncarried.every((t) => BROWSE_REMOTE_SOURCES.has(t))) {
+        ui.browseSources = uncarried;
         ui.note = [
           ui.note,
           `Browse option(s) ${uncarried.join(', ')} have no Catalyst equivalent; file uploads are supported from local drive only.`,
@@ -2098,14 +2161,19 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
     if (widget === 'audio') {
       const duration = prop(field, AUDIO_DURATION_PROPERTY_KEY);
       if (duration !== undefined) {
-        const name = `${formName}.${field.name} property ${AUDIO_DURATION_PROPERTY_KEY}`;
-        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
-          todos.push({
-            area: 'field',
-            name,
-            reason: `Field ${field.name} sets \`duration = ${duration}\`; the generated audio recorder enforces no maximum recording length.`,
-            manualStep: `Enforce the ${duration}-second recording limit in the client (stop or trim the recorder) or accept longer recordings, per your policy — this is not generated.`,
-          });
+        const seconds = recordSeconds(duration);
+        if (seconds !== undefined) {
+          mediaOf(ui, field).recordSeconds = seconds;
+        } else {
+          const name = `${formName}.${field.name} property ${AUDIO_DURATION_PROPERTY_KEY}`;
+          if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+            todos.push({
+              area: 'field',
+              name,
+              reason: `Field ${field.name} sets \`duration = ${duration}\`, which is not a whole number of seconds from 1 to ${RECORD_SECONDS_MAX}; the generated audio recorder sets no maximum recording length for it.`,
+              manualStep: `Decide the recording limit for ${field.name} by hand — the declared value \`${duration}\` is not generated.`,
+            });
+          }
         }
       }
     }
@@ -2385,6 +2453,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   for (const column of report.columns) {
     if (knownColumnHead(form, column.field) || !UNSUPPORTED_RECORD_COLUMNS.has(column.field)) continue;
     if (column.field === 'Record_Status' && recordStatusColumn(app, form)) continue;
+    if (storedBuiltinColumn(app, form, column.field)) continue;
     const name = `${report.name} column ${column.field}`;
     if (!todos.some((t) => t.area === 'report' && t.name === name)) {
       todos.push({
@@ -2427,8 +2496,9 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
         : blockName === 'toolbar'
           ? block.properties.filter((property) => {
               const key = property.key.trim().toLowerCase().replace(/\s+/g, ' ');
-              // The generated report chrome draws no export button and no add
-              // button; an explicit Creator false for either is therefore
+              // The generated report chrome draws Export CSV / XLSX unless
+              // `show export = false` (carried as showExport: false), and no
+              // add button; an explicit Creator false for the add button is
               // faithfully represented by its absence.
               if (property.value.trim().toLowerCase() !== 'false') return true;
               return key !== 'show export' && key !== 'show add button';
@@ -2445,6 +2515,11 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
       manualStep: `In the Catalyst console, apply the \`${block.name}\` settings by hand on report ${report.name}: ${settings}.`,
     });
   }
+  const hideExport = report.blocks.some(
+    (block) =>
+      block.name.trim().toLowerCase() === 'toolbar' &&
+      block.properties.some((p) => p.key.trim().toLowerCase().replace(/\s+/g, ' ') === 'show export' && p.value.trim().toLowerCase() === 'false'),
+  );
   const displayField = options.get('display field');
   const pageSize = reportPageSizeOption(options.get('display rows')) ?? LIMITS.zcqlRowsPerQuery;
   let groupField = groupBy[0]?.field;
@@ -2761,6 +2836,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     ...(recordsPerRow !== undefined ? { recordsPerRow } : {}),
     ...(labelWidth ? { labelWidth } : {}),
     ...(showRecordCount ? { showRecordCount: true } : {}),
+    ...(hideExport ? { showExport: false as const } : {}),
     queryEndpoint: `/reports/${encodeURIComponent(report.name)}`,
     ...(form ? { recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record` } : {}),
     ...(view === 'spreadsheet' ? { editEndpoint: `/reports/${encodeURIComponent(report.name)}/rows` } : {}),
@@ -2985,6 +3061,12 @@ const RECORD_COLUMNS = new Set([
   'Modified_User_IP_Address',
 ]);
 
+/** True when the schema stores this built-in record column for the form (see `builtinRecordColumns`). */
+function storedBuiltinColumn(app: App, form: Form | undefined, name: string): boolean {
+  const stored = builtinRecordColumns(app, form);
+  return name === 'Record_Status' ? stored.status : GEO_RECORD_COLUMNS.has(name) && stored.location;
+}
+
 /**
  * Creator system columns a report may list that the generated schema stores
  * no column for at all — distinct from `RECORD_COLUMNS`, which the schema
@@ -2992,9 +3074,10 @@ const RECORD_COLUMNS = new Set([
  * Applicable / Yet to get Approved / Approved / Rejected); when an approval
  * or blueprint machine governs the report's form the column reads the
  * machine's status column instead (`recordStatusColumn`), so only a form no
- * machine governs stays counted here. The geo stamps (`Added_Location`,
- * `Modified_Location`) have no stored column either, so a report column
- * naming one is counted rather than drawn blank.
+ * machine governs is stored as its own column (`builtinRecordColumns`). The
+ * geo stamps (`Added_Location`, `Modified_Location`) are stored as latitude /
+ * longitude columns the same way. What stays counted here is a report that
+ * names no form, so there is no table to store the column on.
  */
 const UNSUPPORTED_RECORD_COLUMNS = new Set(['Record_Status', ...GEO_RECORD_COLUMNS]);
 
@@ -3039,6 +3122,9 @@ function reportViewColumns(app: App, form: Form | undefined, column: Report['col
     if (path === 'Record_Status' && recordStatusColumn(app, form)) {
       return [{ field: path, label: column.label || path }];
     }
+    // A built-in record column the schema now stores (location stamps, a plain
+    // Record_Status): the report endpoint fills the cell from the stored parts.
+    if (storedBuiltinColumn(app, form, path)) return [{ field: path, label: column.label || path }];
     return [];
   }
   const out: ReportViewColumn[] = [
@@ -3142,6 +3228,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       : [];
   const pageLeaves = leaves(elements);
   const todoLeaves = pageLeaves.filter((el) => el.kind === 'todo');
+  const remoteNote = remoteBackgroundNote(env?.remoteBg?.unresolved ?? new Map());
   // Dropped `<style>` CSS is one counted manual step per page; the count stays off the generated element.
   let styleRules = 0;
   const styleDrops: string[] = [];
@@ -3178,7 +3265,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
         area: 'zml',
         name: `${page.name}.${elementName}`,
         reason: `ZML <${el.tag}> "${elementName}" click parameters "${el.droppedParameters}" are not generated; wire them to the click handler by hand`,
-        manualStep: manualStepWithAnchor(`On page "${page.name}", wire click parameters "${el.droppedParameters}" to the generated <${el.tag}> "${elementName}" click handler.`, MANUAL_STEP_ANCHORS.zmlClickParameters),
+        manualStep: manualStepWithAnchor(`On page "${page.name}", the <${el.tag}> "${elementName}" opens without its values "${el.droppedParameters}". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them.`, MANUAL_STEP_ANCHORS.zmlClickParameters),
       });
       delete el.droppedParameters;
     }
@@ -3214,11 +3301,11 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
         if (name === '?') dropped[n] = `"${refused[next++]}"`;
       });
     }
-    if (dropped.length) todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedStyleReason(dropped), manualStep: droppedStyleStep(`On page ${page.name}, the <${el.tag}> element`, dropped) });
+    if (dropped.length) todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedStyleReason(dropped), manualStep: droppedStyleStep(`On page ${page.name}, the <${el.tag}> element`, dropped) + remoteNote });
   }
   if (styleRules) {
     const lost = droppedStyleRulesTodo(page.name, styleRules, styleDrops, styleWhere);
-    todos.push({ area: 'zml', name: `${page.name}.style`, reason: lost.reason, manualReasons: ['sanitizer-loss'], manualStep: lost.step });
+    todos.push({ area: 'zml', name: `${page.name}.style`, reason: lost.reason, manualReasons: ['sanitizer-loss'], manualStep: lost.step + remoteNote });
   }
   const status = pageLeaves.length > 0 && todoLeaves.length === pageLeaves.length ? 'todo' : todoLeaves.length > 0 ? 'partial' : 'generated';
   return {

@@ -1,0 +1,540 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Attendance Management",
+  "cases": [
+    {
+      "id": "class-title-unique-and-days-meet-mandatory",
+      "notes": [
+        "Add_Class: must have unique Class_Title, must have Days_Meet (checkboxes)"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Date_unbounded": true
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Days_Meet": [
+              "Monday"
+            ],
+            "Date_unbounded": true
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Days_Meet": [
+              "Tuesday"
+            ],
+            "Date_unbounded": true
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Class": [
+            {
+              "Class_Title": "Maths"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "class-bounded-without-dates-cancel-submit",
+      "notes": [
+        "Validation script (on add, Date_unbounded == false): Starting_Date or Ending_Date null -> cancel submit. Date_unbounded initial value is false, so omitting it takes the bounded path"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Days_Meet": [
+              "Monday"
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Class": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "class-bounded-explicit-false-without-dates-cancel-submit",
+      "notes": [
+        "same as the omitted-default case with Date_unbounded sent as false"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Days_Meet": [
+              "Monday"
+            ],
+            "Date_unbounded": false
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Add_Class": []
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "class-bounded-with-dates-and-status-initial-active",
+      "notes": [
+        "bounded class with both dates saves; Class_Status initial value Active"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Days_Meet": [
+              "Monday"
+            ],
+            "Starting_Date": "2026-09-01",
+            "Ending_Date": "2027-06-30"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Class": [
+            {
+              "Class_Title": "Maths",
+              "Class_Status": "Active",
+              "Date_unbounded": false
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "class-unbounded-without-dates-saved",
+      "notes": [
+        "Date_unbounded true skips the dates validation"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Days_Meet": [
+              "Monday"
+            ],
+            "Date_unbounded": true
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Class": [
+            {
+              "Class_Title": "Maths",
+              "Date_unbounded": true
+            }
+          ]
+        }
+      },
+      "tags": [
+        "d2diff"
+      ]
+    },
+    {
+      "id": "student-defaults-gender-status",
+      "notes": [
+        "initial values Gender = Male and Student_Status = Active (Gender sent explicitly in other cases)"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p@example.test"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Gender": "Male",
+              "Student_Status": "Active"
+            }
+          ]
+        }
+      },
+      "skip": "Add_Student has must-have Photo (image); the only accepted write shape {key} answers 500 in the offline harness, so the form is unreachable via the API (see student-photo-file-reference-saved)",
+      "tags": [
+        "d2diff",
+        "unreachable-via-api"
+      ]
+    },
+    {
+      "id": "student-registration-number-sequence",
+      "notes": [
+        "On Success: first student Registration_Number = 1; later max(Registration_Number) + 1 -> 2 [UNVERIFIED] for the later one: the script only sets input.Registration_Number after the insert"
+      ],
+      "tags": [
+        "d2diff",
+        "unreachable-via-api"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu1",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p1@example.test",
+            "Email": "a@example.test",
+            "Gender": "Female"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu2",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p2@example.test",
+            "Email": "b@example.test",
+            "Gender": "Female"
+          },
+          "setup": true
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Email": "a@example.test",
+              "Registration_Number": 1
+            },
+            {
+              "Email": "b@example.test",
+              "Registration_Number": 2
+            }
+          ]
+        }
+      },
+      "skip": "Add_Student has must-have Photo (image); the only accepted write shape {key} answers 500 in the offline harness, so the form is unreachable via the API (see student-photo-file-reference-saved)"
+    },
+    {
+      "id": "student-email-unique",
+      "notes": [
+        "Add_Student: unique Email"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu1",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p1@example.test",
+            "Email": "a@example.test",
+            "Gender": "Female"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu2",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p2@example.test",
+            "Email": "a@example.test",
+            "Gender": "Female"
+          },
+          "setup": false,
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Email": "a@example.test"
+            }
+          ]
+        }
+      },
+      "skip": "Add_Student has must-have Photo (image); the only accepted write shape {key} answers 500 in the offline harness, so the form is unreachable via the API (see student-photo-file-reference-saved)",
+      "tags": [
+        "d2diff",
+        "unreachable-via-api"
+      ]
+    },
+    {
+      "id": "attendance-present-and-absent-counts-on-success",
+      "notes": [
+        "On success: Absent_Students = class students not in Present_Students; Number_Of_Present_Students = size(Present_Students), Number_Of_Absent_Students = size(absent)"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu1",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p1@example.test",
+            "Email": "a@example.test",
+            "Gender": "Female"
+          },
+          "bind": {
+            "s1": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu2",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p2@example.test",
+            "Email": "b@example.test",
+            "Gender": "Female"
+          },
+          "bind": {
+            "s2": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Class_Title": "Maths",
+            "Days_Meet": [
+              "Monday"
+            ],
+            "Date_unbounded": true,
+            "Students": [
+              "<ref:s1>",
+              "<ref:s2>"
+            ]
+          },
+          "bind": {
+            "c": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Fill_Attendance",
+          "record": {
+            "Attendance_Date": "2026-10-05",
+            "Class": "<ref:c>",
+            "Present_Students": [
+              "<ref:s1>"
+            ]
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Fill_Attendance": [
+            {
+              "Class": "<ref:c>",
+              "Number_Of_Present_Students": 1,
+              "Number_Of_Absent_Students": 1
+            }
+          ]
+        }
+      },
+      "skip": "Add_Student has must-have Photo (image); the only accepted write shape {key} answers 500 in the offline harness, so the form is unreachable via the API (see student-photo-file-reference-saved)",
+      "tags": [
+        "d2diff",
+        "unreachable-via-api"
+      ]
+    },
+    {
+      "id": "student-photo-file-reference-saved",
+      "notes": [
+        "[UNVERIFIED] a {key} file reference for the must-have Photo is expected to be accepted (record saved); the app has no other way to satisfy the mandatory image"
+      ],
+      "tags": [
+        "d2diff",
+        "UNVERIFIED"
+      ],
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_Name": {
+              "first_name": "Stu",
+              "last_name": "Lee"
+            },
+            "Date_of_Birth": "2012-05-04",
+            "Photo": {
+              "key": "k1"
+            },
+            "Parent_Name1": {
+              "first_name": "Par",
+              "last_name": "Lee"
+            },
+            "Parent_Email": "p@example.test"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Gender": "Male",
+              "Student_Status": "Active"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

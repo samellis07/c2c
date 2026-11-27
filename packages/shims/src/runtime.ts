@@ -432,7 +432,7 @@ export interface FieldValueReader {
 
 /** Fields `Runtime.context` takes; `form` names the record's form for {@link RuntimeOptions.fieldValues}. */
 export type ContextInput = Partial<
-  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent'>
+  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent' | 'stamps'>
 > & { form?: string };
 
 /** A client action the server run answers with: a field `:ui` task, an `openUrl`, a field value, the rows to insert into a subform, an alert or a field's visibility. */
@@ -473,6 +473,14 @@ export interface ShimContext {
    * A prefetch response for any other nonce is stale.
    */
   formNonce?: string;
+  /**
+   * The linked row of each single lookup of the submitted record, by field,
+   * read by `input.hydrate` before the scripts run. `input.get` walks it for
+   * `input.Lookup.Field`, which Creator reads as the linked record's field.
+   */
+  linked?: Record<string, Record<string, unknown>>;
+  /** The lookup fields `input.hydrate` covered: an unresolved read below one reads as empty text. */
+  linkedFields?: string[];
   /** Prefetch endpoint path the client handler loaded, set by the first prefetch call. */
   prefetchPath?: string;
   /**
@@ -513,6 +521,18 @@ export interface ShimContext {
    * A client `body.op` is not copied here.
    */
   writeOp?: 'insert' | 'update';
+  /**
+   * Built-in record columns the generated submit endpoint stamps on `form`
+   * (Creator's Added_Location / Modified_Location and Record_Status). Set by
+   * the endpoint, never read from the request body: `location` is the
+   * validated browser position (absent when denied or malformed) and
+   * `recordStatus` the value a new row stores. Ignored for any other form.
+   */
+  stamps?: {
+    form: string;
+    location?: { latitude: number; longitude: number };
+    recordStatus?: string;
+  };
   /**
    * Request ROWID (`body.ROWID` or `body.rowid` only). Not read from `record`.
    * Empty means on add or edit is an insert.
@@ -777,6 +797,12 @@ export interface Shim {
     root(ctx: ShimContext): Record<string, unknown>;
     get(ctx: ShimContext, ...path: string[]): unknown;
     set(ctx: ShimContext, path: string[], value: unknown): unknown;
+    /**
+     * Reads the row each single lookup of the record points at (`links`: field
+     * -> the form it links to) so `input.Lookup.Field` reads the linked row.
+     * A field the caller may not read, or with no row, reads as no linked row.
+     */
+    hydrate(ctx: ShimContext, links: Record<string, string>, graph?: Record<string, Record<string, string>>): Promise<void>;
     /**
      * `input.<subform>.insert(rows)` appends rows to the field list: one row
      * per element of a collection argument, else the single row.
@@ -1354,7 +1380,7 @@ function labelledIdentity(value: string | undefined, sentinel: string): { value:
  * Caller copies of these columns are dropped. `authorizeWrite` already rejects
  * them; this is the server write that follows that rejection.
  */
-function applySystemColumns(values: Record<string, unknown>, op: 'insert' | 'update', ctx: ShimContext): Record<string, unknown> {
+function applySystemColumns(values: Record<string, unknown>, op: 'insert' | 'update', ctx: ShimContext, form?: string): Record<string, unknown> {
   const out = { ...values };
   for (const key of Object.keys(out)) {
     const lower = key.toLowerCase();
@@ -1369,6 +1395,19 @@ function applySystemColumns(values: Record<string, unknown>, op: 'insert' | 'upd
   } else {
     out.Modified_User = user;
     out.Modified_Time = time;
+  }
+  const stamps = ctx.stamps;
+  if (stamps && form === stamps.form) {
+    // The endpoint owns these columns: a caller copy is dropped first.
+    for (const key of Object.keys(out)) {
+      if (/^(added|modified)_location_(latitude|longitude)$/i.test(key) || key.toLowerCase() === 'record_status') delete out[key];
+    }
+    const stamp = op === 'insert' ? 'Added_Location' : 'Modified_Location';
+    if (stamps.location) {
+      out[`${stamp}_latitude`] = stamps.location.latitude;
+      out[`${stamp}_longitude`] = stamps.location.longitude;
+    }
+    if (op === 'insert' && stamps.recordStatus !== undefined) out.Record_Status = stamps.recordStatus;
   }
   return out;
 }
@@ -1455,6 +1494,10 @@ function indexSet(obj: unknown, key: unknown, value: unknown): unknown {
   (obj as Record<string, unknown>)[k] = value;
   return value;
 }
+
+/** Lookup links `input.hydrate` follows, and the store reads it may spend, per submit. */
+const HYDRATE_DEPTH = 3;
+const HYDRATE_READS = 32;
 
 function getPath(root: unknown, path: string[]): unknown {
   let cur = root;
@@ -3344,6 +3387,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       get(ctx, ...path) {
         const value = getPath(ctx.record, path);
+        if (value === undefined && path.length > 1 && ctx.linked && Object.hasOwn(ctx.linked, path[0]!)) {
+          // A link below the parent that did not resolve reads as empty text.
+          const linked = getPath(ctx.linked[path[0]!], path.slice(1));
+          return linked === undefined ? '' : linked;
+        }
+        if (value === undefined && path.length > 1 && ctx.linkedFields?.includes(path[0]!)) return '';
         if (value === undefined && ctx.rowInput && ctx.row && path.length) {
           const field = shim.record.get(ctx.row, path[0]!);
           return path.length === 1 ? field : getPath(field, path.slice(1));
@@ -3352,6 +3401,49 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         // record carries no id of its own.
         if (value === undefined && path.length === 1 && path[0] === 'ID') return ctx.rowId;
         return value;
+      },
+      async hydrate(ctx, links, graph = {}) {
+        // The chain A -> B -> C is followed to HYDRATE_DEPTH links, each link
+        // read through the same grant as any lookup read; a link the caller
+        // cannot read, or that has no row, stays an id and reads as empty.
+        // One read per distinct (form, id), at most HYDRATE_READS per submit.
+        ctx.linkedFields = Object.keys(links);
+        const seen = new Map<string, Record<string, unknown> | null>();
+        let budget = HYDRATE_READS;
+        const load = async (form: string, id: string, depth: number, trail: string[]): Promise<Record<string, unknown> | null> => {
+          const key = `${form.toLowerCase()}\u0000${id}`;
+          if (seen.has(key)) return seen.get(key)!;
+          if (trail.includes(key) || budget <= 0) return null;
+          budget--;
+          let row: Record<string, unknown> | null = null;
+          try {
+            const rows = await shim.datastore.plainRows(ctx, shim.datastore.query(ctx, form, { op: '==', field: 'ROWID', value: id }));
+            row = rows[0] ? { ...rows[0] } : null;
+          } catch (err) {
+            if (!(err instanceof RecordAccessError)) throw err;
+          }
+          if (row && depth < HYDRATE_DEPTH) {
+            const next = Object.hasOwn(graph, form) ? graph[form]! : {};
+            for (const [field, target] of Object.entries(next)) {
+              const cell = row[field];
+              if ((typeof cell !== 'string' && typeof cell !== 'number') || String(cell) === '') continue;
+              const child = await load(target, String(cell), depth + 1, [...trail, key]);
+              if (child) {
+                const out = { ...child };
+                Object.defineProperty(out, 'toString', { value: () => String(child.ID ?? ''), enumerable: false });
+                row[field] = out;
+              }
+            }
+          }
+          seen.set(key, row);
+          return row;
+        };
+        for (const [field, form] of Object.entries(links)) {
+          const cell = getPath(ctx.record, [field]);
+          if ((typeof cell !== 'string' && typeof cell !== 'number') || String(cell) === '') continue;
+          const row = await load(form, String(cell), 1, []);
+          if (row) (ctx.linked ??= Object.create(null))[field] = row;
+        }
       },
       set(ctx, path, value) {
         note({ op: 'input.set', path, value });
@@ -3805,7 +3897,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             throw err;
           }
         }
-        const stamped = applySystemColumns(storedValues, 'insert', ctx);
+        const stamped = applySystemColumns(storedValues, 'insert', ctx, form);
         warnLongStrings(form, stamped);
         // authorizeWrite keeps composite nesting (Name: { first_name }); the
         // store has one flat column per part, so expand before the check.
@@ -3849,7 +3941,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             throw err;
           }
         }
-        const expandedUpdate = flatComposites(form, expandCompositeWrites(form, stringifyValues(applySystemColumns(storedValues, 'update', ctx)), rulesOf(form)));
+        const expandedUpdate = flatComposites(form, expandCompositeWrites(form, stringifyValues(applySystemColumns(storedValues, 'update', ctx, form)), rulesOf(form)));
         const stored = checkedWrite(form, shadowsForWrite(form, expandedUpdate), false);
         // The read that finds ROWIDs is the same scoped read as rows/column/count/field.
         // Without the profile record filter, a criteria update writes rows the principal cannot see.
@@ -4101,7 +4193,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       async writeRow(ctx, form, rowId, values) {
         const criteria: Criteria = { op: '==', field: 'ROWID', value: rowId };
-        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'update', ctx))), false);
+        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'update', ctx, form))), false);
         const where = whereOf(form, criteria);
         if (dryRun) {
           note({ op: 'store', form, where, values: stored, dryRun, performed: true });
@@ -4117,7 +4209,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return { values: stored, criteria };
       },
       async insertRow(ctx, form, values) {
-        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'insert', ctx))), true);
+        const stored = checkedWrite(form, shadowsForWrite(form, stringifyValues(applySystemColumns(values, 'insert', ctx, form))), true);
         if (dryRun) {
           note({ op: 'store', form, criteria: null, values: stored, dryRun, performed: true });
           return { values: stored };
@@ -4353,10 +4445,16 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           // Creator's built-in namespaces (thisapp.permissions.assignUserInProfile,
           // thisapp.portal.*) manage Creator users and portals; they are not app
           // functions, and Catalyst users and roles are managed in Authentication.
-          const builtin = path.length > 1 && THISAPP_BUILTINS.has(path[0]!.toLowerCase());
-          const error = builtin
-            ? `thisapp.${name}: Creator built-in not run by c2c; manage the user's role in Catalyst Authentication`
-            : `thisapp.${name}: no such function`;
+          // The call is a recorded manual step, never a silent drop and never a
+          // failure: it answers null so the rest of the script (an on-success
+          // after the row is saved) still runs, as it does in Creator.
+          if (path.length > 1 && THISAPP_BUILTINS.has(path[0]!.toLowerCase())) {
+            const manualStep = `thisapp.${name}: Creator built-in not run by c2c; manage the user's role in Catalyst Authentication`;
+            note({ op: 'thisapp', path, args, performed: false, dryRun, manualStep });
+            if (!dryRun) console.error(JSON.stringify({ level: 'warn', component: 'c2c-thisapp', event: 'builtin-not-run', call: `thisapp.${name}` }));
+            return null;
+          }
+          const error = `thisapp.${name}: no such function`;
           note({ op: 'thisapp', path, args, performed: false, dryRun, error });
           throw new DelugeRuntimeError(error);
         }
@@ -4546,8 +4644,11 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       effect(ctx, key, effect) {
         if (!effect) return;
+        // A plain object, so the reply keeps its public shape; an own property is defined for the key, so one spelled
+        // __proto__ or constructor is an ordinary entry and never reaches Object.prototype.
         const queued = (ctx.clientEffects ??= {});
-        (queued[key] ??= []).push(effect);
+        if (!Object.hasOwn(queued, key)) Object.defineProperty(queued, key, { value: [], enumerable: true, writable: true, configurable: true });
+        queued[key]!.push(effect);
       },
       rowValue(ctx, row, name) {
         const at = ctx.subformRow;
@@ -4770,6 +4871,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       if (partial.principal) ctx.principal = partial.principal;
       if (partial.formNonce) ctx.formNonce = partial.formNonce;
       if (partial.writeOp) ctx.writeOp = partial.writeOp;
+      if (partial.stamps) ctx.stamps = partial.stamps;
       if (partial.rowId !== undefined) ctx.rowId = partial.rowId;
       if (partial.subformRow) ctx.subformRow = partial.subformRow;
       if (Array.isArray(partial.args)) ctx.args = partial.args;

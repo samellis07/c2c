@@ -388,6 +388,15 @@ function writeExport(app: App, dir: string, exported: CreatorExport): string {
     const rows = exported.find((form) => form.subform?.form === table.subform!.form && form.subform.field === table.subform!.field)?.rows.length;
     if (rows !== undefined) counts[table.name] = rows;
   }
+  // A lookup junction pins its own total too: its rows are the values of the parent's lookup column, and a report export cannot prove it holds them all.
+  const junctions = schema.tables.filter((table) => table.role === 'junction' && !table.nosql);
+  if (junctions.length) {
+    const read = readSourceCsv(dir, app, true);
+    for (const table of junctions) {
+      const rows = read.tables.find((item) => item.table === table.name)?.rows.length;
+      if (rows !== undefined) counts[table.name] = rows;
+    }
+  }
   writeFileSync(join(dir, 'counts.json'), `${JSON.stringify(counts)}\n`);
   return dir;
 }
@@ -632,7 +641,8 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
   const load = (name: string, exported: CreatorExport) => readSourceCsv(writeExport(app, join(work, name), exported), app, true);
 
   // Initial load, then one parallel-run round while Creator stays in use.
-  const first = await sync(app, store, load('export-0', initial), undefined);
+  const initialLoad = load('export-0', initial);
+  const first = await sync(app, store, initialLoad, undefined);
   const parallel = cloneExport(initial);
   const expectParallel = { added: 0, changed: 0, deleted: 0 };
   const leaf = parallel.find((form) => form.form === targets.leaf);
@@ -657,6 +667,13 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
     expectParallel.changed = 1;
   }
   const parallelLoad = load('export-1', parallel);
+  // A multi lookup's junction rows come and go with the records that hold them.
+  for (const table of generateSchema(app).tables.filter((entry) => entry.role === 'junction' && !entry.nosql)) {
+    const before = new Set(initialLoad.tables.find((item) => item.table === table.name)?.rows.map((row) => row.id));
+    const after = new Set(parallelLoad.tables.find((item) => item.table === table.name)?.rows.map((row) => row.id));
+    expectParallel.added += [...after].filter((id) => !before.has(id)).length;
+    expectParallel.deleted += [...before].filter((id) => !after.has(id)).length;
+  }
   const round = await sync(app, store, parallelLoad, first.next);
   const parallelStore = await storeDiff(
     app,

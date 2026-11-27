@@ -197,15 +197,15 @@ test('thisapp.call bounded recursion returns the nested result', async () => {
   assert.equal(await ctx.shim.thisapp.call(ctx, ['F', 'count'], [5]), 5);
 });
 
-test('thisapp.permissions.* is refused as a Creator built-in, not a missing app function', async () => {
-  const { ctx } = live({ 'F.g': { call: async () => 1 } });
-  await assert.rejects(
-    ctx.shim.thisapp.call(ctx, ['permissions', 'assignUserInProfile'], ['user@example.test', 'Employee']),
-    (err: unknown) =>
-      err instanceof DelugeRuntimeError &&
-      /Creator built-in not run by c2c/.test((err as Error).message) &&
-      !/no such function/.test((err as Error).message),
-  );
+test('thisapp.permissions.* is a recorded manual step, not a failure of the script that calls it', async () => {
+  const { runtime, ctx } = live({ 'F.g': { call: async () => 1 } });
+  // The call answers null and the script carries on: a throw here would abort an
+  // on-success script after the row is saved and answer every submit with a warning.
+  assert.equal(await ctx.shim.thisapp.call(ctx, ['permissions', 'assignUserInProfile'], ['user@example.test', 'Employee']), null);
+  const entry = runtime.transcript.find((e) => e.op === 'thisapp') as unknown as Record<string, unknown>;
+  assert.equal(entry.performed, false);
+  assert.match(String(entry.manualStep), /Creator built-in not run by c2c/);
+  assert.match(String(entry.manualStep), /Catalyst Authentication/);
   // An app function that happens to be called "permissions" with one segment is still a missing function.
   await assert.rejects(
     ctx.shim.thisapp.call(ctx, ['permissions'], []),

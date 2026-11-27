@@ -146,6 +146,15 @@ test('a stale or missing golden fails', async () => {
   assert.equal(status(checkApp({ ...inputs, golden: {} }).criteria, 'report-golden-current').status, 'FAIL');
 });
 
+test('a gallery fixture without the private golden directory reports the golden check as not run, never as a failure', async () => {
+  const inputs = await fresh();
+  const missingDir = checkApp({ ...inputs, golden: {}, goldenDirMissing: true }).criteria;
+  assert.equal(status(missingDir, 'report-golden-current').status, 'GAP');
+  assert.match(status(missingDir, 'report-golden-current').detail, /not run/);
+  // With the directory configured, a missing golden is still a failure, and a current one still passes.
+  assert.equal(status(checkApp({ ...inputs, golden: {} }).criteria, 'report-golden-current').status, 'FAIL');
+});
+
 test('two different builds of the same report fail the byte-identity check', async () => {
   const inputs = await fresh();
   assert.equal(status(checkApp({ ...inputs, rebuiltJson: `${inputs.rebuiltJson} ` }).criteria, 'report-deterministic').status, 'FAIL');
@@ -156,30 +165,45 @@ test('a markdown report without the scope labels fails', async () => {
   assert.equal(status(checkApp({ ...inputs, reportMd: inputs.reportMd.replace('## Scope', '').replace(/^- .* — not .*$/gm, '') }).criteria, 'report-lists-scope').status, 'FAIL');
 });
 
-test('human steps count the checklist once and console steps that are a separate visit', () => {
-  const steps = humanSteps({
+test('human steps fold to Connect Catalyst, invite and sign-in, the in-app check, and one review step', () => {
+  const plan = {
     steps: [
-      { id: 'cloudscale-enable', via: 'console' },
+      { id: 'cloudscale-enable', via: 'console', command: 'open Cloud Scale' },
+      { id: 'stratus-enable', via: 'console' },
+      { id: 'smartbrowz-enable', via: 'console' },
       { id: 'sign-in-check', via: 'console' },
       { id: 'mail-sender', via: 'console' },
       { id: 'tables', via: 'mcp' },
     ],
-    connectionSecretKeys: [],
-  });
-  assert.deepEqual(steps.map((step) => step.split(':')[0]), ['Accept invite', 'Sign in once', 'Run the in-app check and paste its code', 'Verify mail sender', 'console']);
+    connectionSecretKeys: ['API_KEY'],
+  };
+  const steps = humanSteps(plan, 3);
+  assert.deepEqual(steps.map((step) => step.split(':')[0]), ['Connect Catalyst', 'Accept invite and sign in once', 'Run the in-app check and paste its code', 'Review 3 counted items']);
+  for (const named of ['c2c doctor', 'cloudscale-enable — open Cloud Scale', 'stratus-enable', 'smartbrowz-enable', 'verify mail sender', 'API_KEY']) {
+    assert.ok(steps[0]!.includes(named), `Connect Catalyst names ${named}`);
+  }
+  assert.deepEqual(humanSteps({ steps: [], connectionSecretKeys: [] }, 0).length, 3, 'no review step without counted items');
+  assert.match(humanSteps({ steps: [], connectionSecretKeys: [] }, 1)[3]!, /^Review 1 counted item:/);
 });
 
-test('more than the step limit fails, the limit passes, and a failed plan fails both plan criteria', async () => {
+test('the worst case stays within the step limit, and a failed plan fails both plan criteria', async () => {
   const inputs = await fresh();
-  const over = { ...inputs, plan: { ...inputs.plan, steps: [{ id: 'cloudscale-enable', via: 'console' }, { id: 'stratus-enable', via: 'console' }] } };
-  assert.equal(humanSteps(over.plan).length, MAX_HUMAN_STEPS + 1);
-  assert.equal(status(checkApp(over).criteria, 'human-steps-within-limit').status, 'FAIL');
-  const within = { ...inputs, plan: { ...inputs.plan, steps: [{ id: 'cloudscale-enable', via: 'console' }] } };
-  assert.equal(humanSteps(within.plan).length, MAX_HUMAN_STEPS);
-  assert.equal(status(checkApp(within).criteria, 'human-steps-within-limit').status, 'PASS');
+  const worst = { ...inputs, plan: { ...inputs.plan, connectionSecretKeys: ['API_KEY'], steps: ['cloudscale-enable', 'stratus-enable', 'smartbrowz-enable', 'mail-sender'].map((id) => ({ id, via: 'console' })) } };
+  assert.equal(humanSteps(worst.plan, 40).length, MAX_HUMAN_STEPS);
+  assert.equal(status(checkApp(worst).criteria, 'human-steps-within-limit').status, 'PASS');
   const failed = checkApp({ ...inputs, plan: { ...inputs.plan, code: 1, files: [], stderr: 'c2c plan: boom\n' } });
   assert.equal(status(failed.criteria, 'human-steps-within-limit').status, 'FAIL');
   assert.equal(status(failed.criteria, 'guide-offline-steps-run').status, 'FAIL');
+});
+
+test('the review checklist carries every counted TODO and every silent drop, each with reason and step', async () => {
+  const inputs = await fresh();
+  const items = inputs.report.reviewChecklist ?? [];
+  assert.equal(items.length, inputs.analysis.determinism.todoCount + inputs.analysis.determinism.silentDrops);
+  assert.ok(items.length > 0);
+  for (const item of items) for (const key of ['where', 'reason', 'step'] as const) assert.ok(item[key].trim(), `${item.where}: ${key}`);
+  assert.ok(inputs.report.humanSteps.some((step) => step.startsWith(`Review ${items.length} counted item`)));
+  for (const item of items) assert.ok(inputs.reportMd.includes(item.step), `${item.where}: step in the markdown`);
 });
 
 test('the guide checks fail on an unknown command, a broken link and an unnamed checklist step', () => {

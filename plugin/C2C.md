@@ -49,9 +49,9 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 | `analyze/plan` | `commands/plan.md` | `skills/c2c-migrate/SKILL.md` | `plan`, `report` | none |
 | `analyze/plan` | none | `skills/c2c-edit/SKILL.md` | `edit` | none |
 | `provision/deploy` | `commands/migrate.md` | `skills/c2c-migrate/SKILL.md` | `provision`, `deploy` | Accept the admin invite, Sign in once, Run the in-app check and paste its code, Verify the mail sender (only if your app sends mail) |
-| `provision/deploy` | none | `skills/c2c-provision-and-deploy/SKILL.md` | `provision`, `deploy` | Accept the admin invite, Sign in once |
+| `provision/deploy` | none | `skills/c2c-provision-and-deploy/SKILL.md` | `provision`, `deploy`, `upgrade` | Accept the admin invite, Sign in once |
 | `provision/deploy` | none | `skills/c2c-auth-and-access/SKILL.md` | `auth`, `users` | Accept the admin invite, Sign in once |
-| `provision/deploy` | none | `skills/c2c-ui/SKILL.md` | `ui`, `ui-react` | Sign in once |
+| `provision/deploy` | none | `skills/c2c-ui/SKILL.md` | `ui`, `ui-react`, `fetch-assets` | Sign in once |
 | `provision/deploy` | none | `skills/c2c-integrations/SKILL.md` | `deploy` | Verify the mail sender (only if your app sends mail) |
 | `data/cutover` | none | `skills/c2c-schema-and-data/SKILL.md` | `schema`, `migrate-data`, `seed`, `sync-delta` | none |
 | `data/cutover` | `commands/verify.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `smoke`, `proof`, `cutover-checklist`, `verify`, `verify-behavior` | Run the in-app check and paste its code |

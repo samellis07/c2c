@@ -115,7 +115,9 @@ test('a failing step marks the work failed; a new request may then start it agai
     jobs,
   });
   assert.equal(failed.state, 'failed');
-  assert.equal(failed.error, 'store refused the write');
+  assert.equal(failed.errorCode, 'WORK_FAILED');
+  assert.doesNotMatch(JSON.stringify(failed), /store refused the write/, 'the raw error text never reaches the polled status');
+  assert.equal(failed.error, 'The work failed. Try again, and contact the app owner if it keeps failing.');
   const retry = await runOrDefer({ workId: 'w4', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
   assert.equal(retry.status, 202);
   assert.equal(jobs.submitted.length, 2);
@@ -133,7 +135,8 @@ test('a submit failure marks the work failed and a retried request resubmits it'
   );
   const stored = statuses.rows.get('w6')!;
   assert.equal(stored.state, 'failed', 'a failed submit does not leave the work queued');
-  assert.match(stored.error ?? '', /job pool is full/);
+  assert.equal(stored.errorCode, 'WORK_NOT_QUEUED');
+  assert.doesNotMatch(JSON.stringify(stored), /job pool is full/);
   jobs.submit = async (job: { name: string; params: Record<string, string> }) => (jobs.submitted.push(job), { jobId: 'j2' });
   const retry = await runOrDefer({ workId: 'w6', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
   assert.equal(retry.status, 202);
@@ -181,7 +184,8 @@ test('a slice-end resubmit that throws marks the work failed instead of queued f
     now: () => clock,
   });
   assert.equal(status.state, 'failed');
-  assert.match(status.error ?? '', /queue unavailable/);
+  assert.equal(status.errorCode, 'WORK_NOT_QUEUED');
+  assert.doesNotMatch(JSON.stringify(status), /queue unavailable/);
   const polled = (await pollWork(statuses, 'w8')).body as Record<string, unknown>;
   assert.equal(polled.state, 'failed');
 });
@@ -206,5 +210,61 @@ test('work that never finishes is failed after maxJobs instead of resubmitting f
     if (status.state === 'failed') break;
   }
   assert.equal(status?.state, 'failed');
+  assert.equal(status?.errorCode, 'WORK_INCOMPLETE');
   assert.match(status?.error ?? '', /did not finish in 3 job/);
+});
+
+test('a failing step logs the detailed error server-side only', async () => {
+  const jobs = queue();
+  const statuses = memoryStatuses();
+  await runOrDefer({ workId: 'w9', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
+  const logged: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => void logged.push(a.join(' '));
+  try {
+    await runWorkSlice({ workId: 'w9', statuses, step: async () => { throw new Error("ZCQL: SELECT * FROM Orders WHERE ROWID = '123'"); }, jobName: 'c2c_jobs', jobs });
+  } finally {
+    console.error = orig;
+  }
+  assert.match(logged.join('\n'), /SELECT \* FROM Orders/);
+  assert.doesNotMatch(JSON.stringify((await pollWork(statuses, 'w9')).body), /SELECT|ROWID/);
+});
+
+async function failedWith(thrown: () => unknown): Promise<{ status: Record<string, unknown>; logged: string[] }> {
+  const jobs = queue();
+  const statuses = memoryStatuses();
+  await runOrDefer({ workId: 'wx', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
+  const logged: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => void logged.push(a.join(' '));
+  try {
+    await runWorkSlice({ workId: 'wx', statuses, step: async () => { throw thrown(); }, jobName: 'c2c_jobs', jobs });
+  } finally {
+    console.error = orig;
+  }
+  return { status: (await pollWork(statuses, 'wx')).body as Record<string, unknown>, logged };
+}
+
+test('fail() is total: hostile thrown values still persist a failed status with the stable code', async () => {
+  const hostile: Array<[string, () => unknown]> = [
+    ['throwing message getter', () => Object.defineProperty(new Error('x'), 'message', { get() { throw new Error('boom'); } })],
+    ['throwing name getter', () => Object.defineProperty(new Error('x'), 'name', { get() { throw new Error('boom'); } })],
+    ['null-prototype object', () => Object.create(null)],
+    ['throwing toString', () => ({ toString() { throw new Error('boom'); } })],
+  ];
+  for (const [label, make] of hostile) {
+    const { status } = await failedWith(make);
+    assert.equal(status.state, 'failed', label);
+    assert.equal(status.errorCode, 'WORK_FAILED', label);
+  }
+});
+
+test('the logged detail is bounded and carries no raw control characters', async () => {
+  const esc = String.fromCharCode(27);
+  const nul = String.fromCharCode(0);
+  const { logged } = await failedWith(() => new Error(`${esc}[31m${nul}${'a'.repeat(50000)}`));
+  const line = logged.join('\n');
+  assert.ok(line.length < 4000, `log line bounded, got ${line.length}`);
+  assert.doesNotMatch(line, /[\u0000-\u0008\u000b-\u001f\u007f]/);
+  assert.match(line, /WORK_FAILED/);
 });

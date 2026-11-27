@@ -85,6 +85,21 @@ const base = {
   download,
 };
 
+for (const name of ['constructor', '__proto__']) {
+  test(`file checkpoint resumes a ${name} table as an own entry`, async () => {
+    const before = Object.getOwnPropertyNames(Object.prototype).sort();
+    const checkpoint = JSON.parse('{"version":1,"tables":{}}');
+    const sink = memorySink();
+    const first = await migrateFileBytes({ ...base, tables: [{ ...base.tables[0], table: name }], sink, checkpoint, dryRun: false });
+    const second = await migrateFileBytes({ ...base, tables: [{ ...base.tables[0], table: name }], sink, checkpoint, dryRun: false });
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(second.tables[0].uploaded, 0);
+    assert.equal(Object.hasOwn(checkpoint.tables, name), true);
+    assert.deepEqual(Object.getOwnPropertyNames(Object.prototype).sort(), before);
+  });
+}
+
 test('the schema names the Stratus-key columns the mover rewrites', () => {
   const field = (name: string, type: string) => `\t\t${name}\n\t\t(\n\t\t\ttype = ${type}\n\t\t)`;
   const app = deriveIr(parse(`application "Demo"\n{\n\tform Order\n\t{\n${field('Name', 'text')}\n${field('Photo', 'image')}\n${field('Sign', 'signature')}\n\t}\n}\n`));

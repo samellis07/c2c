@@ -27,3 +27,5 @@ export type { SnippetGuidance, SnippetReason } from './snippet-guidance.js';
 export type { HtmlpageCompiled, HtmlpageFile } from './htmlpage.js';
 export { appIconPng, pwaFiles, pwaManifest, pwaRegisterScript, pwaServiceWorkerSource, slateRedirects } from './pwa.js';
 export type { PwaSpec } from './pwa.js';
+export { applyDocPickerCsp, appHasGoogleBrowse, DOC_PICKER_ENV, GOOGLE_PICKER_CSP, readDocPickerEnv, stripDocPickerCsp } from './doc-picker.js';
+export type { DocPickerConfig } from './doc-picker.js';

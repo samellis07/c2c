@@ -387,7 +387,7 @@
     {
       "matrixId": "auto-number",
       "count": 4,
-      "reason": "ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.",
+      "reason": "Claim-table counters allocate the next value on a live insert with the field blank (start index from the .ds). A failed insert can leave a gap; if the claim table is emptied, numbering restarts.",
       "fields": [
         {
           "form": "Book",
@@ -529,7 +529,7 @@
       "field": "Phone_Number",
       "property": "property defaultcountry",
       "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
-      "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.",
+      "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, open Staff_Members.Phone_Number and set its property defaultcountry setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
     }
   ],
@@ -579,19 +579,19 @@
         "location": "page DashBoard.Book_Report",
         "construct": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
         "scope": "ui",
-        "manualStep": "On page \"DashBoard\", wire click parameters \"View all Books\" to the generated <button> \"Book_Report\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
+        "manualStep": "On page \"DashBoard\", the <button> \"Book_Report\" opens without its values \"View all Books\". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
       },
       {
         "location": "page DashBoard.All_Book_Transactions",
         "construct": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
         "scope": "ui",
-        "manualStep": "On page \"DashBoard\", wire click parameters \"Borrowed Book\" to the generated <text> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
+        "manualStep": "On page \"DashBoard\", the <text> \"All_Book_Transactions\" opens without its values \"Borrowed Book\". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
       },
       {
         "location": "page DashBoard.All_Book_Transactions",
         "construct": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
         "scope": "ui",
-        "manualStep": "On page \"DashBoard\", wire click parameters \"Overdue transactions\" to the generated <button> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
+        "manualStep": "On page \"DashBoard\", the <button> \"All_Book_Transactions\" opens without its values \"Overdue transactions\". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
       }
     ]
   },
@@ -601,28 +601,28 @@
       "label": "silent drop field-property: Staff_Members.Phone_Number property defaultcountry",
       "detail": "Field Staff_Members.Phone_Number property defaultcountry is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
-      "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected."
+      "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, open Staff_Members.Phone_Number and set its property defaultcountry setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected."
     },
     {
       "kind": "ui",
       "label": "page DashBoard.All_Book_Transactions",
       "detail": "ZML <button> \"All_Book_Transactions\" click parameters \"Overdue transactions\" are not generated; wire them to the click handler by hand",
       "scope": "ui",
-      "manualStep": "On page \"DashBoard\", wire click parameters \"Overdue transactions\" to the generated <button> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
+      "manualStep": "On page \"DashBoard\", the <button> \"All_Book_Transactions\" opens without its values \"Overdue transactions\". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
     },
     {
       "kind": "ui",
       "label": "page DashBoard.All_Book_Transactions",
       "detail": "ZML <text> \"All_Book_Transactions\" click parameters \"Borrowed Book\" are not generated; wire them to the click handler by hand",
       "scope": "ui",
-      "manualStep": "On page \"DashBoard\", wire click parameters \"Borrowed Book\" to the generated <text> \"All_Book_Transactions\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
+      "manualStep": "On page \"DashBoard\", the <text> \"All_Book_Transactions\" opens without its values \"Borrowed Book\". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
     },
     {
       "kind": "ui",
       "label": "page DashBoard.Book_Report",
       "detail": "ZML <button> \"Book_Report\" click parameters \"View all Books\" are not generated; wire them to the click handler by hand",
       "scope": "ui",
-      "manualStep": "On page \"DashBoard\", wire click parameters \"View all Books\" to the generated <button> \"Book_Report\" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
+      "manualStep": "On page \"DashBoard\", the <button> \"Book_Report\" opens without its values \"View all Books\". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters)."
     },
     {
       "kind": "ui",
@@ -725,7 +725,7 @@
   },
   "effort": {
     "estimate": true,
-    "hours": 86,
+    "hours": 86.5,
     "weights": {
       "hoursPerFeature": {
         "supported": 0,
@@ -744,7 +744,7 @@
     }
   },
   "catalyst": {
-    "tables": 4,
+    "tables": 5,
     "nosqlCollections": 0,
     "delugeUnits": 14,
     "functions": 1,

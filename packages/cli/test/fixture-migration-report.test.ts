@@ -9,12 +9,17 @@ import { analyze, analyzeAsText } from '../src/analyze.js';
 import {
   buildFixtureMigrationReport,
   fixtureMigrationReportAsJson,
+  fixtureMigrationReportAsJson as fixtureJson,
   fixtureMigrationReportAsMarkdown,
+  reviewChecklist,
   listInRepoFixtures,
   migrationReportGoldenDir,
+  privateMigrationReportGoldenDir,
   type FixtureMigrationReport,
   writeFixtureMigrationReports,
+  writeGalleryMigrationReports,
 } from '../src/fixture-migration-report.js';
+import { checkApp, loadAppInputs } from '../src/onboarding-readiness.js';
 import { ownerScope } from '../src/scope-labels.js';
 
 const root = fileURLToPath(new URL('../../..', import.meta.url));
@@ -182,7 +187,7 @@ test('markdown report spells out an empty TODO list, no manual steps, and a name
   assert.match(md, /## Field gaps\n\n- none\n/);
   assert.match(md, /## Manual steps\n\n- none\n\n/);
   assert.match(md, /## Hidden from end users\n\n0\n\n- none\n\n/);
-  assert.match(md, /## Human steps\n\n- none\n\n## Not converted\n\nSilent drops: 0/);
+  assert.match(md, /## Human steps\n\n- none\n\n## Review checklist\n\n- none\n\n## Not converted\n\nSilent drops: 0/);
 });
 
 test('converted inventory section lists counts from IR and renders singular/plural correctly', () => {
@@ -284,15 +289,16 @@ test('buildFixtureMigrationReport populates converted inventory, field gaps, wor
   const fixture = listInRepoFixtures(root).find((f) => f.id.endsWith('library_application'));
   assert.ok(fixture);
   const report = await buildFixtureMigrationReport(fixture);
-  assert.deepEqual(report.converted, { forms: 4, reports: 5, pages: 1, functions: 7, catalyst: { tables: 4, nosqlCollections: 0, functions: 1, cronJobs: 0, slatePages: 10 }, deluge: { statements: 65, translated: 5, shimmed: 60 } });
+  assert.deepEqual(report.converted, { forms: 4, reports: 5, pages: 1, functions: 7, catalyst: { tables: 5, nosqlCollections: 0, functions: 1, cronJobs: 0, slatePages: 10 }, deluge: { statements: 65, translated: 5, shimmed: 60 } });
   assert.equal(report.fieldGaps.length, 7);
   assert.equal(report.fieldGaps.reduce((sum, g) => sum + g.count, 0), 13);
-  assert.equal(report.humanSteps.length, 5);
-  assert.ok(report.humanSteps.some((step) => step.startsWith('console: cloudscale-enable')), 'console gate step listed');
+  assert.ok(report.humanSteps.length <= 4, `${report.humanSteps.length} human steps`);
+  assert.ok(report.humanSteps[0]!.startsWith('Connect Catalyst:') && report.humanSteps[0]!.includes('cloudscale-enable'), 'console gate named inside the one Connect Catalyst step');
   const md = fixtureMigrationReportAsMarkdown(report);
   assert.match(md, /## Converted inventory\n\n- 4 forms\n- 5 reports\n- 1 page\n- 7 functions\n/);
   assert.match(md, /## Field gaps\n\n- auto-number: 4 /);
-  assert.match(md, /## Human steps\n\n- Accept invite: accept the app invite mail\n/);
+  assert.match(md, /## Human steps\n\n- Connect Catalyst: /);
+  assert.match(md, /## Review checklist\n\n/);
 });
 
 test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-stable', async (t) => {
@@ -314,4 +320,46 @@ test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-st
   assert.equal(existsSync(join(out, '.keep')), true);
   await writeFixtureMigrationReports(repo);
   assert.equal(readFileSync(join(out, 'one/library.json'), 'utf8'), first);
+});
+
+test('gallery goldens are written to and read from the private fixtures directory, never the repo', async (t) => {
+  const priv = mkdtempSync(join(tmpdir(), 'c2c-private-fixtures-'));
+  t.after(() => rmSync(priv, { recursive: true, force: true }));
+  mkdirSync(join(priv, 'gallery/one'), { recursive: true });
+  copyFileSync(join(root, 'fixtures/redistributable/library-application-system/library_application.ds'), join(priv, 'gallery/one/one.ds'));
+  assert.equal(privateMigrationReportGoldenDir({}), null);
+  const out = privateMigrationReportGoldenDir({ C2C_FIXTURES_DIR: priv })!;
+  assert.deepEqual(await writeGalleryMigrationReports(join(priv, 'gallery'), out), ['gallery/one']);
+  const previous = process.env.C2C_FIXTURES_DIR;
+  process.env.C2C_FIXTURES_DIR = priv;
+  t.after(() => {
+    if (previous === undefined) delete process.env.C2C_FIXTURES_DIR;
+    else process.env.C2C_FIXTURES_DIR = previous;
+  });
+  const inputs = await loadAppInputs(root, { id: 'gallery/one', file: join(priv, 'gallery/one/one.ds') });
+  assert.equal(inputs.golden.json, inputs.reportJson);
+  assert.equal(checkApp(inputs).criteria.find((item) => item.id === 'report-golden-current')?.status, 'PASS');
+  assert.equal(existsSync(join(migrationReportGoldenDir(root), 'gallery')), false, 'nothing written into the repo');
+});
+
+test('hostile locations, constructs and steps never reach the review checklist or its markdown with terminal or bidi controls', () => {
+  const hostile = `evil${String.fromCharCode(0x1b)}[31mAPP${String.fromCharCode(0x1b)}[0m${String.fromCharCode(0x202e)}${String.fromCharCode(0x0d)}${String.fromCharCode(0x2060)}.txt`;
+  const checklist = reviewChecklist({
+    deluge: { todoLocations: [{ location: hostile, construct: hostile, manualStep: hostile }] },
+    residuals: [{ id: hostile, reason: hostile, step: hostile }],
+  } as unknown as Parameters<typeof reviewChecklist>[0]);
+  const markdown = fixtureMigrationReportAsMarkdown({ fixture: hostile, app: hostile, scope: [], converted: [], todoKinds: [], fieldGaps: [], manualSteps: [], hiddenParts: [], humanSteps: [], residuals: [{ id: hostile, reason: hostile, step: hostile }], reviewChecklist: checklist, todoSteps: [{ location: hostile, construct: hostile, step: hostile }] } as unknown as FixtureMigrationReport);
+  const texts = [JSON.stringify(checklist), markdown];
+  for (const code of [0x1b, 0x202e, 0x0d, 0x2060]) {
+    for (const text of texts) assert.ok(!text.includes(String.fromCharCode(code)), `U+${code.toString(16)} must not appear`);
+  }
+  assert.ok(checklist.every((item) => !/[\u0000-\u001f]/.test(item.where + item.reason + item.step)), 'checklist fields are single lines');
+  assert.ok(markdown.includes('APP'), 'the readable part is kept');
+});
+
+test('the fixture migration report JSON carries no raw terminal, bidi or tag characters from hostile values', () => {
+  const hostile = `x${String.fromCharCode(0x1b)}[31m${String.fromCharCode(0x202e)}${String.fromCharCode(0x2060)}${String.fromCodePoint(0xe0001)}y`;
+  const json = fixtureJson({ fixture: hostile, app: hostile, scope: [], converted: [], todoKinds: [{ construct: hostile, count: 1 }], fieldGaps: [], manualSteps: [], hiddenParts: [], humanSteps: [], residuals: [], reviewChecklist: [{ kind: 'todo', where: hostile, reason: hostile, step: hostile }], todoSteps: [] } as unknown as FixtureMigrationReport);
+  for (const code of [0x1b, 0x202e, 0x2060, 0xe0001]) assert.ok(!json.includes(String.fromCodePoint(code)), `U+${code.toString(16)} must not appear raw in the JSON`);
+  assert.ok(json.includes('"x'), 'the readable part is kept');
 });

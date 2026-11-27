@@ -19,7 +19,7 @@ App: Freight Forwarding and Feeder Solution
 - 20 forms
 - 22 reports
 - 4 functions
-- The generated Catalyst app carries 26 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 42 pages
+- The generated Catalyst app carries 27 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 42 pages
 - Deluge: 56 statements translated, 497 kept working through a compatibility shim, of 553
 
 ## TODO counts
@@ -56,7 +56,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## Field gaps
 
-- auto-number: 1 (New_Deal.Auto_Number) — ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.
+- auto-number: 1 (New_Deal.Auto_Number) — Claim-table counters allocate the next value on a live insert with the field blank (start index from the .ds). A failed insert can leave a gap; if the claim table is emptied, numbering restarts.
 - currency: 32 (New_Account.Annual_Revenue, New_Deal.Amount, New_Deal.Expected_Revenue, New_Lead.Annual_Revenue, New_Quotation.List_Price, New_Quotation.Amount, New_Quotation.Discount, New_Quotation.Tax, New_Quotation.Total, New_Quotation.Sub_Total, New_Quotation.Tax_Total, New_Quotation.Grand_Total, New_Delivery_Order.Sales_Commission, New_Delivery_Order.Excise_Duty, New_Delivery_Order.List_Price, New_Delivery_Order.Amount, New_Delivery_Order.Discount, New_Delivery_Order.Tax, New_Delivery_Order.Total, New_Delivery_Order.Sub_Total, New_Delivery_Order.Tax_Total, New_Delivery_Order.Grand_Total, New_Invoice.Excise_Duty, New_Invoice.Sales_Commission, New_Invoice.List_Price, New_Invoice.Amount, New_Invoice.Discount, New_Invoice.Tax, New_Invoice.Total, New_Invoice.Sub_Total, New_Invoice.Tax_Total, New_Invoice.Grand_Total) — Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
 - decimal: 27 (New_Quotation.Width_of_Cargo_cm, New_Quotation.Chargeable_Weight_KG, New_Quotation.Length_of_Cargo_cm, New_Quotation.Volume_CBM, New_Quotation.Height_of_Cargo_cm, New_Quotation.Gross_Weight_KG, New_Quotation.Quantity, New_Delivery_Order.Length_of_Cargo_cm, New_Delivery_Order.Volume_CBM, New_Delivery_Order.Width_of_Cargo_cm, New_Delivery_Order.Height_of_Cargo_cm, New_Delivery_Order.Gross_Weight_KG, New_Delivery_Order.Chargeable_Weight_KG, New_Delivery_Order.Quantity, New_Invoice.Quantity, New_SOF.FWD, New_SOF.AFT, New_SOF.FWD2, New_SOF.AFT2, New_SOF.FO, New_SOF.DO, New_SOF.FW, New_SOF.FO2, New_SOF.DO2, New_SOF.FW2, New_Table_of_Container.G_Wt, New_Table_of_Container.NetWt) — Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.
 - email: 5 (New_Account.Email, New_User.Email, New_Contact.Email, New_Vendor.Email, New_Lead.Email) — There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
@@ -80,15 +80,15 @@ App: Freight Forwarding and Feeder Solution
 ## Residual TODO steps
 
 - `field New_SOF.Time property timedisplayoptions` — Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for Time shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.FROM property timedisplayoptions` — Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for FROM shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.TO property timedisplayoptions` — Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for TO shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.FROM2 property timedisplayoptions` — Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for FROM2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `field New_SOF.TO2 property timedisplayoptions` — Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
-  - Step: Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision).
+  - Step: The generated time input for TO2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
 - `report Container_Movement_Tracking block report properties` — Report "Container_Movement_Tracking" has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
   - Step: In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false.
 - `report SOFs block options` — Report "SOFs" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
@@ -142,13 +142,67 @@ App: Freight Forwarding and Feeder Solution
 
 ## Human steps
 
-- Accept invite: accept the app invite mail
-- Sign in once: sign in to the deployed app once
+- Connect Catalyst: run `c2c doctor` (it checks your login, scope and plugin install and says what to fix), then open the Catalyst console for: console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table); console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket); console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow); verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+- Accept invite and sign in once: accept the app invite mail, then sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
-- Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
-- console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
-- console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)
-- console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)
+- Review 27 counted items: work through the review checklist in this report, one line per item with its reason and manual step
+
+## Review checklist
+
+1. [ ] `field New_SOF.Time property timedisplayoptions` — Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+   - Step: The generated time input for Time shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
+2. [ ] `field New_SOF.FROM property timedisplayoptions` — Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+   - Step: The generated time input for FROM shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
+3. [ ] `field New_SOF.TO property timedisplayoptions` — Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+   - Step: The generated time input for TO shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
+4. [ ] `field New_SOF.FROM2 property timedisplayoptions` — Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+   - Step: The generated time input for FROM2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
+5. [ ] `field New_SOF.TO2 property timedisplayoptions` — Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.
+   - Step: The generated time input for TO2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision).
+6. [ ] `report Container_Movement_Tracking block report properties` — Report "Container_Movement_Tracking" has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.
+   - Step: In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false.
+7. [ ] `report SOFs block options` — Report "SOFs" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options).
+8. [ ] `report Leads block options` — Report "Leads" has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add. See [Report options](human-steps#manual-kind-report-options).
+9. [ ] `report Converted_Leads block options` — Report "Converted_Leads" has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home. See [Report options](human-steps#manual-kind-report-options).
+10. [ ] `report Accounts block options` — Report "Accounts" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
+11. [ ] `report Contacts block options` — Report "Contacts" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc. See [Report options](human-steps#manual-kind-report-options).
+12. [ ] `report Deals block options` — Report "Deals" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options).
+13. [ ] `report Quotations block options` — Report "Quotations" has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote. See [Report options](human-steps#manual-kind-report-options).
+14. [ ] `report Delivery_Orders block options` — Report "Delivery_Orders" has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time. See [Report options](human-steps#manual-kind-report-options).
+15. [ ] `report Invoices block options` — Report "Invoices" has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42. See [Report options](human-steps#manual-kind-report-options).
+16. [ ] `report Airports block options` — Report "Airports" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+17. [ ] `report Ports block options` — Report "Ports" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+18. [ ] `report HS_Codes block options` — Report "HS_Codes" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+19. [ ] `report Users block options` — Report "Users" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+20. [ ] `report Containers block options` — Report "Containers" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+21. [ ] `report Vendors block options` — Report "Vendors" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+22. [ ] `report Products block options` — Report "Products" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+23. [ ] `report Vessels block options` — Report "Vessels" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+24. [ ] `report Tax_Rates block options` — Report "Tax_Rates" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options).
+25. [ ] `report Mode_to_SubMode block options` — Report "Mode_to_SubMode" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options).
+26. [ ] `report Submode_to_CT_ST_CMT block options` — Report "Submode_to_CT_ST_CMT" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options).
+27. [ ] `report Table_of_Containers block options` — Report "Table_of_Containers" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options).
 
 ## Not converted
 

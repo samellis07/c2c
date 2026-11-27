@@ -20,6 +20,7 @@
  * Stratus acknowledged; nothing is invented. Bytes are held in memory for one
  * value at a time and never logged.
  */
+import { ownGet, ownSet } from '../../core/src/own-keys.js';
 import { creatorFilePath, MAX_FILE_BYTES, migratedObjectKey } from '../../shims/src/files.js';
 import { assertAllowedHost, creatorUrl, readPage, type FetchLike } from './migrate.js';
 
@@ -137,7 +138,7 @@ export async function migrateFileBytes(opts: FileBytesOptions): Promise<FileByte
   const results: FileBytesTableResult[] = [];
   const save = () => opts.saveCheckpoint?.(opts.checkpoint);
   for (const table of opts.tables) {
-    const state: FileTableCheckpoint = opts.checkpoint.tables[table.table] ?? {
+    const state: FileTableCheckpoint = ownGet(opts.checkpoint.tables, table.table) ?? {
       requestCursor: null,
       rowIndex: 0,
       uploaded: 0,
@@ -145,7 +146,7 @@ export async function migrateFileBytes(opts: FileBytesOptions): Promise<FileByte
       empty: 0,
       done: false,
     };
-    if (!opts.dryRun) opts.checkpoint.tables[table.table] = state;
+    if (!opts.dryRun) ownSet(opts.checkpoint.tables, table.table, state);
     const result: FileBytesTableResult = { table: table.table, uploaded: 0, existing: 0, empty: 0, planned: 0, missing: [], done: state.done };
     results.push(result);
     if (state.done) continue;

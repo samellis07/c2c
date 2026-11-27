@@ -54,6 +54,10 @@ matching, nonmatching and missing-record cases before accepting a custom rule.
 - CORS: `OPTIONS https://<project-domain>/server/c2c_api/reports/<r>` with `Origin: https://<app>.onslate.<dc>` returns `Access-Control-Allow-Origin: https://<app>.onslate.<dc>` and `Allow-Credentials: true` [TESTED].
 - After the user signs in: `GET /baas/v1/project/<id>/project-user/current` → 200 (was 401 before auth setup [TESTED]); a report shows rows; a lookup dropdown has options.
 
+## Remote CSS backgrounds
+
+A page style with a remote `background` url is dropped and counted. `c2c fetch-assets <export>` copies a literal `https` image into `c2c-assets/` and writes `c2c-assets.lock.json`; the next `ui` or `ui-react` run serves it from the app. It is the only step that uses the network for this, it needs the user's go-ahead like any outbound fetch, and a url it refuses (http, private host, not an image, too large) stays a counted TODO. See `docs/fetch-assets.md`.
+
 ## Stop conditions
 
 - `findIndex` crash → wrong c2c version; stop and upgrade.

@@ -32,36 +32,19 @@ export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 }
 
-export const ALLOWED_TAGS = new Set([
-  'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt', 'input', 'label',
-  'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
-  'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
-  'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
-]);
-
-export const DROPPED_TAGS = new Set([
-  'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'frame', 'frameset', 'noscript',
-  'noembed', 'template', 'svg', 'math', 'title', 'head', 'html', 'body',
-]);
-
-const ALLOWED_ATTRS = {
-  a: new Set(['href', 'title']),
-  input: new Set(['type', 'checked']),
-  label: new Set(['for']),
-  // A generated ExecuteFunction button carries its call route, encoded
-  // arguments, and success message; the delegated click wires the POST.
-  button: new Set(['type', 'data-fn-call', 'data-fn-args', 'data-fn-argc', 'data-fn-msg', 'data-fn-refresh']),
-  img: new Set(['src', 'alt', 'title', 'width', 'height']),
-  font: new Set(['color', 'face', 'size']),
-  td: new Set(['colspan', 'rowspan', 'title']),
-  th: new Set(['colspan', 'rowspan', 'title']),
-  ol: new Set(['start', 'title']),
-  '*': new Set(['class', 'title', 'id', 'data-style-dropped', 'data-zml']),
-};
-
+// <<< sanitizer-core:begin (generated from packages/ui/src/sanitizer-core.ts by scripts/sanitizer-core.mjs; edit the core, not this block) >>>
+/**
+ * The one HTML/CSS snippet sanitizer. Every other copy is derived from this file:
+ *  - the build (packages/ui/src/pages.ts) imports it;
+ *  - the browser runtime (packages/ui/src/client-runtime.js) carries the transpiled block between its
+ *    sanitizer-core markers;
+ *  - the React template (packages/ui-react/template/lib/c2c-ui/pages/sanitize.ts) is this file verbatim
+ *    under a generated banner.
+ * `npm run build` regenerates both copies (scripts/sanitizer-core.mjs); a test fails when either drifts.
+ * Keep this file self-contained: no imports, and no TypeScript syntax that does not erase.
+ */
 /** Ids the page shell owns: a snippet control may not take one (getElementById would find it first, or a label for it would click a shell button). */
-const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title', 'nav', 'drawer', 'nav-drawer-open', 'offline', 'sign-out', 'install', 'menu-toggle', 'root', 'c2c-login', 'c2c-login-title', 'c2c-session-body', 'c2c-session-title', 'c2c-smoke-code', 'c2c-smoke-json']);
-
+export const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts', 'app-title', 'nav', 'drawer', 'nav-drawer-open', 'offline', 'sign-out', 'install', 'menu-toggle', 'root', 'c2c-login', 'c2c-login-title', 'c2c-session-body', 'c2c-session-title', 'c2c-smoke-code', 'c2c-smoke-json']);
 /**
  * An id (or a label's `for`) a snippet may keep: one bounded token, a letter then letters, digits, `_` or `-`, at most 64 long, and
  * never a shell id. The generated render builds a computed id from an encoded token, so the same rule closes quote, space, `#` or URL text
@@ -69,25 +52,49 @@ const SHELL_IDS = new Set(['main', 'tabbar', 'more-sheet', 'more-tab', 'toasts',
  */
 const ID_TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 function idTokenOk(value) {
-  const text = String(value == null ? '' : value);
-  return ID_TOKEN.test(text) && !SHELL_IDS.has(text.toLowerCase());
+    const text = String(value ?? '');
+    return ID_TOKEN.test(text) && !SHELL_IDS.has(text.toLowerCase());
 }
-
+export const ALLOWED_TAGS = new Set([
+    'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt', 'input', 'label',
+    'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
+    'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
+    'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
+]);
+/** Dropped with their descendants. Unwrapping these would surface script or style text. */
+export const DROPPED_TAGS = new Set([
+    'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'frame', 'frameset', 'noscript',
+    'noembed', 'template', 'svg', 'math', 'title', 'head', 'html', 'body',
+]);
+export const ALLOWED_ATTRS = {
+    a: new Set(['href', 'title']),
+    input: new Set(['type', 'checked']),
+    label: new Set(['for']),
+    // A generated ExecuteFunction button carries its call route, encoded
+    // arguments, and success message; the runtime wires the click.
+    button: new Set(['type', 'data-fn-call', 'data-fn-args', 'data-fn-argc', 'data-fn-msg', 'data-fn-refresh']),
+    img: new Set(['src', 'alt', 'title', 'width', 'height']),
+    font: new Set(['color', 'face', 'size']),
+    td: new Set(['colspan', 'rowspan', 'title']),
+    th: new Set(['colspan', 'rowspan', 'title']),
+    ol: new Set(['start', 'title']),
+    '*': new Set(['class', 'title', 'id', 'data-style-dropped', 'data-zml']),
+};
 /**
  * Classes a shell stylesheet lifts out of flow (fixed, absolute or z-indexed):
- * page or data markup may not borrow one to paint over the app. The generator and the React template keep
- * identical copies; a test derives the list from both stylesheets.
+ * page or data markup may not borrow one to paint over the app. The browser
+ * runtime and the React template keep identical copies; a test derives the
+ * list from both stylesheets.
  */
 export const SHELL_OVERLAY_CLASSES = new Set([
-  'c2c-modal-backdrop', 'c2c-sr-only', 'modal', 'modal-close', 'navitems', 'skip', 'skip-link', 'visually-hidden',
+    'c2c-modal-backdrop', 'c2c-sr-only', 'modal', 'modal-close', 'navitems', 'skip', 'skip-link', 'visually-hidden',
 ]);
-const SHELL_OVERLAY_MODULE_CLASS = /^_overlay_[A-Za-z0-9_-]+$/i;
-
+// A bundler-hashed CSS-module name, `_local_hash`: the template's modules lift .overlay and .content out of flow.
+const SHELL_OVERLAY_MODULE_CLASS = /^_[A-Za-z0-9-]+_[A-Za-z0-9_-]+$/;
 /** Longest class attribute and token the sanitizers scan, and the most tokens they keep. */
 const CLASS_TEXT_MAX = 4096;
 const CLASS_TOKENS_MAX = 32;
 const CLASS_TOKEN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
-
 /**
  * A class attribute reduced to its plain identifier tokens, minus the shell's
  * overlay classes (compared without case: a quirks-mode page matches class
@@ -96,63 +103,47 @@ const CLASS_TOKEN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
  * else in a token may.
  */
 function cleanClass(value) {
-  const text = String(value ?? '');
-  if (text.length > CLASS_TEXT_MAX) return '';
-  const kept = [];
-  for (const token of text.split(/\s+/)) {
-    if (kept.length < CLASS_TOKENS_MAX && CLASS_TOKEN.test(token) && !SHELL_OVERLAY_CLASSES.has(token.toLowerCase()) && !SHELL_OVERLAY_MODULE_CLASS.test(token)) kept.push(token);
-  }
-  return kept.join(' ');
-}
-
-function flatUrl(value) {
-  return String(value ?? '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
-}
-
-/**
- * The one `data:` URL an `<img>` keeps: an inline raster image, exactly as the
- * page endpoint's markup value writes it. Matched on the raw value, so case,
- * whitespace and every other media type (SVG included) stay refused.
- */
-const DATA_IMAGE_SRC = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
-
-function safeUrl(value) {
-  let detected = String(value ?? '');
-  for (let pass = 0; pass < 4; pass++) {
-    const flat = flatUrl(detected);
-    if (flat.startsWith('javascript:') || flat.startsWith('data:') || flat.startsWith('vbscript:')) return false;
-    try {
-      const next = decodeURIComponent(detected);
-      if (next === detected) break;
-      detected = next;
-    } catch {
-      detected = detected.replace(/%([0-9a-fA-F]{2})/g, (_m, hex) => String.fromCharCode(parseInt(hex, 16)));
+    const text = String(value ?? '');
+    if (text.length > CLASS_TEXT_MAX)
+        return '';
+    const kept = [];
+    for (const token of text.split(/\s+/)) {
+        if (kept.length < CLASS_TOKENS_MAX && CLASS_TOKEN.test(token) && !SHELL_OVERLAY_CLASSES.has(token.toLowerCase()) && !SHELL_OVERLAY_MODULE_CLASS.test(token))
+            kept.push(token);
     }
-  }
-  return true;
+    return kept.join(' ');
 }
-
+export function listOf(items) {
+    if (!items)
+        return [];
+    const out = [];
+    for (let i = 0; i < items.length; i++)
+        out.push(items[i]);
+    return out;
+}
+export function flatCss(value) {
+    return String(value ?? '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
+}
 /** CSS functions an inline style value may call: colour notations and numeric transforms and filters. None can fetch. */
-const STYLE_FUNCTIONS = new Set([
-  'rgb', 'rgba', 'hsl', 'hsla', 'rotate', 'rotatex', 'rotatey', 'rotatez', 'hue-rotate', 'scale', 'scalex', 'scaley',
-  'translate', 'translatex', 'translatey', 'skew', 'skewx', 'skewy',
+export const STYLE_FUNCTIONS = new Set([
+    'rgb', 'rgba', 'hsl', 'hsla', 'rotate', 'rotatex', 'rotatey', 'rotatez', 'hue-rotate', 'scale', 'scalex', 'scaley',
+    'translate', 'translatex', 'translatey', 'translatez', 'translate3d', 'scalez', 'scale3d', 'skew', 'skewx', 'skewy',
+    'matrix', 'matrix3d', 'perspective', 'blur', 'brightness', 'contrast', 'drop-shadow', 'grayscale', 'invert', 'opacity', 'saturate', 'sepia',
+    'linear-gradient', 'radial-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient',
 ]);
-
 /** Arguments of an allowed function: numbers with an optional unit, separated by spaces, commas or `/`. */
-const STYLE_ARGS = /^\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?(?:(?:\s*[,/]\s*|\s+)[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
-
+export const STYLE_ARGS = /^\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?(?:(?:\s*[,/]\s*|\s+)[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
+const STYLE_PAINT_ARGS = /^[\s,a-zA-Z0-9#.%+\-]+$/;
+const STYLE_PAINT_FUNCTIONS = new Set(['drop-shadow', 'linear-gradient', 'radial-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient']);
 /** Longest style attribute or declaration value the sanitizer scans; longer values are refused. */
-const STYLE_TEXT_MAX = 8192;
-
+export const STYLE_TEXT_MAX = 8192;
 /** Longest calc() argument list the sanitizer parses; longer values are refused. */
 const CALC_ARGS_MAX = 200;
-
 /** ASCII letter test for CSS units and function names (the regex [a-z] with the i flag). */
 function asciiLetter(ch) {
-  const c = ch.charCodeAt(0) | 32;
-  return c >= 97 && c <= 122;
+    const c = ch.charCodeAt(0) | 32;
+    return c >= 97 && c <= 122;
 }
-
 /**
  * One pass over a calc() argument list, the same decisions as the old
  * CALC_ARGS regex without the backtracking: a number is an optional sign,
@@ -161,74 +152,81 @@ function asciiLetter(ch) {
  * numbers and spaces may sit around them.
  */
 export function calcArgsSafe(args) {
-  const text = String(args ?? '');
-  const n = text.length;
-  if (n === 0 || n > CALC_ARGS_MAX) return false;
-  let i = 0;
-  const spaces = () => {
-    while (i < n && /\s/.test(text[i])) i++;
-  };
-  const number = () => {
-    if (text[i] === '+' || text[i] === '-') i++;
-    let whole = 0;
-    while (i < n && text[i] >= '0' && text[i] <= '9') {
-      i++;
-      whole++;
-    }
-    let frac = 0;
-    if (text[i] === '.') {
-      i++;
-      while (i < n && text[i] >= '0' && text[i] <= '9') {
+    const text = String(args ?? '');
+    const n = text.length;
+    if (n === 0 || n > CALC_ARGS_MAX)
+        return false;
+    let i = 0;
+    const spaces = () => {
+        while (i < n && /\s/.test(text[i]))
+            i++;
+    };
+    const number = () => {
+        if (text[i] === '+' || text[i] === '-')
+            i++;
+        let whole = 0;
+        while (i < n && text[i] >= '0' && text[i] <= '9') {
+            i++;
+            whole++;
+        }
+        let frac = 0;
+        if (text[i] === '.') {
+            i++;
+            while (i < n && text[i] >= '0' && text[i] <= '9') {
+                i++;
+                frac++;
+            }
+        }
+        return whole > 0 || frac > 0;
+    };
+    const unit = () => {
+        if (text[i] === '%') {
+            i++;
+            return true;
+        }
+        let letters = 0;
+        while (i < n && asciiLetter(text[i])) {
+            i++;
+            letters++;
+        }
+        return letters <= 4;
+    };
+    spaces();
+    if (!number() || !unit())
+        return false;
+    for (;;) {
+        spaces();
+        if (i >= n)
+            return true;
+        const op = text[i];
+        if (op !== '+' && op !== '-' && op !== '*' && op !== '/')
+            return false;
         i++;
-        frac++;
-      }
+        spaces();
+        if (!number() || !unit())
+            return false;
     }
-    return whole > 0 || frac > 0;
-  };
-  const unit = () => {
-    if (text[i] === '%') {
-      i++;
-      return true;
-    }
-    let letters = 0;
-    while (i < n && asciiLetter(text[i])) {
-      i++;
-      letters++;
-    }
-    return letters <= 4;
-  };
-  spaces();
-  if (!number() || !unit()) return false;
-  for (;;) {
-    spaces();
-    if (i >= n) return true;
-    const op = text[i];
-    if (op !== '+' && op !== '-' && op !== '*' && op !== '/') return false;
-    i++;
-    spaces();
-    if (!number() || !unit()) return false;
-  }
 }
-
 /**
  * Remove css comments in one pass — the same spans the old
  * /\/\*[\s\S]*?\*\//g replace dropped, pairing each opener with the next
  * closer. An unterminated opener is literal text, like the regex left it.
  */
 export function stripStyleComments(value) {
-  const text = String(value ?? '');
-  let out = '';
-  let i = 0;
-  for (;;) {
-    const start = text.indexOf('/*', i);
-    if (start < 0) return out + text.slice(i);
-    const end = text.indexOf('*/', start + 2);
-    if (end < 0) return out + text.slice(i);
-    out += text.slice(i, start);
-    i = end + 2;
-  }
+    const text = String(value ?? '');
+    let out = '';
+    let i = 0;
+    for (;;) {
+        const start = text.indexOf('/*', i);
+        if (start < 0)
+            return out + text.slice(i);
+        const end = text.indexOf('*/', start + 2);
+        if (end < 0)
+            return out + text.slice(i);
+        out += text.slice(i, start);
+        i = end + 2;
+    }
 }
-
 /**
  * Rewrite each name(args) call left to right — the same matches as the old
  * /([-a-z0-9]*)\(([^()]*)\)/gi replace, without the regex: a call's name is
@@ -237,239 +235,397 @@ export function stripStyleComments(value) {
  * or whose call never closes, is kept as is.
  */
 export function replaceStyleCalls(text, decide) {
-  const nameChar = (ch) => ch === '-' || (ch >= '0' && ch <= '9') || asciiLetter(ch);
-  let out = '';
-  let i = 0;
-  const n = text.length;
-  let from = 0;
-  while (from < n) {
-    const open = text.indexOf('(', from);
-    if (open < 0) break;
-    let nameStart = open;
-    while (nameStart > i && nameChar(text[nameStart - 1])) nameStart--;
-    let close = open + 1;
-    while (close < n && text[close] !== '(' && text[close] !== ')') close++;
-    if (close >= n || text[close] === '(') {
-      from = open + 1;
-      continue;
+    const nameChar = (ch) => ch === '-' || (ch >= '0' && ch <= '9') || asciiLetter(ch);
+    let out = '';
+    let i = 0;
+    const n = text.length;
+    let from = 0;
+    while (from < n) {
+        const open = text.indexOf('(', from);
+        if (open < 0)
+            break;
+        let nameStart = open;
+        while (nameStart > i && nameChar(text[nameStart - 1]))
+            nameStart--;
+        let close = open + 1;
+        while (close < n && text[close] !== '(' && text[close] !== ')')
+            close++;
+        if (close >= n || text[close] === '(') {
+            from = open + 1;
+            continue;
+        }
+        out += text.slice(i, nameStart) + decide(text.slice(nameStart, open), text.slice(open + 1, close));
+        i = close + 1;
+        from = i;
     }
-    out += text.slice(i, nameStart) + decide(text.slice(nameStart, open), text.slice(open + 1, close));
-    i = close + 1;
-    from = i;
-  }
-  return out + text.slice(i);
+    return out + text.slice(i);
 }
-
-// A `name=value` pair such as `width=3%`: a browser's CSS parser skips a declaration with no colon, so it styled nothing in Creator either.
+/**
+ * A declaration written `name=value`, as `width=3%` in a table cell. A browser's
+ * CSS parser skips a declaration with no colon, so it styled nothing in Creator
+ * either: there is nothing to carry and nothing lost.
+ */
 const IGNORED_ASSIGNMENT = /^-?[a-z][-a-z]*\s*=\s*[-\w.%#\s]*$/i;
-
+/** `text-align:"center"`: no browser takes a quoted word for text-align, so it styled nothing in Creator either. */
+const IGNORED_QUOTED_ALIGN = /^(["'])[-a-z]+\1$/i;
 /**
  * Split an inline style into the declarations kept and the ones refused.
  * Each declaration is checked on its own: the property must be a plain CSS
  * name (never behavior or -moz-binding) and the value a safe style value, so
  * a refused declaration never takes the safe ones beside it. A trailing token
  * with no colon and no assignment, quote, escape, or call is not a declaration
- * and is left out, as is a plain `name=value` pair.
+ * and is left out, as is a plain `name=value` pair. The browser runtime keeps an identical copy.
  */
-function cleanStyle(value) {
-  const kept = [];
-  const dropped = [];
-  let rewrote = false;
-  const source = String(value ?? '');
-  if (source.length > STYLE_TEXT_MAX) return { style: '', dropped: ['?'] };
-  const hasComment = source.includes('/*');
-  const stripped = hasComment ? stripStyleComments(source) : source;
-  const rawPieces = stripped.split(';').map((piece) => piece.trim()).filter(Boolean);
-  for (const text of rawPieces) {
-    const colon = text.indexOf(':');
-    if (colon < 0) {
-      if (/[=@\\'"()]/.test(text) && !IGNORED_ASSIGNMENT.test(text)) dropped.push('?');
-      continue;
+export function cleanStyle(value) {
+    const kept = [];
+    const dropped = [];
+    let rewrote = false;
+    const source = String(value ?? '');
+    if (source.length > STYLE_TEXT_MAX)
+        return { style: '', dropped: ['?'] };
+    const hasComment = source.includes('/*');
+    const stripped = hasComment ? stripStyleComments(source) : source;
+    const rawPieces = stripped.split(';').map((piece) => piece.trim()).filter(Boolean);
+    for (const text of rawPieces) {
+        const colon = text.indexOf(':');
+        if (colon < 0) {
+            if (/[=@\\'"()]/.test(text) && !IGNORED_ASSIGNMENT.test(text))
+                dropped.push('?');
+            continue;
+        }
+        const prop = flatCss(text.slice(0, colon));
+        const body = text.slice(colon + 1).replace(/!\s*important\s*$/i, '');
+        const flat = flatCss(body);
+        if (prop === 'text-align' && IGNORED_QUOTED_ALIGN.test(body.trim()))
+            continue;
+        const safe = /^-?[-a-z]+$/.test(prop) &&
+            prop !== 'behavior' &&
+            prop !== '-moz-binding' &&
+            !flat.includes('javascript:') &&
+            !flat.includes('vbscript:') &&
+            safeStyleValue(body, prop);
+        if (safe)
+            kept.push(text);
+        else if ((prop === 'filter' || prop === '-ms-filter') && ieGradientDeclaration(text.slice(colon + 1), prop)) {
+            kept.push(`${prop}:${ieGradientDeclaration(text.slice(colon + 1), prop)}`);
+            rewrote = true;
+        }
+        else
+            dropped.push(/^-?[-a-z]+$/.test(prop) ? prop : '?');
     }
-    const prop = flatUrl(text.slice(0, colon));
-    const body = text.slice(colon + 1).replace(/!\s*important\s*$/i, '');
-    const flat = flatUrl(body);
-    const safe = /^-?[-a-z]+$/.test(prop) && prop !== 'behavior' && prop !== '-moz-binding' && !flat.includes('javascript:') && !flat.includes('vbscript:') && safeStyleValue(body, prop);
-    if (safe) kept.push(text);
-    else if ((prop === 'filter' || prop === '-ms-filter') && ieGradientDeclaration(body, prop)) { kept.push(`${prop}:${ieGradientDeclaration(body, prop)}`); rewrote = true; }
-    else dropped.push(/^-?[-a-z]+$/.test(prop) ? prop : '?');
-  }
-  const hasDebris = rawPieces.length !== kept.length + dropped.length;
-  return { style: dropped.length || rewrote ? kept.join('; ') : hasComment || hasDebris ? kept.join('; ') : source, dropped };
+    const hasDebris = rawPieces.length !== kept.length + dropped.length;
+    return { style: dropped.length || rewrote ? kept.join('; ') : hasComment || hasDebris ? kept.join('; ') : source, dropped };
 }
-
 function ieGradientDeclaration(raw, prop) {
-  const body = String(raw).trim().replace(/!\s*important\s*$/i, '');
-  const match = /^(?:progid:DXImageTransform\.Microsoft\.)?gradient\(([\s\S]*)\)$/i.exec(body);
-  const normalized = match && ieGradientFilterSafe(match[1]);
-  return normalized ? normalized + (/!\s*important\s*$/i.test(raw) ? ' !important' : '') : undefined;
+    const body = raw.trim().replace(/!\s*important\s*$/i, '');
+    const match = /^(?:progid:DXImageTransform\.Microsoft\.)?gradient\(([\s\S]*)\)$/i.exec(body);
+    const normalized = match && ieGradientFilterSafe(match[1]);
+    return normalized ? normalized + (/!\s*important\s*$/i.test(raw) ? ' !important' : '') : undefined;
 }
-
-function ieGradientFilterSafe(args) {
-  const parts = []; let start = 0; let depth = 0;
-  for (let n = 0; n <= args.length; n++) {
-    const ch = args[n] ?? ',';
-    if (ch === '(') depth++;
-    else if (ch === ')') { if (depth === 0) return undefined; depth--; }
-    else if (ch === ',' && depth === 0) { parts.push(args.slice(start, n)); start = n + 1; }
-  }
-  if (depth !== 0 || !parts.length) return undefined;
-  const values = Object.create(null);
-  for (const raw of parts) {
-    const eq = raw.indexOf('='); if (eq < 0) return undefined;
-    const key = raw.slice(0, eq).trim().toLowerCase(); if (key in values) return undefined;
-    const value = raw.slice(eq + 1).trim();
-    if (key === 'enabled') { if (!/^(?:true|false)$/i.test(value)) return undefined; values[key] = value.toLowerCase(); }
-    else if (key === 'gradienttype') { if (!/^[01]$/.test(value)) return undefined; values[key] = value; }
-    else if (key === 'startcolorstr' || key === 'endcolorstr') { const color = ieGradientColor(value); if (!color) return undefined; values[key] = color; }
-    else return undefined;
-  }
-  if (Object.hasOwn(values, 'enabled') && Object.keys(values).length === 1) return `progid:DXImageTransform.Microsoft.gradient(enabled=${values.enabled})`;
-  if (!values.startcolorstr || !values.endcolorstr) return undefined;
-  const tail = [
-    Object.hasOwn(values, 'gradienttype') ? `GradientType=${values.gradienttype}` : '',
-    Object.hasOwn(values, 'enabled') ? `enabled=${values.enabled}` : '',
-  ].filter(Boolean);
-  return `progid:DXImageTransform.Microsoft.gradient(${['startColorstr=' + values.startcolorstr, 'endColorstr=' + values.endcolorstr, ...tail].join(',')})`;
-}
-
-function ieGradientColor(raw) {
-  let text = String(raw).trim();
-  const wrapped = /^(?:'([\s\S]*)'|"([\s\S]*)"|&apos;([\s\S]*)&apos;|&quot;([\s\S]*)&quot;)$/.exec(text);
-  if (wrapped) text = (wrapped[1] ?? wrapped[2] ?? wrapped[3] ?? wrapped[4] ?? '').trim();
-  if (!text || /['"\\<>]/.test(text)) return undefined;
-  if (/^#[0-9a-fA-F]{3}$/.test(text) || /^#[0-9a-fA-F]{6}$/.test(text) || /^#[0-9a-fA-F]{8}$/.test(text)) return text.toLowerCase();
-  const call = /^(?:rgb|rgba)\(([^()]*)\)$/i.exec(text); if (!call) return undefined;
-  const nums = call[1].split(',').map((v) => v.trim());
-  if ((nums.length !== 3 && nums.length !== 4) || nums.some((v, i) => !/^(?:\d+(?:\.\d+)?)$/.test(v) || (i < 3 ? Number(v) > 255 : Number(v) > 1))) return undefined;
-  if (nums.length === 4 && /^rgb\(/i.test(text)) return undefined;
-  return `${nums.length === 4 ? 'rgba' : 'rgb'}(${nums.join(',')})`;
-}
-
 /**
- * One inline-style value: keywords, numbers, lengths, `#hex`, the allowed
- * functions with numeric arguments, `calc()` with numbers, units and + - * /,
- * and in `font-family` quoted plain names. Backslashes (CSS escapes like
- * `u\72 l(`), comments, `@` rules, nested `calc()`, and every other function
- * (`url`, `image-set`, `attr`, `var`, …) are refused.
+ * One `startColorstr`/`endColorstr` argument of IE's gradient filter: a
+ * `#hex` colour or an `rgb()`/`rgba()` call with numeric arguments, optionally
+ * wrapped in a quote — `'`, `"`, or the `&apos;`/`&quot;` entity a `<style>`
+ * raw-text element never decodes. The wrapper is stripped by shape only (its
+ * two markers need not match), then the inner text may hold no quote,
+ * backslash or angle bracket of its own.
  */
-function safeStyleValue(raw, prop) {
-  let text = String(raw ?? '').trim();
-  if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>{}]/.test(text) || text.includes('/*')) return false;
-  if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
-  if (/['"]/.test(text)) return false;
-  const flat = flatUrl(text);
-  if (flat.includes('url(') || flat.includes('expression')) return false;
-  const rest = replaceStyleCalls(text, (name, args) => {
-    const fn = name.toLowerCase();
-    if (STYLE_FUNCTIONS.has(fn) && STYLE_ARGS.test(args)) return ' ';
-    if (fn === 'calc' && calcArgsSafe(args)) return ' ';
-    return '(';
-  });
-  return !/[()]/.test(rest);
+function ieGradientColor(raw) {
+    let text = raw.trim();
+    const wrapped = /^(?:'([\s\S]*)'|"([\s\S]*)"|&apos;([\s\S]*)&apos;|&quot;([\s\S]*)&quot;)$/.exec(text);
+    if (wrapped)
+        text = (wrapped[1] ?? wrapped[2] ?? wrapped[3] ?? wrapped[4] ?? '').trim();
+    if (!text || /['"\\<>]/.test(text))
+        return undefined;
+    if (/^#[0-9a-fA-F]{3}$/.test(text) || /^#[0-9a-fA-F]{6}$/.test(text) || /^#[0-9a-fA-F]{8}$/.test(text))
+        return text.toLowerCase();
+    const call = /^(?:rgb|rgba)\(([^()]*)\)$/i.exec(text);
+    if (!call)
+        return undefined;
+    const nums = call[1].split(',').map((v) => v.trim());
+    if ((nums.length !== 3 && nums.length !== 4) || nums.some((v, i) => !/^(?:\d+(?:\.\d+)?)$/.test(v) || (i < 3 ? Number(v) > 255 : Number(v) > 1)))
+        return undefined;
+    if (nums.length === 4 && /^rgb\(/i.test(text))
+        return undefined;
+    return `${nums.length === 4 ? 'rgba' : 'rgb'}(${nums.join(',')})`;
 }
-
-function allowedAttr(tag, name) {
-  if (name.startsWith('on') || name === 'srcdoc') return false;
-  if (name === 'style') return true;
-  const specific = ALLOWED_ATTRS[tag];
-  if (tag === 'button' && /^data-fn-arg-\d+$/.test(name)) return true;
-  if (specific && specific.has(name)) return true;
-  return ALLOWED_ATTRS['*'].has(name);
-}
-
-// The one frame a snippet may keep: a YouTube player, `https://www.youtube.com/embed/<11-character id>` and
-// nothing else. The build sanitizer (pages.ts) carries the same rule.
-function videoEmbedSrc(value) {
-  const match = /^https:\/\/(?:www\.)?youtube(?:-nocookie)?\.com\/embed\/([A-Za-z0-9_-]{11})$/.exec(value);
-  return match ? `https://www.youtube-nocookie.com/embed/${match[1]}` : undefined;
-}
-
-function videoFrame(node, doc) {
-  const src = videoEmbedSrc(node.getAttribute('src') || '');
-  if (!src) return null;
-  const out = doc.createElement('iframe');
-  out.setAttribute('src', src);
-  for (const name of ['width', 'height']) {
-    const value = node.getAttribute(name) || '';
-    if (/^[0-9]{1,4}$/.test(value)) out.setAttribute(name, value);
-  }
-  const title = node.getAttribute('title');
-  if (title) out.setAttribute('title', title);
-  out.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
-  out.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-  out.setAttribute('loading', 'lazy');
-  out.setAttribute('allowfullscreen', '');
-  return out;
-}
-
-function cleanNode(node, doc, dropped) {
-  if (node.nodeType === 3) return doc.createTextNode(node.textContent || '');
-  if (node.nodeType !== 1) return null;
-  const tag = String(node.tagName || '').toLowerCase();
-  if (tag === 'input' && (node.getAttribute('type') || '').toLowerCase() !== 'checkbox') return null;
-  if (tag === 'iframe') return videoFrame(node, doc);
-  if (DROPPED_TAGS.has(tag)) return null;
-  const fragment = doc.createDocumentFragment();
-  for (let i = 0; i < node.childNodes.length; i++) {
-    const next = cleanNode(node.childNodes[i], doc, dropped);
-    if (next) fragment.appendChild(next);
-  }
-  if (!ALLOWED_TAGS.has(tag)) return fragment;
-  const out = doc.createElement(tag);
-  const attrs = node.attributes;
-  for (let i = 0; attrs && i < attrs.length; i++) {
-    const attr = attrs[i];
-    const name = attr.name.toLowerCase();
-    if (!allowedAttr(tag, name)) continue;
-    if ((name === 'id' || (tag === 'label' && name === 'for')) && !idTokenOk(attr.value)) continue;
-    if (name === 'checked') {
-      // A boolean: the initial state of a checkbox, whatever text the author gave it.
-      out.setAttribute('checked', '');
-      continue;
-    }
-    if ((name === 'href' || name === 'src') && !(tag === 'img' && name === 'src' && DATA_IMAGE_SRC.test(attr.value)) && !safeUrl(attr.value)) continue;
-    if (name === 'style') {
-      const style = cleanStyle(attr.value);
-      if (style.style || !style.dropped.length) out.setAttribute('style', style.style);
-      if (style.dropped.length) {
-        out.setAttribute('data-style-dropped', style.dropped.join(' '));
-        if (dropped) dropped.push(...style.dropped);
-      }
-      continue;
-    }
-    if (name === 'class') {
-      const kept = cleanClass(attr.value);
-      if (kept) out.setAttribute('class', kept);
-      continue;
-    }
-    out.setAttribute(name, attr.value);
-  }
-  if (tag === 'a' && out.getAttribute('href')) out.setAttribute('rel', 'noopener noreferrer');
-  out.appendChild(fragment);
-  return out;
-}
-
 /**
- * Allowlist sanitizer. `doc` is the document to parse with (jsdom in tests,
- * the page document in the browser). Without a DOM the snippet is text.
- * A refused style declaration is named in the element's `data-style-dropped`
+ * IE's `gradient()` filter paints a two-stop fallback background from plain
+ * colour arguments and a boolean/0-1 flag — it never fetches and modern
+ * browsers already ignore it, so a page carrying it loses nothing either way.
+ * Only `startColorstr`, `endColorstr`, `GradientType` and `enabled` are
+ * recognized; any other key, duplicate, or malformed argument list refuses
+ * the whole filter the same as an unknown function would.
+ */
+export function ieGradientFilterSafe(args) {
+    // Split on top-level commas only: a colour argument like
+    // `rgba(240, 173, 78, 0.54)` has commas of its own that must stay inside
+    // that one key=value pair rather than splitting it apart.
+    const parts = [];
+    let start = 0, depth = 0;
+    for (let n = 0; n <= args.length; n++) {
+        const ch = args[n] ?? ',';
+        if (ch === '(')
+            depth++;
+        else if (ch === ')') {
+            if (depth === 0)
+                return undefined;
+            depth--;
+        }
+        else if (ch === ',' && depth === 0) {
+            parts.push(args.slice(start, n));
+            start = n + 1;
+        }
+    }
+    if (depth !== 0 || !parts.length)
+        return undefined;
+    const values = {};
+    for (const raw of parts) {
+        const eq = raw.indexOf('=');
+        const key = raw.slice(0, eq).trim().toLowerCase();
+        if (eq < 0 || key in values)
+            return undefined;
+        const value = raw.slice(eq + 1).trim();
+        if (key === 'gradienttype') {
+            if (!/^[01]$/.test(value))
+                return undefined;
+            values[key] = value;
+        }
+        else if (key === 'enabled') {
+            if (!/^(?:true|false)$/i.test(value))
+                return undefined;
+            values[key] = value.toLowerCase();
+        }
+        else if (key === 'startcolorstr' || key === 'endcolorstr') {
+            const color = ieGradientColor(value);
+            if (!color)
+                return undefined;
+            values[key] = color;
+        }
+        else
+            return undefined;
+    }
+    // IE also emits a standalone enabled switch.  It has no colour payload to
+    // normalize, but is still safe when it is the sole recognized argument.
+    if (Object.hasOwn(values, 'enabled') && Object.keys(values).length === 1) {
+        return `progid:DXImageTransform.Microsoft.gradient(enabled=${values.enabled})`;
+    }
+    // Both colours are required; GradientType and enabled are optional and are
+    // re-emitted only when present, in one fixed order.
+    if (!values.startcolorstr || !values.endcolorstr)
+        return undefined;
+    const tail = [
+        Object.hasOwn(values, 'gradienttype') ? `GradientType=${values.gradienttype}` : '',
+        Object.hasOwn(values, 'enabled') ? `enabled=${values.enabled}` : '',
+    ].filter(Boolean);
+    return `progid:DXImageTransform.Microsoft.gradient(${['startColorstr=' + values.startcolorstr, 'endColorstr=' + values.endcolorstr, ...tail].join(',')})`;
+}
+/**
+ * One inline-style or exported presentation value: keywords, numbers,
+ * lengths, `#hex`, the allowed functions with numeric arguments, `calc()`
+ * with numbers, units and + - * /, and in `font-family` quoted plain names.
+ * Backslashes (CSS escapes like `u\72 l(`), comments, `@` rules, nested
+ * `calc()`, and every other function (`url`, `image-set`, `attr`, `var`, …)
+ * are refused.
+ */
+/** A fetched background image as `c2c fetch-assets` names it: `bg/`, a 64-hex sha256, an image extension. Nothing else. */
+const LOCAL_BACKGROUND_URL = /url\(bg\/[0-9a-f]{64}\.(?:png|jpg|gif|webp)\)/g;
+export function safeStyleValue(raw, prop) {
+    let text = String(raw ?? '').trim();
+    if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>{}]/.test(text) || text.includes('/*'))
+        return false;
+    if (prop === 'font-family' || prop === 'font')
+        text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
+    if (/['"]/.test(text))
+        return false;
+    // The one url() an inline style may carry: a background image this app ships under bg/, named by its sha256.
+    if (prop === 'background' || prop === 'background-image')
+        text = text.replace(LOCAL_BACKGROUND_URL, ' ');
+    const flat = flatCss(text);
+    if (flat.includes('url(') || flat.includes('expression'))
+        return false;
+    // Nested calls (a colour inside a gradient) resolve innermost first, one level per pass.
+    for (let pass = 0; pass < 4 && /[()]/.test(text); pass++) {
+        const next = replaceStyleCalls(text, (name, args) => {
+            const fn = name.toLowerCase();
+            if (STYLE_FUNCTIONS.has(fn) && (STYLE_ARGS.test(args) || (STYLE_PAINT_FUNCTIONS.has(fn) && STYLE_PAINT_ARGS.test(args))))
+                return ' ';
+            if (fn === 'calc' && calcArgsSafe(args))
+                return ' ';
+            return '(';
+        });
+        if (next === text)
+            return false;
+        text = next;
+    }
+    return !/[()]/.test(text);
+}
+export function allowedAttr(tag, name) {
+    if (name.startsWith('on') || name === 'srcdoc')
+        return false;
+    if (name === 'style')
+        return true;
+    const specific = ALLOWED_ATTRS[tag];
+    if (tag === 'button' && /^data-fn-arg-\d+$/.test(name))
+        return true;
+    if (specific?.has(name))
+        return true;
+    return ALLOWED_ATTRS['*'].has(name);
+}
+/**
+ * The one frame a snippet may keep: a YouTube player, `https://www.youtube.com/embed/<11-character id>` and nothing else
+ * (no query, userinfo, port, other host or path). It is rewritten to the privacy-enhanced host the shell CSP allows.
+ * The runtime sanitizers carry the same rule.
+ */
+export function videoEmbedSrc(value) {
+    const match = /^https:\/\/(?:www\.)?youtube(?:-nocookie)?\.com\/embed\/([A-Za-z0-9_-]{11})$/.exec(value);
+    return match ? `https://www.youtube-nocookie.com/embed/${match[1]}` : undefined;
+}
+/** A kept video frame: only its address, size and title survive; the sandbox and the referrer policy are fixed here. */
+function videoFrame(node, doc) {
+    const src = videoEmbedSrc(node.getAttribute('src') ?? '');
+    if (!src)
+        return null;
+    const out = doc.createElement('iframe');
+    out.setAttribute('src', src);
+    for (const name of ['width', 'height']) {
+        const value = node.getAttribute(name) ?? '';
+        if (/^[0-9]{1,4}$/.test(value))
+            out.setAttribute(name, value);
+    }
+    const title = node.getAttribute('title');
+    if (title)
+        out.setAttribute('title', title);
+    out.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+    out.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    out.setAttribute('loading', 'lazy');
+    out.setAttribute('allowfullscreen', '');
+    return out;
+}
+export function cleanNode(node, doc, dropped, urlOk = safeUrl) {
+    if (node.nodeType === 3)
+        return doc.createTextNode(node.textContent ?? '');
+    if (node.nodeType !== 1)
+        return null;
+    const tag = (node.tagName || '').toLowerCase();
+    if (tag === 'input' && node.getAttribute('type')?.toLowerCase() !== 'checkbox')
+        return null;
+    if (tag === 'iframe')
+        return videoFrame(node, doc);
+    if (DROPPED_TAGS.has(tag))
+        return null;
+    const fragment = doc.createDocumentFragment();
+    for (const child of listOf(node.childNodes)) {
+        const next = cleanNode(child, doc, dropped, urlOk);
+        if (next)
+            fragment.appendChild(next);
+    }
+    if (!ALLOWED_TAGS.has(tag))
+        return fragment;
+    const out = doc.createElement(tag);
+    for (const attr of listOf(node.attributes)) {
+        const name = attr.name.toLowerCase();
+        if (!allowedAttr(tag, name))
+            continue;
+        if ((name === 'id' || (tag === 'label' && name === 'for')) && !idTokenOk(attr.value))
+            continue;
+        if (name === 'checked') {
+            // A boolean: the initial state of a checkbox, whatever text the author gave it.
+            out.setAttribute('checked', '');
+            continue;
+        }
+        if ((name === 'href' || name === 'src') && !(tag === 'img' && name === 'src' && DATA_IMAGE_SRC.test(attr.value)) && !urlOk(attr.value))
+            continue;
+        if (name === 'style') {
+            const style = cleanStyle(attr.value);
+            if (style.style || !style.dropped.length)
+                out.setAttribute('style', style.style);
+            if (style.dropped.length) {
+                out.setAttribute('data-style-dropped', style.dropped.join(' '));
+                dropped?.push(...style.dropped);
+            }
+            continue;
+        }
+        if (name === 'class') {
+            const kept = cleanClass(attr.value);
+            if (kept)
+                out.setAttribute('class', kept);
+            continue;
+        }
+        out.setAttribute(name, attr.value);
+    }
+    if (tag === 'a' && out.getAttribute('href'))
+        out.setAttribute('rel', 'noopener noreferrer');
+    out.appendChild(fragment);
+    return out;
+}
+/** The one `data:` URL an `<img>` keeps: an inline raster image, matched on the raw value so case, whitespace and SVG stay refused. */
+const DATA_IMAGE_SRC = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+/**
+ * An href or src a snippet may keep. The raw value may not hold a control, a space or a backslash and may not
+ * start protocol-relative; after each percent-decode pass (four at most) the flattened value may not name a
+ * script-capable, local or opaque scheme, and any other scheme than http(s), mailto or tel is refused.
+ * A relative path, a query and a hash stay.
+ */
+export function safeUrl(value) {
+    const raw = String(value ?? '');
+    if (!raw)
+        return true;
+    if (/[\u0000-\u0020\\]/.test(raw) || raw.startsWith('//'))
+        return false;
+    let text = raw;
+    for (let pass = 0; pass <= 4; pass++) {
+        // Decoded URL data may hold ordinary spaces (%20) legitimately; only decoded controls and backslashes refuse.
+        if (pass > 0 && /[\u0000-\u001f\u007f\\]/.test(text))
+            return false;
+        const flatText = flatCss(text);
+        if (flatText.startsWith('//') || /^(?:javascript|data|vbscript|file|ftp|blob):/.test(flatText))
+            return false;
+        if (/^[a-z][a-z0-9+.-]*:/.test(flatText) && !/^(?:https?|mailto|tel):/.test(flatText))
+            return false;
+        let decoded;
+        try {
+            decoded = decodeURIComponent(text);
+        }
+        catch {
+            decoded = text.replace(/%([0-9a-fA-F]{2})/g, (_m, hex) => String.fromCharCode(parseInt(hex, 16)));
+        }
+        if (decoded === text)
+            break;
+        text = decoded;
+    }
+    return true;
+}
+/** True when an inline style would lose a declaration or carry a comment or escape (the strict yes/no form of cleanStyle). */
+export function dangerousStyle(value) {
+    const text = String(value ?? '');
+    return text.includes('\\') || text.includes('/*') || cleanStyle(text).dropped.length > 0;
+}
+const escapeText = (text) => String(text ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] ?? ch);
+/**
+ * Allowlist sanitizer. `doc` is the document to parse with (jsdom in tests, the page document in the browser).
+ * Without a DOM the snippet is text. A refused style declaration is named in the element's `data-style-dropped`
  * and, when `dropped` is an array, pushed onto it.
  */
 export function sanitizeSnippet(raw, doc, dropped) {
-  const documentRef = doc || (typeof document !== 'undefined' ? document : null);
-  const view = documentRef && documentRef.defaultView;
-  const Parser = (view && view.DOMParser) || (typeof DOMParser !== 'undefined' ? DOMParser : null);
-  if (!documentRef || !Parser) return escapeHtml(raw);
-  const parsed = new Parser().parseFromString(String(raw ?? ''), 'text/html');
-  const sink = parsed.createElement('template');
-  const bodyNodes = parsed.body.childNodes;
-  for (let i = 0; i < bodyNodes.length; i++) {
-    const next = cleanNode(bodyNodes[i], parsed, dropped);
-    if (next) sink.content.appendChild(next);
-  }
-  return sink.innerHTML;
+    const g = globalThis;
+    const documentRef = doc || g.document || null;
+    const Parser = (documentRef && documentRef.defaultView && documentRef.defaultView.DOMParser) || g.DOMParser || null;
+    if (!documentRef || !Parser)
+        return escapeText(raw);
+    const parsed = new Parser().parseFromString(String(raw ?? ''), 'text/html');
+    const sink = parsed.createElement('template');
+    const content = sink.content;
+    if (!content)
+        return '';
+    for (const node of listOf(parsed.body.childNodes)) {
+        const next = cleanNode(node, parsed, dropped);
+        if (next)
+            content.appendChild(next);
+    }
+    return sink.innerHTML;
 }
+// <<< sanitizer-core:end >>>
 
 function isEmpty(value, widget) {
   if (typeof File !== 'undefined' && value instanceof File) return value.size === 0;
@@ -757,7 +913,8 @@ export function validateField(field, value) {
   if (field.choices && field.choices.length && !field.othersOption && field.widget !== 'lookup' && field.widget !== 'lookup-multi') {
     const items = Array.isArray(value) ? value.map(String) : [text];
     for (const item of items) {
-      if (!field.choices.includes(item)) return 'Choose a listed value.';
+      // A stored choice may carry trailing blanks the control's value drops.
+      if (!field.choices.includes(item) && !field.choices.some((choice) => String(choice).trim() === item)) return 'Choose a listed value.';
     }
   }
   return null;
@@ -897,7 +1054,7 @@ function fieldControl(field, id, describedBy) {
       // A stored value outside the list selects Others and pre-fills its text box.
       const other = initialItems.find((item) => !listed.has(item));
       const othersMark = other !== undefined ? ' selected' : '';
-      const text = `<input type="text" data-others-text maxlength="${field.maxLength ?? 255}"${other === undefined ? ' hidden' : ` value="${escapeHtml(String(other))}"`}>`;
+      const text = `<input type="text" data-others-text aria-label="${escapeHtml(field.label || field.name)} (other)" maxlength="${field.maxLength ?? 255}"${other === undefined ? ' hidden' : ` value="${escapeHtml(String(other))}"`}>`;
       select = `<select${idAttr} name="${name}"${required}${lookup}${described} data-others-choice>${blank}${options}<option value="${OTHERS_VALUE}"${othersMark}>Others</option></select>${text}`;
     } else {
       select = `<select${idAttr} name="${name}"${multiple}${required}${lookup}${described}>${blank}${extra}${options}</select>`;
@@ -924,7 +1081,7 @@ function fieldControl(field, id, describedBy) {
       const other = initial !== '' && !new Set(choices.map((choice) => String(choice))).has(initial) ? initial : '';
       const cid = `${id}-choice-others`;
       parts.push(`<label class="choice" for="${cid}"><input id="${cid}" type="radio" name="${name}" value="${OTHERS_VALUE}" data-others-choice${other !== '' ? ' checked' : ''}${required}${described}> Others</label>`);
-      parts.push(`<input type="text" data-others-text maxlength="${field.maxLength ?? 255}"${other === '' ? ' hidden' : ` value="${escapeHtml(other)}"`}>`);
+      parts.push(`<input type="text" data-others-text aria-label="${escapeHtml(field.label || field.name)} (other)" maxlength="${field.maxLength ?? 255}"${other === '' ? ' hidden' : ` value="${escapeHtml(other)}"`}>`);
     }
     return choiceGroup(field, parts.join(''));
   }
@@ -948,6 +1105,11 @@ function fieldControl(field, id, describedBy) {
     if (sources.includes('file')) {
       inner += `<label class="filepick-btn" for="${id}">${verb}</label><input${idAttr} name="${name}" type="file"${accept}${nativeRequired}${described} data-upload="${escapeHtml(field.uploadEndpoint || '')}"${previewDuration} class="visually-hidden">`;
     }
+    // Opt-in Google Drive picker: only when the deployer's runtime config carries a key
+    // (docs/doc-pickers.md). Without one the field is the local upload alone.
+    if (sources.includes('file') && field.widget === 'file' && Array.isArray(field.browseSources) && field.browseSources.includes('google_docs') && googlePickerConfig(globalThis)) {
+      inner += `<button type="button" class="filepick-btn" data-doc-picker="google" data-pick-for="${id}" data-pick-field="${name}" data-pick-accept="${escapeHtml(field.accept || '')}">Choose from Google Drive</button>`;
+    }
     if (sources.includes('camera')) {
       inner += `<label class="filepick-btn" for="${id}-cam">Take Photo</label><input id="${id}-cam" name="${name}__camera" type="file"${accept} capture${previewDuration} class="visually-hidden">`;
     }
@@ -964,7 +1126,15 @@ function fieldControl(field, id, describedBy) {
     if (field.widget === 'image' && field.imageTitle) {
       companions += `<input id="${id}-title" name="${escapeHtml(field.imageTitleColumn || '')}" type="text" placeholder="Title" aria-label="${escapeHtml(field.label)} title">`;
     }
-    return `<span class="filepick">${inner}<span class="filepick-name"></span></span>${companions}`;
+    const picker = `<span class="filepick">${inner}<span class="filepick-name"></span></span>${companions}`;
+    // Live capture, recording cap, markup and open-on-load (model.ts ui.media):
+    // attachMediaTools builds the panel inside this wrapper.
+    const media = field.media;
+    if (media && (field.widget === 'image' || field.widget === 'video' || field.widget === 'audio')) {
+      const seconds = Number(media.recordSeconds);
+      return `<div class="media-field" data-media-kind="${field.widget}" data-media-camera="${media.camera === 'secondary' ? 'secondary' : 'primary'}"${Number.isInteger(seconds) && seconds >= 1 ? ` data-media-seconds="${seconds}"` : ''}${media.annotate ? ' data-media-annotate="true"' : ''}${media.onload ? ' data-media-onload="true"' : ''}>${picker}</div>`;
+    }
+    return picker;
   }
   if (field.widget === 'signature') {
     return `<canvas data-signature="${name}" width="320" height="120"></canvas><button type="button" data-signature-save="${name}">Save signature</button><input${idAttr} name="${name}" type="hidden" data-upload="${escapeHtml(field.uploadEndpoint || '')}">`;
@@ -1319,10 +1489,20 @@ export function reportStateHtml(state, opts) {
     const action = options.formHref
       ? `<a class="button-primary" href="${escapeHtml(options.formHref)}">Add a record</a>`
       : '';
+    if (options.filtered) {
+      return `<div data-state="empty"><div class="state-empty"><p>No records match.</p><button type="button" data-clear-search>Clear search</button></div></div>`;
+    }
     return `<div data-state="empty"><div class="state-empty"><p>No records yet</p>${action}</div></div>`;
   }
   if (state === 'error') {
     return `<div data-state="error" role="alert"><div class="state-error"><p>Could not load these records.</p><button type="button" data-retry>Retry</button></div></div>`;
+  }
+  if (state === 'denied') {
+    return `<div data-state="denied" role="alert"><div class="state-error"><h2>You don't have access to this report</h2><p>Ask the app administrator for access.</p><a href="#/">Go to home</a></div></div>`;
+  }
+  if (state === 'session-expired') {
+    const login = options.loginHref ? `<a class="button-primary" href="${escapeHtml(options.loginHref)}">Sign in again</a>` : '';
+    return `<div data-state="session-expired" role="alert"><div class="state-error"><p>Your session ended. Sign in again to continue; what you entered on this page is kept until you leave it.</p>${login}</div></div>`;
   }
   return '';
 }
@@ -1376,6 +1556,18 @@ export function submitCommitted(res, body) {
   return !!(res && (res.ok || (body && body.wrote === true)));
 }
 
+/**
+ * Server text shown to the user: control and direction-override characters
+ * removed, whitespace collapsed, length capped. It is only ever set as text.
+ */
+export function cleanServerText(value) {
+  const text = String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 300 ? `${text.slice(0, 299)}\u2026` : text;
+}
+
 /** Append a success or failure toast to the live region (or the body without one). */
 export function showToast(doc, kind, text) {
   const documentRef = doc || (typeof document !== 'undefined' ? document : null);
@@ -1385,10 +1577,87 @@ export function showToast(doc, kind, text) {
   const el = documentRef.createElement('div');
   el.className = 'toast';
   el.setAttribute('data-kind', kind);
-  el.setAttribute('role', 'status');
-  el.textContent = String(text ?? '');
+  // A failure interrupts; a success waits its turn.
+  el.setAttribute('role', kind === 'failure' ? 'alert' : 'status');
+  const message = documentRef.createElement('span');
+  message.textContent = cleanServerText(text);
+  el.appendChild(message);
+  const close = documentRef.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '\u00d7';
+  close.addEventListener('click', () => el.remove());
+  el.appendChild(close);
   host.appendChild(el);
+  // A success clears itself; a failure stays until dismissed.
+  const view = documentRef.defaultView;
+  if (kind !== 'failure' && view && typeof view.setTimeout === 'function') view.setTimeout(() => el.remove(), 5000);
   return el;
+}
+
+/**
+ * Ask before a destructive action in an in-page alertdialog (Creator's confirm
+ * dialog). Resolves true only on the confirm button; Cancel, Escape and a click
+ * on the backdrop resolve false. One dialog at a time, focus starts on Cancel
+ * and returns to the control that opened it (the trigger, else the focused one).
+ */
+export function askConfirm(doc, message, labels, trigger) {
+  const documentRef = doc || (typeof document !== 'undefined' ? document : null);
+  const host = documentRef && documentRef.body;
+  if (!host) return Promise.resolve(false);
+  const opener = trigger || documentRef.activeElement;
+  const old = documentRef.querySelector('[data-confirm-dialog]');
+  if (old) old.remove();
+  return new Promise((resolve) => {
+    const backdrop = documentRef.createElement('div');
+    backdrop.className = 'modal';
+    backdrop.setAttribute('data-confirm-dialog', '');
+    const box = documentRef.createElement('div');
+    box.className = 'modal-card';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'c2c-confirm-msg');
+    const msg = documentRef.createElement('p');
+    msg.id = 'c2c-confirm-msg';
+    msg.textContent = String(message ?? '');
+    const cancel = documentRef.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = (labels && labels.cancelLabel) || 'Cancel';
+    const ok = documentRef.createElement('button');
+    ok.type = 'button';
+    ok.setAttribute('data-confirm-ok', '');
+    ok.textContent = (labels && labels.confirmLabel) || 'Delete';
+    let done = false;
+    const finish = (answer) => {
+      if (done) return;
+      done = true;
+      documentRef.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      if (opener && typeof opener.focus === 'function' && opener.isConnected !== false) opener.focus();
+      resolve(answer);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === 'Tab') {
+        // Keep focus inside the two buttons while the dialog is open.
+        event.preventDefault();
+        (documentRef.activeElement === cancel ? ok : cancel).focus();
+      }
+    };
+    cancel.addEventListener('click', () => finish(false));
+    ok.addEventListener('click', () => finish(true));
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) finish(false);
+    });
+    documentRef.addEventListener('keydown', onKey, true);
+    box.append(msg, cancel, ok);
+    backdrop.appendChild(box);
+    host.appendChild(backdrop);
+    cancel.focus();
+  });
 }
 
 /** In-app chart report chrome: title, Refresh/Sort controls, and the drawing area. */
@@ -2397,7 +2666,7 @@ function loadChart(report, section, viewRef) {
     post(withFilter({ op: 'query', page: 0, pageSize: report.pageSize || PAGE_SIZE })).then((res) => {
       // A static host has no data function: that is an empty report, not an error.
       if (!res || res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
-      if (!res.ok) throw new Error(`chart query ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(`chart query ${res.status}`), { refused: res.status });
       return responseJson(res).then((body) => {
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         // The fold reads one page; a full page means more rows may follow.
@@ -2417,7 +2686,7 @@ function loadChart(report, section, viewRef) {
         if (res && (res.status === 404 || res.status === 405 || res.status === 501)) return { rows: [] };
         // A refused group field or a server error is a load failure: the panel
         // shows its error state, never a fake "No Data Available".
-        throw new Error(`chart aggregate ${res && res.status}`);
+        throw Object.assign(new Error(`chart aggregate ${res && res.status}`), { refused: res && res.status });
       })
     : foldRows();
   return first
@@ -2434,8 +2703,12 @@ function loadChart(report, section, viewRef) {
         drawChart(host, report, rows, order, null, { truncated: !!result.truncated, scanned: result.scanned || rows.length });
       }
     })
-    .catch(() => {
-      if (stateEl) stateEl.innerHTML = reportStateHtml('error');
+    .catch((error) => {
+      if (!stateEl) return;
+      const refused = error && error.refused;
+      if (refused === 401) stateEl.innerHTML = reportStateHtml('session-expired', { loginHref: viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '' });
+      else if (refused === 403) stateEl.innerHTML = reportStateHtml('denied');
+      else stateEl.innerHTML = reportStateHtml('error');
     });
 }
 
@@ -3150,7 +3423,7 @@ export function renderRoute(appModel, route, doc) {
   if (route.name === 'home') return renderHome(appModel);
   if (route.name === 'form') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
-    return form ? renderForm(form) : `<p class="todo">Unknown form.</p>`;
+    return form ? renderForm(form) : notFoundHtml('form');
   }
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
@@ -3158,7 +3431,7 @@ export function renderRoute(appModel, route, doc) {
       const form = (appModel.forms || []).find((item) => item.name === report.form);
       return form ? `${renderReport(report)}<section class="record-summary" data-record-summary="${escapeHtml(form.name)}" data-record-report="${escapeHtml(report.name)}" data-record-id="${escapeHtml(route.row)}"><p>Loading record…</p></section>` : `<p class="todo">Unknown report form.</p>`;
     }
-    return report ? renderReport(report) : `<p class="todo">Unknown report.</p>`;
+    return report ? renderReport(report) : notFoundHtml('report');
   }
   if (route.name === 'record') {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
@@ -3166,10 +3439,15 @@ export function renderRoute(appModel, route, doc) {
   }
   if (route.name === 'page') {
     const page = (appModel.pages || []).find((item) => item.name === route.id);
-    return page ? renderPage(page, doc, appModel) : `<p class="todo">Unknown page.</p>`;
+    return page ? renderPage(page, doc, appModel) : notFoundHtml('page');
   }
   if (route.name === 'smoke') return renderSmokeShell();
-  return `<p class="todo">That page is not in this app.</p>`;
+  return notFoundHtml('page');
+}
+
+/** The screen an unknown route shows: a heading focus can land on, and the way back to the first screen. */
+function notFoundHtml(kind) {
+  return `<section class="card" data-state="not-found"><h1 tabindex="-1">Not found</h1><p>This ${kind} is not part of the app. Choose a screen from the menu.</p><p><a class="button-primary" href="#/">Go to home</a></p></section>`;
 }
 
 /** Creator's banner after a successful submit when the success handler sets no `success message`. */
@@ -3184,8 +3462,11 @@ export function submitFailureText(body) {
   const server = body && (typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : '');
   // The row is stored; only a step after the write failed. A resubmit would add it twice.
   // The generic "request failed" adds nothing; a Deluge runtime error's text does.
-  if (body && body.wrote === true) return `The record was saved, but a step after saving failed${server && server.trim() && server.trim() !== 'request failed' ? `: ${server.trim()}` : '.'}`;
-  return server && server.trim() ? server : 'The record was not saved.';
+  if (body && body.wrote === true) {
+    const said = cleanServerText(server);
+    return `The record was saved, but a step after saving failed${said && said !== 'request failed' ? `: ${said}` : '.'}`;
+  }
+  return server && cleanServerText(server) ? cleanServerText(server) : 'The record was not saved.';
 }
 
 /**
@@ -7364,6 +7645,414 @@ function startScanner(input) {
   return { start, stop };
 }
 
+const MEDIA_IMAGE_MAX_SIDE = 2048;
+const MEDIA_PEN_COLORS = ['#d32f2f', '#1565c0', '#212121'];
+const MEDIA_RECORD_TYPES = {
+  video: ['video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4'],
+  audio: ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'],
+};
+const mediaPicked = new WeakSet();
+
+/**
+ * Creator's image `annotation`, `show onload` and front `camera` lens, and a
+ * video or audio field's `duration`: a small panel beside the file control
+ * (model.ts ui.media). Capture and recording use getUserMedia and
+ * MediaRecorder in the page; a drawing editor marks up a chosen or captured
+ * photo before it is stored. The result is always a File placed in the
+ * field's own file input, so the existing size/type checks and upload run
+ * unchanged. When the camera, microphone or an API is missing or refused the
+ * panel says so and the file chooser keeps working.
+ */
+function startMediaTools(blockEl, spec) {
+  const doc = blockEl.ownerDocument;
+  const win = doc.defaultView;
+  const kind = spec.kind;
+  const fileInputs = Array.from(blockEl.querySelectorAll('input[type="file"]'));
+  const target = fileInputs[0];
+  if (!target) return null;
+  let stream = null;
+  let recorder = null;
+  let tick = 0;
+  let stopTimer = 0;
+  let session = 0;
+
+  const box = doc.createElement('div');
+  box.className = 'media-tools';
+  const status = doc.createElement('p');
+  status.className = 'media-status';
+  status.setAttribute('role', 'status');
+  const video = doc.createElement('video');
+  video.className = 'media-video';
+  video.style.maxWidth = '100%';
+  video.setAttribute('playsinline', '');
+  video.muted = true;
+  video.hidden = true;
+  const open = doc.createElement('button');
+  open.type = 'button';
+  open.className = 'media-open';
+  open.textContent = kind === 'image' ? 'Use camera' : kind === 'video' ? 'Record video' : 'Record audio';
+  const act = doc.createElement('button');
+  act.type = 'button';
+  act.className = 'media-act';
+  act.textContent = kind === 'image' ? 'Capture' : 'Stop recording';
+  act.hidden = true;
+  const close = doc.createElement('button');
+  close.type = 'button';
+  close.className = 'media-close';
+  close.textContent = kind === 'image' ? 'Close camera' : 'Cancel';
+  close.hidden = true;
+  const editor = doc.createElement('div');
+  editor.className = 'media-editor';
+  editor.hidden = true;
+  box.append(open, act, close, video, status, editor);
+  const anchor = blockEl.querySelector('.filepick');
+  if (anchor) anchor.insertAdjacentElement('afterend', box);
+  else blockEl.append(box);
+
+  const say = (text) => {
+    status.textContent = text;
+  };
+  const unavailable = `${kind === 'image' ? 'The camera' : 'Recording'} is not available here (it needs ${kind === 'video' ? 'a camera, a microphone' : kind === 'audio' ? 'a microphone' : 'a camera'}, a supported browser and HTTPS). Choose a file instead.`;
+  const refused = `${kind === 'audio' ? 'Microphone' : kind === 'video' ? 'Camera or microphone' : 'Camera'} access was refused or none was found. Choose a file instead.`;
+
+  function release() {
+    session += 1;
+    if (tick) win.clearInterval(tick);
+    if (stopTimer) win.clearTimeout(stopTimer);
+    tick = 0;
+    stopTimer = 0;
+    const live = recorder;
+    recorder = null;
+    if (live) {
+      live.discard = true;
+      try {
+        if (live.state !== 'inactive') live.stop();
+      } catch {
+        // already stopped
+      }
+    }
+    if (stream) {
+      for (const track of stream.getTracks()) track.stop();
+      stream = null;
+    }
+    video.srcObject = null;
+    video.hidden = true;
+    act.hidden = true;
+    close.hidden = true;
+    open.hidden = false;
+  }
+
+  function place(file) {
+    try {
+      const transfer = new win.DataTransfer();
+      transfer.items.add(file);
+      target.files = transfer.files;
+    } catch {
+      say('This browser cannot attach the result. Choose a file instead.');
+      return false;
+    }
+    mediaPicked.add(target);
+    target.dispatchEvent(new win.Event('change', { bubbles: true }));
+    return true;
+  }
+
+  async function openStream() {
+    const nav = win.navigator;
+    if (!nav || !nav.mediaDevices || typeof nav.mediaDevices.getUserMedia !== 'function') {
+      say(unavailable);
+      return false;
+    }
+    if (kind !== 'image' && typeof win.MediaRecorder !== 'function') {
+      say(unavailable);
+      return false;
+    }
+    const mine = ++session;
+    let media;
+    try {
+      media = await nav.mediaDevices.getUserMedia({
+        video: kind === 'audio' ? false : { facingMode: spec.camera === 'secondary' ? 'user' : 'environment' },
+        audio: kind !== 'image',
+      });
+    } catch {
+      if (mine === session) say(refused);
+      return false;
+    }
+    if (mine !== session) {
+      for (const track of media.getTracks()) track.stop();
+      return false;
+    }
+    stream = media;
+    if (kind !== 'audio') {
+      video.srcObject = media;
+      video.hidden = false;
+      try {
+        const played = video.play();
+        if (played && typeof played.catch === 'function') played.catch(() => {});
+      } catch {
+        // jsdom and some browsers refuse; frames are read either way
+      }
+    }
+    open.hidden = true;
+    act.hidden = false;
+    close.hidden = false;
+    return true;
+  }
+
+  function capture() {
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 480;
+    const scale = Math.min(1, MEDIA_IMAGE_MAX_SIDE / Math.max(width, height));
+    const canvas = doc.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      say(unavailable);
+      return;
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        say('The photo could not be captured. Choose a file instead.');
+        return;
+      }
+      release();
+      say('');
+      place(new win.File([blob], 'photo.jpg', { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.92);
+  }
+
+  async function record() {
+    if (!(await openStream())) return;
+    const types = MEDIA_RECORD_TYPES[kind];
+    const supported = typeof win.MediaRecorder.isTypeSupported === 'function' ? types.find((t) => win.MediaRecorder.isTypeSupported(t)) : undefined;
+    let rec;
+    try {
+      rec = supported ? new win.MediaRecorder(stream, { mimeType: supported }) : new win.MediaRecorder(stream);
+    } catch {
+      release();
+      say(unavailable);
+      return;
+    }
+    recorder = rec;
+    const chunks = [];
+    let bytes = 0;
+    rec.ondataavailable = (event) => {
+      if (!event.data || !event.data.size) return;
+      chunks.push(event.data);
+      bytes += event.data.size;
+      // A recording never outgrows what the upload accepts.
+      if (bytes >= UPLOAD_SOURCE_MAX_BYTES && rec.state !== 'inactive') {
+        rec.discard = false;
+        rec.stop();
+      }
+    };
+    rec.onstop = () => {
+      const discarded = rec.discard === true;
+      const mime = String(rec.mimeType || supported || '').split(';')[0] || (kind === 'video' ? 'video/webm' : 'audio/webm');
+      if (recorder === rec) {
+        recorder = null;
+        release();
+      }
+      if (discarded) return;
+      if (!chunks.length) {
+        say('Nothing was recorded. Choose a file instead.');
+        return;
+      }
+      const ext = mime.endsWith('mp4') ? 'mp4' : 'webm';
+      say('');
+      place(new win.File(chunks, `recording.${ext}`, { type: mime }));
+    };
+    // The recording is kept unless Cancel, a reset or leaving the page discards it.
+    rec.discard = false;
+    let left = spec.recordSeconds;
+    say(`Recording… ${left}s left.`);
+    tick = win.setInterval(() => {
+      left -= 1;
+      if (left > 0) say(`Recording… ${left}s left.`);
+    }, 1000);
+    // Auto-stop: the declared duration is a hard limit on the recording.
+    stopTimer = win.setTimeout(() => {
+      if (recorder === rec && rec.state !== 'inactive') rec.stop();
+    }, spec.recordSeconds * 1000);
+    rec.start(1000);
+  }
+
+  function markup(file) {
+    editor.textContent = '';
+    editor.hidden = false;
+    const keep = () => {
+      editor.hidden = true;
+      say('The photo could not be opened for markup; it is kept unmarked.');
+    };
+    const reader = new win.FileReader();
+    reader.onerror = keep;
+    reader.onload = () => {
+      const img = new win.Image();
+      img.onerror = keep;
+      img.onload = () => {
+        const scale = Math.min(1, MEDIA_IMAGE_MAX_SIDE / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        const canvas = doc.createElement('canvas');
+        canvas.className = 'media-canvas';
+        canvas.style.maxWidth = '100%';
+        canvas.style.touchAction = 'none';
+        canvas.width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+        canvas.height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          keep();
+          return;
+        }
+        const paint = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        paint();
+        ctx.lineWidth = Math.max(2, Math.round(canvas.width / 200));
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = MEDIA_PEN_COLORS[0];
+        const tools = doc.createElement('div');
+        tools.className = 'media-tools-row';
+        for (const color of MEDIA_PEN_COLORS) {
+          const swatch = doc.createElement('button');
+          swatch.type = 'button';
+          swatch.className = 'media-pen';
+          swatch.setAttribute('aria-label', `Pen ${color}`);
+          swatch.style.background = color;
+          swatch.addEventListener('click', () => {
+            ctx.strokeStyle = color;
+          });
+          tools.append(swatch);
+        }
+        const clear = doc.createElement('button');
+        clear.type = 'button';
+        clear.className = 'media-clear';
+        clear.textContent = 'Clear markup';
+        clear.addEventListener('click', paint);
+        const done = doc.createElement('button');
+        done.type = 'button';
+        done.className = 'media-done';
+        done.textContent = 'Use marked-up photo';
+        const cancel = doc.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'media-cancel';
+        cancel.textContent = 'Keep original';
+        tools.append(clear, done, cancel);
+        let pen = null;
+        const at = (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const w = rect.width || canvas.width;
+          const h = rect.height || canvas.height;
+          return [((event.clientX - rect.left) / w) * canvas.width, ((event.clientY - rect.top) / h) * canvas.height];
+        };
+        canvas.addEventListener('pointerdown', (event) => {
+          pen = at(event);
+          try {
+            canvas.setPointerCapture(event.pointerId);
+          } catch {
+            // not every engine supports capture
+          }
+          ctx.beginPath();
+          ctx.moveTo(pen[0], pen[1]);
+          ctx.lineTo(pen[0] + 0.01, pen[1]);
+          ctx.stroke();
+        });
+        canvas.addEventListener('pointermove', (event) => {
+          if (!pen) return;
+          const next = at(event);
+          ctx.beginPath();
+          ctx.moveTo(pen[0], pen[1]);
+          ctx.lineTo(next[0], next[1]);
+          ctx.stroke();
+          pen = next;
+        });
+        const lift = () => {
+          pen = null;
+        };
+        canvas.addEventListener('pointerup', lift);
+        canvas.addEventListener('pointercancel', lift);
+        const finish = () => {
+          editor.hidden = true;
+          editor.textContent = '';
+        };
+        cancel.addEventListener('click', finish);
+        done.addEventListener('click', () => {
+          const type = 'image/png';
+          canvas.toBlob((blob) => {
+            finish();
+            if (!blob) {
+              say('The marked-up photo could not be saved; the original is kept.');
+              return;
+            }
+            const base = String(file.name || 'photo').replace(/\.[^.]*$/, '') || 'photo';
+            place(new win.File([blob], `${base}-marked.png`, { type }));
+          }, type);
+        });
+        editor.append(canvas, tools);
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  open.addEventListener('click', () => {
+    if (kind === 'image') openStream();
+    else record();
+  });
+  act.addEventListener('click', () => {
+    if (kind === 'image') capture();
+    else if (recorder && recorder.state !== 'inactive') recorder.stop();
+  });
+  close.addEventListener('click', () => {
+    release();
+    say('');
+  });
+  if (spec.annotate) {
+    for (const input of fileInputs) {
+      input.addEventListener('change', () => {
+        if (mediaPicked.has(input)) {
+          mediaPicked.delete(input);
+          return;
+        }
+        const file = input.files && input.files[0];
+        if (file && /^image\//.test(file.type) && !refusedImageType(file.type)) markup(file);
+      });
+    }
+  }
+  box.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && stream) {
+      release();
+      say('');
+    }
+  });
+  win.addEventListener('pagehide', release);
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.visibilityState === 'hidden') release();
+  });
+  const form = target.form;
+  if (form) form.addEventListener('reset', release);
+  if (spec.onload && kind === 'image') openStream();
+  return { release };
+}
+
+/** Give every `[data-media-kind]` file field its capture, recording and markup tools, once each. */
+export function attachMediaTools(formEl) {
+  if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
+  for (const block of formEl.querySelectorAll('[data-media-kind]')) {
+    if (block.getAttribute('data-media-bound') === 'true') continue;
+    block.setAttribute('data-media-bound', 'true');
+    const kind = block.getAttribute('data-media-kind');
+    if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
+    const seconds = Number(block.getAttribute('data-media-seconds'));
+    const recordSeconds = Number.isInteger(seconds) && seconds >= 1 && seconds <= 3600 ? seconds : 0;
+    if (kind !== 'image' && !recordSeconds) continue;
+    startMediaTools(block, {
+      kind,
+      camera: block.getAttribute('data-media-camera') === 'secondary' ? 'secondary' : 'primary',
+      recordSeconds,
+      annotate: kind === 'image' && block.getAttribute('data-media-annotate') === 'true',
+      onload: block.getAttribute('data-media-onload') === 'true',
+    });
+  }
+}
+
 /** Give every `[data-scan-camera]` field its scanner controls, once each. */
 export function attachScanners(formEl) {
   if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
@@ -7371,6 +8060,126 @@ export function attachScanners(formEl) {
     if (input.getAttribute('data-scan-bound') === 'true') continue;
     input.setAttribute('data-scan-bound', 'true');
     startScanner(input);
+  }
+}
+
+const GOOGLE_API_SCRIPT = 'https://apis.google.com/js/api.js';
+const GOOGLE_IDENTITY_SCRIPT = 'https://accounts.google.com/gsi/client';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GOOGLE_NATIVE_PREFIX = 'application/vnd.google-apps.';
+const GOOGLE_FILE_ID = /^[A-Za-z0-9_-]{10,200}$/;
+
+/** The deployer's picker settings from the runtime config, or null when none are configured (the default). */
+function googlePickerConfig(view) {
+  const config = view && view.C2C_DOC_PICKER;
+  const google = config && config.google;
+  if (!google || typeof google.apiKey !== 'string' || typeof google.clientId !== 'string' || !google.apiKey || !google.clientId) return null;
+  return { apiKey: google.apiKey, clientId: google.clientId };
+}
+
+/** Load one of the two fixed Google scripts. The URLs are constants here; no configured or user value reaches `src`. */
+function loadGoogleScript(view, src) {
+  return new Promise((resolve, reject) => {
+    const doc = view.document;
+    const script = doc.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('script'));
+    doc.head.appendChild(script);
+  });
+}
+
+/**
+ * The opt-in Google Drive picker for a `browse = google_docs` file field. Asks for
+ * the `drive.file` scope only (the one chosen file), refuses Google-native
+ * documents, ids that are not plain Drive ids and anything over
+ * UPLOAD_SOURCE_MAX_BYTES, then downloads the bytes in the page so they take
+ * the same signed upload as a picked file. Resolves to a File, null when the
+ * user cancels, or { error } with a message the form can show.
+ */
+export async function pickGoogleDoc(field, view) {
+  const config = googlePickerConfig(view);
+  if (!config) return { error: 'The Google Drive picker is not configured; choose a file from this device.' };
+  try {
+    if (!view.gapi) await loadGoogleScript(view, GOOGLE_API_SCRIPT);
+    if (!(view.google && view.google.accounts && view.google.accounts.oauth2)) await loadGoogleScript(view, GOOGLE_IDENTITY_SCRIPT);
+    await new Promise((resolve) => view.gapi.load('picker', () => resolve()));
+    const token = await new Promise((resolve, reject) => {
+      const client = view.google.accounts.oauth2.initTokenClient({
+        client_id: config.clientId,
+        scope: GOOGLE_DRIVE_SCOPE,
+        callback: (response) => (response && response.access_token ? resolve(response.access_token) : reject(new Error('auth'))),
+        error_callback: () => reject(new Error('auth')),
+      });
+      client.requestAccessToken();
+    });
+    const picker = view.google.picker;
+    const chosen = await new Promise((resolve) => {
+      new picker.PickerBuilder()
+        .setDeveloperKey(config.apiKey)
+        .setAppId(config.clientId.split('-')[0])
+        .setOAuthToken(token)
+        .addView(new picker.DocsView())
+        .setCallback((response) => {
+          const action = response[picker.Response.ACTION];
+          if (action === picker.Action.PICKED) resolve((response[picker.Response.DOCUMENTS] || [])[0] || null);
+          else if (action === picker.Action.CANCEL) resolve(null);
+        })
+        .build()
+        .setVisible(true);
+    });
+    if (!chosen) return null;
+    const id = String(chosen[picker.Document.ID] || '');
+    const mime = String(chosen[picker.Document.MIME_TYPE] || '');
+    const size = Number(chosen[picker.Document.SIZE_BYTES]);
+    if (!GOOGLE_FILE_ID.test(id)) return { error: 'That Google Drive item could not be used.' };
+    if (mime.toLowerCase().startsWith(GOOGLE_NATIVE_PREFIX)) return { error: 'Google-native documents (Docs, Sheets, Slides) cannot be attached; download or export one first.' };
+    if (Number.isFinite(size) && size > UPLOAD_SOURCE_MAX_BYTES) return { error: `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.` };
+    const accept = field && field.accept;
+    if (accept && !uploadSourceTypeOk(mime, accept)) return { error: 'That file type is not accepted by this field.' };
+    const res = await view.fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res || !res.ok) return { error: 'Google Drive did not return the file.' };
+    const blob = await uploadSourceBlob(res, view);
+    const name = String(chosen[picker.Document.NAME] || 'file').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 255) || 'file';
+    return new view.File([blob], name, { type: mime });
+  } catch (cause) {
+    if (cause instanceof Error && /larger than/.test(cause.message)) return { error: `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.` };
+    return { error: 'Could not read the file from Google Drive.' };
+  }
+}
+
+/** Wire every Google Drive control in the form: the chosen File lands in the field's own file input, exactly as a picked file would. */
+export function attachDocPickers(formEl) {
+  if (!formEl || typeof formEl.querySelectorAll !== 'function') return;
+  for (const button of formEl.querySelectorAll('[data-doc-picker="google"]')) {
+    if (button.getAttribute('data-doc-picker-bound') === 'true') continue;
+    button.setAttribute('data-doc-picker-bound', 'true');
+    button.addEventListener('click', async () => {
+      const view = viewOf(button);
+      const input = view.document.getElementById(button.getAttribute('data-pick-for') || '');
+      const fieldName = button.getAttribute('data-pick-field') || '';
+      const errorEl = Array.from(formEl.querySelectorAll('[data-error-for]')).find((el) => el.getAttribute('data-error-for') === fieldName) || null;
+      const result = await pickGoogleDoc({ widget: 'file', accept: button.getAttribute('data-pick-accept') || '' }, view);
+      if (!result || !input) return;
+      if (typeof result.error === 'string') {
+        if (errorEl) errorEl.textContent = result.error;
+        return;
+      }
+      if (errorEl) errorEl.textContent = '';
+      try {
+        const data = new view.DataTransfer();
+        data.items.add(result);
+        input.files = data.files;
+      } catch {
+        if (errorEl) errorEl.textContent = 'This browser cannot attach a file from Google Drive; choose a file from this device.';
+        return;
+      }
+      const nameEl = input.closest ? input.closest('.filepick') : null;
+      const label = nameEl && nameEl.querySelector ? nameEl.querySelector('.filepick-name') : null;
+      if (label) label.textContent = result.name;
+      input.dispatchEvent(new view.Event('change', { bubbles: true }));
+    });
   }
 }
 
@@ -7425,6 +8234,40 @@ export function attachCapturePreviews(formEl) {
 }
 
 /** Values the submit POST sends. Read-only fields are left out. File widgets are references, or omitted when empty. */
+/**
+ * The browser position for the Added_Location / Modified_Location stamps,
+ * asked for once per submit (the browser shows its own permission prompt).
+ * Denied, unavailable, timed out or not finite resolves undefined: the
+ * stamped columns then stay null and the submit goes ahead.
+ */
+function capturePosition(viewRef) {
+  return new Promise((resolve) => {
+    const nav = viewRef && viewRef.navigator ? viewRef.navigator : typeof navigator === 'undefined' ? undefined : navigator;
+    const geolocation = nav && nav.geolocation;
+    if (!geolocation || typeof geolocation.getCurrentPosition !== 'function') {
+      resolve(undefined);
+      return;
+    }
+    const timer = setTimeout(() => resolve(undefined), 12000);
+    const done = (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      geolocation.getCurrentPosition(
+        (position) => {
+          const coords = position && position.coords;
+          done(coords && Number.isFinite(coords.latitude) && Number.isFinite(coords.longitude) ? { latitude: coords.latitude, longitude: coords.longitude } : undefined);
+        },
+        () => done(undefined),
+        { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 },
+      );
+    } catch {
+      done(undefined);
+    }
+  });
+}
+
 export async function submitRecord(formEl, form, upload) {
   const raw = readValues(formEl);
   const record = {};
@@ -7528,7 +8371,7 @@ function readValues(formEl) {
 
   // Identify which names are data-choice groups
   const dataChoiceNames = new Set();
-  const dataChoiceBoxes = {};
+  const dataChoiceBoxes = Object.create(null);
   for (const box of formEl.querySelectorAll('input[type="checkbox"][data-choice]')) {
     if (!box.name) continue;
     dataChoiceNames.add(box.name);
@@ -8556,6 +9399,10 @@ export function boot(appModel, doc) {
     if (!sheet) return;
     sheet.hidden = !open;
     if (moreTab) moreTab.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      const first = sheet.querySelector('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (first && first.focus) first.focus();
+    }
   };
   if (moreTab && sheet) {
     moreTab.addEventListener('click', () => {
@@ -8570,6 +9417,13 @@ export function boot(appModel, doc) {
       if (event.key === 'Escape' && !sheet.hidden) {
         setMore(false);
         moreTab.focus();
+      } else if (event.key === 'Tab' && !sheet.hidden) {
+        const focusable = Array.from(sheet.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && documentRef.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && documentRef.activeElement === last) { event.preventDefault(); first.focus(); }
       }
     });
   }
@@ -8728,7 +9582,7 @@ export function boot(appModel, doc) {
     if (popup.target === 'report') {
       const report = (appModel.reports || []).find((item) => item.name === name);
       if (!report) return;
-      wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true">${close}${renderReport(report)}</div>`;
+      wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(report.label || report.name)}">${close}${renderReport(report)}</div>`;
       docRef.body.appendChild(wrap);
       if (report.view === 'chart') {
         const section = wrap.querySelector('section[data-report]');
@@ -8746,7 +9600,37 @@ export function boot(appModel, doc) {
       if (formEl) wireForm(appModel, form, formEl, viewRef);
     }
     const closeButton = wrap.querySelector('[data-modal-close]');
-    if (closeButton) closeButton.addEventListener('click', () => wrap.remove());
+    const opener = docRef.activeElement;
+    const dialog = wrap.querySelector('.modal-card');
+    // The key handler lives exactly as long as the popup: every way the popup can go (the close
+    // button, Escape, closeDialog, a route sweep, any other removal) detaches it, so it never leaks
+    // and never steals focus from a later screen.
+    let removalWatch = null;
+    const detach = () => {
+      docRef.removeEventListener('keydown', onKey, true);
+      if (removalWatch) { removalWatch.disconnect(); removalWatch = null; }
+    };
+    const closePopup = () => { wrap.remove(); detach(); if (opener && opener.isConnected && opener.focus) opener.focus(); };
+    if (closeButton) closeButton.addEventListener('click', closePopup);
+    const onKey = (event) => {
+      if (!wrap.isConnected) { detach(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); closePopup(); }
+      else if (event.key === 'Tab' && dialog) {
+        const focusable = Array.from(dialog.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'));
+        if (!focusable.length) return;
+        const first = focusable[0]; const last = focusable[focusable.length - 1];
+        if (event.shiftKey && docRef.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && docRef.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    docRef.addEventListener('keydown', onKey, true);
+    const Watcher = docRef.defaultView && docRef.defaultView.MutationObserver;
+    if (Watcher) {
+      removalWatch = new Watcher(() => { if (!wrap.isConnected) detach(); });
+      removalWatch.observe(docRef.body, { childList: true });
+    }
+    const first = dialog && dialog.querySelector('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (first && first.focus) first.focus();
   };
   setPopupOpener((popup, root, viewRef) => {
     // A popup target that lives only in a hidden nav section asks the server first, like its route does.
@@ -8772,6 +9656,47 @@ export function boot(appModel, doc) {
       })
       .catch(() => {});
   });
+  // After a route change, retitle the document to the open screen and move focus
+  // to its heading so a keyboard or screen-reader user lands on the new screen.
+  let watchHeading = null;
+  let lastRouteIdentity = null;
+  const announceRoute = (routeIdentity) => {
+    const movedToNewRoute = lastRouteIdentity !== null && lastRouteIdentity !== routeIdentity;
+    lastRouteIdentity = routeIdentity;
+    if (watchHeading) watchHeading.disconnect();
+    const heading = main.querySelector('h1, h2');
+    const current = nav && nav.querySelector ? nav.querySelector('a[aria-current="page"]') : null;
+    const label = ((current && current.textContent) || (heading && heading.textContent) || '').replace(/\s+/g, ' ').trim();
+    const app = appModel.name || '';
+    documentRef.title = label && app ? `${label} - ${app}` : label || app || documentRef.title;
+    const announcer = documentRef.querySelector('[data-route-announcer]');
+    if (announcer && movedToNewRoute) announcer.textContent = label;
+    if (!heading || typeof heading.focus !== 'function' || !movedToNewRoute) return;
+    if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+    heading.focus({ preventScroll: true });
+    // A screen that redraws itself once its data lands replaces the heading;
+    // put focus on the new one unless the user has already moved on.
+    const Observer = documentRef.defaultView && documentRef.defaultView.MutationObserver;
+    if (!Observer) return;
+    if (watchHeading) watchHeading.disconnect();
+    let watch = null;
+    const done = () => {
+      if (watch) watch.disconnect();
+      if (watchHeading === watch) watchHeading = null;
+    };
+    watch = new Observer(() => {
+      if (heading.isConnected) return;
+      const active = documentRef.activeElement;
+      if (active && active !== documentRef.body) return done();
+      const next = main.querySelector('h1, h2');
+      if (!next) return;
+      if (!next.hasAttribute('tabindex')) next.setAttribute('tabindex', '-1');
+      next.focus({ preventScroll: true });
+      done();
+    });
+    watchHeading = watch;
+    watch.observe(main, { childList: true, subtree: true });
+  };
   const paintAllowed = (route) => {
     if (!main) return;
     // A same-hash repaint must not restart the run: the shell is already up.
@@ -8780,6 +9705,9 @@ export function boot(appModel, doc) {
     for (const modal of documentRef.querySelectorAll('[data-modal-form]')) modal.remove();
     main.innerHTML = renderRoute(appModel, route, documentRef);
     markCurrent();
+    // An unknown screen announces itself: focus lands on its heading.
+    const lost = main.querySelector('[data-state="not-found"] h1');
+    if (lost && typeof lost.focus === 'function') lost.focus();
     if (route.name === 'form') {
       const form = (appModel.forms || []).find((item) => item.name === route.id);
       const formEl = main.querySelector('form');
@@ -8804,7 +9732,7 @@ export function boot(appModel, doc) {
         const section = tbody.closest ? tbody.closest('section[data-report]') : null;
         const loadLive = (page) => {
           const live = reportRowsSlot(section);
-          loadRows(report, live || tbody, view, page);
+          loadRows(report, live || tbody, view, page, section);
         };
         const search = section && section.querySelector('[data-report-search]');
         if (search) {
@@ -8814,6 +9742,17 @@ export function boot(appModel, doc) {
           });
         }
         const filter = section && section.querySelector('select[data-filter]');
+        if (section) {
+          section.addEventListener('click', (event) => {
+            const clear = event.target && event.target.closest ? event.target.closest('[data-clear-search]') : null;
+            if (!clear) return;
+            const box = section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+            if (box) box.value = '';
+            const pick = section.querySelector('select[data-filter]');
+            if (pick) pick.value = '';
+            loadLive(0);
+          });
+        }
         if (filter) filter.addEventListener('change', () => loadLive(0));
       }
     }
@@ -8822,6 +9761,7 @@ export function boot(appModel, doc) {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
     if (report && report.form) loadRecordSummary(appModel, { ...route, id: report.form, report: report.name }, main, view);
   }
+  announceRoute(`${route.name}|${route.id || ""}|${route.row || ""}|${route.edit || ""}`);
   };
   const paint = () => {
     if (!main) return Promise.resolve();
@@ -8989,13 +9929,12 @@ export function boot(appModel, doc) {
         event.preventDefault();
         if (customAction.disabled) return;
         const message = customAction.getAttribute('data-confirm-message');
-        if (message) {
-          const ok = typeof view.confirm === 'function' ? view.confirm(message) : true;
-          if (!ok) return;
-        }
         const endpoint = customAction.getAttribute('data-action');
         const call = view.fetch || globalThis.fetch;
-        if (endpoint && typeof call === 'function') {
+        const run = () => {
+          if (!(endpoint && typeof call === 'function')) return;
+          customAction.disabled = true;
+          customAction.setAttribute('aria-busy', 'true');
           apiCall(call, view, endpoint, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -9012,8 +9951,17 @@ export function boot(appModel, doc) {
               const msg = body && typeof body.error === 'string' && body.error.trim() ? body.error : 'The action did not run.';
               showToast(documentRef, 'failure', msg);
             })
-            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'));
-        }
+            .catch(() => showToast(documentRef, 'failure', 'The action did not run.'))
+            .finally(() => {
+              customAction.disabled = false;
+              customAction.removeAttribute('aria-busy');
+            });
+        };
+        if (message) {
+          askConfirm(documentRef, message, { confirmLabel: customAction.getAttribute('data-confirm-label'), cancelLabel: customAction.getAttribute('data-cancel-label') }, customAction).then((ok) => {
+            if (ok) run();
+          });
+        } else run();
         return;
       }
       const action = target.closest('[data-retry], [data-prev], [data-next]');
@@ -9048,8 +9996,11 @@ export function boot(appModel, doc) {
           const form = (appModel.forms || []).find((item) => item.name === report.form);
           const call = view.fetch || globalThis.fetch;
           // Creator asks before deleting; Cancel (or no dialog at all) sends nothing.
-          const confirmed = typeof view.confirm === 'function' && view.confirm(DELETE_CONFIRM_TEXT) === true;
-          if (form && form.deleteEndpoint && typeof call === 'function' && confirmed) {
+          if (!(form && form.deleteEndpoint && typeof call === 'function') || rowOp.disabled) return;
+          askConfirm(documentRef, DELETE_CONFIRM_TEXT, null, rowOp).then((confirmed) => {
+            if (!confirmed || rowOp.disabled) return;
+            rowOp.disabled = true;
+            rowOp.setAttribute('aria-busy', 'true');
             apiCall(call, view, form.deleteEndpoint, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -9069,8 +10020,12 @@ export function boot(appModel, doc) {
               })
               .catch(() => {
                 showToast(documentRef, 'failure', 'The record was not deleted.');
+              })
+              .finally(() => {
+                rowOp.disabled = false;
+                rowOp.removeAttribute('aria-busy');
               });
-          }
+          });
           return;
         }
       }
@@ -9127,6 +10082,10 @@ export function boot(appModel, doc) {
   const flag = () => {
     if (offline) offline.hidden = navg ? navg.onLine : true;
   };
+  // Coming back online re-reads each report that failed while offline, once.
+  view.addEventListener('online', () => {
+    for (const retry of documentRef.querySelectorAll('section[data-report] [data-state="error"] [data-retry]')) retry.click();
+  });
   view.addEventListener('online', flag);
   view.addEventListener('offline', flag);
   flag();
@@ -9164,10 +10123,11 @@ export function boot(appModel, doc) {
     }
   }
 
-  function loadRows(report, tbody, viewRef, page) {
+  function loadRows(report, tbody, viewRef, page, sectionHint) {
     const call = (viewRef && viewRef.fetch) || globalThis.fetch;
     if (!report.queryEndpoint || typeof call !== 'function') return Promise.resolve();
-    const section = tbody.closest ? tbody.closest('section[data-report]') : null;
+    // An empty answer removes the grid's tbody; the section still owns the repaint.
+    const section = (tbody.closest ? tbody.closest('section[data-report]') : null) || sectionHint || null;
     const current = typeof page === 'number' && page >= 0 ? page : 0;
     if (section && section.dataset) section.dataset.page = String(current);
     const stateEl = section && section.querySelector('[data-state]');
@@ -9178,6 +10138,12 @@ export function boot(appModel, doc) {
     const paintEmpty = () => {
       if (stateEl) stateEl.innerHTML = reportStateHtml('empty', emptyOpts);
     };
+    const narrowed = (() => {
+      const box = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
+      const pick = section && section.querySelector('select[data-filter]');
+      return !!((box && box.value) || (pick && pick.value));
+    })();
+    const rowsEmptyOpts = narrowed ? { filtered: true } : emptyOpts;
     if (stateEl) stateEl.innerHTML = reportStateHtml('loading');
     const qInput = section && section.querySelector('[data-report-search] input[name="q"], [data-report-search] input[type="search"]');
     const filterEl = section && section.querySelector('select[data-filter]');
@@ -9214,12 +10180,20 @@ export function boot(appModel, doc) {
             paintEmpty();
             return null;
           }
+          if (res && (res.status === 401 || res.status === 403)) return { refused: res.status };
           throw new Error(`report query ${res ? res.status : 'no response'}`);
         }
         return responseJson(res);
       })
       .then((body) => {
         if (body == null) return;
+        if (body.refused) {
+          // A refusal is its own screen, never the generic error with a Retry that cannot help.
+          setReportChrome(section, false);
+          const href = viewRef && viewRef.location ? `/__catalyst/auth/login?service_url=${encodeURIComponent(viewRef.location.href)}` : '';
+          if (stateEl) stateEl.innerHTML = body.refused === 401 ? reportStateHtml('session-expired', { loginHref: href }) : reportStateHtml('denied');
+          return;
+        }
         const rows = Array.isArray(body && body.rows) ? body.rows : [];
         const doc = tbody.ownerDocument;
         if (tbody.hasAttribute('data-board')) fillBoard(report, tbody, rows);
@@ -9237,7 +10211,7 @@ export function boot(appModel, doc) {
         if (bulkButton) bulkButton.disabled = selectedCount === 0;
         setReportChrome(section, rows.length > 0);
         if (stateEl) {
-          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', emptyOpts);
+          stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', rowsEmptyOpts);
         }
         updatePages(section, current, rows, pageSize);
         const text = body && typeof body.notice === 'string' ? body.notice : '';
@@ -9404,7 +10378,9 @@ export function boot(appModel, doc) {
     fillLookups(form, formEl, viewRef).catch(() => {});
     attachLookupAddNew(model, formEl, viewRef);
     attachCapturePreviews(formEl);
+    attachDocPickers(formEl);
     attachScanners(formEl);
+    attachMediaTools(formEl);
     const mode = open && open.mode === 'edit' ? 'edit' : 'add';
     const rowId = mode === 'edit' && open && open.rowId ? String(open.rowId) : '';
     // Creator's edit screen submits with an Update button.
@@ -9540,10 +10516,11 @@ export function boot(appModel, doc) {
         if (banner) banner.textContent = 'Upload failed. The form was not submitted.';
         return;
       }
+      const geo = form.capturesLocation ? await capturePosition(viewRef) : undefined;
       const res = await apiCall(call, viewRef, endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ record, ...(rowId ? { ROWID: rowId } : {}), idempotencyKey: submitKey }, jsonReplacer),
+        body: JSON.stringify({ record, ...(geo ? { geo } : {}), ...(rowId ? { ROWID: rowId } : {}), idempotencyKey: submitKey }, jsonReplacer),
       }).catch(() => null);
       const banner = formEl.querySelector('[data-banner]');
       const formDoc = formEl.ownerDocument || (typeof document !== 'undefined' ? document : null);
@@ -9563,6 +10540,12 @@ export function boot(appModel, doc) {
           failure = submitFailureText(body);
         }
         if (banner) banner.textContent = failure;
+        // A 400 that names a field lands on that field and takes focus.
+        const named = res && answer && typeof answer.field === 'string' ? (form.fields || []).find((item) => item.name === answer.field) : null;
+        if (named) {
+          const control = showErrors(formEl, form, { [named.name]: failure });
+          if (control && typeof control.focus === 'function') control.focus();
+        }
         if (formDoc) showToast(formDoc, 'failure', submitNotice({ ok: false, dryRun: !live, message: failure }));
         return;
       }

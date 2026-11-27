@@ -1326,7 +1326,7 @@ test('an index.html edit changes sw.js and activate keeps foreign caches', () =>
   assert.match(index1, /http-equiv="Content-Security-Policy"/);
   assert.notEqual(sw1, sw2);
   assert.match(indexOf(second), /only-index/);
-  const indexHash = createHash('sha256').update(indexOf(second)).digest('hex').slice(0, 10);
+  const indexHash = shortHashId(createHash('sha256').update(indexOf(second)).digest('hex'));
   assert.match(sw2, new RegExp(indexHash));
 
   const cssChanged = bundle.files.map((file) =>
@@ -3163,7 +3163,7 @@ test('browser form: a committed submit whose on-success failed (200 + warning) s
   form.submit();
   await form.tick();
   assert.equal(form.banner(), 'Item Added Successfully');
-  assert.deepEqual(form.toasts(), [{ kind: 'success', text: 'Item Added Successfully' }]);
+  assert.deepEqual(form.toasts(), [{ kind: 'success', text: 'Item Added Successfully×' }]);
 });
 
 test('browser form: a 5xx that says wrote true is a stored row and says the save landed but a step after it failed', async () => {

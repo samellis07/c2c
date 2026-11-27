@@ -176,6 +176,23 @@ test('e2e: a green stamp carries provenance (status, at, scope, c2c)', () => {
   assert.equal(scope?.project, PROJECT);
 });
 
+test('e2e: a hand-edited doctor.json scope never reaches a report stamp raw', () => {
+  const dir = tmp();
+  const hostile = [27, 13, 0x202e, 0x2060, 0xe0041].map((cp) => String.fromCodePoint(cp)).join('');
+  writeDoctor(dir, { scope: { dc: `d${hostile}`, org: `o${hostile}`, project: `p${hostile}` }, at: `t${hostile}`, c2c: `v${hostile}` });
+  const ds = join(dir, 'app.ds');
+  writeFileSync(ds, readFileSync(minimalDs));
+  for (const cmd of ['precheck', 'analyze', 'schema']) {
+    const run = runC2c([cmd, ds, '--json'], dir);
+    assert.equal(run.code, 0, run.stderr);
+    for (const cp of [27, 13, 0x202e, 0x2060, 0xe0041]) {
+      assert.ok(!run.stdout.includes(String.fromCodePoint(cp)), `${cmd}: U+${cp.toString(16)} reached stdout raw`);
+    }
+    const doctor = (JSON.parse(run.stdout) as { doctor?: { status?: string; scope?: Record<string, string> } }).doctor;
+    for (const value of Object.values(doctor?.scope ?? {})) assert.match(value, /^[dop]\?{5}$/, `${cmd}: scope value`);
+  }
+});
+
 test('e2e: c2c doctor exists, is read-only, and persists c2c-out/.c2c/doctor.json', () => {
   const dir = tmp();
   const run = runC2c(['doctor'], dir);

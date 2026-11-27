@@ -20,6 +20,8 @@ export interface FieldStoreShape {
   links: SubformTable[];
   /** Top-level Stratus-key columns of the form table. */
   files: string[];
+  /** Links of the form's `must have` grids: an insert must carry at least one row. */
+  requiredGrids?: string[];
 }
 
 const cache = new WeakMap<App, SchemaPlan>();
@@ -95,7 +97,10 @@ export function fileFieldsByForm(app: App): Record<string, string[]> {
 }
 
 export function fieldStoreShape(app: App, form: string): FieldStoreShape {
-  return { links: subformLinksFor(app, form), files: fileFieldsFor(app, form) };
+  const links = subformLinksFor(app, form);
+  const fields = app.forms.find((item) => item.name === form)?.fields ?? [];
+  const requiredGrids = fields.filter((field) => field.required && links.some((link) => link.field === field.name)).map((field) => field.name);
+  return { links, files: fileFieldsFor(app, form), ...(requiredGrids.length ? { requiredGrids } : {}) };
 }
 
 /** Names to add to the `creator-to-catalyst/shims` import. */
@@ -103,6 +108,7 @@ export function fieldStoreImports(shape: FieldStoreShape): string[] {
   const linked = shape.links.some((link) => link.linkedForm);
   return [
     ...(shape.links.length ? ['saveSubforms', 'splitSubforms'] : []),
+    ...(shape.requiredGrids?.length ? ['assertSubformsPresent'] : []),
     ...(linked ? ['authorizeDelete', 'authorizeSubformWrites'] : []),
     ...(shape.files.length ? ['storeFileKeys'] : []),
   ];
@@ -137,6 +143,7 @@ export function writeLiveSource(form: string, shape: FieldStoreShape): string {
     ...(links.length
       ? [`/** Inline subforms of this form, each a child table (FK to the parent ROWID, 0-based row order). */\nexport const subformTables = ${JSON.stringify({ [form]: links })};`]
       : []),
+    ...(shape.requiredGrids?.length ? [`/** Creator \`must have\` grids: an insert without a row is refused. */\nconst requiredGrids = ${JSON.stringify(shape.requiredGrids)};`] : []),
     ...(files.length ? [`/** File, image, audio, video, and signature fields: the column stores the Stratus object key. */\nexport const fileFields = ${JSON.stringify(files)};`] : []),
   ].join('\n');
   const keys = files.length ? '\n  storeFileKeys(targetForm, ctx.record, fileFields);' : '';
@@ -181,6 +188,7 @@ function linkedSubformGate(ctx) {
     : '';
   const gateUpdate = linked ? `
     await authorizeSubformWrites(datastore, rowId, split.children, { replace: true, authorize: linkedSubformGate(ctx) });` : '';
+  const requiredGate = shape.requiredGrids?.length ? `\n  assertSubformsPresent(targetForm, ctx.record, requiredGrids);` : '';
   const gateInsert = linked ? `
   await authorizeSubformWrites(datastore, "", split.children, { authorize: linkedSubformGate(ctx) });` : '';
   return `${consts}
@@ -198,7 +206,7 @@ async function writeLive(runtime, ctx, targetForm, datastore) {
     return { wrote: true, op: "update" };
   }
   if (!Object.prototype.hasOwnProperty.call(ctx.record, "Added_User")) shim.record.stamp(ctx, "insert");
-  const split = splitSubforms(ctx.record, subformTables, targetForm);${gateInsert}
+  const split = splitSubforms(ctx.record, subformTables, targetForm);${requiredGate}${gateInsert}
   const result = await shim.datastore.insert(ctx, targetForm, split.parent);
   mergeInserted(ctx.record, result);
   if (split.children.length) {

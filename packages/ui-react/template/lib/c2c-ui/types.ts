@@ -30,6 +30,14 @@ export interface ScannerSpec {
   onload: boolean;
 }
 
+/** Live capture, recording cap, markup and open-on-load for an image, video or audio field (see form/media.ts). */
+export interface MediaSpec {
+  camera: 'primary' | 'secondary';
+  recordSeconds?: number;
+  annotate?: boolean;
+  onload?: boolean;
+}
+
 export interface FieldSpec {
   name: string;
   label: string;
@@ -57,6 +65,10 @@ export interface FieldSpec {
   uploadEndpoint?: string;
   /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
   uploadSources?: string[];
+  /** Image, video or audio field: the capture, recording and markup tools beside the file control. */
+  media?: MediaSpec;
+  /** Remote document stores the `browse` property names (`google_docs`, `zoho_docs`). A Google Drive control shows only when the deployer configured a picker key. */
+  browseSources?: string[];
   /** Scan fields: the camera/gallery scanner beside the text input. */
   scanner?: ScannerSpec;
   /** Scan fields: offer a button that switches between the front and back camera. */
@@ -134,6 +146,8 @@ export interface FormSpec {
   phoneLayout?: DeviceLayout;
   fields: FieldSpec[];
   submitEndpoint: string;
+  /** Ask the browser for its position on submit and post it as `geo` (Added/Modified_Location). */
+  capturesLocation?: boolean;
   editSubmitEndpoint?: string;
   recordEndpoint: string;
   /** Record delete posted by report row affordances. */
@@ -238,7 +252,7 @@ export interface CustomActionSpec {
 export interface ReportSpec {
   name: string;
   label: string;
-  /** list for a table; map plots stored coordinates; kanban, calendar, timeline, pivot, chart, spreadsheet and summary render a counted stub until they are generated. */
+  /** list for a table; map plots stored coordinates; kanban, calendar, pivot, chart, spreadsheet and summary render a counted stub until they are generated. */
   view: string;
   /** Shown above the records when a map/pivot fell back to the list view. */
   note?: string;
@@ -275,12 +289,16 @@ export interface ReportSpec {
   /** Calendar and timeline placement columns. */
   startField?: string;
   endField?: string;
+  /** Timeline `options { week start day }`: lanes are the week starting on this day; without it a lane is a day. */
+  weekStartDay?: 'monday' | 'sunday';
   /** `options { display records per row = N }`: the list draws each record as a card, N cards per row. */
   recordsPerRow?: number;
   /** `options { label width = 20% }`: the record-card label column width. */
   labelWidth?: string;
   /** `options { record count = enable }`: show how many rows the list is displaying. */
   showRecordCount?: boolean;
+  /** `toolbar { show export = false }`: no Export CSV / XLSX buttons. */
+  showExport?: false;
   conditionalFormats: ConditionalFormatSpec[];
   /** Single-row read of the report's form, for the detail view. */
   recordEndpoint?: string;

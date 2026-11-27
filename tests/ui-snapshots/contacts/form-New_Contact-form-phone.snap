@@ -43,7 +43,7 @@ div class="c2c-app"
               "All Contacts"
   main tabindex="-1"
     section class="c2c-card" data-form-card=""
-      h1
+      h1 tabindex="-1"
         "New Contact"
       form data-form="New_Contact" data-layout="one" data-mode="add"
         div class="form-grid"

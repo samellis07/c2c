@@ -20,7 +20,7 @@ App: Library_System_Application
 - 5 reports
 - 1 page
 - 7 functions
-- The generated Catalyst app carries 4 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 10 pages
+- The generated Catalyst app carries 5 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 10 pages
 - Deluge: 5 statements translated, 60 kept working through a compatibility shim, of 65
 
 ## TODO counts
@@ -39,7 +39,7 @@ App: Library_System_Application
 
 ## Field gaps
 
-- auto-number: 4 (Book.Book_ID, Member_Info.Auto_Number, Book_Transaction.Trans, Staff_Members.Staff_ID) — ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.
+- auto-number: 4 (Book.Book_ID, Member_Info.Auto_Number, Book_Transaction.Trans, Staff_Members.Staff_ID) — Claim-table counters allocate the next value on a live insert with the field blank (start index from the .ds). A failed insert can leave a gap; if the claim table is emptied, numbering restarts.
 - checkbox-multi: 1 (Book.Mark_as_Featured) — The .ds token checkboxes is a list, not a boolean. Stored as text holding a JSON list. values = Form.Field is a multi lookup (junction table).
 - currency: 1 (Book_Transaction.Fine_Amount) — Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
 - decimal: 1 (Member_Info.Max_Books_Allowed) — Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.
@@ -64,11 +64,11 @@ App: Library_System_Application
 - `report All_Staff_Members block options` — Report "All_Staff_Members" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
   - Step: In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
 - `page DashBoard.Book_Report` — ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "View all Books" to the generated <button> "Book_Report" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+  - Step: On page "DashBoard", the <button> "Book_Report" opens without its values "View all Books". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 - `page DashBoard.All_Book_Transactions` — ZML <text> "All_Book_Transactions" click parameters "Borrowed Book" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "Borrowed Book" to the generated <text> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+  - Step: On page "DashBoard", the <text> "All_Book_Transactions" opens without its values "Borrowed Book". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 - `page DashBoard.All_Book_Transactions` — ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
-  - Step: On page "DashBoard", wire click parameters "Overdue transactions" to the generated <button> "All_Book_Transactions" click handler. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+  - Step: On page "DashBoard", the <button> "All_Book_Transactions" opens without its values "Overdue transactions". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
 
 ## Hidden from end users
 
@@ -85,15 +85,37 @@ App: Library_System_Application
 
 ## Human steps
 
-- Accept invite: accept the app invite mail
-- Sign in once: sign in to the deployed app once
+- Connect Catalyst: run `c2c doctor` (it checks your login, scope and plugin install and says what to fix), then open the Catalyst console for: console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table); verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+- Accept invite and sign in once: accept the app invite mail, then sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
-- Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
-- console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
+- Review 10 counted items: work through the review checklist in this report, one line per item with its reason and manual step
+
+## Review checklist
+
+1. [ ] `report Book_Report block options` — Report "Book_Report" has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Book_Report: icon = education-books-46. See [Report options](human-steps#manual-kind-report-options).
+2. [ ] `report Book_by_Genre block options` — Report "Book_by_Genre" has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report Book_by_Genre: icon = tech-music. See [Report options](human-steps#manual-kind-report-options).
+3. [ ] `report All_Member_Infos block options` — Report "All_Member_Infos" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report All_Member_Infos: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
+4. [ ] `report All_Book_Transactions block options` — Report "All_Book_Transactions" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report All_Book_Transactions: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
+5. [ ] `report All_Staff_Members block options` — Report "All_Staff_Members" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
+   - Step: In the Catalyst console, apply the `options` setting by hand on report All_Staff_Members: icon = travel-world. See [Report options](human-steps#manual-kind-report-options).
+6. [ ] `page DashBoard.Book_Report` — ZML <search> "Book_Report" criteria "Title.contains(input.searchString)" is not generated; wire the search filter by hand
+   - Step: Finish this by hand in the generated app: ZML <search> "Book_Report" criteria "Title.contains(input.searchString)" is not generated; wire the search filter by hand
+7. [ ] `page DashBoard.Book_Report` — ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
+   - Step: On page "DashBoard", the <button> "Book_Report" opens without its values "View all Books". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+8. [ ] `page DashBoard.All_Book_Transactions` — ZML <text> "All_Book_Transactions" click parameters "Borrowed Book" are not generated; wire them to the click handler by hand
+   - Step: On page "DashBoard", the <text> "All_Book_Transactions" opens without its values "Borrowed Book". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+9. [ ] `page DashBoard.All_Book_Transactions` — ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
+   - Step: On page "DashBoard", the <button> "All_Book_Transactions" opens without its values "Overdue transactions". Ask a developer to pass them when it is clicked, then click it in the generated app and confirm the target shows them. See [Button or text click parameters](human-steps#manual-kind-page-click-parameters).
+10. [ ] `field-property:Staff_Members.Phone_Number property defaultcountry` — property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
+   - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, open Staff_Members.Phone_Number and set its property defaultcountry setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.
 
 ## Not converted
 
 Silent drops: 1 (still counted; each has a guided step below)
 
 - `field-property:Staff_Members.Phone_Number property defaultcountry` — not converted. property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.
+  - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, open Staff_Members.Phone_Number and set its property defaultcountry setting to match the original Creator field, then preview the form or report and confirm the field behaves as expected.

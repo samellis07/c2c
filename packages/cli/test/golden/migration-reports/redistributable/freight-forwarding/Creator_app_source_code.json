@@ -46,7 +46,7 @@
     "pages": 0,
     "functions": 4,
     "catalyst": {
-      "tables": 26,
+      "tables": 27,
       "nosqlCollections": 0,
       "functions": 1,
       "cronJobs": 0,
@@ -173,7 +173,7 @@
     {
       "matrixId": "auto-number",
       "count": 1,
-      "reason": "ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.",
+      "reason": "Claim-table counters allocate the next value on a live insert with the field blank (start index from the .ds). A failed insert can leave a gap; if the claim table is emptied, numbering restarts.",
       "fields": [
         {
           "form": "New_Deal",
@@ -961,27 +961,27 @@
     {
       "location": "field New_SOF.Time property timedisplayoptions",
       "construct": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for Time by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for Time shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.FROM property timedisplayoptions",
       "construct": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for FROM by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for FROM shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.TO property timedisplayoptions",
       "construct": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for TO by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for TO shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.FROM2 property timedisplayoptions",
       "construct": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for FROM2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for FROM2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "field New_SOF.TO2 property timedisplayoptions",
       "construct": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
-      "step": "Add a seconds-precision time control for TO2 by hand (the native time input shows only hours and minutes) — this is not generated. See [Time precision](human-steps#manual-kind-field-time-precision)."
+      "step": "The generated time input for TO2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
     },
     {
       "location": "report Container_Movement_Tracking block report properties",
@@ -1095,13 +1095,174 @@
     }
   ],
   "humanSteps": [
-    "Accept invite: accept the app invite mail",
-    "Sign in once: sign in to the deployed app once",
+    "Connect Catalyst: run `c2c doctor` (it checks your login, scope and plugin install and says what to fix), then open the Catalyst console for: console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table); console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket); console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow); verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)",
+    "Accept invite and sign in once: accept the app invite mail, then sign in to the deployed app once",
     "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
-    "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)",
-    "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)",
-    "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
-    "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
+    "Review 27 counted items: work through the review checklist in this report, one line per item with its reason and manual step"
+  ],
+  "reviewChecklist": [
+    {
+      "kind": "todo",
+      "where": "field New_SOF.Time property timedisplayoptions",
+      "reason": "Field Time sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "step": "The generated time input for Time shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
+    },
+    {
+      "kind": "todo",
+      "where": "field New_SOF.FROM property timedisplayoptions",
+      "reason": "Field FROM sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "step": "The generated time input for FROM shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
+    },
+    {
+      "kind": "todo",
+      "where": "field New_SOF.TO property timedisplayoptions",
+      "reason": "Field TO sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "step": "The generated time input for TO shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
+    },
+    {
+      "kind": "todo",
+      "where": "field New_SOF.FROM2 property timedisplayoptions",
+      "reason": "Field FROM2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "step": "The generated time input for FROM2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
+    },
+    {
+      "kind": "todo",
+      "where": "field New_SOF.TO2 property timedisplayoptions",
+      "reason": "Field TO2 sets `timedisplayoptions = hh:mm:ss`; the generated time input has no seconds step and never shows seconds.",
+      "step": "The generated time input for TO2 shows only hours and minutes. Ask a developer to replace it with a control that accepts seconds, then save a value with seconds and confirm it is kept. See [Time precision](human-steps#manual-kind-field-time-precision)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Container_Movement_Tracking block report properties",
+      "reason": "Report \"Container_Movement_Tracking\" has a `report properties` settings block (records displayed = all_records, allow export = false, allow drilldown and view underlying data = false) that Catalyst generates no equivalent for.",
+      "step": "In the Catalyst console, apply the `report properties` settings by hand on report Container_Movement_Tracking: records displayed = all_records, allow export = false, allow drilldown and view underlying data = false."
+    },
+    {
+      "kind": "todo",
+      "where": "report SOFs block options",
+      "reason": "Report \"SOFs\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report SOFs: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Leads block options",
+      "reason": "Report \"Leads\" has an `options` setting (icon = users-2-a-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Leads: icon = users-2-a-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Converted_Leads block options",
+      "reason": "Report \"Converted_Leads\" has an `options` setting (icon = users-2-home) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Converted_Leads: icon = users-2-home. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Accounts block options",
+      "reason": "Report \"Accounts\" has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Accounts: icon = travel-world. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Contacts block options",
+      "reason": "Report \"Contacts\" has an `options` setting (icon = users-2-wc) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Contacts: icon = users-2-wc. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Deals block options",
+      "reason": "Report \"Deals\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Deals: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Quotations block options",
+      "reason": "Report \"Quotations\" has an `options` setting (icon = text-quote) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Quotations: icon = text-quote. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Delivery_Orders block options",
+      "reason": "Report \"Delivery_Orders\" has an `options` setting (icon = shopping-delivery-time) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Delivery_Orders: icon = shopping-delivery-time. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Invoices block options",
+      "reason": "Report \"Invoices\" has an `options` setting (icon = shopping-receipt-list-42) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Invoices: icon = shopping-receipt-list-42. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Airports block options",
+      "reason": "Report \"Airports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Airports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Ports block options",
+      "reason": "Report \"Ports\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Ports: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report HS_Codes block options",
+      "reason": "Report \"HS_Codes\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report HS_Codes: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Users block options",
+      "reason": "Report \"Users\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Users: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Containers block options",
+      "reason": "Report \"Containers\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Containers: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Vendors block options",
+      "reason": "Report \"Vendors\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Vendors: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Products block options",
+      "reason": "Report \"Products\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Products: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Vessels block options",
+      "reason": "Report \"Vessels\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Vessels: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Tax_Rates block options",
+      "reason": "Report \"Tax_Rates\" has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Tax_Rates: icon = files-folder-add. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Mode_to_SubMode block options",
+      "reason": "Report \"Mode_to_SubMode\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Mode_to_SubMode: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Submode_to_CT_ST_CMT block options",
+      "reason": "Report \"Submode_to_CT_ST_CMT\" has an `options` setting (icon = ui-1-settings-gear-64) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Submode_to_CT_ST_CMT: icon = ui-1-settings-gear-64. See [Report options](human-steps#manual-kind-report-options)."
+    },
+    {
+      "kind": "todo",
+      "where": "report Table_of_Containers block options",
+      "reason": "Report \"Table_of_Containers\" has an `options` setting (icon = business-laptop-71) that Catalyst does not carry into the generated list report.",
+      "step": "In the Catalyst console, apply the `options` setting by hand on report Table_of_Containers: icon = business-laptop-71. See [Report options](human-steps#manual-kind-report-options)."
+    }
   ],
   "silentDrops": 0,
   "residuals": []

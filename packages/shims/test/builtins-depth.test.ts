@@ -180,7 +180,8 @@ test('matches refuses a repeated group that can match in more than one length', 
     const started = Date.now();
     assert.throws(() => matches(`${'a'.repeat(30)}!`, pattern), /backtrack without bound/, pattern);
     const elapsed = Date.now() - started;
-    assert.ok(elapsed < 250, `${pattern} refused in ${elapsed}ms`);
+    // A hang guard, not a speed budget: exponential backtracking on 30 characters runs for minutes.
+    assert.ok(elapsed < 5000, `${pattern} refused in ${elapsed}ms`);
   }
 });
 

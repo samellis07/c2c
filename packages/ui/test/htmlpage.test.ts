@@ -178,6 +178,27 @@ function htmlElements(model: ReturnType<typeof buildUi>['model']) {
   return leaves(model.pages[0].elements).filter((el) => el.kind === 'html');
 }
 
+/**
+ * Linearity, not a wall-clock budget: run the same input at half length and require the full run to
+ * stay under the quadratic ratio (4x), best of three each. A shared CI runner can be several times slower
+ * than a laptop, so a fixed millisecond bound flakes; the 5 s ceiling only catches a hang.
+ */
+function assertLinear(run: (input: string) => void, input: string, label: string): void {
+  const time = (text: string): number => {
+    let best = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const t0 = performance.now();
+      run(text);
+      best = Math.min(best, performance.now() - t0);
+    }
+    return best;
+  };
+  const small = Math.max(time(input.slice(0, Math.floor(input.length / 2))), 1);
+  const full = time(input);
+  assert.ok(full / small < 3.2, `${label}: ${input.length} chars took ${full.toFixed(1)} ms vs ${small.toFixed(1)} ms at half size`);
+  assert.ok(full < 5000, `${label}: ${input.length} chars took ${full.toFixed(1)} ms`);
+}
+
 test('value-slots: input, zoho.currentdate, literals and if compile and render', async () => {
   const { files, model } = generateUi(
     appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
@@ -203,7 +224,7 @@ if (input.show == "yes") {
   try {
     const shown = await invoke(handler, { ...USER, body: { input: { name: 'Ada', show: 'yes' } } });
     assert.equal(shown.status, 200, JSON.stringify(shown.body));
-    assert.match(String(shown.body.html), /<p>Hello Ada, \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}, ada@example\.com, #<\/p>/);
+    assert.match(String(shown.body.html), /<p>Hello Ada, \d{2}-[A-Z][a-z]{2}-\d{4}, ada@example\.com, #<\/p>/);
     assert.match(String(shown.body.html), /<b>shown<\/b>/);
     assert.doesNotMatch(String(shown.body.html), /hidden/);
 
@@ -2022,9 +2043,12 @@ test('the browser runtime flattens the same characters and refuses the same sche
   const client = readFileSync(join(process.cwd(), 'packages/ui/src/client-runtime.js'), 'utf8');
   assert.match(policy, /\[\\u0000-\\u0020\]/);
   assert.match(client, /\[\\u0000-\\u0020\]/);
-  for (const scheme of ['javascript:', 'data:', 'vbscript:']) {
-    assert.equal(policy.includes(`'${scheme}'`), true, scheme);
-    assert.equal(client.includes(`'${scheme}'`), true, scheme);
+  // The runtime's snippet URL rule is the shared sanitizer core, which names the same refused schemes.
+  const core = readFileSync(join(process.cwd(), 'packages/ui/src/sanitizer-core.ts'), 'utf8');
+  for (const scheme of ['javascript', 'data', 'vbscript']) {
+    assert.equal(policy.includes(`'${scheme}:'`), true, scheme);
+    assert.match(core, new RegExp(`\\b${scheme}\\b`), scheme);
+    assert.match(client, new RegExp(`\\b${scheme}\\b`), scheme);
   }
   for (const scheme of ['http:', 'https:', 'mailto:']) {
     assert.equal(policy.includes(`'${scheme}'`), true, scheme);
@@ -2369,10 +2393,23 @@ test('the ExecuteFunction button tag scan stays linear on adversarial templates'
   compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n<% x = 1; %>\n${execButton('helpers.mark', '7')}`);
   for (const hostile of junk) {
     const snippet = `htmlpage hp1()\ncontent\n<% x = 1; %>\n${hostile}${execButton('helpers.mark', '7')}${hostile}`;
-    const t0 = performance.now();
-    compileHtmlpage(app, 'Home', 'hp1', snippet);
-    const elapsed = performance.now() - t0;
-    assert.ok(elapsed < 250, `input of ${snippet.length} chars took ${elapsed.toFixed(1)} ms`);
+    // Linearity, not a wall-clock budget: compile the same shape at half size and require
+    // the full-size run to stay well under the quadratic ratio (4x). A shared CI runner can be
+    // several times slower than a laptop, so a fixed millisecond bound flakes.
+    const half = `htmlpage hp1()\ncontent\n<% x = 1; %>\n${hostile.slice(0, hostile.length / 2)}${execButton('helpers.mark', '7')}${hostile.slice(0, hostile.length / 2)}`;
+    const time = (s: string) => {
+      let best = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const t0 = performance.now();
+        compileHtmlpage(app, 'Home', 'hp1', s);
+        best = Math.min(best, performance.now() - t0);
+      }
+      return best;
+    };
+    const small = Math.max(time(half), 1);
+    const full = time(snippet);
+    assert.ok(full / small < 3.2, `input of ${snippet.length} chars took ${full.toFixed(1)} ms vs ${small.toFixed(1)} ms at half size`);
+    assert.ok(full < 5000, `input of ${snippet.length} chars took ${full.toFixed(1)} ms`);
   }
 });
 
@@ -2536,14 +2573,12 @@ test('page names and snippet ids with long dash runs slugify in linear time', ()
   // ReDoS regression: the file-path slug used to be two regex passes whose
   // alternation backtracked quadratically on uncontrolled separator runs.
   const dashes = `x${'-'.repeat(100_000)}x`;
-  const t0 = performance.now();
-  const compiled = compileHtmlpage(appOf(ORDERS), dashes, 'hp1', 'htmlpage hp1()\ncontent\n<p><%= input.val %></p>', {
-    id: dashes,
-  });
-  const elapsed = performance.now() - t0;
+  const compile = (name: string) =>
+    compileHtmlpage(appOf(ORDERS), name, 'hp1', 'htmlpage hp1()\ncontent\n<p><%= input.val %></p>', { id: name });
+  const compiled = compile(dashes);
   assert.ok(compiled.ok, compiled.reason ?? 'compile failed');
   assert.equal(compiled.file!.path, 'functions/htmlpages/x-x-x-x.mjs');
-  assert.ok(elapsed < 1000, `compile took ${elapsed} ms`);
+  assertLinear((name) => void compile(name), dashes, 'dash-run slug');
 });
 
 test('a field value inside a loop is escaped in the rendered page', async () => {
@@ -3427,19 +3462,17 @@ test('the same read-only island without the write still compiles, so the effect 
   assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
 });
 
-test('a text remove whose operands mix a date-to-text and a datetime-to-text stays the counted TODO', () => {
-  // Creator renders both operands in the app date format, so `str.remove(dt)`
-  // leaves the time. The shims render String(datetime) and date text in other
-  // formats, so a translation would not match Creator: the snippet stays counted.
+test('a text remove whose operands are a datetime-to-text and its own date-to-text compiles', () => {
+  // `Added_Time.toString()` is rendered in Creator's date-time format and `dte.toString()` in its date format, both by the
+  // date shims, so `str.remove(dt)` leaves the time of day as it does in Creator. A field text or any other operand
+  // keeps the snippet counted (snippet-date-text-remove.test.ts).
   const island = 'for each re in Orders[Status == "open"]\n{\n\tstr = re.Added_Time.toString();\n\tdte = re.Added_Time.toDate();\n\tdt = dte.toString();\n\ttym = str.remove(dt);\n}';
   const template = `htmlpage hp1()\ncontent\n<%{\n${island}\n%}\n<p><%= Orders[Status == "open"].count() %></p>`;
   const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', template);
-  assert.equal(compiled.ok, false, 'remove over mixed date texts must not compile');
-  assert.equal(compiled.file, undefined);
+  assert.equal(compiled.ok, true, compiled.reason ?? 'compile failed');
   const { model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(template)}`));
-  assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO]);
-  assert.ok(model.todos[0]?.manualStep, 'the counted TODO carries a manual step');
-  assert.deepEqual(uiSnippetFiles(model), []);
+  assert.deepEqual(model.todos, []);
+  assert.equal(uiSnippetFiles(model).length, 1);
 });
 
 
@@ -3486,12 +3519,7 @@ test('record-summary iframe scan stays linear on adversarial markup', () => {
     "<iframe '".repeat(25_000),
     `<iframe${' x'.repeat(100_000)}`,
   ];
-  for (const input of inputs) {
-    const started = performance.now();
-    rewriteRecordSummaryFrames(input);
-    const elapsed = performance.now() - started;
-    assert.ok(elapsed < 250, `${input.length} chars took ${elapsed.toFixed(1)} ms`);
-  }
+  for (const input of inputs) assertLinear((text) => rewriteRecordSummaryFrames(text), input, 'record-summary scan');
 });
 
 test('record-summary report link resolves to its scoped report detail route', () => {
@@ -5178,6 +5206,8 @@ test('a markup value follows the HTML parser for abruptly closed and malformed c
   const app = appWithFns([wrapFn], `${ORDERS}\n${pageWithSnippet(snippet)}`);
   const abrupt = await renderPage(app, snippet, { q: '<!--><p>live</p>' });
   assert.match(abrupt.html, /<p>live<\/p>/);
+  const bang = await renderPage(app, snippet, { q: 'a<!-- x --!><p>live</p>' });
+  assert.match(bang.html, /<p>live<\/p>/);
   const malformed = await renderPage(app, snippet, { q: '<!--not closed><p>hidden</p>' });
   assert.doesNotMatch(malformed.html, /hidden/);
 });
@@ -6268,10 +6298,11 @@ test('the link rewrites read a thousand adversarial templates in linear time', (
     `${'<%=zoho . '.repeat(n)}`,
   ];
   for (const body of hostile) {
-    const start = process.hrtime.bigint();
+    // A hang guard, not a speed budget: half of these bodies cuts a construct in two, so a half-size ratio is not a faithful shape.
+    const started = performance.now();
     compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
-    const ms = Number(process.hrtime.bigint() - start) / 1e6;
-    assert.ok(ms < 3000, `${body.slice(0, 40)} took ${ms}ms`);
+    const ms = performance.now() - started;
+    assert.ok(ms < 10_000, `${body.slice(0, 40)} took ${ms}ms`);
   }
 });
 

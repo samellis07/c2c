@@ -770,7 +770,15 @@ const SAFE_COMPONENT_NAME = /^[A-Za-z_]\w*$/;
  */
 const ZC_COMPONENT_ELNAME = /\belname\s*=\s*['"]zc-component(?=['"\s>]|$)/i;
 /** Fold a link name or display name to one comparison shape, the way Creator link names compare. */
-const linkNameKey = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const linkNameKey = (value: string) => {
+  const folded = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  // Trim the dashes with indexes, not a regex: /^-+|-+$/ is quadratic on a long run that does not end the string.
+  let start = 0;
+  let end = folded.length;
+  while (start < end && folded.charCodeAt(start) === 45) start++;
+  while (end > start && folded.charCodeAt(end - 1) === 45) end--;
+  return folded.slice(start, end);
+};
 
 /** Parse a whole component tag's attributes; malformed quoting never proves an embed target. */
 function componentAttributes(tag: string): Map<string, string> | null {
@@ -2226,12 +2234,19 @@ function send(res, status, body) {
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
+// A date value prints the way Creator prints it: the day as dd-MMM-yyyy, then the time when it has one.
+function c2cDateText(v) {
+  const p = (n) => String(n).padStart(2, "0");
+  const day = p(v.d) + "-" + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][v.m - 1] + "-" + String(v.y).padStart(4, "0");
+  return v.hh || v.mm || v.ss ? day + " " + p(v.hh) + ":" + p(v.mm) + ":" + p(v.ss) : day;
+}
+
 function c2cStr(v) {
   if (v == null) return "";
   if (typeof v === "object") {
     if (typeof v.zoho === "string") return v.zoho === "appuri" ? "#" : "";
     if (Array.isArray(v)) return v.map(c2cStr).join(", ");
-    if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return v.toString();
+    if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return c2cDateText(v);
     if (typeof v.label === "string") return v.label;
     if (v.constructor && v.constructor.name === "Decimal") return v.toString();
 ${opts.composites || opts.lookupReads ? '    // A composite (a name, an address) prints its non-empty parts joined by spaces; a linked record prints as its id.\n    if (Object.prototype.hasOwnProperty.call(v, "toString")) return v.toString();\n' : ''}    try {
@@ -2802,6 +2817,48 @@ function removesLiteralFromText(server: string, open: number): boolean {
   return isStringShimText(server, server.slice(open + 1, comma).trim());
 }
 
+/**
+ * The initializer of every assignment to `name` in the generated script, when each one is a whole statement
+ * (`var name = <initializer>;` or `name = <initializer>;` on its own line). Null when the name is also a loop binding,
+ * is assigned any other way, or is never assigned.
+ */
+function assignmentsOf(code: string, name: string): string[] | null {
+  if (new RegExp(`\\bfor\\s*\\([^)]*(?<![\\w.$])${name}\\b`).test(code)) return null;
+  const any = [...code.matchAll(new RegExp(`(?<![\\w.$])${name}\\s*[-+*/%]?=(?!=)`, 'g'))];
+  const whole = [...code.matchAll(new RegExp(`^[ \\t]*(?:var |let |const )?${name} = ([^\\n]*);[ \\t]*$`, 'gm'))];
+  if (!any.length || any.length !== whole.length) return null;
+  return whole.map((m) => m[1] ?? '');
+}
+
+/** A system date-time column read of a fetched record, in either generated form. */
+const SYSTEM_READ = '(?:await shim\\.datastore\\.field\\(ctx, [A-Za-z_$][\\w$]*, "(?:Added_Time|Modified_Time)"\\)|shim\\.record\\.get\\([A-Za-z_$][\\w$]*, "(?:Added_Time|Modified_Time)"\\))';
+/** Creator's default text of a date-time: the format `translate` gives `Added_Time.toString()`. */
+const DATE_TIME_TEXT_CALL = new RegExp(`^shim\\.date\\.format\\(${SYSTEM_READ}, "dd-MMM-yyyy HH:mm:ss", ctx\\)$`);
+const DATE_OF_READ_CALL = new RegExp(`^shim\\.date\\.toDate\\(${SYSTEM_READ}, ctx\\)$`);
+
+/**
+ * True when the call whose `(` is at `open` is `str.remove(dt)` where every value `str` ever holds is the default text
+ * of a system date-time and every value `dt` ever holds is the default text of such a read's date
+ * (`dte = <read>.toDate(); dt = dte.toString()`). The date shims write both operands in the one format, so which rows
+ * they came from cannot change what is removed. Any other pair of operands is no proof.
+ */
+function removesOwnDateText(server: string, open: number): boolean {
+  const close = matchingParen(server, open);
+  if (close < 0) return false;
+  const operands = /^\s*([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*$/.exec(server.slice(open + 1, close));
+  if (!operands) return false;
+  // The `// Deluge:` comment above each statement quotes the source and is no assignment.
+  const code = server.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
+  const stamps = assignmentsOf(code, operands[1]!);
+  const days = assignmentsOf(code, operands[2]!);
+  if (!stamps || !days || !stamps.every((init) => DATE_TIME_TEXT_CALL.test(init))) return false;
+  return days.every((init) => {
+    const day = /^shim\.date\.text\(([A-Za-z_]\w*), ctx\)$/.exec(init);
+    const dates = day ? assignmentsOf(code, day[1]!) : null;
+    return !!dates && dates.every((date) => DATE_OF_READ_CALL.test(date));
+  });
+}
+
 /** A date or datetime shim call anywhere in an expression: a string shim wrapped around a date's text is still a date's text. */
 const DATE_SHIM = /\bshim\.date\w*\./i;
 
@@ -2870,7 +2927,8 @@ export function islandReadOnly(server: string, appCall?: (path: string[]) => boo
     // `zoho.encryption.urlEncode` is a pure local adapter: the runtime answers it without a Zoho call.
     if (name === 'zoho.task' && PURE_ZOHO_TASK.test(server.slice((match.index ?? 0) + match[0].length))) continue;
     // `text.remove("literal")` over a string shim's text is a pure text edit.
-    if (name === 'list.removeText' && removesLiteralFromText(server, (match.index ?? 0) + match[0].length - 1)) continue;
+    const at = (match.index ?? 0) + match[0].length - 1;
+    if (name === 'list.removeText' && (removesLiteralFromText(server, at) || removesOwnDateText(server, at))) continue;
     if (!readOnlyShim(name)) return false;
   }
   if (assignsDatastoreRead(server) || mutatesFetchedRead(server)) return false;
@@ -4655,7 +4713,7 @@ export function compileHtmlpage(
   for (const chunk of chunks) combined += chunk.kind === 'static' ? chunk.text : marker(islandOrdinal(chunks, chunk), chunk.context === 'style-fn');
   const nIslands = islands.length;
   const droppedTags: string[] = [];
-  const sanitized = sanitizeSnippet(combined, undefined, droppedTags, appHasNoScriptHook(app));
+  const sanitized = sanitizeSnippet(combined, undefined, droppedTags, appHasNoScriptHook(app), true);
   MARK_SPLIT.lastIndex = 0;
   MARK_MATCH.lastIndex = 0;
   const pieces = sanitized.split(MARK_SPLIT);
@@ -4891,11 +4949,11 @@ export function compileHtmlpage(
 
 /** The composite fields (a name, an address) of the forms a render reads, by form, or nothing when they hold none. */
 function compositesOf(app: App, forms: readonly string[]): { composites?: Record<string, Record<string, string[]>> } {
-  const out: Record<string, Record<string, string[]>> = {};
+  const out: Record<string, Record<string, string[]>> = Object.create(null);
   for (const name of forms) {
     for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
       if (field.subfields.length === 0 || /^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')) continue;
-      (out[name] ??= {})[field.name] = field.subfields.map((part) => part.name);
+      (out[name] ??= Object.create(null))[field.name] = field.subfields.map((part) => part.name);
     }
   }
   return Object.keys(out).length ? { composites: out } : {};
@@ -4906,10 +4964,10 @@ function compositesOf(app: App, forms: readonly string[]): { composites?: Record
  * whose linked-record field the render's criteria compares (`"Head.Field"`).
  */
 function lookupPathsOf(app: App, server: string, forms: readonly string[]): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
+  const out: Record<string, Record<string, string>> = Object.create(null);
   for (const name of forms) {
     for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
-      if (field.lookup && server.includes(`field: "${field.name}.`)) (out[name] ??= {})[field.name] = field.lookup.form;
+      if (field.lookup && server.includes(`field: "${field.name}.`)) (out[name] ??= Object.create(null))[field.name] = field.lookup.form;
     }
   }
   return out;
@@ -4921,8 +4979,8 @@ function lookupPathsOf(app: App, server: string, forms: readonly string[]): Reco
  * field of (`shim.record.get(row, "Head", "Field")` or a `"Head.Field"` read).
  */
 function lookupReadsOf(app: App, server: string, forms: readonly string[]): { forms: Record<string, Record<string, string>>; fields: Record<string, Record<string, string[]>> } {
-  const linked: Record<string, Record<string, string>> = {};
-  const fields: Record<string, Record<string, string[]>> = {};
+  const linked: Record<string, Record<string, string>> = Object.create(null);
+  const fields: Record<string, Record<string, string[]>> = Object.create(null);
   for (const name of forms) {
     for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
       if (!field.lookup || !/^[A-Za-z_]\w*$/.test(field.name)) continue;
@@ -4930,8 +4988,8 @@ function lookupReadsOf(app: App, server: string, forms: readonly string[]): { fo
       for (const m of server.matchAll(new RegExp(`shim\\.record\\.get\\([A-Za-z_$][\\w$]*, "${field.name}", "([A-Za-z_]\\w*)"`, 'g'))) read.add(m[1]!);
       for (const m of server.matchAll(new RegExp(`shim\\.datastore\\.(?:field|column)\\(ctx, [A-Za-z_$][\\w$]*, "${field.name}\\.([A-Za-z_]\\w*)"`, 'g'))) read.add(m[1]!);
       if (!read.size) continue;
-      (linked[name] ??= {})[field.name] = field.lookup.form;
-      (fields[name] ??= {})[field.name] = [...read].sort();
+      (linked[name] ??= Object.create(null))[field.name] = field.lookup.form;
+      (fields[name] ??= Object.create(null))[field.name] = [...read].sort();
     }
   }
   return { forms: linked, fields };
@@ -4944,18 +5002,22 @@ function linkedForms(map: Record<string, Record<string, string>>): string[] {
 
 /** Two form -> lookup -> linked-form maps as one. */
 function mergeLookupForms(...maps: Record<string, Record<string, string>>[]): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
-  for (const map of maps) for (const form of Object.keys(map).sort()) out[form] = { ...out[form], ...map[form] };
+  const out: Record<string, Record<string, string>> = Object.create(null);
+  for (const map of maps) for (const form of Object.keys(map).sort()) {
+    const merged = Object.create(null) as Record<string, string>;
+    Object.assign(merged, out[form], map[form]);
+    out[form] = merged;
+  }
   return out;
 }
 
 /** The multi lookups among the named lookup paths, as the junction tables that hold them. */
 function multiLookupsOfPaths(app: App, paths: Record<string, Record<string, string>>, schema?: SchemaPlan): ReturnType<typeof multiLookupsOf> {
   const all = multiLookupsOf(app, schema);
-  const out: ReturnType<typeof multiLookupsOf> = {};
+  const out: ReturnType<typeof multiLookupsOf> = Object.create(null);
   for (const form of Object.keys(paths).sort()) {
     for (const head of Object.keys(paths[form]!).sort()) {
-      if (Object.hasOwn(all, form) && Object.hasOwn(all[form]!, head)) (out[form] ??= {})[head] = all[form]![head]!;
+      if (Object.hasOwn(all, form) && Object.hasOwn(all[form]!, head)) (out[form] ??= Object.create(null))[head] = all[form]![head]!;
     }
   }
   return out;

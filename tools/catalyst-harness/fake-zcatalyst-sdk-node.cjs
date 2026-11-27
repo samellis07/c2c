@@ -240,7 +240,22 @@ function parsePredicate(tokens) {
         if (peek() && peek().t === ')') { pos += 1; break; }
         throw sdkError('ZCQL syntax error: missing )', 400);
       }
-      return (row) => values.some((v) => compare(row[column], '=', v)) !== negate;
+      // A hash lookup, not rows x values: a lookup display reads parents with ROWID IN (300 ids).
+      // Keys mirror compare(): integers by BigInt, other numbers by Number, anything else by string.
+      const keys = new Set();
+      for (const v of values) {
+        const text = String(v);
+        keys.add(`s${text}`);
+        if (/^-?\d+$/.test(text)) { keys.add(`i${BigInt(text)}`); keys.add(`M${Number(text)}`); }
+        else if (text !== '' && !Number.isNaN(Number(text))) keys.add(`N${Number(text)}`);
+      }
+      const inSet = (raw) => {
+        const a = raw == null ? '' : String(raw);
+        if (keys.has(`s${a}`)) return true;
+        if (/^-?\d+$/.test(a)) return keys.has(`i${BigInt(a)}`) || keys.has(`N${Number(a)}`);
+        return a !== '' && !Number.isNaN(Number(a)) && (keys.has(`N${Number(a)}`) || keys.has(`M${Number(a)}`));
+      };
+      return (row) => inSet(row[column]) !== negate;
     }
     const op = peek();
     if (!op || op.t !== 'op') throw sdkError('ZCQL syntax error: expected a comparison', 400);
@@ -327,7 +342,9 @@ function executeZCQLQuery(sql) {
       for (const [field, dir] of keys) {
         const a = x[field] ?? '';
         const b = y[field] ?? '';
-        const cmp = field === 'ROWID' ? (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0) : a < b ? -1 : a > b ? 1 : 0;
+        // Integers order as BigInt (ROWIDs, BigInt columns such as the autonumber claim `n`: "9" must sort below "10").
+        const integers = field === 'ROWID' || (/^-?\d+$/.test(String(a)) && /^-?\d+$/.test(String(b)));
+        const cmp = integers ? (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0) : a < b ? -1 : a > b ? 1 : 0;
         if (cmp) return (dir || '').toUpperCase() === 'DESC' ? -cmp : cmp;
       }
       return 0;

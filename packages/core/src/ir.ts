@@ -27,6 +27,8 @@ import { parseZml, zmlReferences, type ZmlElement, type ZmlReference } from './z
 import { detectDialect, normaliseDialect, type Dialect } from './dialect.js';
 import { compareEnUs } from './order.js';
 
+import type { RemoteAsset } from './remote-assets.js';
+
 export const IR_VERSION = 1 as const;
 
 export interface Span {
@@ -500,10 +502,20 @@ export interface App {
   /** Source files, for multi-file (shape C) projects. */
   files?: string[];
   /**
+   * Forms, fields, reports and pages named exactly `__proto__`, removed from the
+   * IR (see `REFUSED_NAME`). Omitted when there are none, so other IR is unchanged.
+   */
+  refusedNames?: RefusedName[];
+  /**
    * Widget packages under `sidecars/widgets/`. Omitted when the project has none,
    * so an export that only has `.ds` files keeps the same IR.
    */
   widgets?: WidgetSidecar[];
+  /**
+   * Remote CSS background images recorded by `c2c fetch-assets` in
+   * `c2c-assets.lock.json` next to the export. Omitted when there is no lock.
+   */
+  remoteAssets?: RemoteAsset[];
 }
 
 // ---------------------------------------------------------------------------
@@ -2512,6 +2524,64 @@ export function detectShape(doc: Document, header: Header | undefined): Shape {
   return 'unknown';
 }
 
+/** The one name the generated map literals cannot carry: `{"__proto__": ...}` sets the prototype instead of an entry. */
+export const REFUSED_NAME = '__proto__';
+
+export interface RefusedName {
+  kind: 'form' | 'field' | 'report' | 'page' | 'profile' | 'blueprint stage' | 'blueprint transition';
+  /** The enclosing form, for a field. */
+  form?: string;
+  span: Span;
+}
+
+/** Removes every form, field, report or page named `REFUSED_NAME` and records it on `app.refusedNames`. */
+function refuseNames(app: App): void {
+  const refused: RefusedName[] = [];
+  const dropFields = (fields: Field[], form: string): void => {
+    for (let i = fields.length - 1; i >= 0; i--) {
+      if (fields[i]!.name === REFUSED_NAME) refused.push({ kind: 'field', form, span: fields.splice(i, 1)[0]!.span });
+      else dropFields(fields[i]!.subfields, form);
+    }
+  };
+  const dropNamed = <T extends { name: string; span: Span }>(items: T[], kind: 'form' | 'report' | 'page' | 'profile'): void => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i]!.name === REFUSED_NAME) refused.push({ kind, span: items.splice(i, 1)[0]!.span });
+    }
+  };
+  dropNamed(app.forms, 'form');
+  // Profile names key the generated access policy; blueprint stage and transition names key its field rules.
+  // Dropped silently by the generated map literal, a rule keyed __proto__ would fail open, so refuse it here.
+  dropNamed(app.profiles, 'profile');
+  // The generated key of a transition: the same rule as machineTransitionName in the generator (the LAST quoted
+  // `as "Display"` at the end of the name, any letter case), else the whole name. An unquoted `as __proto__`
+  // tail is refused too, which can only over-refuse.
+  const generatedKey = (name: string): string[] => {
+    const quoted = /\s+as\s+("[^"]*")\s*$/i.exec(name);
+    // The generator unquote()s the name (which decodes \uXXXX and \x style escapes), so compare the decoded text.
+    const keys = [unquote(quoted ? quoted[1]! : name), unquote(name)];
+    const bare = /\s+as\s+([^"\s][^"]*?)\s*$/i.exec(name);
+    if (bare) keys.push(bare[1]!);
+    return keys.map((key) => key.trim());
+  };
+  const isRefusedKey = (name: string): boolean => generatedKey(name).includes(REFUSED_NAME);
+  for (const w of app.workflows) {
+    const bp = w.blueprint;
+    if (!bp) continue;
+    for (let i = bp.stages.length - 1; i >= 0; i--) {
+      if (isRefusedKey(bp.stages[i]!.name)) refused.push({ kind: 'blueprint stage', span: bp.stages.splice(i, 1)[0]!.span });
+    }
+    for (let i = bp.transitions.length - 1; i >= 0; i--) {
+      if (isRefusedKey(bp.transitions[i]!.name)) refused.push({ kind: 'blueprint transition', span: bp.transitions.splice(i, 1)[0]!.span });
+    }
+  }
+  for (const form of app.forms) dropFields(form.fields, form.name);
+  dropNamed(app.reports, 'report');
+  dropNamed(app.pages, 'page');
+  if (!refused.length) return;
+  refused.sort((a, b) => a.span.start - b.span.start || a.span.end - b.span.end);
+  app.refusedNames = refused;
+}
+
 export function emptyApp(shape: Shape): App {
   return {
     irVersion: IR_VERSION,
@@ -2576,6 +2646,7 @@ export function deriveIr(doc: Document, file?: string, roles: Map<Statement, str
     return app;
   }
   visit(ctx, top, 'document');
+  refuseNames(app);
   linkDeviceViews(app);
   app.dialect = detectDialect(doc).dialect;
   normaliseDialect(app);
@@ -2731,4 +2802,31 @@ export function recordStatusColumn(app: App, form: Form | undefined): string | u
     (w) => (isApprovalWorkflow(w) || isBlueprintWorkflow(w)) && formLink(w.form).name === form.name,
   );
   return governed ? flowStatusColumn(form.fields) : undefined;
+}
+
+/** Creator's geo-stamp system columns: where a record was added and last edited. */
+export const LOCATION_RECORD_COLUMNS = ['Added_Location', 'Modified_Location'] as const;
+
+/** The two stored parts of one location stamp, in Creator's `latitude` / `longitude` order. */
+export const LOCATION_PARTS = ['latitude', 'longitude'] as const;
+
+/** The value a form no approval or blueprint machine governs carries in `Record_Status`. */
+export const RECORD_STATUS_NOT_APPLICABLE = 'Not Applicable';
+
+/**
+ * The built-in record columns the schema stores for one form: the location
+ * stamps when a report on the form lists either, and a plain `Record_Status`
+ * column when a report lists it and no machine status column holds it.
+ */
+export function builtinRecordColumns(app: App, form: Form | undefined): { location: boolean; status: boolean } {
+  if (!form) return { location: false, status: false };
+  const listed = new Set<string>();
+  for (const report of app.reports) {
+    if (report.form !== form.name) continue;
+    for (const column of report.columns) listed.add(column.field);
+  }
+  const declared = new Set(form.fields.map((field) => field.name));
+  const location = LOCATION_RECORD_COLUMNS.some((name) => listed.has(name) && !declared.has(name));
+  const status = listed.has('Record_Status') && !declared.has('Record_Status') && !recordStatusColumn(app, form);
+  return { location, status };
 }

@@ -43,7 +43,7 @@ div class="c2c-app"
               "All Contacts"
   main tabindex="-1"
     section class="c2c-card" data-report="All_Contacts" data-row="1" data-view="list"
-      h1
+      h1 tabindex="-1"
         "All Contacts"
       p class="c2c-back"
         a href="#/report/All_Contacts"

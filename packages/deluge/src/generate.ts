@@ -14,7 +14,7 @@
  * Nothing here deploys or contacts Catalyst.
  */
 
-import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, privacyFlagsOf, staticDefault, translationLeftovers, translationStrings, unquote, type App, type Device, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
+import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, privacyFlagsOf, REFUSED_NAME, staticDefault, translationLeftovers, translationStrings, unquote, type App, type Device, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
@@ -23,7 +23,7 @@ import type { Expr, Script, Stmt } from './ast.js';
 import type { AccessPolicy, FieldRuleDenial, FormGrant, WriteField, WriteOp, WriteScalar } from '../../shims/src/access.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria, type DecimalColumn, type DecimalColumns } from '../../shims/src/criteria.js';
 import { integrityColumns, type IntegrityColumn } from '../../data/src/integrity.js';
-import { flowHistoryTable, generateSchema, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
+import { flowHistoryTable, generateSchema, isMulti, isMultiChoiceField, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
 import { LIMITS, jobPoolName } from '../../shims/src/index.js';
 import { scriptNavInstruction } from '../../shims/src/runtime.js';
@@ -708,11 +708,19 @@ function addStats(a: TranslateStats, b: TranslateStats): void {
   a.todo += b.todo;
 }
 
+/** The counted todo kind for a form, field, report or page the analyzer refuses by name. */
+export const REFUSED_NAME_CONSTRUCT = 'refused-name';
+
 export function generate(app: App, options?: GenerateOptions): GenerateResult {
   const files: GeneratedFile[] = [];
   const used = new Set<string>();
   const stats = EMPTY_STATS();
-  const todos: TodoItem[] = [];
+  const todos: TodoItem[] = (app.refusedNames ?? []).map((item) => ({
+    construct: REFUSED_NAME_CONSTRUCT,
+    start: item.span.start,
+    end: item.span.end,
+    manualStep: `A ${item.kind}${item.form ? ` in form ${item.form}` : ''} is named ${REFUSED_NAME}, which the generated maps cannot carry, so it is refused and nothing is generated from it. Rename it in the source app and convert again.`,
+  }));
   const statementCoverage: CoverageEntry[] = [];
   const alertDiagnostics: AlertDiagnostic[] = [];
   const put = (path: string, source: string): string => {
@@ -1853,9 +1861,23 @@ function resolveApprovers(properties: readonly Property[] | undefined, form: For
   return out;
 }
 
+/** The text before a trailing `/ on load` (trimmed), or null when the event has no such tail; string scans, no backtracking. */
+function beforeOnLoad(event: string): string | null {
+  const head = event.trimEnd();
+  if (!/on load$/i.test(head)) return null;
+  const rest = head.slice(0, -'on load'.length).trimEnd();
+  return rest.endsWith('/') ? rest.slice(0, -1).trimEnd() : null;
+}
+
+/** `event` trimmed, without a trailing `/ on load`. */
+function stripOnLoad(event: string): string {
+  const trimmed = event.trim();
+  return beforeOnLoad(trimmed) ?? trimmed;
+}
+
 /** The level and action of `on level N / on approve`, or level 1 for a bare `on approve`. */
 export function approvalEvent(event: string): { level: number; action: 'approve' | 'reject' } | null {
-  const cleaned = event.trim().replace(/\s*\/\s*on load\s*$/i, '');
+  const cleaned = stripOnLoad(event);
   const leveled = /^on level (\d+)\s*\/\s*on (approve|reject)\s*$/i.exec(cleaned);
   if (leveled) return { level: Number(leveled[1]), action: leveled[2]!.toLowerCase() as 'approve' | 'reject' };
   const bare = /^on (approve|reject)\s*$/i.exec(cleaned);
@@ -1871,7 +1893,7 @@ export function approvalEvent(event: string): { level: number; action: 'approve'
 export function approvalEventGap(w: Workflow): { construct: 'approval-on-load' | 'approval-event'; start: number; end: number } | null {
   if (/^on start\s*$/i.test(w.event)) return null;
   if (approvalEvent(w.event)) return null;
-  if (/\/\s*on load\s*$/i.test(w.event)) {
+  if (beforeOnLoad(w.event) !== null) {
     const span = w.deluge?.span ?? w.span;
     return { construct: 'approval-on-load', start: span.start, end: span.end };
   }
@@ -2198,8 +2220,14 @@ function onEditWorkflowSpecs(app: App, form: string): { validate: string[]; succ
 
 /** `Send as "Send"` is an internal name plus a display label; the label wins. */
 function machineTransitionName(name: string): string {
-  const match = /\s+as\s+("[^"]*")\s*$/i.exec(name ?? '');
-  return match ? unquote(match[1]!) : name;
+  const head = (name ?? '').trimEnd();
+  if (!head.endsWith('"')) return name;
+  const open = head.lastIndexOf('"', head.length - 2);
+  const before = open > 0 ? head.slice(0, open) : '';
+  if (open < 1 || !/\s$/.test(before)) return name;
+  const lead = before.trimEnd();
+  if (!/as$/i.test(lead) || !/\s$/.test(lead.slice(0, -2))) return name;
+  return unquote(head.slice(open));
 }
 
 /** `transition criteria` in any letter case — the source format does not fix key casing. */
@@ -3749,11 +3777,13 @@ export function functionRowBinding(fn: FunctionDef): '' | 'rec' | 'recs' {
 
 /** Parameter names whose declared type is a form of the app (`Add_Visa_Details visaDetails`). */
 function formParams(app: App, signature: string | undefined): string[] {
-  const m = signature?.match(/\(([^)]*)\)/);
-  if (!m || !m[1]?.trim()) return [];
+  const open = signature?.indexOf('(') ?? -1;
+  const close = open < 0 ? -1 : signature!.indexOf(')', open + 1);
+  const inner = close < 0 ? '' : signature!.slice(open + 1, close);
+  if (!inner.trim()) return [];
   const forms = new Set(app.forms.map((f) => f.name.toLowerCase()));
   const out: string[] = [];
-  for (const part of m[1].split(',')) {
+  for (const part of inner.split(',')) {
     const words = part.trim().split(/\s+/);
     if (words.length < 2) continue;
     const name = words[words.length - 1]!;
@@ -4974,7 +5004,10 @@ function expressionCode(condition: string, inputFields: string[] = [], decimalFi
 /** Parameter names exactly as the Deluge body writes them (pre-jsIdent). */
 export function rawFnParams(signature: string | undefined): string[] {
   if (!signature) return [];
-  const m = signature.match(/\(([^)]*)\)/);
+  // Index the parentheses instead of a /\(([^)]*)\)/ scan, which is quadratic on a long run of '('.
+  const open = signature.indexOf('(');
+  const close = open < 0 ? -1 : signature.indexOf(')', open);
+  const m = close < 0 ? null : [signature.slice(open, close + 1), signature.slice(open + 1, close)];
   if (!m || !m[1]?.trim()) return [];
   return m[1]
     .split(',')
@@ -4990,7 +5023,10 @@ function fnParams(signature: string | undefined): string[] {
 /** Parameters declared `decimal` (or legacy `float`): exact decimals inside the function body. */
 function fnDecimalParams(signature: string | undefined): string[] {
   if (!signature) return [];
-  const m = signature.match(/\(([^)]*)\)/);
+  // Index the parentheses instead of a /\(([^)]*)\)/ scan, which is quadratic on a long run of '('.
+  const open = signature.indexOf('(');
+  const close = open < 0 ? -1 : signature.indexOf(')', open);
+  const m = close < 0 ? null : [signature.slice(open, close + 1), signature.slice(open + 1, close)];
   if (!m || !m[1]?.trim()) return [];
   return m[1]
     .split(',')
@@ -5002,7 +5038,10 @@ function fnDecimalParams(signature: string | undefined): string[] {
 /** Declared `(type name)` pairs of a `thisapp` signature; the last token is the name. */
 export function fnSignatureParams(signature: string | undefined): { type: string; name: string }[] {
   if (!signature) return [];
-  const m = signature.match(/\(([^)]*)\)/);
+  // Index the parentheses instead of a /\(([^)]*)\)/ scan, which is quadratic on a long run of '('.
+  const open = signature.indexOf('(');
+  const close = open < 0 ? -1 : signature.indexOf(')', open);
+  const m = close < 0 ? null : [signature.slice(open, close + 1), signature.slice(open + 1, close)];
   if (!m || !m[1]?.trim()) return [];
   const out: { type: string; name: string }[] = [];
   for (const part of m[1].split(',')) {
@@ -5077,14 +5116,14 @@ const decimalColumnCache = new WeakMap<App, Record<string, DecimalColumns>>();
 export function decimalColumnsOf(app: App): Record<string, DecimalColumns> {
   const cached = decimalColumnCache.get(app);
   if (cached) return cached;
-  const out: Record<string, Record<string, DecimalColumn>> = {};
+  const out: Record<string, Record<string, DecimalColumn>> = Object.create(null);
   for (const table of schemaOf(app).tables) {
     if (table.nosql || table.role === 'junction') continue;
     const key = table.role === 'form' ? table.form : table.name;
     for (const column of table.columns) {
       if (!column.shadowFor) continue;
       const exact = table.columns.find((c) => c.name === column.shadowFor);
-      (out[key] ??= {})[exact?.field ?? column.shadowFor] = { shadow: column.name, scale: exact?.precision ?? 2 };
+      (out[key] ??= Object.create(null))[exact?.field ?? column.shadowFor] = { shadow: column.name, scale: exact?.precision ?? 2 };
     }
   }
   decimalColumnCache.set(app, out);
@@ -5226,7 +5265,26 @@ export function writeRulesOption(app: App, schema?: SchemaPlan): string {
 
 /** Schema-derived createRuntime fields: decimals, app-unique columns, write rules, and split layouts. */
 export function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
-  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${countersOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+}
+
+/** form → autonumber field → start index, for the runtime's claim-table counters (shims/src/counters.ts). */
+export function autonumbersOf(app: App, schema?: SchemaPlan): Record<string, Record<string, { start?: number }>> {
+  const map: Record<string, Record<string, { start?: number }>> = Object.create(null);
+  for (const table of (schema ?? schemaOf(app)).tables) {
+    if (table.role !== 'form') continue;
+    for (const column of table.columns) {
+      if (column.matrixId !== 'auto-number') continue;
+      const start = Number(/start index (\d+)/.exec(column.note ?? '')?.[1]);
+      (map[table.form] ??= Object.create(null))[column.field ?? column.name] = Number.isSafeInteger(start) && start >= 0 ? { start } : {};
+    }
+  }
+  return map;
+}
+
+function countersOption(app: App, schema?: SchemaPlan): string {
+  const autonumber = autonumbersOf(app, schema);
+  return Object.keys(autonumber).length ? `, counters: ${JSON.stringify({ autonumber })}` : '';
 }
 
 export interface MultiLookupSpec {
@@ -5238,7 +5296,7 @@ export interface MultiLookupSpec {
 
 /** form → multi-lookup field → the junction table that holds it (schema-derived, shared by the generated runtime and offline verification). */
 export function multiLookupsOf(app: App, schema?: SchemaPlan): Record<string, Record<string, MultiLookupSpec>> {
-  const map: Record<string, Record<string, MultiLookupSpec>> = {};
+  const map: Record<string, Record<string, MultiLookupSpec>> = Object.create(null);
   for (const table of (schema ?? schemaOf(app)).tables) {
     if (table.role !== 'junction') continue;
     const parent = table.columns.find((column) => column.name === 'parent_id');
@@ -5246,7 +5304,7 @@ export function multiLookupsOf(app: App, schema?: SchemaPlan): Record<string, Re
     const value = table.columns.find((column) => column.relation && column.name !== parent?.name);
     if (!parent || !order || !value) continue;
     const field = value.field ?? value.name;
-    (map[table.form] ??= {})[field] = { table: table.name, parentColumn: parent.name, valueColumn: value.name, orderColumn: order.name };
+    (map[table.form] ??= Object.create(null))[field] = { table: table.name, parentColumn: parent.name, valueColumn: value.name, orderColumn: order.name };
   }
   return map;
 }
@@ -6391,6 +6449,8 @@ function writeField(field: Field, app?: App): WriteField {
   }
   if (field.lookup) {
     node.kind = 'lookup';
+    // A list of ids is the multi lookup's shape; a single lookup refuses one.
+    if (isMulti(field)) node.multi = true;
     return node;
   }
   if (row && (row.id === 'file-upload' || row.id === 'image' || row.id === 'audio' || row.id === 'video' || row.id === 'signature')) {
@@ -6411,12 +6471,15 @@ function writeField(field: Field, app?: App): WriteField {
   }
   const scalar = writeScalar(row?.id);
   if (scalar) node.scalar = scalar;
+  // A multi select or checkbox list is the plain leaf that takes a JSON array.
+  if (isMultiChoiceField(field)) node.multi = true;
   const allowedDays = fieldAllowedDays(field);
   if (allowedDays) node.allowedDays = allowedDays;
   const choices = closedChoices(field);
   if (choices) node.choices = choices;
   const initial = isMultiChoiceField(field) ? multiValueDefault(field.initialValue) : staticDefault(field.initialValue);
-  if (initial !== undefined) node.defaultValue = initial;
+  // A decision box default is the boolean a validate script compares with `== false`, not its text.
+  if (initial !== undefined) node.defaultValue = row?.id === 'decision-box' && (initial === 'true' || initial === 'false') ? initial === 'true' : initial;
   return node;
 }
 
@@ -6768,7 +6831,7 @@ ${opts.systemWrite ? `  let loadedStore = null;
       return;
     }
     accepted = ${writeCall}.values;
-  } catch (err) {
+  } catch (err) {${opts.systemWrite ? '\n    // A value the form refuses (a radio outside its list) is a 4xx, as on /submit.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;' : ''}
     const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
     send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed" });
     return;
@@ -6784,7 +6847,7 @@ ${runtimeSetup}
 ${opts.systemWrite && schema ? '  // API and import inserts never saw the Slate prefill. Absent\n  // fields fall back to their Creator initial values here, so validate\n  // scripts and the row write see the same record as the form path.\n  if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);\n' : ''}${scriptEventGate}  try {
 ${successBody}
   } catch (err) {
-${discardDeferred}${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n    if (err && err.code === "C2C_STALE_WRITE") {\n      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });\n      return;\n    }\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
+${discardDeferred}${refusal}${opts.systemWrite ? '    if (err && (err.code === "FILE_REFERENCE_INVALID" || err.name === "FileReferenceError")) {\n      send(res, 400, { dryRun: !live, wrote: false, code: "FILE_REFERENCE_INVALID", error: "A file reference in the submitted record is not valid." });\n      return;\n    }\n    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n    if (err && err.code === "C2C_STALE_WRITE") {\n      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });\n      return;\n    }\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
     send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed", slots: null, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
   }
 }

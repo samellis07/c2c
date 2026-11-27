@@ -612,8 +612,8 @@ test('a live aggregate resolves a lookup-path group through the parent read scop
     );
     // The parent rows are read through the caller's scoped ROWID IN query.
     const parentReads = store.calls.filter((c) => c.form === 'Book');
-    // One scoped parent read per path field, plus the Book display column.
-    assert.equal(parentReads.length, 3, JSON.stringify(store.calls));
+    // One scoped parent read per path field; the Book display column is not read, the fold does not use it.
+    assert.equal(parentReads.length, 2, JSON.stringify(store.calls));
     assert.ok(parentReads.every((c) => /\bIN \(/.test(c.where)));
     // The hidden parent column never leaves the function.
     assert.doesNotMatch(JSON.stringify(res.body), /"s[123]"/);

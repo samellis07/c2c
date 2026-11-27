@@ -138,3 +138,10 @@ test('a dry-run seed filters by the same null rule', async () => {
   const filled = await runtime.shim.datastore.rows(ctx, runtime.shim.datastore.query(ctx, 'Contact', { op: '!=', field: 'Lookup', value: null }));
   assert.deepEqual(filled.map((r) => r.values.Name), ['a', 'c']);
 });
+
+test('an empty IN list matches no row, NULL rows included', () => {
+  assert.equal(compileCriteria({ op: 'in', field: 'Status', value: [] }), '(ROWID IS NULL)');
+  assert.equal(matchRow({ Status: null }, { op: 'in', field: 'Status', value: [] }), false);
+  // [null] still means a NULL test.
+  assert.equal(compileCriteria({ op: 'in', field: 'Status', value: [null] }), 'Status IS NULL');
+});

@@ -84,6 +84,8 @@ type Row = Record<string, unknown>;
 
 /** One CSV field, RFC 4180 quoted when it holds a comma, quote or line break. */
 function csvField(text: string): string {
+  // A cell a spreadsheet would run as a formula is exported with an apostrophe in front; a plain negative number is not one.
+  if (/^[=+@\t\r]/.test(text) || (text.startsWith('-') && !/^-\d[\d,]*(\.\d+)?$/.test(text))) text = `'${text}`;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -462,7 +464,8 @@ function expectedReportRows(model: UiModel, app: App, seeded: SeededApp, reportN
     seeded,
     zone: comparisonZone(process.env.C2C_APP_TIMEZONE?.trim() || appTimeZone(app)) ?? '',
     userId: 'admin@example.test',
-    renames: columnRenamesOf(generateSchema(app)),
+    // The seeded rows are keyed by Creator field name (fieldKeyedStored), so the oracle compares field names, not store columns.
+    renames: {},
   };
   const resolved = oracleCriteria(criteria, oracle, form!);
   if (resolved === REFUSED) return REFUSED;
@@ -554,10 +557,12 @@ export function expectedBuckets(rows: readonly Row[], chart: Pick<ChartSpec, 'x'
 /** The visible table of a rendered report: header labels and row cells (cells carry their column label in data-th). */
 export function readTable(root: Element, columns: readonly { key: string; label: string }[]): { header: string[]; rows: string[][] } {
   const body = [...root.querySelectorAll('tbody tr')].filter((tr) => tr.querySelector('td[data-th]'));
-  const pick = (tr: Element, label: string) => [...tr.querySelectorAll('td[data-th]')].find((td) => td.getAttribute('data-th') === label);
+  // Two columns can share a label: the nth column of a label reads the nth cell of that label.
+  const seen = columns.map((c, i) => columns.slice(0, i).filter((d) => d.label === c.label).length);
+  const pick = (tr: Element, label: string, nth: number) => [...tr.querySelectorAll('td[data-th]')].filter((td) => td.getAttribute('data-th') === label)[nth];
   return {
     header: columns.map((c) => c.label),
-    rows: body.map((tr) => columns.map((c) => (pick(tr, c.label)?.textContent ?? '').trim())),
+    rows: body.map((tr) => columns.map((c, i) => (pick(tr, c.label, seen[i]!)?.textContent ?? '').trim())),
   };
 }
 

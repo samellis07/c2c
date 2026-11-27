@@ -40,6 +40,7 @@ const ROOTS: Record<string, string[]> = {
   'rollback-export': ['doctorGateForArgs', 'rollbackExportCli'],
   'cutover-checklist': ['cutoverCli'],
   proof: ['cutoverCli'],
+  upgrade: ['upgradeCli'],
   'iac-drift': [],
 };
 

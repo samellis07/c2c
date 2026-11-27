@@ -718,13 +718,13 @@ test('header parsing stays linear on long whitespace and star lines', () => {
     return work.steps;
   };
   for (const [name, build] of Object.entries(make)) {
-    // A loose absolute bound: the old backtracking pattern took seconds at 64 KiB.
+    // A hang guard, not a speed budget (the step-count ratio below is the linearity check): the old backtracking pattern took minutes at 64 KiB.
     for (const size of [64 * kib, 1024 * kib]) {
       const src = build(size);
       const started = performance.now();
       parseHeader(src);
       const elapsed = performance.now() - started;
-      assert.ok(elapsed < 500, `${name}: ${size / kib} KiB took ${elapsed.toFixed(1)} ms`);
+      assert.ok(elapsed < 5000, `${name}: ${size / kib} KiB took ${elapsed.toFixed(1)} ms`);
     }
     const small = stepsOf(build(256 * kib));
     const large = stepsOf(build(1024 * kib));

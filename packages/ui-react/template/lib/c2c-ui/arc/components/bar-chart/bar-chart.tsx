@@ -141,7 +141,7 @@ function TickLabel({ value, scale, height, avoid, format }: { value: number; sca
   const y = useRowY(value, scale, height);
   // A tick label makes way where the average label sits beside it.
   const opacity = useTransform(() => avoid ? clamp((Math.abs(y.get() - avoid.get()) - 10) / 6, 0, 1) : 1);
-  return <motion.span className={styles.tick} style={{ y }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: fadeFast }} transition={{ duration: duration.standard, ease: [...ease.standard] }}>
+  return <motion.span className={styles.tick} style={{ top: y }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: fadeFast }} transition={{ duration: duration.standard, ease: [...ease.standard] }}>
     <motion.span className={styles.tickText} style={{ opacity }}>{format(value)}</motion.span>
   </motion.span>;
 }
@@ -370,7 +370,7 @@ export function BarChart({ data, label, period, unit = "", averageLabel = "Daily
       </div>
       <div className={styles.gutter} aria-hidden="true">
         <AnimatePresence initial={false}>{ticks.map(value => <TickLabel key={value} value={value} scale={scale} height={height} avoid={avoid} format={formatValue} />)}</AnimatePresence>
-        {showAverage && <motion.span className={styles.meanLabel} style={{ y: meanY }} initial={false} animate={{ opacity: shown ? 1 : 0 }} transition={reduced ? { duration: 0 } : { duration: duration.standard, delay: .12 }}><motion.span className={styles.tickText}>{meanText}</motion.span></motion.span>}
+        {showAverage && <motion.span className={styles.meanLabel} style={{ top: meanY }} initial={false} animate={{ opacity: shown ? 1 : 0 }} transition={reduced ? { duration: 0 } : { duration: duration.standard, delay: .12 }}><motion.span className={styles.tickText}>{meanText}</motion.span></motion.span>}
       </div>
       <div className={styles.axis} aria-hidden="true">
         <AnimatePresence initial={false}>
