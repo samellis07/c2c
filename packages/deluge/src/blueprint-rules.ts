@@ -21,6 +21,7 @@
  * `during` phase). Field lists are comma or semicolon separated names.
  */
 import { unquote, type App, type Form, type Property, type PropertyBlock, type Workflow, type BlueprintTransition } from '../../core/src/ir.js';
+import { ownGet, ownSet } from '../../core/src/own-keys.js';
 import type { TodoItem } from './translate.js';
 
 /** Field settings of one stage or one transition's `during` phase. */
@@ -223,17 +224,18 @@ function collect(properties: readonly Property[], blocks: readonly PropertyBlock
  * the blueprint declares none, so an app without them generates the same bytes.
  */
 export function blueprintFieldSpec(w: Workflow, form: Form | undefined, statusColumn: string, transitionName: (name: string) => string, todos: TodoItem[] = []): BlueprintFieldSpec | null {
+  // Keyed by names from the export: an own entry for any spelling, never a write through __proto__.
   const stages: Record<string, PhaseFields> = {};
   const transitions: Record<string, PhaseFields> = {};
   for (const stage of w.blueprint?.stages ?? []) {
     const fields = collect(stage.properties, stage.blocks, form, todos, 'stage');
-    if (fields) stages[unquote(stage.name)] = fields;
+    if (fields) ownSet(stages, unquote(stage.name), fields);
   }
   for (const t of w.blueprint?.transitions ?? []) {
     for (const phase of t.phases) {
       if (phase.phase.trim().toLowerCase() !== 'during') continue;
       const fields = collect(phase.properties, phase.blocks, form, todos, 'transition');
-      if (fields) transitions[transitionName(t.name)] = { ...(transitions[transitionName(t.name)] ?? {}), ...fields };
+      if (fields) ownSet(transitions, transitionName(t.name), { ...(ownGet(transitions, transitionName(t.name)) ?? {}), ...fields });
     }
   }
   if (!Object.keys(stages).length && !Object.keys(transitions).length) return null;
