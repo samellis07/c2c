@@ -72,12 +72,21 @@ export type SchedulePlan =
   | { kind: 'custom'; module: string; cron: CronDefinition | null; gap: string | null }
   | { kind: 'form'; module: string; sweep: FormScheduleSpec | null; gap: string | null };
 
+/** `s` without leading/trailing `ch`, by index scan (a `_+$` regex is quadratic on long runs). */
+function trimChar(s: string, ch: string): string {
+  let a = 0;
+  let b = s.length;
+  while (a < b && s[a] === ch) a++;
+  while (b > a && s[b - 1] === ch) b--;
+  return s.slice(a, b);
+}
+
 function cronName(name: string): string {
-  return name.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'schedule';
+  return trimChar(name.replace(/[^A-Za-z0-9]+/g, '_'), '_') || 'schedule';
 }
 
 function moduleSlug(s: string): string {
-  return s.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'handler';
+  return trimChar(s.replace(/[^A-Za-z0-9]+/g, '-'), '-').toLowerCase() || 'handler';
 }
 
 /** The five-field expression of a repeating custom schedule, from its start wall time. */

@@ -1861,9 +1861,23 @@ function resolveApprovers(properties: readonly Property[] | undefined, form: For
   return out;
 }
 
+/** The text before a trailing `/ on load` (trimmed), or null when the event has no such tail; string scans, no backtracking. */
+function beforeOnLoad(event: string): string | null {
+  const head = event.trimEnd();
+  if (!/on load$/i.test(head)) return null;
+  const rest = head.slice(0, -'on load'.length).trimEnd();
+  return rest.endsWith('/') ? rest.slice(0, -1).trimEnd() : null;
+}
+
+/** `event` trimmed, without a trailing `/ on load`. */
+function stripOnLoad(event: string): string {
+  const trimmed = event.trim();
+  return beforeOnLoad(trimmed) ?? trimmed;
+}
+
 /** The level and action of `on level N / on approve`, or level 1 for a bare `on approve`. */
 export function approvalEvent(event: string): { level: number; action: 'approve' | 'reject' } | null {
-  const cleaned = event.trim().replace(/\s*\/\s*on load\s*$/i, '');
+  const cleaned = stripOnLoad(event);
   const leveled = /^on level (\d+)\s*\/\s*on (approve|reject)\s*$/i.exec(cleaned);
   if (leveled) return { level: Number(leveled[1]), action: leveled[2]!.toLowerCase() as 'approve' | 'reject' };
   const bare = /^on (approve|reject)\s*$/i.exec(cleaned);
@@ -1879,7 +1893,7 @@ export function approvalEvent(event: string): { level: number; action: 'approve'
 export function approvalEventGap(w: Workflow): { construct: 'approval-on-load' | 'approval-event'; start: number; end: number } | null {
   if (/^on start\s*$/i.test(w.event)) return null;
   if (approvalEvent(w.event)) return null;
-  if (/\/\s*on load\s*$/i.test(w.event)) {
+  if (beforeOnLoad(w.event) !== null) {
     const span = w.deluge?.span ?? w.span;
     return { construct: 'approval-on-load', start: span.start, end: span.end };
   }
@@ -2206,8 +2220,14 @@ function onEditWorkflowSpecs(app: App, form: string): { validate: string[]; succ
 
 /** `Send as "Send"` is an internal name plus a display label; the label wins. */
 function machineTransitionName(name: string): string {
-  const match = /\s+as\s+("[^"]*")\s*$/i.exec(name ?? '');
-  return match ? unquote(match[1]!) : name;
+  const head = (name ?? '').trimEnd();
+  if (!head.endsWith('"')) return name;
+  const open = head.lastIndexOf('"', head.length - 2);
+  const before = open > 0 ? head.slice(0, open) : '';
+  if (open < 1 || !/\s$/.test(before)) return name;
+  const lead = before.trimEnd();
+  if (!/as$/i.test(lead) || !/\s$/.test(lead.slice(0, -2))) return name;
+  return unquote(head.slice(open));
 }
 
 /** `transition criteria` in any letter case — the source format does not fix key casing. */
@@ -3757,11 +3777,13 @@ export function functionRowBinding(fn: FunctionDef): '' | 'rec' | 'recs' {
 
 /** Parameter names whose declared type is a form of the app (`Add_Visa_Details visaDetails`). */
 function formParams(app: App, signature: string | undefined): string[] {
-  const m = signature?.match(/\(([^)]*)\)/);
-  if (!m || !m[1]?.trim()) return [];
+  const open = signature?.indexOf('(') ?? -1;
+  const close = open < 0 ? -1 : signature!.indexOf(')', open + 1);
+  const inner = close < 0 ? '' : signature!.slice(open + 1, close);
+  if (!inner.trim()) return [];
   const forms = new Set(app.forms.map((f) => f.name.toLowerCase()));
   const out: string[] = [];
-  for (const part of m[1].split(',')) {
+  for (const part of inner.split(',')) {
     const words = part.trim().split(/\s+/);
     if (words.length < 2) continue;
     const name = words[words.length - 1]!;
