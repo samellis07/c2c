@@ -342,7 +342,9 @@ function executeZCQLQuery(sql) {
       for (const [field, dir] of keys) {
         const a = x[field] ?? '';
         const b = y[field] ?? '';
-        const cmp = field === 'ROWID' ? (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0) : a < b ? -1 : a > b ? 1 : 0;
+        // Integers order as BigInt (ROWIDs, BigInt columns such as the autonumber claim `n`: "9" must sort below "10").
+        const integers = field === 'ROWID' || (/^-?\d+$/.test(String(a)) && /^-?\d+$/.test(String(b)));
+        const cmp = integers ? (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0) : a < b ? -1 : a > b ? 1 : 0;
         if (cmp) return (dir || '').toUpperCase() === 'DESC' ? -cmp : cmp;
       }
       return 0;
