@@ -69,6 +69,9 @@ test('a blueprint stage or transition named __proto__ is refused and counted; ot
   assert.deepEqual(refusedKinds('Draft', 'Go as __proto__'), ['blueprint transition']);
   // The generated key of `Key as "Display"` is the quoted display name, so a __proto__ KEY with another display name keys nothing.
   assert.deepEqual(refusedKinds('Draft', '__proto__ as "Go"'), []);
+  assert.deepEqual(refusedKinds('Draft', 'Go AS "__proto__"'), ['blueprint transition'], 'any letter case, as the generator reads it');
+  assert.deepEqual(refusedKinds('Draft', 'Go as "x" as "__proto__"'), ['blueprint transition'], 'the last quoted display name keys the transition');
+  assert.deepEqual(refusedKinds('Draft', 'Go as "__proto__"  '), ['blueprint transition']);
   assert.deepEqual(refusedKinds('Draft', 'Go as "my__proto__"'), [], 'only the exact display name is refused');
   assert.deepEqual(refusedKinds('Draft', 'Go as "__proto__x"'), []);
   assert.deepEqual(refusedKinds('Draft', 'Go'), []);

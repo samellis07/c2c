@@ -2552,19 +2552,25 @@ function refuseNames(app: App): void {
   // Profile names key the generated access policy; blueprint stage and transition names key its field rules.
   // Dropped silently by the generated map literal, a rule keyed __proto__ would fail open, so refuse it here.
   dropNamed(app.profiles, 'profile');
-  // The display name of `Key as "Display"` (the quotes may be gone after parsing), else the name itself.
-  const displayName = (name: string): string => {
-    const shown = /\bas\s+(.+)$/.exec(name)?.[1] ?? name;
-    return shown.trim().replace(/^"(.*)"$/, '$1').trim();
+  // The generated key of a transition: the same rule as machineTransitionName in the generator (the LAST quoted
+  // `as "Display"` at the end of the name, any letter case), else the whole name. An unquoted `as __proto__`
+  // tail is refused too, which can only over-refuse.
+  const generatedKey = (name: string): string[] => {
+    const quoted = /\s+as\s+("[^"]*")\s*$/i.exec(name);
+    const keys = [quoted ? quoted[1]!.slice(1, -1) : name];
+    const bare = /\s+as\s+([^"\s][^"]*?)\s*$/i.exec(name);
+    if (bare) keys.push(bare[1]!);
+    return keys.map((key) => key.trim());
   };
+  const isRefusedKey = (name: string): boolean => generatedKey(name).includes(REFUSED_NAME);
   for (const w of app.workflows) {
     const bp = w.blueprint;
     if (!bp) continue;
     for (let i = bp.stages.length - 1; i >= 0; i--) {
-      if (displayName(bp.stages[i]!.name).trim() === REFUSED_NAME) refused.push({ kind: 'blueprint stage', span: bp.stages.splice(i, 1)[0]!.span });
+      if (isRefusedKey(bp.stages[i]!.name)) refused.push({ kind: 'blueprint stage', span: bp.stages.splice(i, 1)[0]!.span });
     }
     for (let i = bp.transitions.length - 1; i >= 0; i--) {
-      if (displayName(bp.transitions[i]!.name).trim() === REFUSED_NAME) refused.push({ kind: 'blueprint transition', span: bp.transitions.splice(i, 1)[0]!.span });
+      if (isRefusedKey(bp.transitions[i]!.name)) refused.push({ kind: 'blueprint transition', span: bp.transitions.splice(i, 1)[0]!.span });
     }
   }
   for (const form of app.forms) dropFields(form.fields, form.name);
