@@ -64,6 +64,13 @@ const refusedKinds = (stage: string, transition: string): string[] =>
 test('a blueprint stage or transition named __proto__ is refused and counted; other names are untouched', () => {
   assert.deepEqual(refusedKinds('__proto__', 'Go'), ['blueprint stage']);
   assert.deepEqual(refusedKinds('Draft', '__proto__'), ['blueprint transition']);
+  // The display-name spellings: with and without the quotes after parsing, on the stage and the transition.
+  assert.deepEqual(refusedKinds('Draft', 'Go as "__proto__"'), ['blueprint transition']);
+  assert.deepEqual(refusedKinds('Draft', 'Go as __proto__'), ['blueprint transition']);
+  // The generated key of `Key as "Display"` is the quoted display name, so a __proto__ KEY with another display name keys nothing.
+  assert.deepEqual(refusedKinds('Draft', '__proto__ as "Go"'), []);
+  assert.deepEqual(refusedKinds('Draft', 'Go as "my__proto__"'), [], 'only the exact display name is refused');
+  assert.deepEqual(refusedKinds('Draft', 'Go as "__proto__x"'), []);
   assert.deepEqual(refusedKinds('Draft', 'Go'), []);
   assert.deepEqual(refusedKinds('constructor', 'Go'), [], 'constructor is an ordinary name');
   assert.deepEqual(refusedKinds('Draft', 'prototype'), [], 'prototype is an ordinary name');

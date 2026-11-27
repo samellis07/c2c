@@ -2552,7 +2552,11 @@ function refuseNames(app: App): void {
   // Profile names key the generated access policy; blueprint stage and transition names key its field rules.
   // Dropped silently by the generated map literal, a rule keyed __proto__ would fail open, so refuse it here.
   dropNamed(app.profiles, 'profile');
-  const displayName = (name: string): string => /(?:^|\bas\s+)"?([^"]*)"?\s*$/.exec(name)?.[1] ?? name;
+  // The display name of `Key as "Display"` (the quotes may be gone after parsing), else the name itself.
+  const displayName = (name: string): string => {
+    const shown = /\bas\s+(.+)$/.exec(name)?.[1] ?? name;
+    return shown.trim().replace(/^"(.*)"$/, '$1').trim();
+  };
   for (const w of app.workflows) {
     const bp = w.blueprint;
     if (!bp) continue;
