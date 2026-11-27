@@ -231,12 +231,12 @@ export function seedRecord(
   const parts = new Map<string, { field: string; part: string }>();
   for (const [field, list] of Object.entries(plan.composites[form] ?? {})) for (const p of list) parts.set(p.column, { field, part: p.part });
   const deferred = plan.deferred.get(form) ?? new Set<string>();
-  const record: Record<string, unknown> = {};
+  const record: Record<string, unknown> = Object.create(null);
   for (const [column, value] of Object.entries(row.columns)) {
     if (dropped.has(column) || deferred.has(column)) continue;
     const part = parts.get(column);
     if (part) {
-      const group = (record[part.field] ??= {}) as Record<string, unknown>;
+      const group = (record[part.field] ??= Object.create(null)) as Record<string, unknown>;
       group[part.part] = value;
       continue;
     }

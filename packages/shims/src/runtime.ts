@@ -3442,7 +3442,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           const cell = getPath(ctx.record, [field]);
           if ((typeof cell !== 'string' && typeof cell !== 'number') || String(cell) === '') continue;
           const row = await load(form, String(cell), 1, []);
-          if (row) (ctx.linked ??= {})[field] = row;
+          if (row) (ctx.linked ??= Object.create(null))[field] = row;
         }
       },
       set(ctx, path, value) {
@@ -4644,7 +4644,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       effect(ctx, key, effect) {
         if (!effect) return;
-        const queued = (ctx.clientEffects ??= {});
+        const queued = (ctx.clientEffects ??= Object.create(null));
         (queued[key] ??= []).push(effect);
       },
       rowValue(ctx, row, name) {

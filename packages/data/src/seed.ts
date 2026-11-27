@@ -530,13 +530,13 @@ function formNameForTable(plan: SchemaPlan, tableName: string): string | undefin
 }
 
 function planTables(app: App, plan: SchemaPlan): { tables: PlannedTable[]; composites: SeedCompositeMap } {
-  const composites: SeedCompositeMap = {};
+  const composites: SeedCompositeMap = Object.create(null);
   const planned: PlannedTable[] = [];
   const writableParts = writableCompositeParts(app);
   const remember = (tableName: string, field: Field, cols: SeedColumn[]) => {
     const parts = cols.filter((col) => col.part);
     if (!parts.length) return;
-    (composites[tableName] ??= {})[field.name] = parts.map((col) => ({ part: col.part!, column: col.name }));
+    (composites[tableName] ??= Object.create(null))[field.name] = parts.map((col) => ({ part: col.part!, column: col.name }));
   };
   for (const form of app.forms) {
     const schemaTable = plan.tables.find((table) => table.role === 'form' && table.form === form.name);

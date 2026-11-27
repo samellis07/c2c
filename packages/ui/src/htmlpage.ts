@@ -4941,11 +4941,11 @@ export function compileHtmlpage(
 
 /** The composite fields (a name, an address) of the forms a render reads, by form, or nothing when they hold none. */
 function compositesOf(app: App, forms: readonly string[]): { composites?: Record<string, Record<string, string[]>> } {
-  const out: Record<string, Record<string, string[]>> = {};
+  const out: Record<string, Record<string, string[]>> = Object.create(null);
   for (const name of forms) {
     for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
       if (field.subfields.length === 0 || /^(?:section|subform|grid|add notes)$/i.test(field.type ?? '')) continue;
-      (out[name] ??= {})[field.name] = field.subfields.map((part) => part.name);
+      (out[name] ??= Object.create(null))[field.name] = field.subfields.map((part) => part.name);
     }
   }
   return Object.keys(out).length ? { composites: out } : {};
@@ -4956,10 +4956,10 @@ function compositesOf(app: App, forms: readonly string[]): { composites?: Record
  * whose linked-record field the render's criteria compares (`"Head.Field"`).
  */
 function lookupPathsOf(app: App, server: string, forms: readonly string[]): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
+  const out: Record<string, Record<string, string>> = Object.create(null);
   for (const name of forms) {
     for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
-      if (field.lookup && server.includes(`field: "${field.name}.`)) (out[name] ??= {})[field.name] = field.lookup.form;
+      if (field.lookup && server.includes(`field: "${field.name}.`)) (out[name] ??= Object.create(null))[field.name] = field.lookup.form;
     }
   }
   return out;
@@ -4971,8 +4971,8 @@ function lookupPathsOf(app: App, server: string, forms: readonly string[]): Reco
  * field of (`shim.record.get(row, "Head", "Field")` or a `"Head.Field"` read).
  */
 function lookupReadsOf(app: App, server: string, forms: readonly string[]): { forms: Record<string, Record<string, string>>; fields: Record<string, Record<string, string[]>> } {
-  const linked: Record<string, Record<string, string>> = {};
-  const fields: Record<string, Record<string, string[]>> = {};
+  const linked: Record<string, Record<string, string>> = Object.create(null);
+  const fields: Record<string, Record<string, string[]>> = Object.create(null);
   for (const name of forms) {
     for (const field of app.forms.find((item) => item.name === name)?.fields ?? []) {
       if (!field.lookup || !/^[A-Za-z_]\w*$/.test(field.name)) continue;
@@ -4980,8 +4980,8 @@ function lookupReadsOf(app: App, server: string, forms: readonly string[]): { fo
       for (const m of server.matchAll(new RegExp(`shim\\.record\\.get\\([A-Za-z_$][\\w$]*, "${field.name}", "([A-Za-z_]\\w*)"`, 'g'))) read.add(m[1]!);
       for (const m of server.matchAll(new RegExp(`shim\\.datastore\\.(?:field|column)\\(ctx, [A-Za-z_$][\\w$]*, "${field.name}\\.([A-Za-z_]\\w*)"`, 'g'))) read.add(m[1]!);
       if (!read.size) continue;
-      (linked[name] ??= {})[field.name] = field.lookup.form;
-      (fields[name] ??= {})[field.name] = [...read].sort();
+      (linked[name] ??= Object.create(null))[field.name] = field.lookup.form;
+      (fields[name] ??= Object.create(null))[field.name] = [...read].sort();
     }
   }
   return { forms: linked, fields };
@@ -4994,18 +4994,22 @@ function linkedForms(map: Record<string, Record<string, string>>): string[] {
 
 /** Two form -> lookup -> linked-form maps as one. */
 function mergeLookupForms(...maps: Record<string, Record<string, string>>[]): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
-  for (const map of maps) for (const form of Object.keys(map).sort()) out[form] = { ...out[form], ...map[form] };
+  const out: Record<string, Record<string, string>> = Object.create(null);
+  for (const map of maps) for (const form of Object.keys(map).sort()) {
+    const merged = Object.create(null) as Record<string, string>;
+    Object.assign(merged, out[form], map[form]);
+    out[form] = merged;
+  }
   return out;
 }
 
 /** The multi lookups among the named lookup paths, as the junction tables that hold them. */
 function multiLookupsOfPaths(app: App, paths: Record<string, Record<string, string>>, schema?: SchemaPlan): ReturnType<typeof multiLookupsOf> {
   const all = multiLookupsOf(app, schema);
-  const out: ReturnType<typeof multiLookupsOf> = {};
+  const out: ReturnType<typeof multiLookupsOf> = Object.create(null);
   for (const form of Object.keys(paths).sort()) {
     for (const head of Object.keys(paths[form]!).sort()) {
-      if (Object.hasOwn(all, form) && Object.hasOwn(all[form]!, head)) (out[form] ??= {})[head] = all[form]![head]!;
+      if (Object.hasOwn(all, form) && Object.hasOwn(all[form]!, head)) (out[form] ??= Object.create(null))[head] = all[form]![head]!;
     }
   }
   return out;
