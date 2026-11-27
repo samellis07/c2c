@@ -47,6 +47,7 @@
  * This module never calls the network. The store is injected.
  */
 import { checkRow, quantizeRow, type WriteRefusal, type WriteRuleColumn } from '../../shims/src/write-rules.js';
+import { ownGet, ownSet } from '../../core/src/own-keys.js';
 import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { MAX_BATCH, ZCQL_IN_LIMIT } from './migrate.js';
 
@@ -321,8 +322,9 @@ export async function bulkLoad(opts: BulkLoadOptions): Promise<BulkLoadResult> {
     }));
     const deferredColumns = new Set(fk.filter((edge) => edge.via === 'deferred').map((edge) => edge.column));
     // A deferred lookup is empty on insert, so its mandatory rule waits for the update.
-    const columns = opts.columnsByTable?.[name]?.map((column) => (deferredColumns.has(column.name) ? { ...column, required: false } : column));
-    const state = (checkpoint.tables[name] ??= { chunks: Object.create(null) });
+    const columns = ownGet(opts.columnsByTable, name)?.map((column) => (deferredColumns.has(column.name) ? { ...column, required: false } : column));
+    let state = ownGet(checkpoint.tables, name);
+    if (!state) ownSet(checkpoint.tables, name, (state = { chunks: Object.create(null) }));
     const report: BulkTableReport = { table: name, source: 0, loaded: 0, refused: 0, chunks: 0, fk };
     reports.push(report);
     for (const chunkState of Object.values(state.chunks)) {
@@ -455,7 +457,7 @@ export async function bulkLoad(opts: BulkLoadOptions): Promise<BulkLoadResult> {
   // Self and cyclic lookups: row updates once every side has a ROWID.
   if (!dryRun && complete) {
     for (const name of order) {
-      const state = checkpoint.tables[name]!;
+      const state = ownGet(checkpoint.tables, name)!;
       const done = (state.deferred ??= Object.create(null) as Record<string, true | string[]>);
       if (state.deferredDone && !Object.values(done).some(Array.isArray)) continue;
       const edges = keys.filter((key) => key.table === name && byName.has(key.parent) && deferred.has(edgeId(key)));
