@@ -14,7 +14,7 @@
  * Nothing here deploys or contacts Catalyst.
  */
 
-import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, privacyFlagsOf, staticDefault, translationLeftovers, translationStrings, unquote, type App, type Device, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
+import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, privacyFlagsOf, REFUSED_NAME, staticDefault, translationLeftovers, translationStrings, unquote, type App, type Device, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
@@ -708,11 +708,19 @@ function addStats(a: TranslateStats, b: TranslateStats): void {
   a.todo += b.todo;
 }
 
+/** The counted todo kind for a form, field, report or page the analyzer refuses by name. */
+export const REFUSED_NAME_CONSTRUCT = 'refused-name';
+
 export function generate(app: App, options?: GenerateOptions): GenerateResult {
   const files: GeneratedFile[] = [];
   const used = new Set<string>();
   const stats = EMPTY_STATS();
-  const todos: TodoItem[] = [];
+  const todos: TodoItem[] = (app.refusedNames ?? []).map((item) => ({
+    construct: REFUSED_NAME_CONSTRUCT,
+    start: item.span.start,
+    end: item.span.end,
+    manualStep: `A ${item.kind}${item.form ? ` in form ${item.form}` : ''} is named ${REFUSED_NAME}, which the generated maps cannot carry, so it is refused and nothing is generated from it. Rename it in the source app and convert again.`,
+  }));
   const statementCoverage: CoverageEntry[] = [];
   const alertDiagnostics: AlertDiagnostic[] = [];
   const put = (path: string, source: string): string => {

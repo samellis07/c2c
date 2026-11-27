@@ -7,13 +7,28 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { deriveIr, parse } from '../../core/src/index.js';
+import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { compileHtmlpage } from '../src/htmlpage.js';
+
+/** The analyzer refuses a literal `__proto__` name at derive time, so the fixture is derived under a stand-in and renamed in the IR. */
+const STAND_IN = 'Zz_proto';
+function derive(text: string): App {
+  const app = deriveIr(parse(text.replaceAll('__proto__', STAND_IN)));
+  const restore = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (typeof value === 'string') (node as Record<string, unknown>)[key] = value.replaceAll(STAND_IN, '__proto__');
+      else restore(value);
+    }
+  };
+  restore(app);
+  return app;
+}
 
 const ADMIN = { name: 'Administrator', type: 'Users_Permissions', properties: [], modules: [], span: { start: 0, end: 0 } };
 
 function compile(form: string, composite: string, lookup: string, multi: string): string {
-  const app = deriveIr(parse(`application "Evil"
+  const app = derive((`application "Evil"
 {
 \tform Other
 \t{

@@ -502,6 +502,11 @@ export interface App {
   /** Source files, for multi-file (shape C) projects. */
   files?: string[];
   /**
+   * Forms, fields, reports and pages named exactly `__proto__`, removed from the
+   * IR (see `REFUSED_NAME`). Omitted when there are none, so other IR is unchanged.
+   */
+  refusedNames?: RefusedName[];
+  /**
    * Widget packages under `sidecars/widgets/`. Omitted when the project has none,
    * so an export that only has `.ds` files keeps the same IR.
    */
@@ -2519,6 +2524,39 @@ export function detectShape(doc: Document, header: Header | undefined): Shape {
   return 'unknown';
 }
 
+/** The one name the generated map literals cannot carry: `{"__proto__": ...}` sets the prototype instead of an entry. */
+export const REFUSED_NAME = '__proto__';
+
+export interface RefusedName {
+  kind: 'form' | 'field' | 'report' | 'page';
+  /** The enclosing form, for a field. */
+  form?: string;
+  span: Span;
+}
+
+/** Removes every form, field, report or page named `REFUSED_NAME` and records it on `app.refusedNames`. */
+function refuseNames(app: App): void {
+  const refused: RefusedName[] = [];
+  const dropFields = (fields: Field[], form: string): void => {
+    for (let i = fields.length - 1; i >= 0; i--) {
+      if (fields[i]!.name === REFUSED_NAME) refused.push({ kind: 'field', form, span: fields.splice(i, 1)[0]!.span });
+      else dropFields(fields[i]!.subfields, form);
+    }
+  };
+  const dropNamed = <T extends { name: string; span: Span }>(items: T[], kind: 'form' | 'report' | 'page'): void => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i]!.name === REFUSED_NAME) refused.push({ kind, span: items.splice(i, 1)[0]!.span });
+    }
+  };
+  dropNamed(app.forms, 'form');
+  for (const form of app.forms) dropFields(form.fields, form.name);
+  dropNamed(app.reports, 'report');
+  dropNamed(app.pages, 'page');
+  if (!refused.length) return;
+  refused.sort((a, b) => a.span.start - b.span.start || a.span.end - b.span.end);
+  app.refusedNames = refused;
+}
+
 export function emptyApp(shape: Shape): App {
   return {
     irVersion: IR_VERSION,
@@ -2583,6 +2621,7 @@ export function deriveIr(doc: Document, file?: string, roles: Map<Statement, str
     return app;
   }
   visit(ctx, top, 'document');
+  refuseNames(app);
   linkDeviceViews(app);
   app.dialect = detectDialect(doc).dialect;
   normaliseDialect(app);

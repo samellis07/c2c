@@ -6,12 +6,27 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { deriveIr, parse } from '../../core/src/index.js';
+import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { generateSchema } from '../../schema/src/generator.js';
 import { seedCompositeMap } from '../src/seed.js';
 
+/** The analyzer refuses a literal `__proto__` name at derive time, so the fixture is derived under a stand-in and renamed in the IR. */
+const STAND_IN = 'Zz_proto';
+function derive(text: string): App {
+  const app = deriveIr(parse(text.replaceAll('__proto__', STAND_IN)));
+  const restore = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (typeof value === 'string') (node as Record<string, unknown>)[key] = value.replaceAll(STAND_IN, '__proto__');
+      else restore(value);
+    }
+  };
+  restore(app);
+  return app;
+}
+
 function appOf(form: string, field: string) {
-  return deriveIr(parse(`application "Evil"\n{\n\tform ${form}\n\t{\n\t\t${field}\n\t\t(\n\t\t\ttype = address\n\t\t\tcity\n\t\t\t(\n\t\t\t\ttype = district_city\n\t\t\t)\n\t\t)\n\t}\n}\n`));
+  return derive((`application "Evil"\n{\n\tform ${form}\n\t{\n\t\t${field}\n\t\t(\n\t\t\ttype = address\n\t\t\tcity\n\t\t\t(\n\t\t\t\ttype = district_city\n\t\t\t)\n\t\t)\n\t}\n}\n`));
 }
 
 const shared = () => [Object.getOwnPropertyNames(Object.prototype).sort(), Object.getOwnPropertyNames(Object).sort()];
