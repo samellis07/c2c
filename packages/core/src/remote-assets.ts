@@ -11,7 +11,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
+import { NO_FOLLOW_READ_FLAGS } from './fs-kind.js';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 
@@ -191,7 +192,8 @@ function isExtension(value: unknown): value is AssetExtension {
 /** Open a regular file once, without following a link, and read from that descriptor; undefined when it is absent, linked, or not a plain file. */
 export function readPlainFile(path: string, max: number): Buffer | undefined {
   try {
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NONBLOCK: a FIFO opens at once and fstat says it is not a plain file, instead of blocking the open until a writer shows up.
+    const fd = openSync(path, NO_FOLLOW_READ_FLAGS);
     try {
       const stat = fstatSync(fd);
       if (!stat.isFile() || stat.size > max) return undefined;

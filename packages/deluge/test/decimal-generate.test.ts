@@ -45,7 +45,8 @@ const POS_FORMS = `\tform Add_Discount
 
 test('generated handlers pass each form’s shadow columns, and the point-of-sale query picks 100.00', async () => {
   const ir = snippet(POS_FORMS);
-  assert.deepEqual(decimalColumnsOf(ir), {
+  // The map has no prototype (a form called __proto__ must be an ordinary key); compare its plain-object form.
+  assert.deepEqual(JSON.parse(JSON.stringify(decimalColumnsOf(ir))), {
     Add_Discount: { Total_price: { shadow: 'Total_price__n', scale: 2 }, Discount: { shadow: 'Discount__n', scale: 2 } },
     Add_Invoice: { Total: { shadow: 'Total__n', scale: 2 }, Discount: { shadow: 'Discount__n', scale: 2 } },
   });
@@ -108,7 +109,8 @@ test('a form with two subforms is a Data Store table: its decimals and its child
 \t\t\ttype = decimal
 \t\t)
 \t}`);
-  assert.deepEqual(decimalColumnsOf(ir), {
+  // The map has no prototype (a form called __proto__ must be an ordinary key); compare its plain-object form.
+  assert.deepEqual(JSON.parse(JSON.stringify(decimalColumnsOf(ir))), {
     Bundle__A: { Cost: { shadow: 'Cost__n', scale: 2 } },
     Bundle: { Total: { shadow: 'Total__n', scale: 2 } },
   });

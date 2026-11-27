@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkAssetUrl, extensionForContentType, isDeniedAddress, parseAssetLock, sniffImage } from '../src/remote-assets.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { checkAssetUrl, extensionForContentType, isDeniedAddress, parseAssetLock, readPlainFile, sniffImage } from '../src/remote-assets.js';
 
 test('checkAssetUrl accepts a plain https host and refuses everything else', () => {
   assert.equal(checkAssetUrl('https://img.example.com/a/b.png?x=1').ok, true);
@@ -67,4 +71,25 @@ test('parseAssetLock keeps well-formed entries once and ignores a wrong version 
     }),
   );
   assert.deepEqual(entries, [{ url: 'https://a.example.com/x.png', status: 'refused', reason: 'r' }]);
+});
+
+test('readPlainFile reads a plain file and refuses a link, a directory, a FIFO, an oversize file and a missing path without blocking', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-plain-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const plain = join(dir, 'plain.json');
+  writeFileSync(plain, 'hello');
+  assert.equal(readPlainFile(plain, 100)?.toString('utf8'), 'hello');
+  assert.equal(readPlainFile(plain, 3), undefined, 'over the size cap');
+  symlinkSync(plain, join(dir, 'link.json'));
+  assert.equal(readPlainFile(join(dir, 'link.json'), 100), undefined, 'a symbolic link is not followed');
+  assert.equal(readPlainFile(dir, 100), undefined, 'a directory');
+  assert.equal(readPlainFile(join(dir, 'missing.json'), 100), undefined, 'a missing path');
+  const fifo = join(dir, 'pipe');
+  try {
+    execFileSync('mkfifo', [fifo]);
+  } catch {
+    return; // no mkfifo on this platform
+  }
+  // An open of a FIFO without O_NONBLOCK waits for a writer for ever; this returns at once.
+  assert.equal(readPlainFile(fifo, 100), undefined, 'a FIFO');
 });

@@ -5077,14 +5077,14 @@ const decimalColumnCache = new WeakMap<App, Record<string, DecimalColumns>>();
 export function decimalColumnsOf(app: App): Record<string, DecimalColumns> {
   const cached = decimalColumnCache.get(app);
   if (cached) return cached;
-  const out: Record<string, Record<string, DecimalColumn>> = {};
+  const out: Record<string, Record<string, DecimalColumn>> = Object.create(null);
   for (const table of schemaOf(app).tables) {
     if (table.nosql || table.role === 'junction') continue;
     const key = table.role === 'form' ? table.form : table.name;
     for (const column of table.columns) {
       if (!column.shadowFor) continue;
       const exact = table.columns.find((c) => c.name === column.shadowFor);
-      (out[key] ??= {})[exact?.field ?? column.shadowFor] = { shadow: column.name, scale: exact?.precision ?? 2 };
+      (out[key] ??= Object.create(null))[exact?.field ?? column.shadowFor] = { shadow: column.name, scale: exact?.precision ?? 2 };
     }
   }
   decimalColumnCache.set(app, out);
@@ -5257,7 +5257,7 @@ export interface MultiLookupSpec {
 
 /** form → multi-lookup field → the junction table that holds it (schema-derived, shared by the generated runtime and offline verification). */
 export function multiLookupsOf(app: App, schema?: SchemaPlan): Record<string, Record<string, MultiLookupSpec>> {
-  const map: Record<string, Record<string, MultiLookupSpec>> = {};
+  const map: Record<string, Record<string, MultiLookupSpec>> = Object.create(null);
   for (const table of (schema ?? schemaOf(app)).tables) {
     if (table.role !== 'junction') continue;
     const parent = table.columns.find((column) => column.name === 'parent_id');
@@ -5265,7 +5265,7 @@ export function multiLookupsOf(app: App, schema?: SchemaPlan): Record<string, Re
     const value = table.columns.find((column) => column.relation && column.name !== parent?.name);
     if (!parent || !order || !value) continue;
     const field = value.field ?? value.name;
-    (map[table.form] ??= {})[field] = { table: table.name, parentColumn: parent.name, valueColumn: value.name, orderColumn: order.name };
+    (map[table.form] ??= Object.create(null))[field] = { table: table.name, parentColumn: parent.name, valueColumn: value.name, orderColumn: order.name };
   }
   return map;
 }
