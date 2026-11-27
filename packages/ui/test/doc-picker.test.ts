@@ -89,7 +89,13 @@ test('stripping the opt-in CSP restores the default policy byte for byte', () =>
 test('the opt-in CSP composes with the function origin connect-src', () => {
   const origin = 'https://demo-123.development.catalystserverless.com';
   const html = `<meta http-equiv="Content-Security-Policy" content="${SHELL_CONTENT_SECURITY_POLICY.replace("connect-src 'self'", `connect-src 'self' ${origin}`)}">`;
-  assert.match(applyDocPickerCsp(html), new RegExp(`connect-src 'self' ${origin.replace(/\./g, '\\.')} https://www\\.googleapis\\.com;`));
+  // Compare the directive's source list token by token, not by a pattern over hostnames.
+  const policy = /content="([^"]*)"/.exec(applyDocPickerCsp(html))?.[1] ?? '';
+  const connect = policy.split(';').map((directive) => directive.trim()).find((directive) => directive.startsWith('connect-src '));
+  assert.ok(connect, 'connect-src is present');
+  const sources = connect.split(/\s+/).slice(1);
+  assert.deepEqual(sources.slice(0, 2), ["'self'", origin]);
+  assert.equal(sources.filter((source) => source === 'https://www.googleapis.com').length, 1, 'the picker origin is allowed once');
 });
 
 test('the runtime config carries the picker only when configured, and escapes the values', () => {

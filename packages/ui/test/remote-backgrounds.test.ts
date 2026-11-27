@@ -62,7 +62,7 @@ test('a fetched https background in a static style rule is rewritten to the same
     const model = buildModel(p.load());
     assert.deepEqual(model.todos.filter((todo) => todo.area === 'zml'), []);
     assert.match(model.pages[0]?.scopedCss ?? '', new RegExp(`url\\(bg/${SHA}\\.png\\)`));
-    assert.doesNotMatch(JSON.stringify(model), /img\.example\.com/);
+    assert.equal(JSON.stringify(model).split('img.example.com').length, 1, 'the remote host is not carried into the model');
   } finally {
     rmSync(p.dir, { recursive: true, force: true });
   }
