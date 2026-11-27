@@ -126,7 +126,7 @@ test('MUST-FAIL guard: a column not declared unique keeps accepting repeats', as
 
 test('uniqueByTable lists exactly the is_unique columns of the table plan', () => {
   const app = deriveIr(parse(APP));
-  assert.deepEqual(uniqueByTable(tableCreatePlan(generateSchema(app))), { Contact: ['Email'] });
+  assert.deepEqual({ ...uniqueByTable(tableCreatePlan(generateSchema(app))) }, { Contact: ['Email'] });
 });
 
 test('offline verify-behavior refuses a duplicate submit on a schema-unique column', async () => {
@@ -167,5 +167,5 @@ test('foreignKeysByTable lists the columns the table plan types as foreign key',
     { table: 'Child', columns: [{ column_name: 'Parent', data_type: 'foreign key' }, { column_name: 'Name', data_type: 'varchar' }] },
     { table: 'Plain', columns: [{ column_name: 'Name', data_type: 'varchar' }] },
   ] as unknown as Parameters<typeof foreignKeysByTable>[0];
-  assert.deepEqual(foreignKeysByTable(steps), { Child: ['Parent'] });
+  assert.deepEqual({ ...foreignKeysByTable(steps) }, { Child: ['Parent'] });
 });

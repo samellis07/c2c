@@ -445,7 +445,7 @@ interface FakeSdk {
 
 /** table → the columns its create step marks is_unique (the store enforces only these). */
 export function uniqueByTable(steps: readonly TableCreateStep[]): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
+  const out: Record<string, string[]> = Object.create(null);
   for (const step of steps) {
     for (const column of step.columns) {
       if (column.is_unique) (out[step.table] ??= []).push(column.column_name);
@@ -456,7 +456,7 @@ export function uniqueByTable(steps: readonly TableCreateStep[]): Record<string,
 
 /** table → the columns its create step types as "foreign key" (a ROWID). */
 export function foreignKeysByTable(steps: readonly TableCreateStep[]): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
+  const out: Record<string, string[]> = Object.create(null);
   for (const step of steps) {
     for (const column of step.columns) {
       if (column.data_type === 'foreign key') (out[step.table] ??= []).push(column.column_name);

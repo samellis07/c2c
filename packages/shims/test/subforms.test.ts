@@ -131,7 +131,7 @@ test('attachSubforms reads each subform once per 300 parents, in row order then 
 test('the schema plan names the child tables the runtime writes: every inline subform, parent_id and row_order', () => {
   const sub = (name: string) => `\t\t${name}\n\t\t(\n\t\t\ttype = grid\n\t\t\tItem\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t)`;
   const app = deriveIr(parse(`application "Demo"\n{\n\tform Order\n\t{\n${sub('Lines')}\n${sub('Notes')}\n\t}\n\tform Plain\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n}\n`));
-  assert.deepEqual(subformTablesOf(generateSchema(app)), TABLES);
+  assert.deepEqual({ ...subformTablesOf(generateSchema(app)) }, TABLES);
 });
 
 test('a constructed { __row } subform row writes its values, not the wrapper', async () => {

@@ -8371,7 +8371,7 @@ function readValues(formEl) {
 
   // Identify which names are data-choice groups
   const dataChoiceNames = new Set();
-  const dataChoiceBoxes = {};
+  const dataChoiceBoxes = Object.create(null);
   for (const box of formEl.querySelectorAll('input[type="checkbox"][data-choice]')) {
     if (!box.name) continue;
     dataChoiceNames.add(box.name);

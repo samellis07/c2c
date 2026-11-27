@@ -1553,7 +1553,7 @@ export function columnRenamesOf(plan: Pick<SchemaPlan, 'tables'>): Record<string
 
 /** Parent form → its inline subforms as child tables, in schema order. The shape `shim` subform helpers take. */
 export function subformTablesOf(plan: SchemaPlan): Record<string, { field: string; table: string; parentColumn: string; orderColumn: string }[]> {
-  const out: Record<string, { field: string; table: string; parentColumn: string; orderColumn: string }[]> = {};
+  const out: Record<string, { field: string; table: string; parentColumn: string; orderColumn: string }[]> = Object.create(null);
   for (const table of plan.tables) {
     const link = table.subform;
     if (table.role !== 'child' || !link) continue;
