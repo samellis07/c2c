@@ -2528,7 +2528,7 @@ export function detectShape(doc: Document, header: Header | undefined): Shape {
 export const REFUSED_NAME = '__proto__';
 
 export interface RefusedName {
-  kind: 'form' | 'field' | 'report' | 'page';
+  kind: 'form' | 'field' | 'report' | 'page' | 'profile' | 'blueprint stage' | 'blueprint transition';
   /** The enclosing form, for a field. */
   form?: string;
   span: Span;
@@ -2543,12 +2543,26 @@ function refuseNames(app: App): void {
       else dropFields(fields[i]!.subfields, form);
     }
   };
-  const dropNamed = <T extends { name: string; span: Span }>(items: T[], kind: 'form' | 'report' | 'page'): void => {
+  const dropNamed = <T extends { name: string; span: Span }>(items: T[], kind: 'form' | 'report' | 'page' | 'profile'): void => {
     for (let i = items.length - 1; i >= 0; i--) {
       if (items[i]!.name === REFUSED_NAME) refused.push({ kind, span: items.splice(i, 1)[0]!.span });
     }
   };
   dropNamed(app.forms, 'form');
+  // Profile names key the generated access policy; blueprint stage and transition names key its field rules.
+  // Dropped silently by the generated map literal, a rule keyed __proto__ would fail open, so refuse it here.
+  dropNamed(app.profiles, 'profile');
+  const displayName = (name: string): string => /(?:^|\bas\s+)"?([^"]*)"?\s*$/.exec(name)?.[1] ?? name;
+  for (const w of app.workflows) {
+    const bp = w.blueprint;
+    if (!bp) continue;
+    for (let i = bp.stages.length - 1; i >= 0; i--) {
+      if (displayName(bp.stages[i]!.name).trim() === REFUSED_NAME) refused.push({ kind: 'blueprint stage', span: bp.stages.splice(i, 1)[0]!.span });
+    }
+    for (let i = bp.transitions.length - 1; i >= 0; i--) {
+      if (displayName(bp.transitions[i]!.name).trim() === REFUSED_NAME) refused.push({ kind: 'blueprint transition', span: bp.transitions.splice(i, 1)[0]!.span });
+    }
+  }
   for (const form of app.forms) dropFields(form.fields, form.name);
   dropNamed(app.reports, 'report');
   dropNamed(app.pages, 'page');

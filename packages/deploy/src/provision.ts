@@ -1296,7 +1296,8 @@ function learnKinds(result: unknown, byKind: Record<string, Record<string, strin
 /** Learned table ids only — the source of every TABLE_* function env id. */
 export function learnedTableIds(learned: ProvisionState['learned']): Record<string, string> {
   const tables = learned.byKind?.table;
-  return isRecord(tables) ? (tables as Record<string, string>) : {};
+  // Prototype-less: a table named constructor or toString is not an inherited member to the readers of this map.
+  return Object.assign(Object.create(null) as Record<string, string>, isRecord(tables) ? (tables as Record<string, string>) : {});
 }
 
 function learnIds(result: unknown, learned: ProvisionState['learned'], stepId?: string): void {
