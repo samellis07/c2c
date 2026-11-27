@@ -2372,10 +2372,23 @@ test('the ExecuteFunction button tag scan stays linear on adversarial templates'
   compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n<% x = 1; %>\n${execButton('helpers.mark', '7')}`);
   for (const hostile of junk) {
     const snippet = `htmlpage hp1()\ncontent\n<% x = 1; %>\n${hostile}${execButton('helpers.mark', '7')}${hostile}`;
-    const t0 = performance.now();
-    compileHtmlpage(app, 'Home', 'hp1', snippet);
-    const elapsed = performance.now() - t0;
-    assert.ok(elapsed < 250, `input of ${snippet.length} chars took ${elapsed.toFixed(1)} ms`);
+    // Linearity, not a wall-clock budget: compile the same shape at half size and require
+    // the full-size run to stay well under the quadratic ratio (4x). A shared CI runner can be
+    // several times slower than a laptop, so a fixed millisecond bound flakes.
+    const half = `htmlpage hp1()\ncontent\n<% x = 1; %>\n${hostile.slice(0, hostile.length / 2)}${execButton('helpers.mark', '7')}${hostile.slice(0, hostile.length / 2)}`;
+    const time = (s: string) => {
+      let best = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const t0 = performance.now();
+        compileHtmlpage(app, 'Home', 'hp1', s);
+        best = Math.min(best, performance.now() - t0);
+      }
+      return best;
+    };
+    const small = Math.max(time(half), 1);
+    const full = time(snippet);
+    assert.ok(full / small < 3.2, `input of ${snippet.length} chars took ${full.toFixed(1)} ms vs ${small.toFixed(1)} ms at half size`);
+    assert.ok(full < 5000, `input of ${snippet.length} chars took ${full.toFixed(1)} ms`);
   }
 });
 
