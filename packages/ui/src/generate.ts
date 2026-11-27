@@ -3416,12 +3416,12 @@ function capturedPosition(req) {
     if (target) lookupLinks[f.name] = target.name;
   }
   // The lookups of each linked form, so `input.A.B.Field` follows the chain.
-  const lookupGraph: Record<string, Record<string, string>> = {};
+  const lookupGraph: Record<string, Record<string, string>> = Object.create(null);
   for (const f2 of app.forms) {
     for (const g of f2.fields) {
       if (!g.lookup || Object.hasOwn(multiLookupMap[f2.name] ?? {}, g.name)) continue;
       const to = app.forms.find((item) => item.name.toLowerCase() === g.lookup!.form.toLowerCase());
-      if (to) (lookupGraph[f2.name] ??= {})[g.name] = to.name;
+      if (to) (lookupGraph[f2.name] ??= Object.create(null))[g.name] = to.name;
     }
   }
   const lookupHydrate = Object.keys(lookupLinks).length && validate.add.length + validate.edit.length + success.add.length + success.edit.length + presuccess.add.length + presuccess.edit.length

@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { withCliLock } from './cli-lock.js';
 import { LockedExportError, parseFileWithSidecars, parseProject, widgetCommandStatus, type App } from '../../core/src/index.js';
+import { readPlainFile } from '../../core/src/remote-assets.js';
 import { seedCompositeMap } from '../../data/src/seed.js';
 import { stratusRestSink } from '../../data/src/files.js';
 import { assertAllowedHost, catalystAuthHeaders, catalystQueryUrl, emptyCheckpoint, type CatalystScope, type Checkpoint, type FetchLike, type MigrateResult } from '../../data/src/migrate.js';
@@ -614,15 +615,32 @@ export const DEPLOYED_MODEL_DIR = '.c2c-deployed-model';
  * old export. Only a single .ds file target is recorded; returns the copy, or undefined.
  */
 export function recordDeployedModel(dir: string, target: string): string | undefined {
-  if (!statSync(target, { throwIfNoEntry: false })?.isFile() || !target.toLowerCase().endsWith('.ds')) return undefined;
+  if (!target.toLowerCase().endsWith('.ds')) return undefined;
+  // One open per file, no link followed, read from that descriptor: no check-then-read window.
+  const model = readPlainFile(target, MAX_RECORDED_MODEL_BYTES);
+  if (!model) return undefined;
   const folder = join(dir, DEPLOYED_MODEL_DIR);
   rmSync(folder, { recursive: true, force: true });
   mkdirSync(folder, { recursive: true });
   const copy = join(folder, basename(target));
-  writeFileSync(copy, readFileSync(target));
-  const edits = editsPathFor(target);
-  if (existsSync(edits)) writeFileSync(editsPathFor(copy), readFileSync(edits));
+  writeFileSync(copy, model);
+  const edits = readPlainFile(editsPathFor(target), MAX_RECORDED_MODEL_BYTES);
+  if (edits) writeFileSync(editsPathFor(copy), edits);
   return copy;
+}
+
+/** A recorded .ds export (and its edits sidecar) larger than this is not copied. */
+const MAX_RECORDED_MODEL_BYTES = 256 * 1024 * 1024;
+
+/** stat that treats a missing path and a path under a plain file (ENOTDIR, as on Linux) alike: nothing there. */
+function statIfPresent(path: string): ReturnType<typeof statSync> | undefined {
+  try {
+    return statSync(path);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+    throw err;
+  }
 }
 
 /** A model to compare against must have something in it: a previous export that parses to no tables would plan every column as an add and make a deleted field invisible. */
@@ -635,10 +653,12 @@ export function requireComparableModel(app: App, label: string): App {
 
 /** `--previous` may name a deploy folder: the model it recorded stands in for the old export. */
 export function deployedModelPath(previous: string): string {
+  // Decide file or folder first: a .ds FILE has no children, so probing <file>/.c2c-deployed-model is ENOTDIR on Linux.
+  if (!statIfPresent(previous)?.isDirectory()) return previous;
   const folder = join(previous, DEPLOYED_MODEL_DIR);
-  if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) {
+  if (!statIfPresent(folder)?.isDirectory()) {
     // A deploy folder without its recorded model cannot stand in for the old export: an empty comparison would read every column as new and hide a delete. Fail closed.
-    if (statSync(join(previous, STATE_FILE), { throwIfNoEntry: false })?.isFile()) {
+    if (statIfPresent(join(previous, STATE_FILE))?.isFile()) {
       throw new Error(`${previous} is a deploy folder with no recorded deployed model (${DEPLOYED_MODEL_DIR}); pass the previous .ds export as --previous instead, or deploy once more to record it`);
     }
     return previous;

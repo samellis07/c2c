@@ -1721,7 +1721,9 @@ test('the Google Drive picker is opt-in at deploy: the CSP origins and the key a
   const both = { C2C_GOOGLE_PICKER_API_KEY: PICKER_KEY, C2C_GOOGLE_PICKER_CLIENT_ID: PICKER_CLIENT };
   assert.deepEqual(docPickerFor(withBrowse, {}, io), {});
   assert.deepEqual(docPickerFor(withBrowse, both, io), { config: { apiKey: PICKER_KEY, clientId: PICKER_CLIENT } });
-  assert.ok(said.includes('Google Drive picker enabled') && !said.includes(PICKER_KEY) && !said.includes(PICKER_CLIENT));
+  assert.ok(said.includes('Google Drive picker enabled'));
+  assert.equal(said.split(PICKER_KEY).length, 1, 'the API key is not echoed');
+  assert.equal(said.split(PICKER_CLIENT).length, 1, 'the client id is not echoed');
   said = '';
   assert.deepEqual(docPickerFor(localOnly, both, io), {});
   assert.match(said, /not enabled/);

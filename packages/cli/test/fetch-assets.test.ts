@@ -189,7 +189,7 @@ test('fetchAssetsInto writes the cache and a sorted lock, counts refusals, and a
       'failed https://img.example.com/b.png?x=1&y=2',
       'refused http://old.example.com/c.png',
     ].sort((a, b) => (a.split(' ')[1]! < b.split(' ')[1]! ? -1 : 1)));
-    assert.equal(s.connected.some((line) => line.includes('skip') || line.includes('old.example.com')), false);
+    assert.equal(s.connected.some((line) => line.split(' ').includes('skip') || line.split(' ')[0] === 'old.example.com'), false);
     const lock = readFileSync(join(dir, 'c2c-assets.lock.json'), 'utf8');
     const files = readdirSync(join(dir, 'c2c-assets'));
     assert.equal(files.length, 1);
@@ -198,7 +198,7 @@ test('fetchAssetsInto writes the cache and a sorted lock, counts refusals, and a
     const s2: Script = { routes: { 'https://img.example.com/b.png?x=1&y=2': () => response(404, {}, new Uint8Array()) }, connected: [] };
     const second = await fetchAssetsInto(dir, [DS], deps(s2));
     assert.equal(second.reused, 1);
-    assert.equal(s2.connected.some((line) => line.startsWith('img.example.com') && line.includes('93.184.216.34')), true);
+    assert.equal(s2.connected.some((line) => line.split(' ')[0] === 'img.example.com' && line.split(' ').includes('93.184.216.34')), true);
     assert.equal(readFileSync(join(dir, 'c2c-assets.lock.json'), 'utf8'), lock);
   } finally {
     rmSync(dir, { recursive: true, force: true });

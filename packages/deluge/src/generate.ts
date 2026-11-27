@@ -5231,13 +5231,13 @@ export function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
 
 /** form → autonumber field → start index, for the runtime's claim-table counters (shims/src/counters.ts). */
 export function autonumbersOf(app: App, schema?: SchemaPlan): Record<string, Record<string, { start?: number }>> {
-  const map: Record<string, Record<string, { start?: number }>> = {};
+  const map: Record<string, Record<string, { start?: number }>> = Object.create(null);
   for (const table of (schema ?? schemaOf(app)).tables) {
     if (table.role !== 'form') continue;
     for (const column of table.columns) {
       if (column.matrixId !== 'auto-number') continue;
       const start = Number(/start index (\d+)/.exec(column.note ?? '')?.[1]);
-      (map[table.form] ??= {})[column.field ?? column.name] = Number.isSafeInteger(start) && start >= 0 ? { start } : {};
+      (map[table.form] ??= Object.create(null))[column.field ?? column.name] = Number.isSafeInteger(start) && start >= 0 ? { start } : {};
     }
   }
   return map;

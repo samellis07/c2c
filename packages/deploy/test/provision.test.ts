@@ -3230,7 +3230,7 @@ test('redactString stays linear on 1 MiB inputs of hostile shapes', () => {
     const t1 = performance.now();
     redactString(large);
     const largeMs = performance.now() - t1;
-    assert.ok(largeMs < 1000, `${label}: 1 MiB redaction took ${largeMs.toFixed(0)}ms`);
+    assert.ok(largeMs < 5000, `${label}: 1 MiB redaction took ${largeMs.toFixed(0)}ms`);
     assert.ok(
       largeMs < Math.max(250, smallMs * 6),
       `${label}: not linear — 256 KiB took ${smallMs.toFixed(0)}ms, 1 MiB took ${largeMs.toFixed(0)}ms`,

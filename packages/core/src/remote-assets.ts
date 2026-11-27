@@ -11,7 +11,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 
@@ -188,10 +188,9 @@ function isExtension(value: unknown): value is AssetExtension {
   return typeof value === 'string' && (ASSET_EXTENSIONS as readonly string[]).includes(value);
 }
 
-/** Open a regular file without following a link; undefined when it is absent, linked, or not a plain file. */
-function readPlainFile(path: string, max: number): Buffer | undefined {
+/** Open a regular file once, without following a link, and read from that descriptor; undefined when it is absent, linked, or not a plain file. */
+export function readPlainFile(path: string, max: number): Buffer | undefined {
   try {
-    if (!lstatSync(path).isFile()) return undefined;
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const stat = fstatSync(fd);

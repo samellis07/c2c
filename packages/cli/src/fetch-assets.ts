@@ -28,6 +28,7 @@ import {
   extensionForContentType,
   isDeniedAddress,
   parseAssetLock,
+  readPlainFile,
   sha256Hex,
   sniffImage,
   type AssetExtension,
@@ -204,6 +205,9 @@ function refuseSymlink(path: string): void {
   if (link) throw new Error('fetch-assets refuses to write through a symbolic link in the export directory');
 }
 
+/** The lock is a small JSON file; anything larger is not ours. */
+const ASSET_MAX_LOCK_BYTES = 1_048_576;
+
 /**
  * Fetch every literal remote background url found in `sources` (the export's
  * text), write the cache and the lock under `dir`. A url already locked as
@@ -216,7 +220,8 @@ export async function fetchAssetsInto(dir: string, sources: readonly string[], d
   refuseSymlink(lockPath);
   refuseSymlink(cacheDir);
   const existing = new Map<string, AssetLockEntry>();
-  if (existsSync(lockPath) && lstatSync(lockPath).isFile()) for (const entry of parseAssetLock(readFileSync(lockPath, 'utf8'))) existing.set(entry.url, entry);
+  const lockBytes = readPlainFile(lockPath, ASSET_MAX_LOCK_BYTES);
+  if (lockBytes) for (const entry of parseAssetLock(lockBytes.toString('utf8'))) existing.set(entry.url, entry);
   const urls = [...new Set(sources.flatMap((text) => literalBackgroundUrls(text)))].sort();
   const entries: AssetLockEntry[] = [];
   const summary: FetchAssetsSummary = { entries, fetched: 0, refused: 0, failed: 0, reused: 0, overCap: Math.max(0, urls.length - ASSET_MAX_URLS) };

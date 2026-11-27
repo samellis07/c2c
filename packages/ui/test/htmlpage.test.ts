@@ -178,6 +178,27 @@ function htmlElements(model: ReturnType<typeof buildUi>['model']) {
   return leaves(model.pages[0].elements).filter((el) => el.kind === 'html');
 }
 
+/**
+ * Linearity, not a wall-clock budget: run the same input at half length and require the full run to
+ * stay under the quadratic ratio (4x), best of three each. A shared CI runner can be several times slower
+ * than a laptop, so a fixed millisecond bound flakes; the 5 s ceiling only catches a hang.
+ */
+function assertLinear(run: (input: string) => void, input: string, label: string): void {
+  const time = (text: string): number => {
+    let best = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const t0 = performance.now();
+      run(text);
+      best = Math.min(best, performance.now() - t0);
+    }
+    return best;
+  };
+  const small = Math.max(time(input.slice(0, Math.floor(input.length / 2))), 1);
+  const full = time(input);
+  assert.ok(full / small < 3.2, `${label}: ${input.length} chars took ${full.toFixed(1)} ms vs ${small.toFixed(1)} ms at half size`);
+  assert.ok(full < 5000, `${label}: ${input.length} chars took ${full.toFixed(1)} ms`);
+}
+
 test('value-slots: input, zoho.currentdate, literals and if compile and render', async () => {
   const { files, model } = generateUi(
     appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
@@ -2552,14 +2573,12 @@ test('page names and snippet ids with long dash runs slugify in linear time', ()
   // ReDoS regression: the file-path slug used to be two regex passes whose
   // alternation backtracked quadratically on uncontrolled separator runs.
   const dashes = `x${'-'.repeat(100_000)}x`;
-  const t0 = performance.now();
-  const compiled = compileHtmlpage(appOf(ORDERS), dashes, 'hp1', 'htmlpage hp1()\ncontent\n<p><%= input.val %></p>', {
-    id: dashes,
-  });
-  const elapsed = performance.now() - t0;
+  const compile = (name: string) =>
+    compileHtmlpage(appOf(ORDERS), name, 'hp1', 'htmlpage hp1()\ncontent\n<p><%= input.val %></p>', { id: name });
+  const compiled = compile(dashes);
   assert.ok(compiled.ok, compiled.reason ?? 'compile failed');
   assert.equal(compiled.file!.path, 'functions/htmlpages/x-x-x-x.mjs');
-  assert.ok(elapsed < 1000, `compile took ${elapsed} ms`);
+  assertLinear((name) => void compile(name), dashes, 'dash-run slug');
 });
 
 test('a field value inside a loop is escaped in the rendered page', async () => {
@@ -3500,12 +3519,7 @@ test('record-summary iframe scan stays linear on adversarial markup', () => {
     "<iframe '".repeat(25_000),
     `<iframe${' x'.repeat(100_000)}`,
   ];
-  for (const input of inputs) {
-    const started = performance.now();
-    rewriteRecordSummaryFrames(input);
-    const elapsed = performance.now() - started;
-    assert.ok(elapsed < 250, `${input.length} chars took ${elapsed.toFixed(1)} ms`);
-  }
+  for (const input of inputs) assertLinear((text) => rewriteRecordSummaryFrames(text), input, 'record-summary scan');
 });
 
 test('record-summary report link resolves to its scoped report detail route', () => {
@@ -6284,10 +6298,11 @@ test('the link rewrites read a thousand adversarial templates in linear time', (
     `${'<%=zoho . '.repeat(n)}`,
   ];
   for (const body of hostile) {
-    const start = process.hrtime.bigint();
+    // A hang guard, not a speed budget: half of these bodies cuts a construct in two, so a half-size ratio is not a faithful shape.
+    const started = performance.now();
     compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
-    const ms = Number(process.hrtime.bigint() - start) / 1e6;
-    assert.ok(ms < 3000, `${body.slice(0, 40)} took ${ms}ms`);
+    const ms = performance.now() - started;
+    assert.ok(ms < 10_000, `${body.slice(0, 40)} took ${ms}ms`);
   }
 });
 

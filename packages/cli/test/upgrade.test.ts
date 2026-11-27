@@ -34,9 +34,9 @@ function sha(data: string | Buffer): string {
 function tree(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (current: string): void => {
-    for (const name of readdirSync(current).sort()) {
-      const path = join(current, name);
-      if (statSync(path).isDirectory()) walk(path);
+    for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) walk(path);
       else out[relative(dir, path)] = sha(readFileSync(path));
     }
   };
@@ -285,7 +285,7 @@ test('the text report names the version, the changes and what is always kept', (
   const dir = oldPlan();
   ageFile(dir, 'plan.json', '{"old":true}\n');
   const text = upgradeAsText(planUpgrade(input({ planDir: dir })).report);
-  assert.match(text, new RegExp(`version: 0\\.1\\.0 -> ${c2cVersion().replace(/\./g, '\\.')} \\(upgrade\\)`));
+  assert.match(text, new RegExp(`version: 0\\.1\\.0 -> ${c2cVersion().replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')} \\(upgrade\\)`));
   assert.match(text, /regenerated \(1\):\n {4}- plan\.json/);
   assert.match(text, /data: no row is read or changed by the upgrade/);
   assert.match(text, /every row in the Data Store/);

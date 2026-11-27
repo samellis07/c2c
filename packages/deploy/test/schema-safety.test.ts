@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -186,6 +186,23 @@ test('c2c plan --previous on a Creator rename with no --rename: refused, names t
   assert.match(err, /detected rename Book\.Author -> Author_Renamed/);
   assert.match(err, /values move to the new name/);
   assert.doesNotMatch(err, /- drop column Book\.Author/);
+});
+
+test('--previous may be a .ds file, a path under a file (ENOTDIR on Linux) or a folder, and a linked model is not recorded', (t) => {
+  const dir = scratch(t);
+  // A path whose parent is a plain file: stat says ENOTDIR on Linux, ENOENT elsewhere; both mean nothing is there.
+  const underFile = join(LIBRARY, '.c2c-deployed-model');
+  assert.equal(deployedModelPath(underFile), underFile, 'a path under a file is passed through, not thrown');
+  assert.equal(deployedModelPath(LIBRARY), LIBRARY, 'a .ds file is passed through');
+  const deploy = join(dir, 'deploy');
+  const recorded = recordDeployedModel(deploy, LIBRARY);
+  assert.ok(recorded, 'a plain .ds file is recorded');
+  assert.equal(deployedModelPath(deploy), recorded, 'a deploy folder resolves to its recorded model');
+  assert.equal(deployedModelPath(join(dir, 'missing')), join(dir, 'missing'), 'a missing path is passed through');
+  // A link is never followed when recording: the model would be whatever the link points at by then.
+  const link = join(dir, 'linked.ds');
+  symlinkSync(LIBRARY, link);
+  assert.equal(recordDeployedModel(join(dir, 'deploy2'), link), undefined, 'a symbolic link is not recorded');
 });
 
 test('the deployed model is recorded beside the deploy and --previous accepts that folder instead of the old export', async (t) => {

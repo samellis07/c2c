@@ -5280,10 +5280,23 @@ test('singleReturnText stays linear on long whitespace and semicolon runs', () =
     'return x' + ' ;'.repeat(100_000),
     ' '.repeat(100_000) + 'return' + '\n'.repeat(100_000) + ';' + ' '.repeat(100_000) + 'y',
   ];
-  const start = process.hrtime.bigint();
-  for (const body of inputs) singleReturnText(body);
-  const ms = Number(process.hrtime.bigint() - start) / 1e6;
-  assert.ok(ms < 250, `took ${ms} ms`);
+  // Linearity, not a wall-clock budget: a shared CI runner is several times slower than a laptop.
+  // Compare the full input with its half, best of three, against the quadratic ratio (4x).
+  for (const body of inputs) {
+    const time = (text: string): number => {
+      let best = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const t0 = process.hrtime.bigint();
+        singleReturnText(text);
+        best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6);
+      }
+      return best;
+    };
+    const small = Math.max(time(body.slice(0, Math.floor(body.length / 2))), 1);
+    const full = time(body);
+    assert.ok(full / small < 3.2, `${body.length} chars took ${full} ms vs ${small} ms at half size`);
+    assert.ok(full < 5000, `${body.length} chars took ${full} ms`);
+  }
 });
 
 test('actions with condition parses as a conditional block and evaluates deterministically without call todos', async () => {
