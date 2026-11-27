@@ -24,6 +24,7 @@ These are intended fidelity boundaries; individual analyzer and report behavior 
 - The delete-500 path still returns `err.message` for `DELUGE_RUNTIME`, `CONVERSION`, and `ZOHO_CONNECTION_REFUSED` errors.
 - Nested arrays through multi-lookup screening are not covered; autonumber gaps can occur after a failed insert, and numbering restarts if the claim table is emptied.
 - Record view supports declared blocks only.
+- A form, field, report or page named exactly `__proto__` is refused: the generated name-keyed map literals cannot carry that key, so nothing is generated from it. `c2c analyze` and `migration-report.json` count each one as a `refused-name` manual step; rename it in the source app and convert again. `constructor` and `prototype` are ordinary names.
 
 ## Manual steps that come from broken references in the source app
 
