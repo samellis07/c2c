@@ -11,7 +11,7 @@ Use `plugin/references/facts/limits.md` as the limits ledger. Platform numbers m
 
 Load `catalyst-datastore` for ZCQL and SDK syntax and `catalyst-stratus` for buckets/objects. This skill adds the migration decisions.
 
-ZCQL schema, planning, and data-load rules are indexed in `plugin/references/facts/zcql.md`: [ZC-05], [ZC-06], [ZC-08], [ZC-10], [ZC-12], [ZC-13] (with write rules [ZC-09], [ZC-11]).
+ZCQL schema, planning, and data-load rules are indexed in `plugin/references/facts/zcql.md`: [ZC-05], [ZC-06], [ZC-08], [ZC-10], [ZC-12], [ZC-13], [ZC-14] (with write rules [ZC-09], [ZC-11]).
 
 ## Part A — Schema (offline, in `c2c plan`)
 

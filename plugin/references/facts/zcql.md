@@ -154,3 +154,14 @@ passed as criteria rather than a fetch-criteria `contains(null)`, so
 never-matching is the conservative reading. A
 record filter holding such a leaf narrows that profile to zero rows instead
 of silently reading every row.
+
+### [ZC-14] ORDER BY on an integer column sorts numerically; the rows still come back as strings
+
+Rule: ZCQL orders an int column numerically (`ORDER BY seq DESC`
+returns 12, 11, 10, 9, 8), while every value in the result is a string
+(`"10"`, `"9"`). Read the order from the query, never from the string form
+of the values, and never re-sort a result by comparing those strings: `"9"`
+would sort above `"10"`. The offline fake Data Store orders integer values
+as BigInt for the same reason, so the autonumber claim (`ORDER BY n DESC`)
+picks the highest claimed number. Verified 27 Nov 2026 by a read-only probe
+of a test project, on an int column; a bigint column is assumed to behave the same, [UNVERIFIED].
