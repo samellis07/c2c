@@ -34,6 +34,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { App } from '../../core/src/ir.js';
+import { ownGet, ownSet } from '../../core/src/own-keys.js';
 import { canonDecimal, changedColumns, integrityColumns, isEmptyCell, prepareColumns, type IntegrityColumn } from '../../data/src/integrity.js';
 import {
   MAX_BATCH,
@@ -191,7 +192,7 @@ export function computeDelta(app: App, loaded: CsvLoad, checkpoint: DeltaCheckpo
   ];
   for (const name of ordered) {
     const rows = loaded.tables.find((table) => table.table === name)?.rows ?? [];
-    const before = checkpoint?.tables[name];
+    const before = ownGet(checkpoint?.tables, name);
     const known = before?.rows ?? {};
     const missing = rows.length === 0 && Object.keys(known).length > 0;
     const store = before?.store ?? {};
@@ -199,10 +200,10 @@ export function computeDelta(app: App, loaded: CsvLoad, checkpoint: DeltaCheckpo
     const fingerprints: Record<string, string> = {};
     for (const row of rows) {
       const fingerprint = rowFingerprint(row.columns, doubles.get(name));
-      fingerprints[row.id] = fingerprint;
+      ownSet(fingerprints, row.id, fingerprint);
       const modified = row.columns[MODIFIED_TIME];
       if (modified && (!latest || modified > latest)) latest = modified;
-      const stored = known[row.id];
+      const stored = ownGet(known, row.id);
       if (stored === undefined) item.added.push(row);
       else if (stored !== fingerprint) {
         item.changed.push(row);
@@ -210,13 +211,13 @@ export function computeDelta(app: App, loaded: CsvLoad, checkpoint: DeltaCheckpo
       } else item.unchanged += 1;
     }
     if (missing) {
-      next.tables[name] = { rows: { ...known }, ...(before?.deleted?.length ? { deleted: [...before.deleted] } : {}), ...storeEntry(store, new Set(Object.keys(store))) };
+      ownSet(next.tables, name, { rows: { ...known }, ...(before?.deleted?.length ? { deleted: [...before.deleted] } : {}), ...storeEntry(store, new Set(Object.keys(store))) });
     } else {
       const present = new Set(rows.map((row) => row.id));
       const gone = new Set([...Object.keys(known), ...(before?.deleted ?? [])].filter((id) => !present.has(id)));
       item.deleted = [...gone].sort(compareIds);
       if (rows.length || item.deleted.length) {
-        next.tables[name] = { rows: fingerprints, ...(item.deleted.length ? { deleted: item.deleted } : {}), ...storeEntry(store, new Set([...present, ...item.deleted])) };
+        ownSet(next.tables, name, { rows: fingerprints, ...(item.deleted.length ? { deleted: item.deleted } : {}), ...storeEntry(store, new Set([...present, ...item.deleted])) });
       }
     }
     tables.push(item);

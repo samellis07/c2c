@@ -22,6 +22,7 @@
  * production io.rest wraps the Catalyst CLI's own authenticated client).
  */
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { ownGet, ownSet } from '../../core/src/own-keys.js';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { slateHost } from '../../auth/src/slate-host.js';
@@ -1631,7 +1632,7 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
       // run re-polls exactly the import it started and nothing else.
       onPosted: (postedName, importId) => {
         posted.push(postedName);
-        (ctx.state.learned.imports ??= {})[postedName] = { status: 'stuck', importId };
+        ownSet(ctx.state.learned.imports ??= {}, postedName, { status: 'stuck', importId });
         writeProvisionState(ctx.out, ctx.state);
       },
       bundle: (projectName) => iacImportBundle(iacDir, bucketName(app, `${ctx.scope.org}:${projectName}`)),
@@ -1648,13 +1649,13 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
     // Stuck rows the import resolved as verifiably ended are dropped — their
     // names were free to re-post, so the record must not re-block a later run.
     for (const attempt of result.attempts) {
-      if (attempt.outcome === 'ended' && ctx.state.learned.imports?.[attempt.name]?.status === 'stuck') delete ctx.state.learned.imports[attempt.name];
+      if (attempt.outcome === 'ended' && ownGet(ctx.state.learned.imports, attempt.name)?.status === 'stuck') delete ctx.state.learned.imports![attempt.name];
     }
     ctx.state.learned.importName = result.projectName;
     ctx.state.learned.projectId = result.projectId;
     rememberName(ctx.state.learned.byName, result.projectName, result.projectId);
     rememberName(((ctx.state.learned.byKind ??= {}).project ??= Object.create(null) as Record<string, string>), result.projectName, result.projectId);
-    (ctx.state.learned.imports ??= {})[result.projectName] = { importId: result.importId, status: 'completed' };
+    ownSet(ctx.state.learned.imports ??= {}, result.projectName, { importId: result.importId, status: 'completed' });
     const provisionedBucket = bucketName(app, `${ctx.scope.org}:${result.projectName}`);
     // One bucket identity: the imported name goes into plan.json, the IaC
     // template, function-env.json and the state before anything else runs, so
@@ -1677,13 +1678,13 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
     };
   } catch (err) {
     if (err instanceof StuckImportError) {
-      (ctx.state.learned.imports ??= {})[err.projectName] = { status: 'stuck', ...(err.importId ? { importId: err.importId } : {}) };
+      ownSet(ctx.state.learned.imports ??= {}, err.projectName, { status: 'stuck', ...(err.importId ? { importId: err.importId } : {}) });
       writeProvisionState(ctx.out, ctx.state);
     } else if (err instanceof ImportEndedError) {
       // The import's own status read says it is over: its name is not held by
       // a running import, so the record goes and a retry may post it again.
       for (const name of posted) {
-        if (ctx.state.learned.imports?.[name]?.status === 'stuck') delete ctx.state.learned.imports[name];
+        if (ownGet(ctx.state.learned.imports, name)?.status === 'stuck') delete ctx.state.learned.imports![name];
       }
       writeProvisionState(ctx.out, ctx.state);
     }
