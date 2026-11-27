@@ -72,6 +72,11 @@ test('a blueprint stage or transition named __proto__ is refused and counted; ot
   assert.deepEqual(refusedKinds('Draft', 'Go AS "__proto__"'), ['blueprint transition'], 'any letter case, as the generator reads it');
   assert.deepEqual(refusedKinds('Draft', 'Go as "x" as "__proto__"'), ['blueprint transition'], 'the last quoted display name keys the transition');
   assert.deepEqual(refusedKinds('Draft', 'Go as "__proto__"  '), ['blueprint transition']);
+  // An escaped spelling decodes to the same key in the generator (unquote), so it is refused as well.
+  assert.deepEqual(refusedKinds('Draft', 'Go as "\\u005f\\u005fproto__"'), ['blueprint transition']);
+  assert.deepEqual(refusedKinds('Draft', 'Go as "_\\_proto__"'), ['blueprint transition']);
+  assert.deepEqual(refusedKinds('Draft', '"__proto__"'), ['blueprint transition']);
+  assert.deepEqual(refusedKinds('\\u005f_proto__', 'Go'), [], 'unquoted, an escape is not decoded and keys nothing');
   assert.deepEqual(refusedKinds('Draft', 'Go as "my__proto__"'), [], 'only the exact display name is refused');
   assert.deepEqual(refusedKinds('Draft', 'Go as "__proto__x"'), []);
   assert.deepEqual(refusedKinds('Draft', 'Go'), []);

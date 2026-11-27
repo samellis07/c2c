@@ -2557,7 +2557,8 @@ function refuseNames(app: App): void {
   // tail is refused too, which can only over-refuse.
   const generatedKey = (name: string): string[] => {
     const quoted = /\s+as\s+("[^"]*")\s*$/i.exec(name);
-    const keys = [quoted ? quoted[1]!.slice(1, -1) : name];
+    // The generator unquote()s the name (which decodes \uXXXX and \x style escapes), so compare the decoded text.
+    const keys = [unquote(quoted ? quoted[1]! : name), unquote(name)];
     const bare = /\s+as\s+([^"\s][^"]*?)\s*$/i.exec(name);
     if (bare) keys.push(bare[1]!);
     return keys.map((key) => key.trim());
