@@ -4974,7 +4974,10 @@ function expressionCode(condition: string, inputFields: string[] = [], decimalFi
 /** Parameter names exactly as the Deluge body writes them (pre-jsIdent). */
 export function rawFnParams(signature: string | undefined): string[] {
   if (!signature) return [];
-  const m = signature.match(/\(([^)]*)\)/);
+  // Index the parentheses instead of a /\(([^)]*)\)/ scan, which is quadratic on a long run of '('.
+  const open = signature.indexOf('(');
+  const close = open < 0 ? -1 : signature.indexOf(')', open);
+  const m = close < 0 ? null : [signature.slice(open, close + 1), signature.slice(open + 1, close)];
   if (!m || !m[1]?.trim()) return [];
   return m[1]
     .split(',')
@@ -4990,7 +4993,10 @@ function fnParams(signature: string | undefined): string[] {
 /** Parameters declared `decimal` (or legacy `float`): exact decimals inside the function body. */
 function fnDecimalParams(signature: string | undefined): string[] {
   if (!signature) return [];
-  const m = signature.match(/\(([^)]*)\)/);
+  // Index the parentheses instead of a /\(([^)]*)\)/ scan, which is quadratic on a long run of '('.
+  const open = signature.indexOf('(');
+  const close = open < 0 ? -1 : signature.indexOf(')', open);
+  const m = close < 0 ? null : [signature.slice(open, close + 1), signature.slice(open + 1, close)];
   if (!m || !m[1]?.trim()) return [];
   return m[1]
     .split(',')
@@ -5002,7 +5008,10 @@ function fnDecimalParams(signature: string | undefined): string[] {
 /** Declared `(type name)` pairs of a `thisapp` signature; the last token is the name. */
 export function fnSignatureParams(signature: string | undefined): { type: string; name: string }[] {
   if (!signature) return [];
-  const m = signature.match(/\(([^)]*)\)/);
+  // Index the parentheses instead of a /\(([^)]*)\)/ scan, which is quadratic on a long run of '('.
+  const open = signature.indexOf('(');
+  const close = open < 0 ? -1 : signature.indexOf(')', open);
+  const m = close < 0 ? null : [signature.slice(open, close + 1), signature.slice(open + 1, close)];
   if (!m || !m[1]?.trim()) return [];
   const out: { type: string; name: string }[] = [];
   for (const part of m[1].split(',')) {

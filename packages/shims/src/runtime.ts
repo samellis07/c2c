@@ -4644,8 +4644,11 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       effect(ctx, key, effect) {
         if (!effect) return;
-        const queued = (ctx.clientEffects ??= Object.create(null));
-        (queued[key] ??= []).push(effect);
+        // A plain object, so the reply keeps its public shape; an own property is defined for the key, so one spelled
+        // __proto__ or constructor is an ordinary entry and never reaches Object.prototype.
+        const queued = (ctx.clientEffects ??= {});
+        if (!Object.hasOwn(queued, key)) Object.defineProperty(queued, key, { value: [], enumerable: true, writable: true, configurable: true });
+        queued[key]!.push(effect);
       },
       rowValue(ctx, row, name) {
         const at = ctx.subformRow;

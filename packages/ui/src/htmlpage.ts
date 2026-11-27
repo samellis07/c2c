@@ -770,7 +770,15 @@ const SAFE_COMPONENT_NAME = /^[A-Za-z_]\w*$/;
  */
 const ZC_COMPONENT_ELNAME = /\belname\s*=\s*['"]zc-component(?=['"\s>]|$)/i;
 /** Fold a link name or display name to one comparison shape, the way Creator link names compare. */
-const linkNameKey = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const linkNameKey = (value: string) => {
+  const folded = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  // Trim the dashes with indexes, not a regex: /^-+|-+$/ is quadratic on a long run that does not end the string.
+  let start = 0;
+  let end = folded.length;
+  while (start < end && folded.charCodeAt(start) === 45) start++;
+  while (end > start && folded.charCodeAt(end - 1) === 45) end--;
+  return folded.slice(start, end);
+};
 
 /** Parse a whole component tag's attributes; malformed quoting never proves an embed target. */
 function componentAttributes(tag: string): Map<string, string> | null {
